@@ -7,6 +7,7 @@ The column to predict is chosen per batch (`BatchConfig.target`), not at upload.
 from __future__ import annotations
 
 import io
+from pathlib import Path
 import json
 import re
 import uuid
@@ -48,6 +49,24 @@ def _dir(dataset_id: str):
 
 def _pima() -> pd.DataFrame:
     return pd.read_csv(config.DATA_DIR / "pima.csv", header=None, names=PIMA_COLUMNS)
+
+
+def read_table(source: bytes | Path) -> pd.DataFrame:
+    """Read a CSV, keeping words like NA, None and null as values in text columns.
+
+    pandas reads those words as "missing". In a number column that is what they mean. In a text
+    column they are usually real values (NA is North America, None is a plan), and reading them as
+    missing would silently drop every row of that class. There, only an empty cell is missing.
+    """
+    def open_() -> io.BytesIO | Path:
+        return io.BytesIO(source) if isinstance(source, bytes) else source
+
+    df = pd.read_csv(open_())
+    as_text = pd.read_csv(open_(), dtype=str, keep_default_na=False, na_values=[""])
+    for c in df.columns:
+        if not pd.api.types.is_numeric_dtype(df[c]) and as_text[c].notna().sum() > df[c].notna().sum():
+            df[c] = as_text[c]
+    return df
 
 
 def target_problem(df: pd.DataFrame, column: str) -> str | None:
@@ -94,7 +113,7 @@ def save_upload(name: str, raw: bytes) -> dict:
     if len(raw) > MAX_UPLOAD_BYTES:
         raise DatasetError(f"the file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
     try:
-        df = pd.read_csv(io.BytesIO(raw))
+        df = read_table(raw)
     except Exception as e:  # noqa: BLE001 - pandas raises many types for a bad file
         raise DatasetError(f"could not read the file as CSV: {e}") from e
     df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
@@ -144,7 +163,7 @@ def load(dataset_id: str, target: str | None = None) -> tuple[pd.DataFrame, str]
         path = _dir(dataset_id) / "data.csv"
         if not path.is_file():
             raise DatasetError(f"unknown dataset {dataset_id}")
-        df = pd.read_csv(path)
+        df = read_table(path)
         if target is None:
             raise DatasetError("choose the column to predict")
     problem = target_problem(df, target)

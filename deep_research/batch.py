@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import time
 import uuid
 from pathlib import Path
@@ -39,10 +40,17 @@ class Batch:
         self.dir = root / self.id
         self.runs_dir = self.dir / "runs"
         self.forks_dir = self.dir / "forks"
+        fresh = not self.dir.exists()
         self.runs_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            # First, and before the case file exists: if the task cannot be built there is no batch.
+            self.task = build_task(cfg, self.dir / "task")
+        except BaseException:
+            if fresh:
+                shutil.rmtree(self.dir, ignore_errors=True)
+            raise
         self.case = CaseFile(self.dir / "case" / "case.json")
         self.tracker = CostTracker(budget_usd=cfg.budget_usd)
-        self.task = build_task(cfg, self.dir / "task")
         self.vms: dict[str, Any] = {}
         self._queues: set[asyncio.Queue] = set()
         self._loop: asyncio.AbstractEventLoop | None = None

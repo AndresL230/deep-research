@@ -115,16 +115,31 @@ def _resolve_script_runs(actions: list[Action], given_files: dict[str, str]) -> 
 
 
 def _did_before_split(actions: list[Action], label: str) -> bool:
-    for a in actions:
-        if label in a.labels and "split" not in a.labels:
+    """Did the run do `label` before the split its results come from, which is its last one?
+
+    An agent often splits more than once: it runs the script it was given to see what happens, then
+    fixes it and runs it again. Only the last split feeds the reported score, so a step added before
+    that one counts, even though an earlier split went without it.
+    """
+    splits = [i for i, a in enumerate(actions) if "split" in a.labels]
+    last = splits[-1] if splits else len(actions) - 1
+    for a in actions[: last + 1]:
+        if label not in a.labels:
+            continue
+        # The same action can dedupe and then split, as in one script: then the order inside it decides.
+        if "split" not in a.labels or _order_in_text(a.source or a.text, label, "split"):
             return True
-        if "split" in a.labels:
-            # Same action can dedupe and then split, as in one script.
-            return label in a.labels and _order_in_text(a.source or a.text, label, "split")
     return False
 
 
 _IMPORT_LINE = re.compile(r"^\s*(?:import|from)\s.*$", re.MULTILINE)
+# `from x import (\n    a,\n    b,\n)`: the whole statement, across its lines.
+_IMPORT_BLOCK = re.compile(r"^[ \t]*from\s+[\w.]+\s+import\s*\([^)]*\)", re.MULTILINE)
+
+
+def _blank(m: re.Match) -> str:
+    """Spaces for everything but the line breaks, so positions after it do not move."""
+    return re.sub(r"[^\n]", " ", m.group())
 
 
 def _order_in_text(text: str, first: str, second: str) -> bool:
@@ -133,7 +148,7 @@ def _order_in_text(text: str, first: str, second: str) -> bool:
     Import lines are blanked first: `from sklearn.model_selection import train_test_split`
     at the top of a script is not the split.
     """
-    text = _IMPORT_LINE.sub(lambda m: " " * len(m.group()), text)
+    text = _IMPORT_LINE.sub(_blank, _IMPORT_BLOCK.sub(_blank, text))
     rx = dict(_RULES)
     m1, m2 = rx[first].search(text), rx[second].search(text)
     return bool(m1 and m2 and m1.start() < m2.start())

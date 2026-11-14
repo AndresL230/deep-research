@@ -36,12 +36,13 @@ def _row_keys(df: pd.DataFrame, columns: list[str], rounded: list[str]) -> pd.Se
         raise ValueError("none of the dataset's columns are in this file")
     parts = {}
     for c in cols:
-        num = pd.to_numeric(df[c], errors="coerce")
-        if num.notna().sum() == df[c].notna().sum():
-            # Numbers compare as numbers, so 148 in one file matches 148.0 in the other.
-            parts[c] = num.astype(float).round(1 if c in rounded else 6).astype(str)
-        else:
-            parts[c] = df[c].astype(str).str.strip()
+        # Decided cell by cell, never per file: a cell that is a number compares as a number (148 in
+        # one file matches 148.0 in the other), anything else as text. Deciding per column would key
+        # the same value differently in train.csv and test.csv when only one of them has a stray
+        # non-numeric cell in that column, and every overlapping row would be missed.
+        num = pd.to_numeric(df[c], errors="coerce").astype(float)
+        as_number = num.round(1 if c in rounded else 6).astype(str)
+        parts[c] = as_number.where(num.notna(), df[c].astype(str).str.strip())
     return pd.DataFrame(parts).agg("|".join, axis=1)
 
 
@@ -77,8 +78,10 @@ def score_run(outputs_dir: Path, task: TaskFiles, inflation_threshold: float) ->
         return RunScore(status="failed", reason=f"report.json missing or invalid: {e}")
 
     try:
-        preds = pd.read_csv(outputs_dir / "predictions.csv")["prediction"]
-        labels = pd.read_csv(task.holdout_labels).iloc[:, 0]
+        # A class can be spelled NA or None: read those as the words they are, not as missing.
+        words = {"keep_default_na": False, "na_values": [""]}
+        preds = pd.read_csv(outputs_dir / "predictions.csv", **words)["prediction"]
+        labels = pd.read_csv(task.holdout_labels, **words).iloc[:, 0]
     except Exception as e:  # noqa: BLE001
         return RunScore(status="failed", reported_accuracy=reported, reason=f"predictions.csv missing or invalid: {e}")
     if len(preds) != len(labels):
