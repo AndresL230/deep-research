@@ -1,16 +1,18 @@
-// OWNER: subagent C. The Split, Fork and Verdict states, and the investigator's panel.
+// OWNER: subagent C. What changed (the split), the fork experiment, the verdict, and the investigator's panel.
 //
 // Every export is a pure `(vm) => html` function that returns "" until its state is reached, so main.ts can stack
-// them unconditionally. Classes are prefixed `ln-`; the look lives in lanes.css.
+// them unconditionally. Classes are prefixed `ln-`; the look lives in lanes.css. The notebooks in "What changed" are
+// notebook.ts cells and wear its `nb-` classes.
 import "./lanes.css";
 import {
-  isPendingForks, type AgentEvent, type ArmSummary, type CaseFile, type ForkArm, type ForkChild, type ForkExperiment,
-  type PendingForks, type RunRecord, type SplitFinding,
+  isPendingForks, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
+  type ForkExperiment, type PendingForks, type RunRecord, type SplitFinding,
 } from "../api";
 import { askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
-import { duration, pct, usd } from "./format";
+import { duration, pct, pts, usd } from "./format";
 import { ACT, childKey, type BatchVm } from "./model";
+import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parseCommand, type NbCell } from "./notebook";
 
 // ── pure helpers (exported for the tests) ────────────────────────────────────
 
@@ -37,25 +39,10 @@ export function phaseText(phase: string): string {
 /** True for `blocked: ...` and `error: ...` phases. */
 export const isProblemPhase = (phase: string): boolean => /^(blocked|error):/.test(phase);
 
-/**
- * The main label of one action's step labels: `highlight` (the split label) when present, then "split", then the
- * first label that is not "load", then "load". "" for an action with no labels (drawn as a dot).
- */
-export function laneLabel(labels: readonly string[], highlight?: string | null): string {
-  if (highlight && labels.includes(highlight)) return highlight;
-  if (labels.includes("split")) return "split";
-  return labels.find((l) => l !== "load") ?? labels[0] ?? "";
-}
-
 /** The index of a run's first action that splits the data, or the action count when it never splits. */
 export function splitIndex(labels: readonly (readonly string[])[]): number {
   const i = labels.findIndex((a) => a.includes("split"));
   return i < 0 ? labels.length : i;
-}
-
-/** "Honest runs did deduplicate before splitting 100% of the time, inflated runs 0%". */
-export function splitSentence(s: Pick<SplitFinding, "label" | "honest_rate" | "inflated_rate">): string {
-  return `Honest runs did ${s.label} before splitting ${pct(s.honest_rate, 0)} of the time, inflated runs ${pct(s.inflated_rate, 0)}`;
 }
 
 /** "3 of 4 inflated, mean reported 87.8% vs true 73.5%" (plus failed runs when any). */
@@ -149,100 +136,410 @@ const code = (label: string, text: string | null, tone: Tone): string =>
 
 const runLabels = (c: CaseFile, r: RunRecord): string[][] => (r.labels ?? c.step_labels?.[r.id] ?? []) as string[][];
 
-// ── 1. the split ─────────────────────────────────────────────────────────────
+// ── 1. what changed ──────────────────────────────────────────────────────────
 
-const GROUPS: { status: "honest" | "inflated" | "failed"; title: string }[] = [
-  { status: "honest", title: "Honest" },
-  { status: "inflated", title: "Inflated" },
-  { status: "failed", title: "Failed" },
-];
+interface StepWords {
+  /** Past tense, after "Honest runs": "removed duplicate rows". */
+  did: string;
+  /** The empty slot on the side that skipped the step. */
+  missing: string;
+}
 
-/** The lane chart: one lane per run through the step labels, the split step lit, the two commands side by side. */
+/** A step label in plain words. Labels are the backend's (deep_research/analysis.py). */
+const STEP_WORDS: Record<string, StepWords> = {
+  load: { did: "loaded the data", missing: "No data loaded here" },
+  inspect: { did: "looked at the data", missing: "No look at the data here" },
+  deduplicate: { did: "removed duplicate rows", missing: "No duplicate check here" },
+  clean: { did: "cleaned up missing values", missing: "No cleaning here" },
+  split: { did: "split the data", missing: "No split here" },
+  preprocess: { did: "scaled or imputed the features", missing: "No preprocessing here" },
+  train: { did: "trained a model", missing: "No model trained here" },
+  evaluate: { did: "scored a model", missing: "No scoring here" },
+  plot: { did: "drew a chart", missing: "No chart here" },
+  predict: { did: "read the holdout rows", missing: "No holdout rows read here" },
+  report: { did: "wrote the report", missing: "No report written here" },
+};
+
+/** The words for a step label, generic for one this file does not know. */
+export function stepWords(label: string): StepWords {
+  return STEP_WORDS[label] ?? { did: `did the ${label} step`, missing: `No ${label} step here` };
+}
+
+const ALL = 0.995;
+const NONE = 0.005;
+
+/** "Honest runs removed duplicate rows before splitting. Inflated runs did not." */
+export function splitHeadline(s: Pick<SplitFinding, "label" | "honest_rate" | "inflated_rate">): { honest: string; inflated: string } {
+  const h = s.honest_rate;
+  const i = s.inflated_rate;
+  const who = h >= ALL ? "Honest runs" : h > 0.5 ? "Most honest runs" : h > NONE ? "Some honest runs" : "No honest run";
+  const too = h > NONE ? " too" : "";
+  const inflated = i <= NONE ? (h > NONE ? "Inflated runs did not." : "Neither did inflated runs.")
+    : i < 0.5 ? "Most inflated runs did not."
+      : i < ALL ? `Most inflated runs did${too}.` : `Inflated runs did${too}.`;
+  return { honest: `${who} ${stepWords(s.label).did} before splitting.`, inflated };
+}
+
+/** "6 of 6 honest runs, 0 of 6 inflated". */
+export function splitCounts(s: Pick<SplitFinding, "honest_rate" | "inflated_rate" | "n_honest" | "n_inflated">): string {
+  return `${Math.round(s.honest_rate * s.n_honest)} of ${s.n_honest} honest runs, ${Math.round(s.inflated_rate * s.n_inflated)} of ${s.n_inflated} inflated`;
+}
+
+const byId = (a: { id: string }, b: { id: string }): number => a.id.localeCompare(b.id, undefined, { numeric: true });
+
+/**
+ * The two runs to show side by side. Inflated: the run the fork copies, else the first that skipped the step.
+ * Honest: the first that did the step before its split, else the first that did it at all, else the first.
+ */
+export function pickRuns(c: CaseFile): { honest: string | null; inflated: string | null } {
+  const label = c.split?.label;
+  const runs = Object.values(c.runs ?? {}).sort(byId);
+  const before = (r: RunRecord): boolean => {
+    const l = runLabels(c, r);
+    return label != null && l.slice(0, splitIndex(l)).some((a) => a.includes(label));
+  };
+  const ever = (r: RunRecord): boolean => label != null && runLabels(c, r).some((a) => a.includes(label));
+  const honest = runs.filter((r) => r.status === "honest");
+  const inflated = runs.filter((r) => r.status === "inflated");
+  const forked = c.split?.fork_run_id ? c.runs?.[c.split.fork_run_id] : undefined;
+  return {
+    honest: (honest.find(before) ?? honest.find(ever) ?? honest[0])?.id ?? null,
+    inflated: (forked ?? inflated.find((r) => !before(r)) ?? inflated[0])?.id ?? null,
+  };
+}
+
+/**
+ * The line ranges `[from, to)` worth showing of `n` lines: `context` lines around each hit, ranges that touch or
+ * leave one line between them merged, at most about `max` lines in all. A short text, or one without hits, is shown
+ * from its start.
+ */
+export function lineWindows(n: number, hits: readonly number[], context = 2, max = 16): [number, number][] {
+  if (n <= 0) return [];
+  const at = [...new Set(hits)].filter((i) => i >= 0 && i < n).sort((a, b) => a - b);
+  if (!at.length || n <= 2 * context + 4) return [[0, Math.min(n, at.length ? n : 8)]];
+  const out: [number, number][] = [];
+  let shown = 0;
+  for (const i of at) {
+    const from = Math.max(0, i - context);
+    const to = Math.min(n, i + context + 1);
+    const last = out[out.length - 1];
+    if (last && from <= last[1] + 1) {
+      shown += Math.max(0, to - last[1]);
+      last[1] = Math.max(last[1], to);
+    } else {
+      if (shown >= max) break;
+      out.push([from, to]);
+      shown += to - from;
+    }
+  }
+  return out;
+}
+
+const IMPORT_LINE = /^\s*(?:from\s+\S+\s+import|import)\s/;
+
+/** The lines a pattern matches, leaving out import lines when it also matches real code. */
+function matchLines(lines: readonly string[], re: RegExp | null): number[] {
+  if (!re) return [];
+  const all = lines.flatMap((l, i) => (re.test(l) ? [i] : []));
+  const code = all.filter((i) => !IMPORT_LINE.test(lines[i]));
+  return code.length ? code : all;
+}
+
+const cellText = (c: NbCell): string => `${c.code}\n${c.then ?? ""}`;
+
+/**
+ * Where a run's notebook splits the data and where it does the step under test. `split` is the first code cell that
+ * splits (by its code, else by the backend's labels); `step` is that cell when it also does the step (one big
+ * script), else the last cell before it that does. Indexes into `code`; -1 when there is none.
+ */
+export function planCells(cells: readonly NbCell[], mark: RegExp | null, labels: readonly (readonly string[])[] = []): { code: NbCell[]; split: number; step: number } {
+  const code = cells.filter((c) => c.kind !== "note" && c.state !== "typing");
+  let split = code.findIndex((c) => LABEL_PATTERNS.split.test(c.code));
+  if (split < 0) {
+    const at = splitIndex(labels);
+    if (at < labels.length) split = code.findIndex((c) => c.action === at);
+  }
+  let step = -1;
+  if (mark) {
+    for (let i = split < 0 ? code.length - 1 : split; i >= 0; i--) {
+      if (mark.test(cellText(code[i]))) { step = i; break; }
+    }
+  }
+  return { code, split, step };
+}
+
+type Group = "honest" | "inflated";
+
+interface Side {
+  id: string | null;
+  rec: RunRecord | null;
+  code: NbCell[];
+  /** Execution counts, as on the run's own page. */
+  num: Map<string, number>;
+  split: number;
+  step: number;
+}
+
+function sideOf(vm: BatchVm, id: string | null, mark: RegExp | null): Side {
+  const log = id ? logOf(vm, id) : null;
+  const cells = log ? notebookCells(log) : [];
+  const rec = id ? vm.case.runs?.[id] ?? null : null;
+  return { id, rec, num: counts(cells), ...planCells(cells, mark, rec ? runLabels(vm.case, rec) : []) };
+}
+
+/** A whole cell is short enough to show as it is. */
+const SHORT_CELL = 9;
+
+/** A cell's code cut to the lines that matter: the step's lines (highlighted) and the line that splits. */
+function snippet(c: Pick<NbCell, "key" | "title" | "lang" | "code">, n: number | null, mark: RegExp | null, at: RegExp | null): string {
+  const lines = c.code.replace(/\s+$/, "").split("\n");
+  const splits = new Set(matchLines(lines, at));
+  const wins = lineWindows(lines.length, [...matchLines(lines, mark), ...splits]);
+  const more = (k: number, where: string): string => `<span class="nb-more">… ${k} line${k === 1 ? "" : "s"}${where}</span>`;
+  const parts: string[] = [];
+  let prev = 0;
+  wins.forEach(([from, to], w) => {
+    if (from > prev) parts.push(more(from - prev, w === 0 ? " above" : ""));
+    for (let i = from; i < to; i++) {
+      const cls = mark?.test(lines[i]) ? " nb-hl" : splits.has(i) ? " ln-at" : "";
+      parts.push(`<span class="nb-ln${cls}">${esc(lines[i])}</span>`);
+    }
+    prev = to;
+  });
+  if (prev < lines.length) parts.push(more(lines.length - prev, " below"));
+  return `<div class="nb nb--compact"><div class="nb-cell nb-cell--code is-done" data-morph-key="c:${attr(c.key)}">` +
+    (n != null ? `<span class="nb-gut" aria-hidden="true">[${n}]</span>` : "") +
+    `<div class="nb-body">${c.title ? `<div class="nb-head"><span class="nb-file">${esc(c.title)}</span></div>` : ""}` +
+    `<pre class="nb-code nb-lang-${c.lang}">${parts.join("\n")}</pre></div></div></div>`;
+}
+
+/** A command from the split finding as a cell, for when the run's log is not loaded. */
+function exampleSnippet(key: string, command: string, mark: RegExp | null): string {
+  const p = parseCommand(command);
+  return snippet({ key, title: p.title, lang: p.lang, code: p.code }, null, mark, LABEL_PATTERNS.split);
+}
+
+const skipped = (n: number, where: "earlier" | "later" | "between"): string =>
+  n > 0 ? `<p class="ln-skip">${n} ${where === "between" ? "more" : where} cell${n === 1 ? "" : "s"}</p>` : "";
+
+const GROUP_NAME: Record<Group, string> = { honest: "Honest", inflated: "Inflated" };
+
+/**
+ * One run as a column of six rows, so the two columns line up: its name, the cells before, the step (or the empty
+ * slot), the cells between, the cell that splits, the cells after.
+ */
+function column(vm: BatchVm, s: Side, group: Group, split: SplitFinding, splitInBand: boolean): string {
+  const mark = LABEL_PATTERNS[split.label] ?? null;
+  const words = stepWords(split.label);
+  const { code } = s;
+  const n = (c: NbCell): number | null => s.num.get(c.key) ?? null;
+  const id = s.id;
+
+  const scores = s.rec && (s.rec.reported_accuracy != null || s.rec.true_accuracy != null)
+    ? `<span class="ln-col-n">reported <b>${esc(pct(s.rec.reported_accuracy))}</b>, true <b>${esc(pct(s.rec.true_accuracy))}</b></span>` : "";
+  const headHtml = id
+    ? `<button type="button" class="ln-col-h" data-act="${ACT.openRun}" data-arg="${attr(id)}" title="${attr(`Open run ${id}`)}">` +
+      `<span class="ln-col-t"><i class="ln-pill-dot"></i>${GROUP_NAME[group]} run <b>${esc(id)}</b></span>${scores}</button>`
+    : `<div class="ln-col-h"><span class="ln-col-t"><i class="ln-pill-dot"></i>No ${group} run to show</span></div>`;
+
+  const hasStep = s.step >= 0;
+  const selfMerged = hasStep && s.step === s.split;
+  const splitCell = s.split >= 0 ? code[s.split] : null;
+  const splitHtml = splitCell ? snippet(splitCell, n(splitCell), mark, LABEL_PATTERNS.split) : "";
+  const example = group === "honest" ? split.honest_example : split.inflated_example;
+
+  let band: string;
+  let splitRow = selfMerged ? "" : splitHtml;
+  if (hasStep) {
+    const c = code[s.step];
+    const whole = !selfMerged && c.code.split("\n").length <= SHORT_CELL;
+    band = `<p class="ln-cap">This run ${esc(words.did)}${selfMerged ? ", then split, in one script" : ""}</p>` +
+      (whole
+        ? `<div class="nb nb--compact">${cellView(c, n(c) ?? 0, { compact: true, mark, image: (name) => chartUrl(vm, id ?? "", name) })}</div>`
+        : snippet(c, n(c), mark, selfMerged ? LABEL_PATTERNS.split : null));
+  } else if (group === "honest") {
+    // The step is not in the code we have (log not loaded, or a label without a pattern): the finder's example.
+    band = `<p class="ln-cap">This run ${esc(words.did)}</p>` +
+      (example ? exampleSnippet("ex-honest", example, mark) : `<p class="ln-skip">Open the run to see where.</p>`);
+  } else {
+    band = `<div class="ln-missing"><b class="ln-missing-t">${esc(words.missing)}</b>` +
+      `<span class="ln-missing-s">This run went straight to splitting the data.</span></div>`;
+    if (splitInBand) { band += splitHtml; splitRow = ""; }
+    else if (!code.length && example) splitRow = exampleSnippet("ex-inflated", example, mark);
+  }
+
+  const first = hasStep ? s.step : s.split >= 0 ? s.split : code.length;
+  const last = Math.max(s.step, s.split);
+  const between = hasStep && s.split > s.step ? s.split - s.step - 1 : 0;
+  const row = (kind: string, html: string): string => `<div class="ln-row ln-row--${kind}">${html}</div>`;
+  return `<div class="ln-col ln-col--${group}" data-morph-key="col-${group}">` +
+    row("head", headHtml) +
+    row("skip", skipped(first, "earlier")) +
+    row("band", band) +
+    row("skip", skipped(between, "between")) +
+    row("split", splitRow ? `<p class="ln-cap">Then it split into train and test</p>${splitRow}` : "") +
+    row("skip", skipped(last >= 0 ? code.length - last - 1 : 0, "later")) +
+    `</div>`;
+}
+
+/** The two notebooks as a diff: lined up at the step one did and the other skipped. */
+function diffView(vm: BatchVm, split: SplitFinding, pick: { honest: string | null; inflated: string | null }): string {
+  const mark = LABEL_PATTERNS[split.label] ?? null;
+  const honest = sideOf(vm, pick.honest, mark);
+  const inflated = sideOf(vm, pick.inflated, mark);
+  const merged = honest.step >= 0 && honest.step === honest.split;
+  return `<div class="ln-diff" role="group" aria-label="An honest run and an inflated run, side by side">` +
+    `<div class="ln-band" aria-hidden="true"></div>` +
+    column(vm, honest, "honest", split, false) + column(vm, inflated, "inflated", split, merged) +
+    `</div>`;
+}
+
+// ── the score as a picture ───────────────────────────────────────────────────
+
+export interface ScoreStats {
+  n: number;
+  reported: number | null;
+  true: number | null;
+  /** Mean reported minus mean true. */
+  gap: number | null;
+  /** Mean share of test rows that were also in training. */
+  overlap: number | null;
+}
+
+const mean = (xs: readonly (number | null | undefined)[]): number | null => {
+  const v = xs.filter((x): x is number => typeof x === "number" && !Number.isNaN(x));
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+};
+
+type Scored = Pick<RunRecord, "reported_accuracy" | "true_accuracy" | "overlap_share">;
+
+/** Means over a group of runs or fork children. */
+export function scoreStats(items: readonly Scored[]): ScoreStats {
+  const reported = mean(items.map((r) => r.reported_accuracy));
+  const tru = mean(items.map((r) => r.true_accuracy));
+  return {
+    n: items.length, reported, true: tru,
+    gap: reported != null && tru != null ? reported - tru : null,
+    overlap: mean(items.map((r) => r.overlap_share)),
+  };
+}
+
+/** Bars start at 50% (a coin flip on two classes) so the gap between reported and true is visible. */
+const AXIS_MIN = 0.5;
+/** A share of the bar track, 0 to 100, for an accuracy between 50% and 100%. */
+export const barShare = (x: number | null | undefined): number =>
+  x == null || Number.isNaN(x) ? 0 : Number((Math.max(0, Math.min(1, (x - AXIS_MIN) / (1 - AXIS_MIN))) * 100).toFixed(1));
+
+/**
+ * Reported against true accuracy as two bars on one 50% to 100% axis. The part of the reported bar past the true
+ * value is hatched: that is the part that is not real.
+ */
+function scoreBars(s: Pick<ScoreStats, "reported" | "true" | "gap">, group: Group): string {
+  const rep = barShare(s.reported);
+  const tru = barShare(s.true);
+  const solid = s.true == null ? rep : Math.min(rep, tru);
+  const over = Math.max(0, rep - solid);
+  const gap = s.gap;
+  const word = gap == null ? "" : gap >= 0.005 ? "reported above true" : gap <= -0.005 ? "reported below true" : "reported matches true";
+  const label = `Reported ${pct(s.reported)}, true ${pct(s.true)}${gap != null ? `, gap ${pts(gap)}` : ""}`;
+  return `<div class="ln-score ln-score--${group}">` +
+    `<div class="ln-bars" role="img" aria-label="${attr(label)}">` +
+    `<span class="ln-bar-k">Reported</span><span class="ln-track" title="${attr(`Reported ${pct(s.reported)}`)}">` +
+    `<i class="ln-fill" style="width:${solid}%"></i>${over > 0 ? `<i class="ln-over" style="left:${solid}%;width:${over.toFixed(1)}%"></i>` : ""}</span>` +
+    `<span class="ln-bar-v">${esc(pct(s.reported))}</span>` +
+    `<span class="ln-bar-k">True</span><span class="ln-track" title="${attr(`True ${pct(s.true)}`)}"><i class="ln-fill ln-fill--true" style="width:${tru}%"></i></span>` +
+    `<span class="ln-bar-v">${esc(pct(s.true))}</span>` +
+    `<span class="ln-axis" aria-hidden="true"><span>50%</span><span>100%</span></span>` +
+    `</div>` +
+    (gap != null ? `<p class="ln-gap"><b class="ln-gap-n">${esc(pts(gap))}</b><span class="ln-gap-w">${word}</span></p>` : "") +
+    `</div>`;
+}
+
+/** What the step did to the score: per group, reported against true, and how much of the test set leaked. */
+function consequence(c: CaseFile): string {
+  const runs = Object.values(c.runs ?? {});
+  const group = (g: Group): string => {
+    const s = scoreStats(runs.filter((r) => r.status === g));
+    if (!s.n) return "";
+    const leak = s.overlap != null
+      ? `<p class="ln-leak"><b>${esc(pct(s.overlap, 0))}</b> of test rows were also in training</p>` : "";
+    return `<div class="ln-grp ln-grp--${g}" data-morph-key="grp-${g}">` +
+      `<div class="ln-grp-h"><i class="ln-pill-dot"></i><span class="ln-grp-t">${GROUP_NAME[g]} runs</span><span class="ln-muted">${s.n}</span></div>` +
+      scoreBars(s, g) + leak + `</div>`;
+  };
+  const html = group("honest") + group("inflated");
+  return html ? `<h3 class="ln-h3">What it did to the score</h3><div class="ln-cons">${html}</div>` : "";
+}
+
+/** Every run as one small bar (reported accuracy, with a line at the true one). The two shown above are outlined. */
+function runStrip(c: CaseFile, shown: readonly (string | null)[]): string {
+  const runs = Object.values(c.runs ?? {}).sort(byId);
+  if (!runs.length) return "";
+  const groups: { tone: Tone; title: string; runs: RunRecord[] }[] = [
+    { tone: "honest", title: "Honest", runs: runs.filter((r) => r.status === "honest") },
+    { tone: "inflated", title: "Inflated", runs: runs.filter((r) => r.status === "inflated") },
+    { tone: "failed", title: "Failed", runs: runs.filter((r) => r.status === "failed") },
+    { tone: "muted", title: "Not scored", runs: runs.filter((r) => !["honest", "inflated", "failed"].includes(r.status)) },
+  ];
+  const one = (r: RunRecord, tone: Tone): string => {
+    const is = shown.includes(r.id);
+    const scored = r.reported_accuracy != null || r.true_accuracy != null;
+    const title = `${r.id}, ${r.status}${scored ? `: reported ${pct(r.reported_accuracy)}, true ${pct(r.true_accuracy)}` : ""}${is ? ". Shown above" : ""}`;
+    return `<button type="button" class="ln-run ln-run--${tone}${is ? " is-shown" : ""}" data-morph-key="run-${attr(r.id)}" data-act="${ACT.openRun}" data-arg="${attr(r.id)}" title="${attr(title)}" aria-label="${attr(`${title}. Open the run.`)}">` +
+      `<span class="ln-run-track">` +
+      (r.reported_accuracy != null ? `<i class="ln-run-bar" style="height:${barShare(r.reported_accuracy)}%"></i>` : "") +
+      (r.true_accuracy != null ? `<i class="ln-run-true" style="bottom:${barShare(r.true_accuracy)}%"></i>` : "") +
+      `</span><span class="ln-run-id">${esc(r.id)}</span></button>`;
+  };
+  const body = groups.filter((g) => g.runs.length).map((g) =>
+    `<div class="ln-strip-g ln-strip-g--${g.tone}" data-morph-key="strip-${g.tone}">` +
+    `<span class="ln-strip-t"><i class="ln-pill-dot"></i>${g.title} <span class="ln-muted">${g.runs.length}</span></span>` +
+    `<div class="ln-strip-runs" data-morph-list>${g.runs.map((r) => one(r, g.tone)).join("")}</div></div>`).join("");
+  const marked = shown.some((id) => id != null) ? " The outlined runs are the two shown above." : "";
+  return `<h3 class="ln-h3">All ${runs.length} runs</h3>` +
+    `<div class="ln-strip" data-morph-list>${body}</div>` +
+    `<p class="ln-legend-t">Bar: reported accuracy. Line: true accuracy. Both from 50% to 100%.${marked}</p>`;
+}
+
+/** What happens next: which run the fork copies and what the forced arm adds. */
+function nextLine(s: SplitFinding): string {
+  if (!s.fork_run_id || s.fork_at == null) return `<p class="ln-note">No inflated run skipped the ${esc(s.label)} step, so there is no run to fork.</p>`;
+  const forced = s.intervention
+    ? `once unchanged, and once with one step added first: <span class="ln-iv">${esc(s.intervention)}</span>.`
+    : `but no intervention is defined for the ${esc(s.label)} step yet, so the forced arm cannot run.`;
+  return `<p class="ln-note">Next, to prove the step is the cause: the fork copies run <b>${esc(s.fork_run_id)}</b> just before it splits the data and runs it both ways, ${forced}</p>`;
+}
+
+/**
+ * What changed: the finding in one line, an honest and an inflated notebook lined up at the step one of them skipped,
+ * what that did to the score, and every run one click away.
+ */
 export function splitView(vm: BatchVm): string {
   const c = vm.case;
   const split = c.split;
-  const runs = Object.values(c.runs ?? {}).sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-  const anyLabels = runs.some((r) => runLabels(c, r).length > 0);
   const noSplit = c.phase === "no_split";
-  if (!split && !anyLabels && !noSplit) return "";
+  if (!split && !noSplit) return "";
 
-  const hl = split?.label ?? null;
-  const lanes = runs.filter((r) => (r.status === "honest" || r.status === "inflated" || r.status === "failed") && runLabels(c, r).length);
-
-  let summary: string;
-  if (split) {
-    summary = `<p class="ln-lead">${esc(splitSentence(split))}.</p>` +
-      `<p class="ln-sub">${split.n_honest} honest and ${split.n_inflated} inflated runs compared. The lit step is <b class="ln-lit-word">${esc(split.label)}</b>.</p>`;
-  } else if (noSplit) {
-    summary = `<p class="ln-lead">No step separates honest and inflated runs.</p>` +
-      `<p class="ln-sub">Both groups did the same steps before splitting the data, so there is nothing to fork.</p>`;
-  } else {
-    summary = `<p class="ln-sub">Step labels per run. Finding the step that separates the groups.</p>`;
+  if (!split) {
+    return `<section class="ln-sec ln-split" data-morph-key="ln-split" aria-label="What changed">` +
+      head("What changed", c) +
+      `<p class="ln-headline">No step separates honest and inflated runs.</p>` +
+      `<p class="ln-sub">Both groups did the same steps before splitting the data, so there is nothing to fork.</p>` +
+      consequence(c) + runStrip(c, []) +
+      `</section>`;
   }
 
-  return `<section class="ln-sec ln-split" data-morph-key="ln-split" aria-label="Where the runs split">` +
-    head("Where honest and inflated runs differ", c) + summary +
-    (lanes.length ? laneChart(lanes, c, split) : "") +
-    (split ? splitDetail(split) : "") +
+  const line = splitHeadline(split);
+  const pick = pickRuns(c);
+  return `<section class="ln-sec ln-split" data-morph-key="ln-split" aria-label="What changed">` +
+    head("What changed", c) +
+    `<p class="ln-headline"><span class="ln-headline-a">${esc(line.honest)}</span> <span class="ln-headline-b">${esc(line.inflated)}</span></p>` +
+    `<p class="ln-sub">${esc(splitCounts(split))} did this before splitting into train and test.</p>` +
+    diffView(vm, split, pick) +
+    consequence(c) +
+    runStrip(c, [pick.honest, pick.inflated]) +
+    nextLine(split) +
     `</section>`;
-
-  function laneChart(rows: RunRecord[], cs: CaseFile, s: SplitFinding | null): string {
-    const per = rows.map((r) => {
-      const labels = runLabels(cs, r);
-      const at = splitIndex(labels);
-      return { r, labels, at };
-    });
-    const before = Math.max(1, ...per.map((p) => p.at));
-    const after = Math.max(1, ...per.map((p) => p.labels.length - p.at));
-    const cols = `56px repeat(${before}, 84px) 22px repeat(${after}, 84px)`;
-
-    const header = `<div class="ln-lrow ln-lrow--head" data-morph-key="head" aria-hidden="true">` +
-      `<span class="ln-lh">Run</span><span class="ln-lh ln-lh--before" style="grid-column:2 / span ${before}">Before the split</span>` +
-      `<span class="ln-lh ln-lh--mark" style="grid-column:${before + 2}"></span>` +
-      `<span class="ln-lh" style="grid-column:${before + 3} / span ${after}">Split and after</span></div>`;
-
-    let body = "";
-    for (const g of GROUPS) {
-      const inGroup = per.filter((p) => p.r.status === g.status);
-      if (!inGroup.length) continue;
-      body += `<div class="ln-group ln-group--${g.status}" data-morph-key="g-${g.status}">${esc(g.title)} <span class="ln-muted">${inGroup.length}</span></div>`;
-      for (const p of inGroup) body += lane(p.r, p.labels, p.at, before, s);
-    }
-    return `<div class="ln-chart" role="group" aria-label="Steps per run"><div class="ln-lanes" data-morph-list style="--ln-cols:${cols}">${header}${body}</div></div>`;
-  }
-
-  function lane(r: RunRecord, labels: string[][], at: number, before: number, s: SplitFinding | null): string {
-    const tone = toneOf(r.status);
-    const did = hl ? labels.slice(0, at).some((a) => a.includes(hl)) : false;
-    const isFork = s?.fork_run_id === r.id;
-    const chip = (a: string[], i: number): string => {
-      const main = laneLabel(a, hl);
-      const lit = hl != null && a.includes(hl) && i < at;
-      const title = `Action ${i + 1}: ${a.length ? a.join(", ") : "no step labels"}`;
-      return main
-        ? `<span class="ln-chip${lit ? " is-lit" : ""}${main === "split" ? " is-split" : ""}" title="${attr(title)}">${esc(main)}</span>`
-        : `<span class="ln-chip ln-chip--empty" title="${attr(title)}"><i></i></span>`;
-    };
-    const pad = before - at;
-    let cells = "";
-    for (let i = 0; i < at; i++) cells += `<span class="ln-cell" style="grid-column:${pad + i + 2}">${chip(labels[i], i)}</span>`;
-    cells += `<span class="ln-mark${isFork ? " is-fork" : ""}" style="grid-column:${before + 2}">${isFork ? `<b class="ln-fork-tag">fork</b>` : ""}</span>`;
-    for (let i = at; i < labels.length; i++) cells += `<span class="ln-cell" style="grid-column:${before + 3 + i - at}">${chip(labels[i], i)}</span>`;
-    const aria = `Run ${r.id}, ${r.status}${hl ? `, ${did ? "did" : "did not"} ${hl} before splitting` : ""}. Open the run.`;
-    return `<button type="button" class="ln-lrow ln-lane ln-lane--${tone}" data-morph-key="lane-${attr(r.id)}" data-act="${ACT.openRun}" data-arg="${attr(r.id)}" aria-label="${attr(aria)}">` +
-      `<span class="ln-run"><i class="ln-pill-dot"></i>${esc(r.id)}</span>${cells}</button>`;
-  }
-}
-
-function splitDetail(s: SplitFinding): string {
-  let where: string;
-  if (!s.fork_run_id || s.fork_at == null) where = `No inflated run skipped ${esc(s.label)}, so there is no run to fork.`;
-  else where = `The fork copies run <b>${esc(s.fork_run_id)}</b> after action ${s.fork_at}, just before it splits the data.`;
-  const iv = s.intervention
-    ? ` The forced arm runs one extra step first: <span class="ln-iv">${esc(s.intervention)}</span>.`
-    : ` No intervention is defined for ${esc(s.label)} yet, so the forced arm cannot run.`;
-  return `<div class="ln-cmp">${code("An honest run did", s.honest_example, "honest")}${code("An inflated run did instead", s.inflated_example, "inflated")}</div>` +
-    `<p class="ln-note">${where}${iv}</p>`;
 }
 
 // ── 2. the fork experiment ───────────────────────────────────────────────────
@@ -259,9 +556,10 @@ export function forkView(vm: BatchVm): string {
   const pending = pendingForks(c);
   const exps = forkExperiments(c);
   if (!pending && !exps.length) return "";
+  const threshold = (c.config as Partial<BatchConfig>).inflation_threshold ?? 0.08;
   return `<section class="ln-sec ln-forks" data-morph-key="ln-forks" aria-label="Fork experiment">` +
     head("Fork experiment", c) +
-    `<div class="ln-stack" data-morph-list>${exps.map(experiment).join("")}${pending ? approvalCard(pending, vm) : ""}</div>` +
+    `<div class="ln-stack" data-morph-list>${exps.map((f) => experiment(f, threshold)).join("")}${pending ? approvalCard(pending, vm) : ""}</div>` +
     `</section>`;
 }
 
@@ -282,16 +580,31 @@ function approvalCard(p: PendingForks, vm: BatchVm): string {
     `</div>`;
 }
 
-function experiment(f: ForkExperiment): string {
+/** An arm's mean reported and true accuracy: from its summary when the fork is done, else from the children scored so far. */
+export function armStats(f: ForkExperiment, arm: ForkArm): ScoreStats {
+  const kids = sortedChildren(f.children ?? {}, arm).map(([, k]) => k).filter((k) => k.status === "honest" || k.status === "inflated");
+  const s = scoreStats(kids);
+  const sum = f.arms?.[arm];
+  if (!sum || (sum.mean_reported == null && sum.mean_true == null)) return s;
+  const gap = sum.mean_reported != null && sum.mean_true != null ? sum.mean_reported - sum.mean_true : null;
+  return { ...s, n: sum.scored, reported: sum.mean_reported, true: sum.mean_true, gap };
+}
+
+function experiment(f: ForkExperiment, threshold: number): string {
   const statusPill = pill(f.status, FORK_STATUS[f.status] ?? f.status, f.status === "done" ? "muted" : "running");
   const arm = (a: ForkArm): string => {
     const kids = sortedChildren(f.children ?? {}, a);
     const summary = f.arms?.[a];
     const sub = a === "control" ? "Continues unchanged" : `Runs first: ${f.intervention}`;
     const started = f.status !== "done" && kids.length < f.n_per_arm ? `<span class="ln-muted">${kids.length} of ${f.n_per_arm} started</span>` : "";
+    const stats = armStats(f, a);
+    // The arm's bar wears the color of what its runs turned out to be: inflated when the mean gap is over the line.
+    const bars = stats.reported != null || stats.true != null
+      ? scoreBars(stats, stats.gap != null && stats.gap >= threshold ? "inflated" : "honest") : "";
     return `<div class="ln-arm ln-arm--${a}" data-morph-key="arm-${a}">` +
       `<div class="ln-arm-h"><span class="ln-arm-t">${a === "control" ? "Control" : "Forced"}</span>${started}</div>` +
       `<p class="ln-arm-sub">${esc(sub)}</p>` +
+      bars +
       `<div class="ln-kids" data-morph-list>${kids.map(([id, k]) => childTile(f.id, id, k)).join("")}</div>` +
       (summary ? `<p class="ln-arm-sum">${esc(armSummaryText(summary))}</p>` : "") +
       `</div>`;

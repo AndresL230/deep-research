@@ -17,9 +17,9 @@ HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amaz
 | Investigator | Deepagent with `step-tagger` and `hypothesis` subagents, the `method-errors` skill, and an approval gate on `request_forks` | `agents/investigator.py` |
 | Case file | One JSON file per batch with everything the investigator knows. It is also the UI's data source | `case_file.py` |
 | Costs | Tokens from every model response, VM time, budget guard | `costs.py`, `prices.json` |
-| Lab page | Tiny web page inside each VM showing the agent's latest chart, embedded via a signed preview URL | `lab_page/server.py` |
+| Lab page | Tiny web page inside each VM showing the agent's latest chart. The server proxies it (no Daytona preview warning); the UI reads a live run's charts through it | `lab_page/server.py` |
 | API | FastAPI plus a websocket per batch; also serves the web UI | `api.py` |
-| Web UI | Vite + TypeScript, Trov Ask styling. Home and config, the wall of runs, split lanes, fork experiment, verdict, each run as a conversation, and a replay player for saved batches | `web/src/main.ts`, `web/src/batch/` |
+| Web UI | Vite + TypeScript, Trov Ask styling. A start panel, a wall of runs where each tile is a notebook typing out the agent's code, a side by side view of what the honest and inflated runs did differently, the fork experiment, the verdict, and a replay player for saved batches | `web/src/main.ts`, `web/src/batch/` |
 
 ### Who can write what
 
