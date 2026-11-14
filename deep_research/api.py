@@ -86,7 +86,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await _lab_client.aclose()
 
 
-app = FastAPI(title="deep-research", lifespan=lifespan)
+app = FastAPI(title="Orro", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 BATCHES: dict[str, Batch] = {}
