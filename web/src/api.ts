@@ -1,69 +1,325 @@
-// The server's HTTP surface (docs/api-contract.md). Same origin: Vite proxies /api in dev; the server serves web/dist.
+// The batch API's HTTP and websocket surface (docs/api-contract.md). Same origin: Vite proxies /api (and the
+// websocket) to uvicorn on 8000 in dev; the server serves web/dist in production.
+//
+// The types mirror the case file (deep_research/case_file.py, written by batch.py, scoring.py and analysis.py) and
+// the run event log (deep_research/events.py). fixtures/demo-batch/ is a full example; test/api.test.ts checks it.
 
-/** A fresh conversation id: the CLIENT makes it and resends it every turn. */
-export function newConversationId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  // Not a secure context (an IP over plain http): a v4 UUID from getRandomValues.
-  const b = crypto.getRandomValues(new Uint8Array(16));
-  b[6] = (b[6] & 0x0f) | 0x40;
-  b[8] = (b[8] & 0x3f) | 0x80;
-  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+// ── the case file ────────────────────────────────────────────────────────────
+
+/** The case file's sections, in order. */
+export const CASE_SECTIONS = ["config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "costs"] as const;
+export type CaseSection = (typeof CASE_SECTIONS)[number];
+
+/** Phases in the order a batch moves through them. Also `stopped`, `blocked: <why>` and `error: <why>`. */
+export const PHASES = [
+  "config", "running", "analyzing", "ready", "no_split", "investigating", "awaiting_approval", "forking", "forked", "done", "stopped",
+] as const;
+export type KnownPhase = (typeof PHASES)[number];
+export type Phase = KnownPhase | (string & {});
+
+/** Step labels the split finder and the investigator use (deep_research/analysis.py LABELS). */
+export const STEP_LABELS = [
+  "load", "inspect", "deduplicate", "clean", "split", "preprocess", "train", "evaluate", "plot", "predict", "report",
+] as const;
+export type StepLabel = (typeof STEP_LABELS)[number];
+
+export interface BatchConfig {
+  dataset: "pima";
+  trap: "duplicates";
+  trap_strength: number;
+  trap_noise: number;
+  hint_level: "none" | "light";
+  model_hint: "random_forest" | "any";
+  holdout_fraction: number;
+  n_runs: number;
+  forks_per_choice: number;
+  analyst_model: string;
+  investigator_model: string;
+  budget_usd: number;
+  inflation_threshold: number;
+  mode: "live" | "replay";
+  seed: number;
+  /** Only on fixtures made by scripts/make_fixture.py: the agents' choices are scripted. */
+  simulated?: boolean;
 }
 
-export const isAbort = (e: unknown): boolean => e instanceof DOMException && e.name === "AbortError" || (e as { name?: string } | null)?.name === "AbortError";
+/** A run's score (deep_research/scoring.py RunScore). */
+export type ScoreStatus = "honest" | "inflated" | "failed";
+export interface RunScore {
+  status: ScoreStatus;
+  reported_accuracy: number | null;
+  true_accuracy: number | null;
+  /** Share of the agent's test rows that also appear in its training rows. */
+  overlap_share: number | null;
+  /** reported_accuracy minus true_accuracy. */
+  gap: number | null;
+  reason: string;
+}
 
-/** A request that did not get an event stream back: what to tell the person. */
-export class AskHttpError extends Error {}
+export const RUN_STATUSES = ["queued", "starting", "running", "honest", "inflated", "failed"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
 
-async function httpMessage(res: Response): Promise<string> {
+export interface AgentTodo { content: string; status: "pending" | "in_progress" | "completed" }
+
+/** One analyst run. Fields fill in as it goes: queued, then starting, running, and finally its score. */
+export interface RunRecord extends Partial<Omit<RunScore, "status">> {
+  id: string;
+  status: RunStatus;
+  vm_id?: string;
+  /** Signed preview URL of the lab page inside the VM. Null when it could not start, or in replays. */
+  lab_url?: string | null;
+  todos?: AgentTodo[];
+  /** The todo in progress. */
+  step?: string | null;
+  last_tool?: string;
+  n_actions?: number;
+  /** Step labels per action, in order. */
+  labels?: StepLabel[][];
+  // Fixture only (scripts/make_fixture.py).
+  duration_s?: number;
+  /** Paths for `batchFileUrl`. */
+  charts?: string[];
+  tokens?: { input: number; output: number };
+}
+
+/** Where honest and inflated runs part ways (deep_research/analysis.py SplitFinding). */
+export interface SplitFinding {
+  label: StepLabel;
+  /** Share of honest runs that did `label` before splitting; inflated_rate is the same for inflated runs. */
+  honest_rate: number;
+  inflated_rate: number;
+  n_honest: number;
+  n_inflated: number;
+  /** Fork this inflated run just before this action. */
+  fork_run_id: string | null;
+  fork_at: number | null;
+  honest_example: string | null;
+  inflated_example: string | null;
+  /** What the forced arm does, or null when no intervention exists for the label yet. */
+  intervention: string | null;
+}
+
+export type ForkArm = "control" | "forced";
+
+export interface ForkChild extends Partial<Omit<RunScore, "status">> {
+  arm: ForkArm;
+  status: "running" | ScoreStatus;
+  lab_url?: string | null;
+  /** "fork": a copy-on-write VM fork. "replay": rebuilt by replaying the actions when forking failed. */
+  how?: "fork" | "replay";
+}
+
+export interface ArmSummary {
+  total: number;
+  scored: number;
+  inflated: number;
+  honest: number;
+  failed: number;
+  mean_reported: number | null;
+  mean_true: number | null;
+}
+
+export interface ForkExperiment {
+  id: string;
+  status: "rebuilding" | "running" | "done";
+  source_run: string;
+  fork_at: number;
+  label: StepLabel;
+  intervention: string;
+  n_per_arm: number;
+  /** Keyed `control-1`, `forced-1`, ... */
+  children: Record<string, ForkChild>;
+  /** Set when status is "done". */
+  arms?: Record<ForkArm, ArmSummary>;
+}
+
+/** forks["pending"]: the investigator asked for forks and is waiting for `postDecision`. */
+export interface PendingForks {
+  id: "pending";
+  status: "awaiting_approval";
+  n_per_arm: number;
+  vm_count: number;
+  estimate_usd: number | null;
+}
+
+export interface Hypothesis {
+  /** Unix seconds. */
+  at: number;
+  step_label: StepLabel;
+  honest_action: string;
+  inflated_action: string;
+  evidence: string;
+}
+
+export interface Verdict {
+  sentence: string;
+  step_label: StepLabel;
+  numbers: Record<string, number>;
+}
+
+export interface ScopeCost {
+  input_tokens: number;
+  output_tokens: number;
+  // Absent on fixtures made before cache tokens were tracked.
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  model_usd?: number | null;
+  vm_seconds?: number;
+  vm_usd?: number | null;
+  total_usd?: number | null;
+}
+
+/** Empty `{}` until the first cost push. Scopes are `run:r01`, `fork:f1:base`, `fork:f1:control-1`, `investigator`. */
+export interface Costs {
+  budget_usd?: number;
+  /** Null when some price is unknown: then only token counts are real. */
+  spent_usd?: number | null;
+  prices_missing?: boolean;
+  scopes?: Record<string, ScopeCost>;
+  simulated?: boolean;
+}
+
+export interface CaseFile {
+  /** `{}` until the batch starts. */
+  config: BatchConfig | Record<string, never>;
+  phase: Phase;
+  runs: Record<string, RunRecord>;
+  /** The investigator's step labels per run, one list per action. */
+  step_labels: Record<string, StepLabel[][]>;
+  split: SplitFinding | null;
+  hypotheses: Hypothesis[];
+  forks: Record<string, ForkExperiment | PendingForks>;
+  verdict: Verdict | null;
+  costs: Costs;
+}
+
+export const isPendingForks = (f: ForkExperiment | PendingForks): f is PendingForks => f.id === "pending";
+
+// ── event logs (events.jsonl) ────────────────────────────────────────────────
+
+/** One line of a run's, fork child's or the investigator's events.jsonl. `t` is seconds since it started. */
+export type AgentEvent = { t: number; /** Investigator only: which agent or subagent. */ agent?: string } & (
+  | { type: "thought"; text: string }
+  | { type: "tool_call"; id: string | null; name: string; args: Record<string, unknown> }
+  | { type: "tool_result"; id: string; name: string | null; content: string }
+  | { type: "todos"; todos: AgentTodo[] }
+  /** Forced fork children only: the step the experiment forced, before the agent continues. */
+  | { type: "forced"; command: string; output: string }
+);
+
+// ── the websocket ────────────────────────────────────────────────────────────
+
+/** Messages on `/api/batches/{id}/ws`. A replay sends one snapshot and closes; a live batch keeps streaming. */
+export type BatchMessage =
+  | { kind: "snapshot"; case: CaseFile; live: boolean }
+  | { [S in CaseSection]: { kind: "case"; section: S; value: CaseFile[S] } }[CaseSection]
+  | { kind: "event"; run: string; event: AgentEvent }
+  | { kind: "fork_event"; fork: string; child: string; event: AgentEvent }
+  | { kind: "investigator"; event: AgentEvent }
+  | { kind: "error"; message: string };
+
+/** Apply a websocket message to the case file the page holds. Events do not change it. */
+export function applyMessage(c: CaseFile | null, m: BatchMessage): CaseFile | null {
+  if (m.kind === "snapshot") return m.case;
+  if (m.kind === "case" && c) return { ...c, [m.section]: m.value };
+  return c;
+}
+
+export interface BatchSocket { close(): void }
+
+/** Open the batch websocket. `onClose` gets whether the server closed it normally (a replay always does). */
+export function openBatchSocket(
+  batchId: string,
+  on: { message: (m: BatchMessage) => void; close?: (clean: boolean) => void },
+  loc: Pick<Location, "protocol" | "host"> = location,
+): BatchSocket {
+  const ws = new WebSocket(batchSocketUrl(batchId, loc));
+  ws.onmessage = (e) => {
+    try { on.message(JSON.parse(String(e.data)) as BatchMessage); } catch { /* not JSON: ignore */ }
+  };
+  ws.onclose = (e) => on.close?.(e.wasClean);
+  return { close: () => ws.close() };
+}
+
+export function batchSocketUrl(batchId: string, loc: Pick<Location, "protocol" | "host"> = location): string {
+  return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}${batchPath(batchId)}/ws`;
+}
+
+// ── REST ─────────────────────────────────────────────────────────────────────
+
+export interface BatchListItem { id: string; kind: "live" | "replay" }
+export interface Health { ok: boolean; keys: { anthropic: boolean; daytona: boolean } }
+export interface Defaults { config: BatchConfig; prices_missing: boolean }
+export interface Estimate {
+  avg_run_usd: number | null;
+  runs_usd: number | null;
+  forks_usd: number | null;
+  total_usd: number | null;
+  over_budget: boolean;
+  basis: string;
+}
+
+/** A request the server refused or could not answer: `message` is what to tell the person. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+export const isAbort = (e: unknown): boolean => (e as { name?: string } | null)?.name === "AbortError";
+
+const batchPath = (id: string): string => `/api/batches/${encodeURIComponent(id)}`;
+
+/** The URL of a file saved with a batch, such as a run's `charts` entry. Holdout labels are never served. */
+export const batchFileUrl = (batchId: string, path: string): string =>
+  `${batchPath(batchId)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+
+async function errorMessage(res: Response): Promise<string> {
   // The Vite proxy answers 502/504 (or 500 with no body) when the server is not running.
   if (res.status === 502 || res.status === 503 || res.status === 504) return `Couldn't reach the server (HTTP ${res.status}). Is it running on port 8000?`;
   let detail = "";
   try {
     const text = await res.text();
     try {
-      const j = JSON.parse(text) as { detail?: unknown; message?: unknown };
-      const d = j.detail ?? j.message;
+      const j = JSON.parse(text) as { detail?: unknown; error?: unknown };
+      const d = j.detail ?? j.error;
       detail = typeof d === "string" ? d : d ? JSON.stringify(d) : "";
     } catch { detail = text.slice(0, 200); }
   } catch { /* no body */ }
-  if (res.status === 500 && !detail.trim()) return `Couldn't reach the server (HTTP 500). Is it running on port 8000?`;
+  if (res.status === 500 && !detail.trim()) return "Couldn't reach the server (HTTP 500). Is it running on port 8000?";
   return `The server answered HTTP ${res.status}${detail ? `: ${detail}` : "."}`;
 }
 
-/** `POST /api/ask` (multipart): the conversation, the message, and the CSV only on the turn it is attached. Resolves
- *  to the `text/event-stream` response; rejects with `AskHttpError` when the server did not answer with one. */
-export async function postAsk(o: { conversation: string; message: string; file: File | null; signal: AbortSignal }): Promise<Response> {
-  const fd = new FormData();
-  fd.append("conversation", o.conversation);
-  fd.append("message", o.message);
-  if (o.file) fd.append("file", o.file, o.file.name);
+async function call<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
+  const { json, ...rest } = init ?? {};
+  const req: RequestInit = json === undefined ? rest : {
+    ...rest, method: rest.method ?? "POST", body: JSON.stringify(json), headers: { "content-type": "application/json", ...rest.headers },
+  };
   let res: Response;
   try {
-    res = await fetch("/api/ask", { method: "POST", body: fd, signal: o.signal });
+    res = await fetch(path, req);
   } catch (e) {
     if (isAbort(e)) throw e;
-    throw new AskHttpError("Couldn't reach the server. Is it running on port 8000?");
+    throw new ApiError("Couldn't reach the server. Is it running on port 8000?", 0);
   }
-  if (!res.ok) throw new AskHttpError(await httpMessage(res));
-  if (!/text\/event-stream/i.test(res.headers.get("content-type") ?? "")) throw new AskHttpError("The server did not answer with an event stream.");
-  return res;
+  if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
+  return (await res.json()) as T;
 }
 
-/** `DELETE /api/conversations/{id}`: the server deletes the sandbox and forgets the thread (204, unknown id too).
- *  `keepalive` lets it finish while the page unloads. Never fails loudly. */
-export function deleteConversation(id: string, keepalive = false): void {
-  void fetch(`/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE", keepalive }).catch(() => undefined);
-}
+type Opts = { signal?: AbortSignal };
 
-/** `GET /api/sample`: the bundled sales CSV, as a File named from its Content-Disposition. */
-export async function fetchSample(): Promise<File> {
-  let res: Response;
-  try { res = await fetch("/api/sample"); } catch { throw new AskHttpError("Couldn't reach the server. Is it running on port 8000?"); }
-  if (!res.ok) throw new AskHttpError(await httpMessage(res));
-  const cd = res.headers.get("content-disposition") ?? "";
-  const name = cd.match(/filename\*=UTF-8''([^;]+)/i)?.[1] ?? cd.match(/filename="?([^";]+)"?/i)?.[1] ?? "sales.csv";
-  const blob = await res.blob();
-  return new File([blob], decodeURIComponent(name), { type: "text/csv" });
-}
+export const fetchHealth = (o: Opts = {}) => call<Health>("/api/health", o);
+export const fetchDefaults = (o: Opts = {}) => call<Defaults>("/api/defaults", o);
+export const postEstimate = (cfg: BatchConfig, o: Opts = {}) => call<Estimate>("/api/estimate", { ...o, json: cfg });
+export const fetchBatches = (o: Opts = {}) => call<BatchListItem[]>("/api/batches", o);
+export const startBatch = (cfg: BatchConfig, o: Opts = {}) => call<{ id: string }>("/api/batches", { ...o, json: cfg });
+export const fetchCase = (id: string, o: Opts = {}) => call<CaseFile>(`${batchPath(id)}/case`, o);
+export const fetchRunEvents = (id: string, run: string, o: Opts = {}) =>
+  call<AgentEvent[]>(`${batchPath(id)}/runs/${encodeURIComponent(run)}/events`, o);
+export const fetchForkEvents = (id: string, fork: string, child: string, o: Opts = {}) =>
+  call<AgentEvent[]>(`${batchPath(id)}/forks/${encodeURIComponent(fork)}/${encodeURIComponent(child)}/events`, o);
+export const fetchInvestigatorEvents = (id: string, o: Opts = {}) => call<AgentEvent[]>(`${batchPath(id)}/investigator/events`, o);
+/** Live batches only: start the investigator once the phase is `ready`. */
+export const startInvestigation = (id: string, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/investigate`, { ...o, method: "POST" });
+/** Live batches only: answer `forks.pending` while the phase is `awaiting_approval`. */
+export const postDecision = (id: string, approve: boolean, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/decision`, { ...o, json: { approve } });
+/** Live batches only: cancel the work and stop every VM. */
+export const stopBatch = (id: string, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/stop`, { ...o, method: "POST" });

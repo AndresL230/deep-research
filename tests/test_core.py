@@ -130,3 +130,56 @@ def test_case_file_tools_validate(tmp_path):
     assert cf.record_hypothesis("deduplicate", "a", "b", "c") == "hypothesis saved"
     assert json.loads((tmp_path / "case" / "case.json").read_text())["step_labels"]["r1"] == [["load"], ["split"]]
     assert seen == ["runs", "step_labels", "hypotheses"]
+
+
+def test_costs_price_cache_reads_and_writes():
+    prices = {"models": {"m": {"input_per_mtok": 2.0, "output_per_mtok": 10.0, "cache_read_per_mtok": 0.1,
+                               "cache_write_per_mtok": 2.5, "cache_write_1h_per_mtok": 4.0}}}
+    t = CostTracker(budget_usd=100.0, prices={**prices, "daytona_vm_per_hour": 0.0})
+    # 1M uncached ($2) + 1M read ($0.10) + 1M 5m write ($2.50) + 1M 1h write ($4) + 1M out ($10)
+    t.record_tokens("run:a", "m", 4_000_000, 1_000_000, cache_read=1_000_000, cache_write=1_000_000,
+                    cache_write_1h=1_000_000)
+    assert t.total_usd() == pytest.approx(18.60)
+    s = t.snapshot()["scopes"]["run:a"]
+    assert s["cache_read_tokens"] == 1_000_000 and s["cache_write_tokens"] == 2_000_000
+
+
+def test_costs_use_long_prompt_rates_over_the_threshold():
+    prices = {"models": {"m": {"input_per_mtok": 0.1, "output_per_mtok": 0.5,
+                               "long_prompt": {"over_tokens": 100_000, "input_per_mtok": 0.5, "output_per_mtok": 2.5}}},
+              "daytona_vm_per_hour": 0.0}
+    t = CostTracker(budget_usd=100.0, prices=prices)
+    t.record_tokens("short", "m", 100_000, 0)
+    t.record_tokens("long", "m", 100_001, 0)
+    assert t.scopes["short"].model_usd == pytest.approx(0.01)
+    assert t.scopes["long"].model_usd == pytest.approx(100_001 / 1e6 * 0.5)
+
+
+def test_costs_missing_cache_rate_means_unknown():
+    t = CostTracker(budget_usd=1.0, prices={"models": {"m": {"input_per_mtok": 1.0, "output_per_mtok": 5.0}},
+                                            "daytona_vm_per_hour": 0.0})
+    t.record_tokens("a", "m", 10, 10)
+    assert t.total_usd() is not None
+    t.record_tokens("a", "m", 10, 10, cache_read=5)
+    assert t.total_usd() is None
+
+
+def test_token_counts_reads_anthropic_usage_metadata():
+    from deep_research.costs import token_counts
+
+    per_ttl = {"input_tokens": 100, "output_tokens": 7, "input_token_details": {
+        "cache_read": 40, "cache_creation": 0, "ephemeral_5m_input_tokens": 20, "ephemeral_1h_input_tokens": 5}}
+    assert token_counts(per_ttl) == {"input_tokens": 100, "output_tokens": 7, "cache_read": 40,
+                                     "cache_write": 20, "cache_write_1h": 5}
+    generic = {"input_tokens": 100, "output_tokens": 7, "input_token_details": {"cache_creation": 30}}
+    assert token_counts(generic)["cache_write"] == 30
+    assert token_counts({"input_tokens": 3, "output_tokens": 1})["cache_read"] == 0
+
+
+def test_shipped_prices_cover_the_default_models():
+    from deep_research.config import load_prices
+
+    prices = load_prices()
+    for model in ("anthropic:claude-haiku-5-5", "anthropic:claude-sonnet-5-5"):
+        assert prices["models"][model]["input_per_mtok"] is not None
+    assert prices["daytona_vm_per_hour"] is not None

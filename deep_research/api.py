@@ -1,32 +1,92 @@
-"""HTTP and websocket API for the UI. Run: `uvicorn deep_research.api:app --reload`."""
+"""The app: the batch API, its websocket, and the built web UI.
+
+Run from the repo root: `uv run uvicorn deep_research.api:app --reload --port 8000`.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import mimetypes
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-load_dotenv()
+from .config import ROOT_DIR
+
+load_dotenv(ROOT_DIR / ".env")
 
 from .batch import Batch  # noqa: E402 - needs the environment loaded first
-from .config import BACKEND_DIR, BATCHES_DIR, BatchConfig, load_prices  # noqa: E402
+from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .costs import OverBudget, estimate_batch_usd  # noqa: E402
 from .events import read_events  # noqa: E402
 
-FIXTURES_DIR = BACKEND_DIR.parent / "fixtures"
-STATS_FILE = BATCHES_DIR / "_stats.json"
+log = logging.getLogger("deep_research.api")
 
-app = FastAPI(title="deep-research")
+mimetypes.add_type("image/svg+xml", ".svg")
+mimetypes.add_type("image/webp", ".webp")
+
+STATS_FILE = BATCHES_DIR / "_stats.json"
+KEYS = {"anthropic": "ANTHROPIC_API_KEY", "daytona": "DAYTONA_API_KEY"}
+# Agent-written files (SVG especially) must not run script when opened directly.
+FILE_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-cache",
+}
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    yield
+    await close_all()
+
+
+app = FastAPI(title="deep-research", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 BATCHES: dict[str, Batch] = {}
 TASKS: dict[str, asyncio.Task] = {}
+
+
+async def close_all() -> None:
+    """Cancel running batch work and stop every VM. Runs on server shutdown."""
+    for t in TASKS.values():
+        if not t.done():
+            t.cancel()
+    if BATCHES:
+        log.info("shutting down: stopping the VMs of %d batch(es)", len(BATCHES))
+    results = await asyncio.gather(*(b.close() for b in BATCHES.values()), return_exceptions=True)
+    for r in results:
+        if isinstance(r, BaseException):
+            log.warning("could not close a batch: %r", r)
+
+
+def key_status() -> dict[str, bool]:
+    """Whether each required key is set. Never the values."""
+    # Pick up keys added to .env after the server started (fills only unset vars).
+    env_file = ROOT_DIR / ".env"
+    if env_file.is_file():
+        for name, value in dotenv_values(env_file).items():
+            if name in KEYS.values() and value and not os.environ.get(name):
+                os.environ[name] = value
+    return {k: bool(os.environ.get(v, "").strip()) for k, v in KEYS.items()}
+
+
+def _inside(base: Path, candidate: Path) -> bool:
+    try:
+        candidate.resolve().relative_to(base.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def _batch_dir(batch_id: str) -> Path:
@@ -68,6 +128,11 @@ def _save_stats(b: Batch) -> None:
     if avg is not None:
         STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATS_FILE.write_text(json.dumps({"avg_run_usd": avg}))
+
+
+@app.get("/api/health")
+def health():
+    return {"ok": True, "keys": key_status()}
 
 
 @app.get("/api/defaults")
@@ -147,7 +212,7 @@ def batch_file(batch_id: str, path: str):
     full = (root / path).resolve()
     if root not in full.parents or not full.is_file() or "holdout_labels" in full.name:
         raise HTTPException(404, "no such file")
-    return FileResponse(full)
+    return FileResponse(full, headers=FILE_HEADERS)
 
 
 @app.post("/api/batches/{batch_id}/investigate")
@@ -186,7 +251,13 @@ async def ws(websocket: WebSocket, batch_id: str):
     await websocket.accept()
     b = BATCHES.get(batch_id)
     if b is None:
-        await websocket.send_json({"kind": "snapshot", "case": get_case(batch_id), "live": False})
+        try:
+            case = get_case(batch_id)
+        except HTTPException as e:
+            await websocket.send_json({"kind": "error", "message": e.detail})
+            await websocket.close(code=4404)
+            return
+        await websocket.send_json({"kind": "snapshot", "case": case, "live": False})
         await websocket.close()
         return
     q = b.subscribe()
@@ -198,3 +269,26 @@ async def ws(websocket: WebSocket, batch_id: str):
         pass
     finally:
         b.unsubscribe(q)
+
+
+# Registered last, so they never shadow the batch routes or the websocket.
+@app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def api_not_found(rest: str) -> Response:
+    return JSONResponse({"error": "not found"}, status_code=404)
+
+
+@app.get("/{path:path}")
+async def spa(path: str) -> Response:
+    """The built web UI, with a fallback to index.html for client-side routes."""
+    index = WEB_DIST / "index.html"
+    if path:
+        candidate = WEB_DIST / path
+        if _inside(WEB_DIST, candidate) and candidate.is_file():
+            return FileResponse(candidate)
+    if index.is_file():
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
+    return Response(
+        "The web UI is not built yet: run `cd web && npm run build` (or use the Vite dev server).",
+        status_code=404,
+        media_type="text/plain",
+    )

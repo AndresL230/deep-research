@@ -8,7 +8,7 @@
 //                  then the parts: markdown (headings, lists, tables, code) with Trov's tail-settling while it
 //                  streams, and image blocks (a chart; a click opens it full size in a new tab), with a soft cursor
 //                  while it streams; Stopped / the error
-//   the empty state  "Drop a CSV to start" and Try the sample
+//   the empty state  a mark, a headline, a line of text and optional actions (the caller says what)
 // Dropped from Trov: refs and ref chips, hover cards, cites / sources, the footer (Copy, Regenerate, Save as
 // artifact, Wrong?), follow-ups, Edit-and-resend, write cards, the Trov blocks (items / chart / themes / diagram /
 // not found / save form), the inspector, sharing, the phone, the ⌘J panel, the motion module (the scroll rule it
@@ -32,7 +32,7 @@ export interface ConversationUi {
 }
 export const initialConversationUi = (): ConversationUi => ({ open: {}, stick: true, away: false });
 
-export interface CvView { convo: AskConvo; ui: ConversationUi; sampleLoading: boolean }
+export interface CvView { convo: AskConvo; ui: ConversationUi }
 
 /** Past this far from the bottom, the jump-to-latest arrow shows. */
 export const AWAY_PX = 160;
@@ -343,15 +343,12 @@ export function conversationView(v: CvView): string {
   return `<div class="ask-col" data-morph-key="cv:${attr(c.id)}"><div class="ask-msgs" data-morph-list>${c.messages.map((m, i) => (m.role === "user" ? question(m) : answer(v, m, i === lastA))).join("")}</div></div>`;
 }
 
-/** A new conversation: the mark, the headline, Try the sample. */
-export function emptyView(v: CvView): string {
-  return `<div class="ask-empty" data-morph-key="empty:${attr(v.convo.id)}">
-    <div class="ask-empty-mark">${askIcon("upload", 22, "var(--accent)", 1.8)}</div>
-    <h2 class="ask-empty-h">Drop a CSV to start</h2>
-    <p class="ask-empty-s">Attach a CSV and ask a question. The agent plans, writes and runs Python in a sandbox, and answers with findings and charts.</p>
-    <div class="ask-empty-acts">
-      <button type="button" class="ask-ghostbtn ask-ghostbtn--outline" data-act="sample"${v.sampleLoading ? " disabled" : ""}>${v.sampleLoading ? askSpinner(13) : askIcon("csv", 14, null, 1.8)}<span>Try the sample</span></button>
-      <button type="button" class="ask-ghostbtn" data-act="attach">${askIcon("attach", 14, null, 1.8)}<span>Choose a file</span></button>
-    </div>
+/** Nothing to show yet: the mark, the headline, a line of text, and any actions (HTML, already escaped). */
+export function emptyView(o: { key: string; title: string; text: string; acts?: string }): string {
+  return `<div class="ask-empty" data-morph-key="empty:${attr(o.key)}">
+    <div class="ask-empty-mark">${askIcon("chart", 22, "var(--accent)", 1.8)}</div>
+    <h2 class="ask-empty-h">${esc(o.title)}</h2>
+    <p class="ask-empty-s">${esc(o.text)}</p>
+    ${o.acts ? `<div class="ask-empty-acts">${o.acts}</div>` : ""}
   </div>`;
 }

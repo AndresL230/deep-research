@@ -8,7 +8,7 @@ HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amaz
 
 | Part | What it is | File |
 | --- | --- | --- |
-| Task | Pima diabetes data with duplicate rows planted, plus a clean holdout whose labels never leave our server | `backend/deep_research/task.py` |
+| Task | Pima diabetes data with duplicate rows planted, plus a clean holdout whose labels never leave our server | `deep_research/task.py` |
 | Analyst agents | One flat deepagent per run, `DaytonaSandbox` backend, `write_todos` planning, no subagents | `agents/analyst.py` |
 | Orchestrator | Plain Python: VMs, runs, scoring, split finding, fork experiment, costs | `batch.py` |
 | Scorer | Reported accuracy vs true holdout accuracy, plus the share of test rows also in training | `scoring.py` |
@@ -17,8 +17,9 @@ HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amaz
 | Investigator | Deepagent with `step-tagger` and `hypothesis` subagents, the `method-errors` skill, and an approval gate on `request_forks` | `agents/investigator.py` |
 | Case file | One JSON file per batch with everything the investigator knows. It is also the UI's data source | `case_file.py` |
 | Costs | Tokens from every model response, VM time, budget guard | `costs.py`, `prices.json` |
-| Lab page | Tiny web page inside each VM showing the agent's latest chart, embedded via a signed preview URL | `backend/lab_page/server.py` |
-| API | FastAPI plus a websocket per batch | `api.py` |
+| Lab page | Tiny web page inside each VM showing the agent's latest chart, embedded via a signed preview URL | `lab_page/server.py` |
+| API | FastAPI plus a websocket per batch; also serves the web UI | `api.py` |
+| Web UI | Vite + TypeScript, Trov Ask styling. Batch screens are next; `web/src/api.ts` is the typed client | `web/` |
 
 ### Who can write what
 
@@ -26,33 +27,67 @@ The analyst agents are fully isolated: no shared files, no labels, no case file.
 
 The investigator reads `/case/`, `/runs/` and `/skills/` through the normal file tools, but a `FilesystemPermission` rule denies `write_file` and `edit_file` there. The case file changes only through narrow tools (`record_step_labels`, `record_hypothesis`, `record_verdict`), each writing one section and checking its input. `tests/test_agents_offline.py` checks that the denial works.
 
-## Setup
+## Layout
 
-```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-cp ../.env.example .env   # add ANTHROPIC_API_KEY and DAYTONA_API_KEY
-python -m deep_research.snapshot   # once: bakes pandas, scikit-learn, matplotlib into a snapshot
+```
+deep_research/   the Python package: orchestrator, agents, scoring, API
+data/pima.csv    the dataset
+skills/          the investigator's method-errors skill
+lab_page/        the page each VM serves with the agent's latest chart
+prices.json      model and VM prices for the cost bar and budget guard
+fixtures/        saved replays (the simulated demo batch)
+batches/         batches from real runs (git-ignored)
+scripts/         make_fixture.py
+tests/           Python tests
+web/             the UI (Vite + TypeScript)
+docs/            api-contract.md
 ```
 
-Fill `backend/prices.json` from Anthropic's and Daytona's current pricing pages. Until then the UI shows token counts and the budget cap cannot be enforced.
+## Setup
+
+Needs [uv](https://docs.astral.sh/uv/) and Node 20+.
+
+```bash
+uv sync
+(cd web && npm install && npm run build)
+cp .env.example .env                       # add ANTHROPIC_API_KEY and DAYTONA_API_KEY
+uv run python -m deep_research.snapshot    # once: bakes pandas, scikit-learn, matplotlib into a snapshot
+```
+
+`prices.json` was filled from Anthropic's and Daytona's pricing pages on 2026-11-14. A null price turns the dollar
+budget guard off and the UI shows token counts only.
 
 ## Run
 
 ```bash
-cd backend
-python -m pytest                              # deterministic parts and agent wiring, no keys needed
-python -m deep_research.cli runs --n 1        # milestone 1: one real run end to end
-python -m deep_research.cli runs --n 12       # milestone 2: a batch and the split finding
-python -m deep_research.cli forks <batch_id> --n 4
-uvicorn deep_research.api:app --reload        # API for the frontend on :8000
+uv run uvicorn deep_research.api:app --reload --port 8000
+```
+
+That serves the API and the built UI at http://localhost:8000. For UI work, also run `cd web && npm run dev`
+(Vite on 5173, proxying `/api` and the websocket to 8000).
+
+Without the UI:
+
+```bash
+uv run python -m deep_research.cli runs --n 1        # milestone 1: one real run end to end
+uv run python -m deep_research.cli runs --n 12       # milestone 2: a batch and the split finding
+uv run python -m deep_research.cli forks <batch_id> --n 4
+```
+
+## Test
+
+```bash
+uv run pytest                                      # Python: no keys, no VMs
+(cd web && npm run typecheck && npm test)          # web
 ```
 
 ## API
 
+Full contract, including the case file and the websocket messages: `docs/api-contract.md`.
+
 | Method | Path | Does |
 | --- | --- | --- |
+| GET | `/api/health` | Whether each key is set (never the values) |
 | GET | `/api/defaults` | Default config, and whether prices are missing |
 | POST | `/api/estimate` | Cost estimate for a config, from earlier runs |
 | GET | `/api/batches` | Live batches and saved replays (`fixtures/`) |
@@ -60,16 +95,24 @@ uvicorn deep_research.api:app --reload        # API for the frontend on :8000
 | GET | `/api/batches/{id}/case` | The case file |
 | GET | `/api/batches/{id}/runs/{run}/events` | One run's event log |
 | GET | `/api/batches/{id}/forks/{fork}/{child}/events` | One fork child's event log |
+| GET | `/api/batches/{id}/investigator/events` | The investigator's event log |
 | GET | `/api/batches/{id}/files/{path}` | Saved charts and outputs (never the holdout labels) |
 | POST | `/api/batches/{id}/investigate` | Start the investigator |
 | POST | `/api/batches/{id}/decision` | `{"approve": true}` answers the fork approval |
+| POST | `/api/batches/{id}/stop` | Stop a live batch and its VMs |
 | WS | `/api/batches/{id}/ws` | A snapshot, then `case`, `event`, `fork_event` and `investigator` messages |
 
 The case file's `phase` moves through `config`, `running`, `analyzing`, `ready` (or `no_split`), `investigating`, `awaiting_approval`, `forking`, `forked`, `done`.
 
+### VM cleanup
+
+Every VM is created with a 60 minute auto-stop and a 60 minute auto-delete after stopping, so a leaked VM stops
+billing on its own. `Batch.close()` stops every VM a batch started (runs, fork bases, fork children), and the
+server closes every open batch when it shuts down.
+
 ## Demo data for the frontend
 
-`fixtures/demo-batch/` is a **simulated** batch, made by `python3 scripts/make_fixture.py`. No model calls: each run is scripted to either remove duplicates or not, then really trains a random forest on the real trapped data, so the scores, overlap and charts are real but the agent's choices and timing are not. Its case file says `"simulated": true`. Do not present it as real agent runs.
+`fixtures/demo-batch/` is a **simulated** batch, made by `uv run python scripts/make_fixture.py`. No model calls: each run is scripted to either remove duplicates or not, then really trains a random forest on the real trapped data, so the scores, overlap and charts are real but the agent's choices and timing are not. Its case file says `"simulated": true`. Do not present it as real agent runs.
 
 It has the same files real batches produce:
 
@@ -87,7 +130,8 @@ forks/f1/<arm>-<n>/...      the same, for each fork child
 Verified here, without keys:
 - Task building, scoring, overlap, split finding, cost tracking, case file (`tests/test_core.py`)
 - Both agents build with the installed `deepagents` 0.7.38; the analyst has no `task` tool; the investigator cannot write to `/case/` but can read it (`tests/test_agents_offline.py`)
-- The API serves the demo batch
+- The API serves the demo batch, the websocket snapshot, health, JSON 404s and the web app, and never serves the holdout labels (`tests/test_api.py`)
+- The web client's types match the demo batch (`web/test/api.test.ts`)
 
 Not yet run, because it needs Anthropic and Daytona keys:
 - Real analyst runs in Daytona, the lab page through a signed preview URL, the fork experiment, and the investigator end to end. Signatures were checked against the installed SDKs, but behaviour was not. Run milestone 1 first.
@@ -103,5 +147,5 @@ Measured on Pima with scikit-learn, averaged over 5 seeds:
 ## Next
 
 1. Milestone 1 and 2 with real keys. Confirm a mix of honest and inflated runs; adjust `trap_strength`, `trap_noise` or `hint_level` if not.
-2. Frontend: config screen, cost bar, wall of lab pages, lane chart, fork approval, verdict. Build against `fixtures/demo-batch` first.
+2. Frontend: config screen, cost bar, wall of lab pages, lane chart, fork approval, verdict, and one run's events in the conversation view. Build against `fixtures/demo-batch` first.
 3. One live fork wired to the approval button.

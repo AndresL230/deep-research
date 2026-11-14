@@ -9,11 +9,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BACKEND_DIR / "data"
-BATCHES_DIR = BACKEND_DIR / "batches"
-SKILLS_DIR = BACKEND_DIR / "skills"
-PRICES_FILE = BACKEND_DIR / "prices.json"
+# The repo root: data/, skills/, lab_page/, prices.json, batches/, fixtures/ and web/ live here.
+ROOT_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = ROOT_DIR / "data"
+BATCHES_DIR = ROOT_DIR / "batches"
+FIXTURES_DIR = ROOT_DIR / "fixtures"
+SKILLS_DIR = ROOT_DIR / "skills"
+PRICES_FILE = ROOT_DIR / "prices.json"
+WEB_DIST = ROOT_DIR / "web" / "dist"
 
 # Paths inside each analyst VM.
 VM_WORKSPACE = "/home/daytona/workspace"
@@ -48,10 +51,10 @@ class BatchConfig(BaseModel):
 
 
 def load_prices() -> dict:
-    """Prices per million tokens and per VM hour.
+    """Prices per million tokens and per VM hour, from `prices.json`.
 
-    `prices.json` ships with nulls on purpose. Fill it from the providers'
-    current pricing pages. Until then costs show token counts only.
+    A null price means unknown: costs then show token counts only and the
+    budget guard cannot enforce a dollar cap.
     """
     if PRICES_FILE.exists():
         return json.loads(PRICES_FILE.read_text())
