@@ -11,6 +11,9 @@ dependencies = [
     "httpx>=0.28.1",
     "langchain-anthropic>=1.7.10",
     "langchain-daytona>=0.0.9",
+    # The robot_arm domain scores controllers in the sim on this server (sim/, deep_research/domains/robot_arm.py).
+    # Only that domain imports it.
+    "mujoco==4.0.1",
     "pandas",
     "python-dotenv>=1.2.4",
     "scikit-learn",
@@ -30,7 +33,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["deep_research*"]
+include = ["deep_research*", "sim*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
