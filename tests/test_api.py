@@ -180,3 +180,39 @@ def test_lab_proxy_refuses_other_paths_and_content(client, lab):
     assert client.get("/api/batches/lab-batch/runs/r02/lab/").status_code == 404  # no lab page yet
     assert client.get("/api/batches/lab-batch/runs/r01/lab/live/missing.png").status_code == 502
     assert len([r for r in lab if r.url.path.startswith("/etc")]) == 0
+
+
+# ---- charts saved with a batch ----
+
+def test_case_lists_charts_found_on_disk(client):
+    case = client.get(f"/api/batches/{DEMO}/case").json()
+    # The fixture's fork children have chart files but no list in the case file.
+    child = case["forks"]["f1"]["children"]["control-1"]
+    assert child["charts"] == ["forks/f1/control-1/live/02_confusion.png"]
+    assert client.get(f"/api/batches/{DEMO}/files/{child['charts'][0]}").status_code == 200
+    # Runs keep the list the case file already has.
+    assert case["runs"]["r01"]["charts"][-1] == "runs/r01/live/02_confusion.png"
+
+
+def test_download_charts_saves_images_only(tmp_path):
+    from types import SimpleNamespace as NS
+
+    from deep_research import sandboxes
+
+    files = {"b.png": b"png2", "a.png": b"png1", "notes.txt": b"x", "c.svg": b"<svg/>"}
+
+    class FS:
+        def list_files(self, path):
+            return [NS(name=n, is_dir=False, mod_time={"a.png": "1", "b.png": "2", "c.svg": "3"}.get(n, "0")) for n in files] + [NS(name="sub", is_dir=True, mod_time="9")]
+
+        def download_file(self, path):
+            return files[path.rsplit("/", 1)[-1]]
+
+    assert sandboxes.download_charts(NS(fs=FS()), tmp_path / "live") == ["a.png", "b.png", "c.svg"]
+    assert sorted(p.name for p in (tmp_path / "live").iterdir()) == ["a.png", "b.png", "c.svg"]
+
+    class Broken:
+        def list_files(self, path):
+            raise RuntimeError("no such dir")
+
+    assert sandboxes.download_charts(NS(fs=Broken()), tmp_path / "none") == []

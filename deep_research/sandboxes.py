@@ -97,6 +97,34 @@ def download_outputs(sb: Sandbox, dest: Path) -> None:
             (dest / name).write_bytes(data)
 
 
+CHART_SUFFIXES = (".png", ".jpg", ".jpeg", ".svg")
+MAX_CHARTS = 30
+
+
+def download_charts(sb: Sandbox, dest: Path) -> list[str]:
+    """Save the charts the agent drew in the live folder, so a finished batch still has them once the VM is gone.
+
+    Returns the file names saved, oldest first. Never raises: charts are a nicety, not part of the score.
+    """
+    try:
+        entries = [e for e in sb.fs.list_files(VM_LIVE_DIR) if not e.is_dir and e.name.lower().endswith(CHART_SUFFIXES)]
+    except Exception:  # noqa: BLE001 - no live folder
+        return []
+    entries.sort(key=lambda e: str(getattr(e, "mod_time", "") or ""))
+    saved: list[str] = []
+    for e in entries[:MAX_CHARTS]:
+        name = Path(e.name).name
+        try:
+            data = sb.fs.download_file(f"{VM_LIVE_DIR}/{name}")
+        except Exception:  # noqa: BLE001
+            continue
+        if data:
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / name).write_bytes(data)
+            saved.append(name)
+    return saved
+
+
 def replay_actions(sb: Sandbox, actions: list[Action]) -> None:
     """Rebuild a VM's files by re-running the agent's file and shell actions. No model calls."""
     backend = DaytonaSandbox(sandbox=sb)

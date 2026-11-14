@@ -75,10 +75,10 @@ export interface RunRecord extends Partial<Omit<RunScore, "status">> {
   n_actions?: number;
   /** Step labels per action, in order. */
   labels?: StepLabel[][];
+  /** The charts the run saved, oldest first, as paths for `batchFileUrl`. Set once the run has finished. */
+  charts?: string[];
   // Fixture only (scripts/make_fixture.py).
   duration_s?: number;
-  /** Paths for `batchFileUrl`. */
-  charts?: string[];
   tokens?: { input: number; output: number };
 }
 
@@ -105,6 +105,8 @@ export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   arm: ForkArm;
   status: "running" | ScoreStatus;
   lab_url?: string | null;
+  /** The charts the child saved, as paths for `batchFileUrl`. */
+  charts?: string[];
   /** "fork": a copy-on-write VM fork. "replay": rebuilt by replaying the actions when forking failed. */
   how?: "fork" | "replay";
 }

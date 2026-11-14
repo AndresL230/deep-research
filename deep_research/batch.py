@@ -138,7 +138,10 @@ class Batch:
             )
             (rdir / "messages.json").write_text(json.dumps(messages_to_dict(msgs)))
             await asyncio.to_thread(vms.download_outputs, sb, rdir / "outputs")
+            charts = await asyncio.to_thread(vms.download_charts, sb, rdir / "live")
             self._finish_run(run_id, rdir, log)
+            if charts:
+                self.case.update_run(run_id, charts=[f"runs/{run_id}/live/{name}" for name in charts])
         except Exception as e:  # noqa: BLE001 - one bad run must not sink the batch
             self.case.update_run(run_id, status="failed", reason=f"{type(e).__name__}: {e}"[:500])
         finally:
@@ -256,10 +259,12 @@ class Batch:
                         RUN_TIMEOUT_S,
                     )
                     await asyncio.to_thread(vms.download_outputs, vm, cdir / "outputs")
+                    charts = await asyncio.to_thread(vms.download_charts, vm, cdir / "live")
                     score = score_run(cdir / "outputs", self.task, self.cfg.inflation_threshold)
                     (cdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
                     results[cid] = {"arm": arm, **score.to_dict()}
-                    self._set_child(fork_id, cid, **results[cid])
+                    extra = {"charts": [f"forks/{fork_id}/{cid}/live/{name}" for name in charts]} if charts else {}
+                    self._set_child(fork_id, cid, **results[cid], **extra)
                 except Exception as e:  # noqa: BLE001
                     results[cid] = {"arm": arm, "status": "failed", "reason": f"{type(e).__name__}: {e}"[:300]}
                     self._set_child(fork_id, cid, **results[cid])

@@ -188,11 +188,12 @@ def estimate(cfg: BatchConfig):
 @app.get("/api/batches")
 def list_batches():
     out = []
-    for root, kind in ((BATCHES_DIR, "live"), (FIXTURES_DIR, "replay")):
+    # Live means running in this server. Anything else on disk, ours or a fixture, is a replay.
+    for root in (BATCHES_DIR, FIXTURES_DIR):
         if root.exists():
             for d in sorted(root.iterdir()):
                 if (d / "case" / "case.json").exists():
-                    out.append({"id": d.name, "kind": "live" if d.name in BATCHES else kind})
+                    out.append({"id": d.name, "kind": "live" if d.name in BATCHES else "replay"})
     return out
 
 
@@ -213,9 +214,39 @@ async def start_batch(cfg: BatchConfig):
     return {"id": b.id}
 
 
+CHART_SUFFIXES = (".png", ".jpg", ".jpeg", ".svg")
+
+
+def _saved_charts(root: Path, rel: str) -> list[str]:
+    """Charts on disk under `<rel>/live`, oldest first, as paths for the files endpoint."""
+    live = root / rel / "live"
+    if not live.is_dir():
+        return []
+    files = [f for f in live.iterdir() if f.is_file() and f.suffix.lower() in CHART_SUFFIXES]
+    files.sort(key=lambda f: (f.stat().st_mtime, f.name))
+    return [f"{rel}/live/{f.name}" for f in files]
+
+
+def _with_charts(case: dict, root: Path) -> dict:
+    """Fill in `charts` for runs and fork children that have chart files on disk but no list in the case file."""
+    for run_id, run in (case.get("runs") or {}).items():
+        if isinstance(run, dict) and not run.get("charts"):
+            found = _saved_charts(root, f"runs/{run_id}")
+            if found:
+                run["charts"] = found
+    for fork_id, fork in (case.get("forks") or {}).items():
+        for cid, child in ((fork or {}).get("children") or {}).items():
+            if isinstance(child, dict) and not child.get("charts"):
+                found = _saved_charts(root, f"forks/{fork_id}/{cid}")
+                if found:
+                    child["charts"] = found
+    return case
+
+
 @app.get("/api/batches/{batch_id}/case")
 def get_case(batch_id: str):
-    return json.loads((_batch_dir(batch_id) / "case" / "case.json").read_text())
+    root = _batch_dir(batch_id)
+    return _with_charts(json.loads((root / "case" / "case.json").read_text()), root)
 
 
 @app.get("/api/batches/{batch_id}/runs/{run_id}/events")
