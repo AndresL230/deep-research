@@ -162,3 +162,8 @@
 /* A teammate's batch, from the hub: whose machine ran it. */
 .hm-batch-from { display:block; margin-top:1px; font-family:var(--sans); font-size:10.5px; color:var(--fg-55); overflow:hidden; text-overflow:ellipsis; }
 .hm-batch:has(.hm-batch-from) { height:auto; min-height:40px; padding-top:5px; padding-bottom:5px; }
+
+/* Three choices need the whole field: let the segment grow and each option shrink to its text. */
+.hm-seg--3 { width:100%; }
+.hm-seg--3 .hm-seg-o { flex:1 1 0; min-width:0; }
+.hm-seg--3 .hm-seg-o span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
