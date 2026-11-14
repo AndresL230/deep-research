@@ -4,7 +4,15 @@
 
 /* ── the line above the grid ── */
 .bw-head { display:flex; flex-direction:column; gap:4px; }
-.bw-sum { margin:0; font-size:13px; font-weight:500; color:var(--fg); font-variant-numeric:tabular-nums; }
+.bw-sum { margin:0; font-size:15px; font-weight:600; letter-spacing:-0.01em; color:var(--fg); font-variant-numeric:tabular-nums; }
+/* The mix of runs as one bar: honest, inflated, failed, still running, not started. */
+.bw-mix { display:flex; gap:2px; height:6px; margin:2px 0 4px; border-radius:3px; overflow:hidden; }
+.bw-mix-s { min-width:0; transition:flex-grow var(--fx-slow) var(--fx-ease); }
+.bw-mix-s--honest { background:var(--green); }
+.bw-mix-s--inflated { background:var(--red); }
+.bw-mix-s--failed { background:var(--fg-40); }
+.bw-mix-s--running { background:var(--accent); }
+.bw-mix-s--queued { background:var(--border-strong); }
 .bw-sim { margin:0; align-self:flex-start; max-width:100%; padding:3px 8px; border:1px solid color-mix(in srgb, var(--amber) 35%, var(--border)); border-radius:6px; background:color-mix(in srgb, var(--amber) 8%, transparent); font-size:12px; line-height:1.45; color:var(--fg-70); }
 .bw-sim strong { font-weight:600; color:var(--amber); }
 .bw-empty { padding:24px 12px; border:1px dashed var(--border-strong); border-radius:8px; font-size:13px; color:var(--fg-55); text-align:center; }
@@ -15,41 +23,42 @@
 @container (max-width: 560px) { .bw-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; } }
 
 /* ── a tile ── */
-.bw-tile { display:flex; flex-direction:column; gap:8px; min-width:0; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--fg); text-align:left; cursor:pointer; transition:border-color var(--fx-fast) var(--fx-ease), background-color var(--fx-fast) var(--fx-ease); }
+.bw-tile { display:flex; flex-direction:column; gap:8px; min-width:0; padding:10px; border:1px solid var(--border-strong); border-top:2px solid var(--border-strong); border-radius:8px; background:var(--surface); color:var(--fg); text-align:left; cursor:pointer; transition:border-color var(--fx-fast) var(--fx-ease), background-color var(--fx-fast) var(--fx-ease); }
 .bw-tile:hover { border-color:var(--border-strong); background:color-mix(in srgb, var(--fg) 3%, var(--surface)); }
 .bw-tile:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.bw-tile--honest { border-color:color-mix(in srgb, var(--green) 32%, var(--border)); }
-.bw-tile--inflated { border-color:color-mix(in srgb, var(--red) 32%, var(--border)); }
+.bw-tile--running, .bw-tile--starting { border-top-color:var(--accent); }
+.bw-tile--honest { border-color:color-mix(in srgb, var(--green) 40%, var(--border)); border-top-color:var(--green); background:color-mix(in srgb, var(--green) 4%, var(--surface)); }
+.bw-tile--inflated { border-color:color-mix(in srgb, var(--red) 40%, var(--border)); border-top-color:var(--red); background:color-mix(in srgb, var(--red) 5%, var(--surface)); }
 .bw-tile--honest:hover { border-color:color-mix(in srgb, var(--green) 55%, var(--border)); }
 .bw-tile--inflated:hover { border-color:color-mix(in srgb, var(--red) 55%, var(--border)); }
 
 .bw-hd { display:flex; align-items:center; justify-content:space-between; gap:6px; min-width:0; }
-.bw-id { font-family:var(--code); font-size:12px; color:var(--fg-70); }
+.bw-id { font-family:var(--code); font-size:12.5px; font-weight:600; color:var(--fg); }
 
 /* status pill */
 .bw-pill { display:inline-flex; align-items:center; gap:5px; padding:1px 7px; border-radius:999px; font-size:11.5px; font-weight:500; line-height:18px; white-space:nowrap; color:var(--fg-55); background:var(--hover); }
 .bw-dot { width:6px; height:6px; border-radius:50%; background:currentColor; flex:none; }
 .bw-pill--running, .bw-pill--starting { color:var(--accent); background:var(--accent-soft); }
 .bw-pill--running .ask-spin, .bw-pill--starting .ask-spin { color:var(--accent) !important; }
-.bw-pill--honest { color:var(--green); background:color-mix(in srgb, var(--green) 12%, transparent); }
-.bw-pill--inflated { color:var(--red); background:color-mix(in srgb, var(--red) 12%, transparent); }
+.bw-pill--honest { color:var(--green); background:color-mix(in srgb, var(--green) 18%, transparent); font-weight:600; }
+.bw-pill--inflated { color:var(--red); background:color-mix(in srgb, var(--red) 18%, transparent); font-weight:600; }
 .bw-pill--failed { color:var(--fg-40); }
 
 /* the picture: a fixed 4:3 box so the grid never jumps */
-.bw-pic { position:relative; aspect-ratio:4 / 3; overflow:hidden; border:1px solid var(--border); border-radius:6px; background:var(--bg); }
+.bw-pic { position:relative; aspect-ratio:4 / 3; overflow:hidden; border:1px solid var(--border-strong); border-radius:6px; background:var(--nb-screen); }
 /* The lab page renders at 2.5x the box and is scaled down, so it reads as a thumbnail; the tile takes the click. */
-.bw-pic--nb { padding:6px 6px 6px 2px; background:var(--bg); }
+.bw-pic--nb { padding:6px 6px 6px 2px; }
 .bw-ph { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:10px; color:var(--fg-40); text-align:center; }
 .bw-ph-t { font-size:12px; line-height:1.35; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
 
 /* the step label */
-.bw-step { font-size:13.5px; font-weight:500; line-height:1.35; min-height:calc(1.35em * 2); color:var(--fg); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+.bw-step { font-size:13.5px; font-weight:600; line-height:1.35; min-height:calc(1.35em * 2); color:var(--fg); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
 .bw-step--failed { color:var(--fg-55); font-weight:400; font-size:12.5px; }
 
 /* the progress strip: one segment per todo */
-.bw-strip { display:flex; gap:2px; height:4px; }
-.bw-seg { flex:1; min-width:0; border-radius:2px; background:var(--border-strong); }
-.bw-seg--completed { background:var(--fg-55); }
+.bw-strip { display:flex; gap:2px; height:5px; }
+.bw-seg { flex:1; min-width:0; border-radius:2px; background:color-mix(in srgb, var(--fg) 12%, transparent); }
+.bw-seg--completed { background:var(--accent); }
 .bw-seg--in_progress { background:var(--accent); animation:bw-pulse 1.6s var(--fx-ease) infinite; }
 .bw-tile--honest .bw-seg--completed { background:var(--green); }
 .bw-tile--inflated .bw-seg--completed { background:var(--red); }
@@ -59,15 +68,15 @@
 /* the reveal */
 .bw-rev { display:flex; flex-direction:column; gap:6px; padding-top:8px; border-top:1px solid var(--border); animation:bw-in var(--fx-base) var(--fx-ease) both; }
 .bw-acc { display:grid; grid-template-columns:56px 1fr 44px; align-items:center; gap:8px; }
-.bw-k { font-size:11px; color:var(--fg-55); }
+.bw-k { font-size:11px; color:var(--fg-70); }
 .bw-v { font-size:12.5px; font-weight:500; font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right; }
-.bw-track { height:8px; border-radius:4px; background:color-mix(in srgb, var(--fg) 8%, transparent); overflow:hidden; }
+.bw-track { height:9px; border-radius:4px; background:color-mix(in srgb, var(--fg) 10%, transparent); overflow:hidden; }
 .bw-fill { display:block; height:100%; border-radius:4px; background:var(--fg-40); transition:width var(--fx-slow) var(--fx-ease); }
-.bw-fill--true { background:var(--fg-55); }
+.bw-fill--true { background:var(--fg-70); }
 .bw-tile--honest .bw-fill--rep { background:var(--green); }
 .bw-tile--inflated .bw-fill--rep { background:var(--red); }
 .bw-foot { display:flex; align-items:baseline; gap:8px; min-width:0; }
-.bw-gap { flex:none; font-size:12.5px; font-weight:600; font-variant-numeric:tabular-nums; }
+.bw-gap { flex:none; font-size:13.5px; font-weight:700; font-variant-numeric:tabular-nums; }
 .bw-tile--honest .bw-gap { color:var(--green); }
 .bw-tile--inflated .bw-gap { color:var(--red); }
 .bw-ovl-t { font-size:11.5px; line-height:1.35; color:var(--fg-70); min-width:0; }

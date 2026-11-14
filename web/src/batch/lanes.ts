@@ -12,6 +12,7 @@ import { askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { duration, pct, pts, usd } from "./format";
 import { ACT, childKey, type BatchVm } from "./model";
+import { codeKind, highlightLines } from "./highlight";
 import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parseCommand, type NbCell } from "./notebook";
 
 // ── pure helpers (exported for the tests) ────────────────────────────────────
@@ -292,7 +293,9 @@ const SHORT_CELL = 9;
 
 /** A cell's code cut to the lines that matter: the step's lines (highlighted) and the line that splits. */
 function snippet(c: Pick<NbCell, "key" | "title" | "lang" | "code">, n: number | null, mark: RegExp | null, at: RegExp | null): string {
-  const lines = c.code.replace(/\s+$/, "").split("\n");
+  const code = c.code.replace(/\s+$/, "");
+  const lines = code.split("\n");
+  const colored = highlightLines(code, codeKind(c.lang, c.title, code));
   const splits = new Set(matchLines(lines, at));
   const wins = lineWindows(lines.length, [...matchLines(lines, mark), ...splits]);
   const more = (k: number, where: string): string => `<span class="nb-more">… ${k} line${k === 1 ? "" : "s"}${where}</span>`;
@@ -302,7 +305,7 @@ function snippet(c: Pick<NbCell, "key" | "title" | "lang" | "code">, n: number |
     if (from > prev) parts.push(more(from - prev, w === 0 ? " above" : ""));
     for (let i = from; i < to; i++) {
       const cls = mark?.test(lines[i]) ? " nb-hl" : splits.has(i) ? " ln-at" : "";
-      parts.push(`<span class="nb-ln${cls}">${esc(lines[i])}</span>`);
+      parts.push(`<span class="nb-ln${cls}">${colored[i] ?? esc(lines[i])}</span>`);
     }
     prev = to;
   });

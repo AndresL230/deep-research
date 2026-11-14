@@ -1,25 +1,40 @@
 /* The notebook (notebook.ts): cells with an execution count in the gutter, code that types itself out, output and
    charts under it. Full size on a run's page; `nb--compact` on tiles and in the side by side view. */
 
+/* The code box: its own darker (light theme: cooler) surface with an indigo tint, so code stands off the page. */
+[data-cnpy-theme="dark"] { --nb-bg:color-mix(in srgb, var(--accent) 7%, #100f0d); --nb-screen:#0e0d0b; --nb-ink:#f1eee8; }
+[data-cnpy-theme="light"] { --nb-bg:color-mix(in srgb, var(--accent) 5%, #ffffff); --nb-screen:#eef0f6; --nb-ink:#16161a; }
+
 .nb { display:flex; flex-direction:column; gap:10px; min-width:0; font-size:12.5px; }
 .nb-cell { display:flex; gap:8px; min-width:0; }
-.nb-gut { flex:none; width:30px; padding-top:7px; text-align:right; font-family:var(--code); font-size:11px; color:var(--fg-40); user-select:none; }
-.nb-cell.is-running .nb-gut { color:var(--accent); }
+.nb-gut { flex:none; width:30px; padding-top:7px; text-align:right; font-family:var(--code); font-size:11px; font-weight:600; color:var(--accent); user-select:none; }
+.nb-cell.is-typing .nb-gut { color:var(--fg-40); }
+.nb-cell.is-running .nb-gut { color:var(--amber); }
 .nb-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
 .nb-head { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-.nb-file { font-family:var(--code); font-size:11px; color:var(--fg-55); }
-.nb-file::before { content:"%%writefile "; color:var(--fg-40); }
+.nb-file { font-family:var(--code); font-size:11px; font-weight:600; color:var(--blue); }
+.nb-file::before { content:"%%writefile "; font-weight:400; color:var(--purple); }
 .nb-tag { padding:1px 6px; border-radius:5px; font-size:10.5px; font-weight:600; letter-spacing:.01em; }
-.nb-tag--forced { color:var(--accent); background:var(--accent-soft); }
+.nb-tag--forced { color:var(--purple); background:color-mix(in srgb, var(--purple) 16%, transparent); }
 
 .nb-code, .nb-out { margin:0; font-family:var(--code); font-size:12px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; tab-size:4; }
-.nb-code { padding:6px 9px; border:1px solid var(--border); border-radius:7px; background:var(--surface); color:var(--fg); }
-.nb-cell.is-running .nb-code { border-color:color-mix(in srgb, var(--accent) 45%, var(--border)); }
-.nb-cell--forced .nb-code { border-color:color-mix(in srgb, var(--accent) 55%, var(--border)); background:var(--accent-soft); }
+.nb-code { padding:6px 9px; border:1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-left:2px solid color-mix(in srgb, var(--accent) 70%, transparent); border-radius:7px; background:var(--nb-bg); color:var(--nb-ink); }
+.nb-cell.is-typing .nb-code { border-left-color:var(--accent); }
+.nb-cell.is-running .nb-code { border-color:color-mix(in srgb, var(--amber) 45%, var(--border)); border-left-color:var(--amber); }
+.nb-cell--forced .nb-code { border-color:color-mix(in srgb, var(--purple) 55%, var(--border)); border-left-color:var(--purple); }
 .nb-then { color:var(--fg-70); }
+
+/* Syntax (highlight.ts). */
+.tk-k { color:var(--purple); }
+.tk-s { color:var(--green); }
+.tk-n { color:var(--amber); }
+.tk-f { color:var(--blue); }
+.tk-c { color:var(--fg-40); font-style:italic; }
+.tk-o { color:var(--fg-55); }
 .nb-ln { display:inline; }
-.nb-hl { background:color-mix(in srgb, var(--amber) 28%, transparent); border-radius:3px; box-shadow:0 0 0 2px color-mix(in srgb, var(--amber) 28%, transparent); }
-.nb-out { padding:2px 9px; color:var(--fg-70); max-height:340px; overflow:auto; }
+.nb-hl { background:color-mix(in srgb, var(--amber) 30%, transparent); border-radius:3px; box-shadow:0 0 0 2px color-mix(in srgb, var(--amber) 30%, transparent); }
+.nb-hl, .nb-hl [class^="tk-"] { color:var(--nb-ink); font-weight:600; }
+.nb-out { margin-left:1px; padding:2px 9px; border-left:2px solid var(--border-strong); color:var(--fg-70); max-height:340px; overflow:auto; }
 .nb-more { color:var(--fg-40); font-style:italic; }
 .nb-caret { display:inline-block; width:6px; height:1.05em; margin-left:1px; vertical-align:-2px; background:var(--accent); animation:nb-blink 1s steps(2, start) infinite; }
 @keyframes nb-blink { to { visibility:hidden; } }
@@ -40,6 +55,7 @@
 .nb--compact .nb-code, .nb--compact .nb-out { font-size:10.5px; line-height:1.45; }
 .nb--compact .nb-code { padding:4px 6px; border-radius:6px; }
 .nb--compact .nb-out { padding:0 6px; max-height:none; overflow:hidden; }
+.nb--compact .nb-gut { font-weight:500; }
 .nb--compact .nb-cell--note { padding-left:30px; }
 .nb--compact .nb-note { font-size:10.5px; }
 .nb--compact .nb-img { max-height:110px; max-width:100%; }

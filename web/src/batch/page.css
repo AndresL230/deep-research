@@ -1,6 +1,11 @@
 /* The page frame around the batch views (main.ts): header, the replay bar under it, the scrolling body. The views
    themselves style their own content (home.css, wall.css, lanes.css, run.css, replay.css). */
 
+/* The header and the replay bar sit on the same column as the content under them (its width varies by screen). */
+.app-root { --pg-w:1240px; --pg-pad:24px; }
+.app-root[data-view="run"], .app-root[data-view="child"] { --pg-w:960px; }
+.app-root[data-view="home"] { --pg-w:808px; }
+.pg-hdr, .pg-sub { padding-inline:max(var(--pg-pad), calc((100% - var(--pg-w)) / 2 + var(--pg-pad))); }
 .pg-hdr { gap:12px; }
 .pg-hdr-l { min-width:0; flex:1; overflow:hidden; }
 .pg-hdr-r { display:flex; align-items:center; gap:10px; flex:none; }
@@ -12,22 +17,23 @@ button.pg-crumb:hover { color:var(--fg); background:var(--hover); }
 .pg-crumb.is-cur { color:var(--fg); }
 button.pg-crumb.is-cur:hover { background:none; cursor:default; }
 
-.pg-sub { flex:none; border-bottom:1px solid var(--border); padding:6px 24px; background:var(--bg); }
+.pg-sub { flex:none; border-bottom:1px solid var(--border); padding-block:6px; background:var(--bg); }
 .pg-sub[hidden] { display:none; }
 
-.pg-scroll { flex:1; min-height:0; overflow-y:auto; overflow-anchor:none; display:flex; flex-direction:column; }
+/* A gutter on both edges keeps the centred column under the header whether or not a scrollbar shows. */
+.pg-scroll { flex:1; min-height:0; overflow-y:auto; overflow-anchor:none; scrollbar-gutter:stable both-edges; display:flex; flex-direction:column; }
 .pg-batch { width:100%; max-width:1240px; margin:0 auto; padding:20px 24px 64px; display:flex; flex-direction:column; gap:28px; }
 .pg-sec { min-width:0; scroll-margin-top:16px; animation:ask-fade-in var(--fx-base) var(--fx-ease) both; }
 
 /* A run: the summary strip, then the conversation column (ask-conversation.ts). */
-.pg-runsum { width:100%; max-width:960px; margin:0 auto; padding:16px 28px 0; box-sizing:border-box; }
-.pg-scroll[data-view="run"] .ask-col, .pg-scroll[data-view="child"] .ask-col { max-width:960px; }
+.pg-runsum { width:100%; max-width:960px; margin:0 auto; padding:16px 24px 0; box-sizing:border-box; }
+.pg-scroll[data-view="run"] .ask-col, .pg-scroll[data-view="child"] .ask-col { max-width:960px; padding-inline:24px; }
 
 .pg-tabs { display:inline-flex; gap:2px; margin-top:12px; padding:2px; border:1px solid var(--border); border-radius:8px; }
 .pg-tab { padding:3px 10px; border-radius:6px; font-size:12px; font-weight:500; color:var(--fg-55); }
 .pg-tab:hover { color:var(--fg); }
 .pg-tab[aria-pressed="true"] { background:var(--hover); color:var(--fg); }
-.pg-nb { width:100%; max-width:960px; margin:0 auto; padding:18px 28px 64px; box-sizing:border-box; }
+.pg-nb { width:100%; max-width:960px; margin:0 auto; padding:18px 24px 64px; box-sizing:border-box; }
 @media (max-width: 640px) { .pg-nb { padding:14px 12px 48px; } }
 
 .pg-note { max-width:720px; margin:24px auto; padding:0 28px; color:var(--fg-55); font-size:13px; }
@@ -36,9 +42,8 @@ button.pg-crumb.is-cur:hover { background:none; cursor:default; }
 .pg-msg p { margin:0 0 14px; color:var(--fg-55); font-size:13.5px; }
 
 @media (max-width: 640px) {
-  .pg-hdr { padding:0 14px; }
+  .app-root { --pg-pad:14px; }
   .pg-hdr .ask-h1 { display:none; }
-  .pg-sub { padding:6px 14px; }
   .pg-batch { padding:16px 14px 48px; gap:22px; }
   .pg-runsum { padding:12px 16px 0; }
 }

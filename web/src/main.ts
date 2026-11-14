@@ -242,6 +242,7 @@ function render(): void {
   else if (r.name === "batch") body = batchBody(vm);
   else body = runBody(vm, routeKey(r)!);
   scrollEl.dataset.view = r.name;
+  root.dataset.view = r.name;
   morphInner(scrollEl, body);
   afterPaint();
 }

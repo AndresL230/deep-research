@@ -152,3 +152,11 @@ describe("real run shapes", () => {
     expect(activityOf([])).toBeNull();
   });
 });
+
+describe("setup before a heredoc", () => {
+  it("drops mkdir and cd, and reads an appending heredoc", () => {
+    const p = parseCommand("mkdir -p /w/live && cd /w && cat > run.py <<'EOF'\nprint(1)\nEOF\npython3 run.py && wc -l predictions.csv");
+    expect(p).toEqual({ lang: "file", title: "run.py", code: "print(1)", then: "python3 run.py && wc -l predictions.csv" });
+    expect(parseCommand("cat >> run.py <<'EOF'\nprint(2)\nEOF").title).toBe("run.py");
+  });
+});
