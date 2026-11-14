@@ -18,7 +18,7 @@ Each of these lets the model see test information during training, or makes the 
 | split | Dates shuffled, or related rows split apart when there is no id column | Splits by date or by group | sorting by date before the split |
 | evaluate | Tuning on the test set, or accuracy on imbalanced data | Separate validation set, balanced metric | many `.score(` calls on the same test set |
 
-`config.trap_info` in `/case/case.json` says which flaw this batch planted, which label is its honest step (`label`) and what the fork experiment forces (`intervention`). A grouped split is the split itself, so `group_split` counts when it is in the action that splits, not only before it. Dropping `followup_score` counts there too. Importing a splitter without using it is not the step.
+Nothing in the case file says which of these flaws, if any, this batch has: that is what you find out. A grouped split is the split itself, so `group_split` counts when it is in the action that splits, not only before it. Dropping `followup_score` counts there too. Importing a splitter without using it is not the step.
 
 ## How to compare runs
 

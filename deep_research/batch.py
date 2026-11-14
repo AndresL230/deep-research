@@ -4,6 +4,7 @@ runs the fork experiment, drives the investigator, and tracks cost.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import contextvars
 import json
@@ -24,14 +25,14 @@ from . import domains, hub
 from . import sandboxes as vms
 from .agents.analyst import build_analyst
 from .agents.investigator import RUBRIC, build_investigator
-from .analysis import find_split
+from .analysis import find_split, fork_point, label_table
 from .case_file import CaseFile
 from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
 from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, prefix_events, read_events
 from .evidence import describe as describe_evidence
-from .evidence import verdict_evidence
+from .evidence import fix_evidence, fix_outcome, method_outcome, verdict_evidence
 from .domains import actions_from_events, build_task, intervention_for, score_run
 from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
 
@@ -48,6 +49,10 @@ MAX_PARALLEL_VMS = 12
 # `sim.domain.TRACE_WORKERS` worker processes, so at most MAX_PARALLEL_TRACES x TRACE_WORKERS of them run together.
 # More traces wait for a slot.
 MAX_PARALLEL_TRACES = 3
+# An experiment tests one of at least this many competing hypotheses, recorded before it.
+MIN_HYPOTHESES = 2
+# A proposed fix is one small, bounded change.
+MAX_FIX_CHARS = 4000
 _TRACE_SLOTS = threading.BoundedSemaphore(MAX_PARALLEL_TRACES)
 # One trace of a run at a time: a trace writes its recordings under the run's `trace/` folder.
 _TRACE_RUN_LOCKS: dict[Path, threading.Lock] = {}
@@ -529,20 +534,31 @@ class Batch:
         self.case.update_run(run_id, **score.to_dict(), n_actions=len(actions), labels=[a.labels for a in actions])
 
     # ---- phase 2: find the split ----
-    def analyze(self) -> None:
-        self.case.set_phase("analyzing")
+    def _labelled_runs(self) -> tuple[dict[str, list], dict[str, str]]:
+        """Every run's labelled actions and its status."""
         statuses = {r: v.get("status") for r, v in self.case.data["runs"].items()}
         runs = {}
         for r in statuses:
             p = self.runs_dir / r / "events.jsonl"
             if p.exists():
                 runs[r] = actions_from_events(read_events(p), self.task)
+        return runs, statuses
+
+    def analyze(self) -> None:
+        self.case.set_phase("analyzing")
+        runs, statuses = self._labelled_runs()
         finding = find_split(runs, statuses, prefer=self.domain.prefer_label(self.cfg), steps=self.domain.steps())
         if finding is None:
             self.case.set_split(None)
             self.case.set_phase("no_split")
             return
         split = finding.to_dict()
+        # Every label's numbers, so a competing hypothesis rests on the same deterministic counts, and the labels tied
+        # with the finding: a tie is broken by the domain's preference, which is not evidence.
+        table = label_table(runs, statuses, self.domain.steps())
+        top = next((row["margin"] for row in table if row["label"] == finding.label), None)
+        split["by_label"] = table
+        split["tied_with"] = [row["label"] for row in table if row["margin"] == top and row["label"] != finding.label]
         iv = intervention_for(finding.label, self.cfg)
         split["intervention"] = None if iv is None else iv["description"]
         self.case.set_split(split)
@@ -579,17 +595,80 @@ class Batch:
             return f"no intervention is defined for '{split['label']}' yet"
         return None
 
-    async def run_forks(self, n_per_arm: int) -> str:
-        """The method experiment: from the moment before the suspect step, does doing that step change the result?"""
-        why_not = self.fork_blocker()
+    def hypothesis_blocker(self, hypothesis_id: str | None, kind: str) -> str | None:
+        """Why the hypothesis `hypothesis_id` cannot be tested by a `kind` ("method" or "code") experiment, or None."""
+        if not hypothesis_id:
+            return "name the hypothesis this experiment tests (`hypothesis_id`); record it first with record_hypothesis"
+        h = self.case.hypothesis(hypothesis_id)
+        if h is None:
+            return f"unknown hypothesis {hypothesis_id}"
+        if h.get("kind") != kind:
+            return (f"{hypothesis_id} is a {h.get('kind')} hypothesis; test it with "
+                    f"{'request_forks' if h.get('kind') == 'method' else 'propose_fix and request_fix_test'}")
+        if h.get("status") not in (None, "untested"):
+            return f"{hypothesis_id} was already tested ({h.get('status')}); record a new hypothesis to test again"
+        if len(self.case.data["hypotheses"]) < MIN_HYPOTHESES:
+            return (f"record at least {MIN_HYPOTHESES} competing hypotheses before an experiment, so the one you test "
+                    "is chosen over an alternative")
+        return None
+
+    def method_plan(self, hypothesis_id: str) -> tuple[str | None, dict | None]:
+        """(error, plan) for testing a method hypothesis: its label's intervention and its own fork point."""
+        why_not = self.hypothesis_blocker(hypothesis_id, "method")
         if why_not:
-            return f"error: {why_not}"
-        split = self.case.data["split"]
-        iv = intervention_for(split["label"], self.cfg)
-        return await self._experiment(
-            self.arm_plan(), n_per_arm, kind="method", src=split["fork_run_id"], fork_at=split["fork_at"],
-            record={"label": split["label"], "intervention": iv["description"]}, headline=f"({split['label']})",
+            return why_not, None
+        label = self.case.hypothesis(hypothesis_id)["step_label"]
+        iv = intervention_for(label, self.cfg)
+        if iv is None:
+            testable = [lb for lb in self.domain.labels() if intervention_for(lb, self.cfg) is not None]
+            return (f"no validated intervention exists for '{label}'. Steps that can be forced: {testable}. Test this "
+                    "hypothesis another way (a code hypothesis), or say in the verdict that it could not be tested."), None
+        split = self.case.data.get("split") or {}
+        if split.get("label") == label and split.get("fork_run_id") is not None:
+            where = (split["fork_run_id"], split["fork_at"])
+        else:
+            runs, statuses = self._labelled_runs()
+            where = fork_point(runs, statuses, label, self.domain.steps())
+        if where is None:
+            return f"every inflated run already did '{label}' before its report, so there is no run to force it in", None
+        return None, {"label": label, "iv": iv, "src": where[0], "fork_at": where[1],
+                      "arms": self.domain.arm_plan(label, self.cfg)}
+
+    async def run_forks(self, n_per_arm: int, hypothesis_id: str | None = None) -> str:
+        """The method experiment: from the moment before the suspect step, does doing that step change the result?
+
+        With `hypothesis_id` (the investigator's tool), the experiment tests that hypothesis: its label's intervention,
+        at its own fork point, with its prediction registered on the fork before any copy runs. Without it (the
+        `cli forks` command), the split finding's label."""
+        if hypothesis_id is None:
+            why_not = self.fork_blocker()
+            if why_not:
+                return f"error: {why_not}"
+            split = self.case.data["split"]
+            iv = intervention_for(split["label"], self.cfg)
+            return await self._experiment(
+                self.arm_plan(), n_per_arm, kind="method", src=split["fork_run_id"], fork_at=split["fork_at"],
+                record={"label": split["label"], "intervention": iv["description"]}, headline=f"({split['label']})",
+            )
+        err, plan = self.method_plan(hypothesis_id)
+        if err:
+            return f"error: {err}"
+        self.case.set_hypothesis_status(hypothesis_id, "testing")
+        out = await self._experiment(
+            plan["arms"], n_per_arm, kind="method", src=plan["src"], fork_at=plan["fork_at"],
+            record={"label": plan["label"], "intervention": plan["iv"]["description"],
+                    **self._preregistration(hypothesis_id)},
+            headline=f"({plan['label']}, testing {hypothesis_id})",
         )
+        if out.startswith("error:"):
+            self.case.set_hypothesis_status(hypothesis_id, "untested")
+        return out
+
+    def _preregistration(self, hypothesis_id: str) -> dict:
+        """The hypothesis's prediction, copied onto the experiment before it runs: what was expected, fixed in time."""
+        h = self.case.hypothesis(hypothesis_id) or {}
+        return {"hypothesis_id": hypothesis_id, "prediction": h.get("prediction"), "falsified_if": h.get("falsified_if"),
+                "preregistered_at": time.time()}
 
     # ---- the diagnosis: traceback and fix ----
     async def trace_failures(self, run_id: str, max_episodes: int = 3) -> dict:
@@ -618,7 +697,7 @@ class Batch:
             return self.domain.trace_run(self.task, run_dir, max_episodes)
 
     def propose_fix(self, run_id: str, old_string: str, new_string: str, description: str, why: str,
-                    line: int | None = None) -> str:
+                    line: int | None = None, hypothesis_id: str | None = None) -> str:
         """Record a one-place patch to a run's code, checked against that run's file before it is accepted.
 
         The same rule as the agents' `edit_file`: `old_string` must occur exactly once. The patch is applied to the
@@ -637,6 +716,17 @@ class Batch:
         n = source.count(old_string)
         if n != 1:
             return f"error: old_string occurs {n} times in {run_id}'s {self.domain.fix_output}; it must occur exactly once"
+        if len(new_string) > MAX_FIX_CHARS or len(old_string) > MAX_FIX_CHARS:
+            return f"error: a fix is one small change: old_string and new_string are at most {MAX_FIX_CHARS} characters each"
+        if self.domain.fix_output.endswith(".py"):
+            try:
+                ast.parse(source.replace(old_string, new_string, 1))
+            except SyntaxError as e:
+                return f"error: the patched file would not parse (line {e.lineno}: {e.msg}); fix the new_string"
+        if hypothesis_id is not None:
+            why_not = self.hypothesis_blocker(hypothesis_id, "code")
+            if why_not:
+                return f"error: {why_not}"
         if line is None:
             line = source[: source.index(old_string)].count("\n") + 1
         self.case.set_fix(
@@ -650,6 +740,8 @@ class Batch:
                 "why": (why or "").strip()[:1000],
                 "status": "proposed",
                 "proposed_at": time.time(),
+                # The code hypothesis this patch tests and its prediction, registered before it is measured.
+                **(self._preregistration(hypothesis_id) if hypothesis_id else {}),
             }
         )
         return f"fix proposed for {run_id} at line {line}: call request_fix_test to test it"
@@ -702,7 +794,15 @@ class Batch:
             "exceptions": list(after.get("exceptions") or []),
             "hidden_results": after.get("hidden_results") or [],
         }
-        self.case.update_fix(status="tested", measured=measured, patched_file=f"fix/{name}")
+        # The deterministic read of the two measurements: a paired exact sign test on the cases that changed.
+        measured["evidence"] = fix_evidence(gained, lost, measured["before"]["true_accuracy"],
+                                            measured["after"]["true_accuracy"])
+        if measured["exceptions"] and measured["evidence"]["level"] != "worse":
+            measured["evidence"]["note"] = "the patched code raised errors"
+        outcome = fix_outcome(measured["evidence"])
+        self.case.update_fix(status="tested", measured=measured, patched_file=f"fix/{name}", outcome=outcome)
+        if fix.get("hypothesis_id"):
+            self.case.set_hypothesis_status(fix["hypothesis_id"], outcome, tested_by="fix")
 
         def rate(m: dict) -> str:
             of = "" if m["successes"] is None else f" ({m['successes']} of {m['n']})"
@@ -716,6 +816,13 @@ class Batch:
             lines.append(f"{gained} setups that failed now succeed and {lost} that succeeded now fail.")
         if measured["exceptions"]:
             lines.append("The patched code raised: " + " | ".join(measured["exceptions"]))
+        ev = measured["evidence"]
+        p = "n/a" if ev["p_value"] is None else f"{ev['p_value']:.3f}"
+        lines.append(f"Evidence, computed from the paired cases: {ev['level']} (one-sided exact sign test p = {p}, below "
+                     f"{ev['alpha']} needed). This measures the controller's performance on held-out setups the trace "
+                     "never ran, not the accuracy of any report.")
+        if fix.get("prediction"):
+            lines.append(f"Pre-registered prediction for {fix['hypothesis_id']}: {fix['prediction']} Outcome: {outcome}.")
         return " ".join(lines)
 
     def fix_blocker(self) -> str | None:
@@ -898,7 +1005,19 @@ class Batch:
             await self._release(f"{fork_id}-base", base_scope)
 
         arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in plan}
-        self.case.update_fork(fork_id, status="done", arms=arms)
+        children = self.case.data["forks"][fork_id].get("children") or {}
+        # How every copy was built: a real VM fork of the base, or a fresh VM brought to the same point by replaying the
+        # source run's commands. A copy that failed before it had a VM has neither.
+        built = {"fork": 0, "replay": 0, "none": 0}
+        for c in children.values():
+            built[c.get("how") if c.get("how") in ("fork", "replay") else "none"] += 1
+        extra: dict[str, Any] = {"built": built, "measures": "controller_performance" if kind == "fix" else "reporting_accuracy"}
+        if kind != "fix" and "control" in arms and "forced" in arms:
+            ev = verdict_evidence({a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]} for a in ("control", "forced")})
+            extra.update(evidence=ev, outcome=method_outcome(ev))
+        self.case.update_fork(fork_id, status="done", arms=arms, **extra)
+        if record.get("hypothesis_id") and "outcome" in extra:
+            self.case.set_hypothesis_status(record["hypothesis_id"], extra["outcome"], tested_by=fork_id)
         self.case.set_phase("forked")
         lines = [
             f"Fork {fork_id} from run {src} before action {n_prefix} {headline}. "
@@ -913,10 +1032,13 @@ class Batch:
                              f"({what}; {a['failed']} failed).")
             else:
                 lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
-        if kind != "fix" and "control" in arms and "forced" in arms:
+        if "evidence" in extra:
             # How strong this is, so the verdict's words can follow it (evidence.py).
-            lines.append(describe_evidence(verdict_evidence(
-                {a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]} for a in ("control", "forced")})))
+            lines.append(describe_evidence(extra["evidence"]))
+            if record.get("prediction"):
+                lines.append(f"Pre-registered prediction for {record['hypothesis_id']}: {record['prediction']} "
+                             f"Outcome, computed from the counts: {extra['outcome']}.")
+        lines.append(f"Copies built by VM fork: {built['fork']}, by replay: {built['replay']}, not built: {built['none']}.")
         if kind == "fix":
             self.case.update_fix(status="tested", fork_id=fork_id,
                                  result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
@@ -993,11 +1115,33 @@ class Batch:
                 kind = "fix"
         except Exception:  # noqa: BLE001
             pass
-        n_arms = max(2, len(self.fix_arm_plan() if kind == "fix" else self.arm_plan()))
+        hid = None
+        try:
+            hid = interrupts[0].value["action_requests"][0]["args"].get("hypothesis_id")
+        except Exception:  # noqa: BLE001
+            pass
+        fix = self.case.data.get("fix") or {}
+        if kind == "fix":
+            hid = hid or fix.get("hypothesis_id")
+        h = self.case.hypothesis(hid) if hid else None
+        # What the person is approving: which hypothesis, what it predicts, and what would falsify it.
+        about = {"hypothesis_id": hid, "prediction": (h or {}).get("prediction"), "falsified_if": (h or {}).get("falsified_if"),
+                 "hypothesis": (h or {}).get("sentence")}
+        if kind == "fix" and self.domain.score_code is not None:
+            # Measured on this server: no VM and no model, but the patched code is run, so a person still approves it.
+            self.case.update_fork("pending", status="awaiting_approval", kind="fix", direct=True, n_per_arm=0,
+                                  vm_count=0, estimate_usd=0.0, patch=fix.get("description"), **about)
+            self.case.set_phase("awaiting_approval")
+            return
+        if kind == "method" and hid:
+            _, plan = self.method_plan(hid)
+            n_arms = max(2, len(plan["arms"])) if plan else 2
+        else:
+            n_arms = max(2, len(self.fix_arm_plan() if kind == "fix" else self.arm_plan()))
         est = self.estimate_forks_usd(n, n_arms)
         self.case.update_fork(
             "pending", status="awaiting_approval", kind=kind, n_per_arm=n, vm_count=n_arms * n + 1,
-            estimate_usd=None if est is None else round(est, 2),
+            estimate_usd=None if est is None else round(est, 2), **about,
         )
         self.case.set_phase("awaiting_approval")
 

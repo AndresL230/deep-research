@@ -8,7 +8,7 @@ from deep_research import batch as batch_mod
 from deep_research import cli
 from deep_research.batch import Batch
 from deep_research.config import BatchConfig
-from tests.scripted import call, say, script_investigator
+from tests.scripted import call, say, script_investigator, seed_hypotheses
 
 HAIKU = "anthropic:claude-haiku-5-5"
 
@@ -43,6 +43,7 @@ def _saved_batch(tmp_path, budget_usd=3.0) -> Batch:
     b.case.update_run("r01", status="honest", reported_accuracy=0.75, true_accuracy=0.76, gap=-0.01)
     b.case.update_run("r02", status="inflated", reported_accuracy=0.91, true_accuracy=0.78, gap=0.13)
     b.case.set_split({"label": "deduplicate", "fork_run_id": "r02", "fork_at": 2})
+    seed_hypotheses(b.case)
     b.case.set_phase("ready")
     for scope in ("run:r01", "run:r02"):
         b.tracker.record_tokens(scope, HAIKU, 1_000_000, 100_000)
@@ -58,7 +59,7 @@ def _script_investigator(monkeypatch, messages):
 def _fake_forks(monkeypatch):
     calls = []
 
-    async def run_forks(self, n_per_arm):
+    async def run_forks(self, n_per_arm, hypothesis_id=None):
         calls.append(n_per_arm)
         self.vms["f1-control-1"] = "vm-child"
         # What a finished experiment leaves in the case file: the verdict's arms are checked against it.
@@ -151,7 +152,7 @@ async def test_cli_investigate_auto_approves_the_fork_request_and_saves_the_verd
     _saved_batch(tmp_path)
     calls = _fake_forks(monkeypatch)
     _script_investigator(monkeypatch, [
-        _call("request_forks", {"n_per_arm": 2}, 1),
+        _call("request_forks", {"hypothesis_id": "h1", "n_per_arm": 2}, 1),
         _call("record_verdict", VERDICT, 2),
         AIMessage(content="The verdict is saved."),
     ])
@@ -172,7 +173,7 @@ async def test_cli_investigate_asks_a_person_without_auto_approve(offline, tmp_p
     _saved_batch(tmp_path)
     calls = _fake_forks(monkeypatch)
     _script_investigator(monkeypatch, [
-        _call("request_forks", {"n_per_arm": 3}, 1),
+        _call("request_forks", {"hypothesis_id": "h1", "n_per_arm": 3}, 1),
         AIMessage(content="The person declined the experiment, so no cause is claimed."),
     ])
     asked = []
@@ -190,7 +191,7 @@ async def test_cli_investigate_asks_a_person_without_auto_approve(offline, tmp_p
 async def test_cli_investigate_refuses_auto_approve_over_a_small_budget(offline, tmp_path, monkeypatch):
     _saved_batch(tmp_path, budget_usd=10.0)
     calls = _fake_forks(monkeypatch)
-    _script_investigator(monkeypatch, [_call("request_forks", {"n_per_arm": 8}, 1)])
+    _script_investigator(monkeypatch, [_call("request_forks", {"hypothesis_id": "h1", "n_per_arm": 8}, 1)])
     with pytest.raises(SystemExit) as e:
         await cli.investigate("t", auto_approve=True)
     assert "3" in str(e.value)
@@ -201,7 +202,7 @@ async def test_cli_investigate_refuses_auto_approve_over_a_small_budget(offline,
 async def test_cli_investigate_stops_approving_when_the_requests_do_not_end(offline, tmp_path, monkeypatch):
     _saved_batch(tmp_path)
     calls = _fake_forks(monkeypatch)
-    _script_investigator(monkeypatch, [_call("request_forks", {"n_per_arm": 2}, i) for i in range(1, 12)])
+    _script_investigator(monkeypatch, [_call("request_forks", {"hypothesis_id": "h1", "n_per_arm": 2}, i) for i in range(1, 12)])
     await cli.investigate("t", auto_approve=True)
     assert len(calls) == cli.MAX_AUTO_APPROVALS
     case = json.loads((tmp_path / "t" / "case" / "case.json").read_text())
@@ -214,8 +215,8 @@ async def test_two_fork_requests_in_one_turn_get_one_approval(offline, tmp_path,
 
     _saved_batch(tmp_path)
     calls = _fake_forks(monkeypatch)
-    twice = Message(content="", tool_calls=[{"name": "request_forks", "args": {"n_per_arm": 2}, "id": "a"},
-                                            {"name": "request_forks", "args": {"n_per_arm": 2}, "id": "b"}])
+    twice = Message(content="", tool_calls=[{"name": "request_forks", "args": {"hypothesis_id": "h1", "n_per_arm": 2}, "id": "a"},
+                                            {"name": "request_forks", "args": {"hypothesis_id": "h1", "n_per_arm": 2}, "id": "b"}])
     _script_investigator(monkeypatch, [twice, _call("record_verdict", VERDICT, 3), AIMessage("The verdict is saved.")])
     await cli.investigate("t", auto_approve=True)
     case = json.loads((tmp_path / "t" / "case" / "case.json").read_text())
@@ -228,7 +229,7 @@ async def test_cli_investigate_refuses_a_batch_with_nothing_to_fork(offline, tmp
     b.case.set_split(None)
     b.case.set_phase("no_split")
     calls = _fake_forks(monkeypatch)
-    _script_investigator(monkeypatch, [_call("request_forks", {"n_per_arm": 2}, 1)])
+    _script_investigator(monkeypatch, [_call("request_forks", {"hypothesis_id": "h1", "n_per_arm": 2}, 1)])
     with pytest.raises(SystemExit) as e:
         await cli.investigate("t", auto_approve=True)
     assert "no split finding" in str(e.value)
@@ -243,7 +244,7 @@ async def test_the_investigator_stops_when_the_batch_is_over_budget(offline, tmp
     # One investigator response of 100,000 prompt tokens costs $0.20 at the shipped Sonnet price: over the budget.
     _script_investigator(monkeypatch, [
         call("read_file", {"file_path": "/case/case.json"}, "c1", 100_000),
-        _call("request_forks", {"n_per_arm": 2}, 2),
+        _call("request_forks", {"hypothesis_id": "h1", "n_per_arm": 2}, 2),
     ])
     monkeypatch.setattr(cli, "_reopen", lambda batch_id: b)
     await cli.investigate("t", auto_approve=True)
@@ -271,11 +272,11 @@ async def test_the_vms_stop_when_the_investigation_crashes(offline, tmp_path, mo
     b = _saved_batch(tmp_path)
     b.vms["r01"] = "vm-run"
 
-    async def run_forks(self, n_per_arm):
+    async def run_forks(self, n_per_arm, hypothesis_id=None):
         raise RuntimeError("the tool blew up")
 
     monkeypatch.setattr(Batch, "run_forks", run_forks)
-    _script_investigator(monkeypatch, [_call("request_forks", {"n_per_arm": 2}, 1)])
+    _script_investigator(monkeypatch, [_call("request_forks", {"hypothesis_id": "h1", "n_per_arm": 2}, 1)])
     await b.investigate()
     with pytest.raises(RuntimeError, match="the tool blew up"):
         await b.decide(True)
