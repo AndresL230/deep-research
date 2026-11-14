@@ -50,6 +50,8 @@ class Action:
     tool: str
     args: dict
     labels: list[str] = field(default_factory=list)
+    # For `python3 x.py`: the text of x.py as it stood when it ran. Not saved with the action.
+    source: str = ""
 
     @property
     def text(self) -> str:
@@ -67,8 +69,12 @@ def label_text(text: str) -> list[str]:
     return [label for label, rx in _RULES if rx.search(text)]
 
 
-def actions_from_events(events: list[dict]) -> list[Action]:
-    """Pull the agent's tool calls out of a run's event log, in order."""
+def actions_from_events(events: list[dict], given_files: dict[str, str] | None = None) -> list[Action]:
+    """Pull the agent's tool calls out of a run's event log, in order.
+
+    `given_files` are scripts that were in the VM before the agent started (an uploaded
+    training script), by file name.
+    """
     actions: list[Action] = []
     for ev in events:
         if ev.get("type") != "tool_call":
@@ -76,21 +82,35 @@ def actions_from_events(events: list[dict]) -> list[Action]:
         a = Action(index=len(actions), tool=ev["name"], args=ev.get("args", {}))
         a.labels = label_text(a.text) if a.tool in VM_TOOLS else []
         actions.append(a)
-    return _resolve_script_runs(actions)
+    return _resolve_script_runs(actions, given_files or {})
 
 
-def _resolve_script_runs(actions: list[Action]) -> list[Action]:
-    """`python3 analysis.py` says nothing by itself. Give it the labels of the file it runs."""
-    written: dict[str, list[str]] = {}
+_RUN_SCRIPT = re.compile(r"python3?\s+(?:-\S+\s+)*(\S+\.py)")
+
+
+def _resolve_script_runs(actions: list[Action], given_files: dict[str, str]) -> list[Action]:
+    """`python3 analysis.py` says nothing by itself. Give it the labels and the text of the file it runs."""
+    files: dict[str, str] = dict(given_files)
+
+    def name(path: str) -> str:
+        return path.rsplit("/", 1)[-1]
+
     for a in actions:
         if a.tool == "write_file":
-            written[a.args.get("file_path", "").rsplit("/", 1)[-1]] = a.labels
+            files[name(a.args.get("file_path", ""))] = a.args.get("content", "")
             # Writing a script is not doing the work. Running it is.
             a.labels = []
+        elif a.tool == "edit_file" and name(a.args.get("file_path", "")) in files:
+            n = name(a.args.get("file_path", ""))
+            old, new = a.args.get("old_string", ""), a.args.get("new_string", "")
+            if old:
+                files[n] = files[n].replace(old, new) if a.args.get("replace_all") else files[n].replace(old, new, 1)
+            a.labels = []
         elif a.tool == "execute":
-            m = re.search(r"python3?\s+(\S+\.py)", a.args.get("command", ""))
-            if m and m.group(1).rsplit("/", 1)[-1] in written:
-                a.labels = sorted(set(a.labels) | set(written[m.group(1).rsplit("/", 1)[-1]]), key=LABELS.index)
+            m = _RUN_SCRIPT.search(a.args.get("command", ""))
+            if m and name(m.group(1)) in files:
+                a.source = files[name(m.group(1))]
+                a.labels = sorted(set(a.labels) | set(label_text(a.source)), key=LABELS.index)
     return actions
 
 
@@ -100,12 +120,20 @@ def _did_before_split(actions: list[Action], label: str) -> bool:
             return True
         if "split" in a.labels:
             # Same action can dedupe and then split, as in one script.
-            return label in a.labels and _order_in_text(a.text, label, "split")
+            return label in a.labels and _order_in_text(a.source or a.text, label, "split")
     return False
 
 
+_IMPORT_LINE = re.compile(r"^\s*(?:import|from)\s.*$", re.MULTILINE)
+
+
 def _order_in_text(text: str, first: str, second: str) -> bool:
-    """True if `first`'s pattern appears before `second`'s inside one action."""
+    """True if `first`'s pattern appears before `second`'s inside one action.
+
+    Import lines are blanked first: `from sklearn.model_selection import train_test_split`
+    at the top of a script is not the split.
+    """
+    text = _IMPORT_LINE.sub(lambda m: " " * len(m.group()), text)
     rx = dict(_RULES)
     m1, m2 = rx[first].search(text), rx[second].search(text)
     return bool(m1 and m2 and m1.start() < m2.start())

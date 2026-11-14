@@ -8,15 +8,19 @@ import { ACT, type HomeVm, type Loadable } from "./model";
 
 // ── home screen ──────────────────────────────────────────────────────────────
 
+/** What the batch runs on, drawn by dataset-input.ts: its rows for the panel and a one-line summary. */
+export interface HomeInputs { html: string; label: string }
+
 /** The home screen: the batches to open, then one panel to start a new one. Labels only, no prose. */
-export function homeView(vm: HomeVm): string {
+export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
   return `<div class="hm" data-morph-key="home">
     ${batchesSection(vm.batches)}
     <section class="hm-panel" data-morph-key="new" aria-labelledby="hm-new-h">
       <div class="hm-panel-h" data-morph-key="head">
         <h2 class="hm-h2" id="hm-new-h">New batch</h2>
-        <span class="hm-fixed">Pima diabetes · planted duplicate rows</span>
+        <span class="hm-fixed">${esc(inputs?.label ?? "Pima diabetes · planted duplicate rows")}</span>
       </div>
+      ${inputs?.html ?? ""}
       ${vm.draft ? mainRow(vm.draft) : mainSkeleton(defaultsFailed(vm))}
       ${advancedBlock(vm)}
       ${footer(vm)}

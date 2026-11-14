@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 
 from daytona import (
@@ -30,11 +31,11 @@ LAB_PAGE_SRC = ROOT_DIR / "lab_page" / "server.py"
 LAB_PAGE_VM = "/home/daytona/lab_page.py"
 PY_PACKAGES = ["pandas", "scikit-learn", "matplotlib"]
 
-# Safety net for leaked VMs. A VM stops after this many idle minutes, and a
-# stopped VM is deleted this many minutes later. A batch starts 12+ VMs plus
-# forks, so one that is never cleaned up would otherwise keep billing for disk.
-AUTO_STOP_MINUTES = 60
-AUTO_DELETE_MINUTES = 60
+# A batch deletes each VM as soon as its run is scored (`delete_vm`), so nothing keeps billing.
+# These are the safety net for a VM that leaks anyway (a crash, a killed server): it stops after
+# this many idle minutes, and a stopped VM is deleted right away (0), which also frees its disk.
+AUTO_STOP_MINUTES = 30
+AUTO_DELETE_MINUTES = 0
 
 _client: Daytona | None = None
 
@@ -72,6 +73,8 @@ def load_task(sb: Sandbox, task: TaskFiles) -> None:
     sb.process.exec(f"mkdir -p {VM_LIVE_DIR}")
     sb.fs.upload_file(task.data.read_bytes(), f"{VM_WORKSPACE}/data.csv")
     sb.fs.upload_file(task.holdout_features.read_bytes(), f"{VM_WORKSPACE}/holdout_features.csv")
+    if task.script.is_file():
+        sb.fs.upload_file(task.script.read_bytes(), f"{VM_WORKSPACE}/{task.script.name}")
 
 
 def start_lab_page(sb: Sandbox) -> str:
@@ -181,6 +184,20 @@ def stop_all_vms() -> tuple[int, int]:
     with ThreadPoolExecutor(16) as ex:
         results = list(ex.map(stop, vms))
     return sum(results), len(results) - sum(results)
+
+
+def delete_vm(sb: Sandbox) -> None:
+    """Delete the VM: it stops billing for compute and for disk. Falls back to stopping it."""
+    for attempt in range(4):
+        try:
+            sb.delete(timeout=120)
+            return
+        except Exception as e:  # noqa: BLE001
+            # "state change in progress": the VM is starting or stopping. Wait and try again.
+            if "in progress" not in str(e) or attempt == 3:
+                break
+            time.sleep(5)
+    stop_vm(sb)  # with AUTO_DELETE_MINUTES = 0 a stopped VM is deleted by Daytona
 
 
 def stop_vm(sb: Sandbox) -> None:

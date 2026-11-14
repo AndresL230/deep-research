@@ -12,6 +12,10 @@ from pydantic import BaseModel, Field
 # The repo root: data/, skills/, lab_page/, prices.json, batches/, fixtures/ and web/ live here.
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
+# CSV files people upload (git-ignored). See datasets.py.
+DATASETS_DIR = ROOT_DIR / "datasets"
+# Training scripts people upload (git-ignored). See user_scripts.py.
+USER_SCRIPTS_DIR = ROOT_DIR / "user_scripts"
 BATCHES_DIR = ROOT_DIR / "batches"
 FIXTURES_DIR = ROOT_DIR / "fixtures"
 SKILLS_DIR = ROOT_DIR / "skills"
@@ -27,7 +31,12 @@ LAB_PAGE_PORT = 8080
 class BatchConfig(BaseModel):
     """Everything set on the config screen."""
 
-    dataset: Literal["pima"] = "pima"
+    # "pima" (built in) or the id of an uploaded CSV (datasets.py).
+    dataset: str = Field("pima", pattern=r"^(pima|ds-[0-9a-f]{8})$")
+    # The column to predict. Needed for an uploaded dataset; Pima defaults to `outcome`.
+    target: str | None = None
+    # An uploaded training script's id (user_scripts.py). The agents then start from it instead of from nothing.
+    script: str | None = Field(None, pattern=r"^sc-[0-9a-f]{8}$")
     trap: Literal["duplicates"] = "duplicates"
     # Share of the agent's rows that get copied once more.
     trap_strength: float = Field(0.5, ge=0.0, le=1.0)

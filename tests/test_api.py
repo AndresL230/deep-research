@@ -107,18 +107,18 @@ async def test_shutdown_closes_open_batches(monkeypatch):
     assert b.closed
 
 
-def test_batch_close_stops_every_vm(tmp_path, monkeypatch):
+def test_batch_close_deletes_every_vm(tmp_path, monkeypatch):
     import asyncio
 
     from deep_research import batch as batch_mod
     from deep_research.config import BatchConfig
 
-    stopped = []
-    monkeypatch.setattr(batch_mod.vms, "stop_vm", stopped.append)
+    deleted = []
+    monkeypatch.setattr(batch_mod.vms, "delete_vm", deleted.append)
     b = batch_mod.Batch(BatchConfig(n_runs=1), batch_id="t", root=tmp_path)
     b.vms.update({"r01": "vm-run", "f1-base": "vm-base", "f1-forced-1": "vm-child"})
     asyncio.run(b.close())
-    assert sorted(stopped) == ["vm-base", "vm-child", "vm-run"]
+    assert sorted(deleted) == ["vm-base", "vm-child", "vm-run"] and b.vms == {}
     assert json.loads((tmp_path / "t" / "case" / "case.json").read_text())["config"]["n_runs"] == 1
 
 
@@ -218,14 +218,15 @@ def test_download_charts_saves_images_only(tmp_path):
     assert sandboxes.download_charts(NS(fs=Broken()), tmp_path / "none") == []
 
 
-# ---- VMs stop when the batch is over ----
+# ---- whatever VMs are left go when the batch is over ----
 
 def _batch_with_vms(tmp_path, monkeypatch):
     from deep_research import batch as batch_mod
     from deep_research.config import BatchConfig
 
     stopped = []
-    monkeypatch.setattr(batch_mod.vms, "stop_vm", stopped.append)
+    # A batch deletes what it closes: a stopped VM would still hold its disk.
+    monkeypatch.setattr(batch_mod.vms, "delete_vm", stopped.append)
     b = batch_mod.Batch(BatchConfig(n_runs=2), batch_id="t", root=tmp_path)
     return b, stopped
 
@@ -317,3 +318,116 @@ def test_a_batch_stops_being_live_once_it_is_over(client, tmp_path, monkeypatch)
     with client.websocket_connect("/api/batches/b-done/ws") as ws:
         msg = ws.receive_json()
     assert msg["kind"] == "snapshot" and msg["live"] is False and msg["case"]["phase"] == "done"
+
+
+# ---- each VM is deleted as soon as its run is scored ----
+
+class FakeVm:
+    id = "vm-1"
+
+
+def _fake_vms(monkeypatch, batch_mod, deleted, load_task=lambda sb, task: None):
+    monkeypatch.setattr(batch_mod.vms, "create_vm", lambda label: FakeVm())
+    monkeypatch.setattr(batch_mod.vms, "load_task", load_task)
+    monkeypatch.setattr(batch_mod.vms, "start_lab_page", lambda sb: "https://lab.example/x")
+    monkeypatch.setattr(batch_mod.vms, "download_outputs", lambda sb, dest: None)
+    monkeypatch.setattr(batch_mod.vms, "download_charts", lambda sb, dest: ["01_counts.png"])
+    monkeypatch.setattr(batch_mod.vms, "delete_vm", deleted.append)
+    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model: object())
+    monkeypatch.setattr(batch_mod, "DaytonaSandbox", lambda sandbox: object())
+
+
+async def test_a_run_deletes_its_vm_as_soon_as_it_is_scored(tmp_path, monkeypatch):
+    from deep_research import batch as batch_mod
+    from deep_research.config import BatchConfig
+
+    deleted = []
+    _fake_vms(monkeypatch, batch_mod, deleted)
+
+    async def drive(self, *args, **kwargs):
+        assert not deleted  # the VM is alive while the agent works
+        return []
+
+    monkeypatch.setattr(batch_mod.Batch, "_drive", drive)
+    b = batch_mod.Batch(BatchConfig(n_runs=1), batch_id="t", root=tmp_path)
+    await b.run_one("r01")
+    run = b.case.data["runs"]["r01"]
+    assert len(deleted) == 1 and b.vms == {}
+    # The lab page died with the VM; the charts were saved first.
+    assert run["lab_url"] is None and run["charts"] == ["runs/r01/live/01_counts.png"]
+    assert run["status"] == "failed" and "report.json" in run["reason"]  # the fake agent wrote nothing
+
+
+async def test_a_run_that_fails_still_deletes_its_vm(tmp_path, monkeypatch):
+    from deep_research import batch as batch_mod
+    from deep_research.config import BatchConfig
+
+    def broken(sb, task):
+        raise RuntimeError("upload failed")
+
+    deleted = []
+    _fake_vms(monkeypatch, batch_mod, deleted, load_task=broken)
+    b = batch_mod.Batch(BatchConfig(n_runs=1), batch_id="t", root=tmp_path)
+    await b.run_one("r01")
+    assert len(deleted) == 1 and b.vms == {}
+    assert b.case.data["runs"]["r01"]["status"] == "failed"
+
+
+def _csv(rows: int = 200) -> bytes:
+    lines = ["id,size,colour,label"] + [f"{i},{i % 17}.5,{'red' if i % 3 else 'blue'},{'yes' if i % 2 else 'no'}" for i in range(rows)]
+    return "\n".join(lines).encode()
+
+
+def test_upload_a_dataset_and_start_checks_the_target(client, tmp_path, monkeypatch):
+    from deep_research import config
+
+    monkeypatch.setattr(config, "DATASETS_DIR", tmp_path / "datasets")
+    started = []
+    monkeypatch.setattr(api, "Batch", lambda cfg: started.append(cfg) or pytest.fail("a batch was started"))
+    assert [d["id"] for d in client.get("/api/datasets").json()] == ["pima"]
+
+    res = client.post("/api/datasets?name=my%20data.csv", content=_csv(), headers={"content-type": "text/csv"})
+    assert res.status_code == 200
+    info = res.json()
+    assert info["name"] == "my data.csv" and info["rows"] == 200 and info["target"] == "label"
+    assert info["id"] in [d["id"] for d in client.get("/api/datasets").json()]
+
+    # Bad files and bad targets are refused with a message, and no batch is created.
+    assert client.post("/api/datasets", content=_csv(10)).status_code == 422
+    assert client.post("/api/datasets", content=b"").status_code == 422
+    cfg = client.get("/api/defaults").json()["config"]
+    bad = client.post("/api/batches", json={**cfg, "dataset": info["id"], "target": "id"})
+    assert bad.status_code == 422 and "cannot be the target" in bad.json()["detail"]
+    assert client.post("/api/batches", json={**cfg, "dataset": info["id"]}).status_code == 422
+    assert client.post("/api/batches", json={**cfg, "dataset": "../etc"}).status_code == 422
+    assert not started
+
+
+def test_upload_larger_than_the_limit_is_refused(client, tmp_path, monkeypatch):
+    from deep_research import config, datasets
+
+    monkeypatch.setattr(config, "DATASETS_DIR", tmp_path / "datasets")
+    monkeypatch.setattr(datasets, "MAX_UPLOAD_BYTES", 1000)
+    assert client.post("/api/datasets", content=_csv()).status_code == 413
+    assert not (tmp_path / "datasets").exists()
+
+
+def test_upload_a_script_and_start_checks_it(client, tmp_path, monkeypatch):
+    from deep_research import config
+
+    monkeypatch.setattr(config, "USER_SCRIPTS_DIR", tmp_path / "user_scripts")
+    monkeypatch.setattr(api, "Batch", lambda cfg: pytest.fail("a batch was started"))
+    res = client.post("/api/scripts?name=train_v2.py", content=b"import torch\nprint(1)\n")
+    assert res.status_code == 200
+    info = res.json()
+    assert info["name"] == "train_v2.py" and info["missing_packages"] == ["torch"]
+    # The script is saved, never run.
+    assert (tmp_path / "user_scripts" / info["id"] / "train.py").read_text() == "import torch\nprint(1)\n"
+
+    bad = client.post("/api/scripts", content=b"this is not python (")
+    assert bad.status_code == 422 and "not valid Python" in bad.json()["detail"]
+    assert client.post("/api/scripts", content=b"x" * (200 * 1024 + 1)).status_code == 413
+    cfg = client.get("/api/defaults").json()["config"]
+    missing = client.post("/api/batches", json={**cfg, "script": "sc-00000000"})
+    assert missing.status_code == 422 and "unknown script" in missing.json()["detail"]
+    assert client.post("/api/batches", json={**cfg, "script": "../../etc/passwd"}).status_code == 422

@@ -13,8 +13,11 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | GET | `/api/health` | `{"ok": true, "keys": {"anthropic": bool, "daytona": bool}}`: whether each key is set, never the value |
 | GET | `/api/defaults` | `{"config": BatchConfig, "prices_missing": bool}` |
 | POST | `/api/estimate` | Body: a `BatchConfig`. Cost estimate from earlier batches' average run cost (all nulls until one has finished) |
+| GET | `/api/datasets` | `[DatasetInfo]`: the built-in `pima` first, then uploaded files |
+| POST | `/api/datasets?name=<file name>` | The body is the CSV file itself (up to 20 MB). Saves it under `datasets/` and returns its `DatasetInfo`. `422 {"detail"}` says why a file cannot be used; `413` when it is too large |
+| POST | `/api/scripts?name=<file name>` | The body is a Python training script (up to 200 KB). The server parses it and never runs it. Saves it under `user_scripts/` and returns its `ScriptInfo`; `422 {"detail"}` when it is not valid Python |
 | GET | `/api/batches` | `[{"id", "kind": "live" or "replay"}]`: batches started on this server, saved batches in `batches/`, and replays in `fixtures/` |
-| POST | `/api/batches` | Body: a `BatchConfig`. Starts a batch, returns `{"id"}` |
+| POST | `/api/batches` | Body: a `BatchConfig`. Starts a batch, returns `{"id"}`. `422 {"detail"}` when the dataset, target or script cannot be used |
 | GET | `/api/batches/{id}/case` | The case file (below) |
 | GET | `/api/batches/{id}/runs/{run}/events` | One run's `events.jsonl` as a JSON array |
 | GET | `/api/batches/{id}/forks/{fork}/{child}/events` | One fork child's events, `child` like `control-1` or `forced-2` |
@@ -28,6 +31,35 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 Errors: unknown batch is `404 {"detail": ...}`; a live-only call on a replay is `409`; any other unknown `/api/*`
 path is `404 {"error": "not found"}`. Every other path serves `web/dist`, falling back to `index.html`.
 
+## Datasets
+
+A batch runs on `config.dataset`: `pima`, or the `id` of an uploaded CSV (`ds-` plus 8 hex digits). An uploaded
+dataset also needs `config.target`, the column to predict; Pima defaults to `outcome`.
+
+```ts
+DatasetInfo { id, name, builtin, rows, columns: [{ name, kind: "number" | "text", n_unique, missing, target_problem }], target }
+```
+
+`target` is Pima's target or, for an upload, a suggestion (the last usable column). `target_problem` is null when
+the column can be the target; otherwise it says why not. The task is classification scored by accuracy, so a
+target needs 2 to 20 different values with at least 5 rows each, and a file needs at least 100 rows. The
+duplicates trap, the hidden holdout and the scoring are the same for every dataset.
+
+## Training scripts
+
+`config.script` is optional: the `id` of an uploaded script (`sc-` plus 8 hex digits). Each analyst VM then gets
+it as `train.py`, and the task tells the agent to start from it (run it, change what it judges wrong) instead of
+writing a script from nothing. The model hint is left out, because the script decides the model. Scoring, the
+split finder and the fork experiment are unchanged: the split finder reads the script's text, and the agent's
+edits to it, to label a run of `python3 train.py`.
+
+```ts
+ScriptInfo { id, name, lines, imports: string[], missing_packages: string[] }
+```
+
+`missing_packages` are imports that are not installed in the VMs (they have pandas, scikit-learn and matplotlib).
+It is a warning, not a refusal.
+
 ## The case file
 
 One JSON file per batch (`case/case.json`), written only by `deep_research/case_file.py`. Sections:
@@ -36,7 +68,8 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
 - `phase`: `config`, `running`, `analyzing`, then `ready` or `no_split`, `investigating`, `awaiting_approval`,
   `forking`, `forked`, `done`. Also `stopped`, `blocked: <why>` (over budget) and `error: <why>`.
 - `runs`: by id (`r01`...). `status` goes `queued`, `starting`, `running`, then `honest`, `inflated` or `failed`.
-  While running: `vm_id`, `lab_url`, `todos`, `step`, `last_tool`. Once scored: `reported_accuracy`,
+  While running: `vm_id`, `lab_url`, `todos`, `step`, `last_tool`. The VM is deleted as soon as the run ends: `lab_url`
+  becomes null and `charts` lists the saved PNG files (paths for `/api/batches/{id}/files/`). Once scored: `reported_accuracy`,
   `true_accuracy`, `overlap_share`, `gap`, `reason`, `n_actions`, `labels` (step labels per action).
 - `step_labels`: the investigator's labels per run.
 - `split`: where honest and inflated runs part ways (`label`, `honest_rate`, `inflated_rate`, `fork_run_id`,
