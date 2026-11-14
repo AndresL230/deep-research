@@ -17,7 +17,42 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { attr, esc } from "../ui";
 import { fetchMotion, fetchScene, fetchSummaries, type MotionData, type MotionSummary, type SceneData, type SceneGeom } from "./data";
-import { motionName, resultFacts, resultText, resultTone, seconds, xy } from "./markup";
+import { SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, motionName, noWebglView, resultFacts, resultText, resultTone, seconds, xy } from "./markup";
+
+// ── WebGL, checked once ──────────────────────────────────────────────────────
+
+let webgl: boolean | null = null;
+
+function probeWebgl(): boolean {
+  try {
+    const c = document.createElement("canvas");
+    return !!(c.getContext("webgl2") ?? c.getContext("webgl"));
+  } catch { return false; }
+}
+
+/** Whether this browser can draw the 3D view. Asked once per page and remembered, so a browser without WebGL is not
+ *  asked again for every thumbnail and every frame (each failed try logs an error). */
+export function webglAvailable(probe: () => boolean = probeWebgl): boolean {
+  webgl ??= probe();
+  return webgl;
+}
+
+/** A renderer, or null (and WebGL marked missing for the page) when one cannot be made. */
+function makeRenderer(): THREE.WebGLRenderer | null {
+  if (!webglAvailable()) return null;
+  try {
+    const r = new THREE.WebGLRenderer({ antialias: true });
+    r.shadowMap.enabled = true;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    return r;
+  } catch {
+    webgl = false;
+    return null;
+  }
+}
+
+/** For the tests: forget the answer. */
+export function resetWebglCheck(): void { webgl = null; }
 
 // ── the world ────────────────────────────────────────────────────────────────
 
@@ -31,6 +66,14 @@ const TARGET = new THREE.Vector3(0.36, -0.06, 0.24);
 const CAMERA_AT = new THREE.Vector3(1.45, -1.02, 0.8);
 const THUMB_CAMERA_AT = new THREE.Vector3(1.5, -1.08, 0.86);
 const CREASE = Math.PI / 5;
+
+/** The success area (markup.ts SUCCESS_RADIUS_CM), in meters. */
+const SUCCESS_R = SUCCESS_RADIUS_CM / 100;
+/** The marks on the floor sit just above the place zone disc (its top is at 1 mm) so they never z-fight with it. */
+const MARK_Z = 0.0016;
+/** The success ring and the center mark: a crisp dark green on the light floor, a bright one on the dark. */
+const RING: Record<Theme, number> = { light: 0x0b6b35, dark: 0x5be38f };
+const END_TONE = { ok: 0x15803d, bad: 0xdc2626, none: 0x6b7480 };
 
 const themeOf = (el: Element): Theme => (el.closest<HTMLElement>("[data-cnpy-theme]")?.dataset.cnpyTheme === "dark" ? "dark" : "light");
 
@@ -156,9 +199,19 @@ class World {
   private readonly floor: THREE.Mesh<THREE.CircleGeometry, THREE.MeshStandardMaterial>;
   private readonly grid: THREE.GridHelper;
   private readonly startMark: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+  /** The place target: a dot and a crosshair at its exact center, and the ring of the success area around it. */
+  private readonly target = new THREE.Group();
+  private readonly targetMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  /** Where the can's center ended (the player, at the end of an episode): a dot and a line from the target's center. */
+  private readonly end = new THREE.Group();
+  private readonly endMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, depthTest: false });
+  private readonly endDot: THREE.Mesh;
+  private readonly endLine: THREE.Mesh;
+  private readonly canId: number | null;
   private theme: Theme | null = null;
 
-  constructor(data: SceneData, shadows: boolean) {
+  /** `thumb`: drawn small, so the target's lines are thicker and it has no crosshair. */
+  constructor(data: SceneData, shadows: boolean, thumb = false) {
     const s = this.scene;
     s.background = new THREE.Color();
     s.fog = new THREE.Fog(0, 2.2, 4.6);
@@ -197,8 +250,62 @@ class World {
     this.startMark.visible = false;
     s.add(this.startMark);
 
+    // The success ring: a crisp outline, thicker on a thumbnail so it still reads at a few pixels.
+    const w = thumb ? 0.003 : 0.0017;
+    const flat = (g: THREE.BufferGeometry, mat: THREE.Material): THREE.Mesh => { const m = new THREE.Mesh(g, mat); m.renderOrder = 3; return m; };
+    this.target.add(flat(new THREE.RingGeometry(SUCCESS_R - w, SUCCESS_R + w, 96), this.targetMat));
+    this.target.add(flat(new THREE.CircleGeometry(thumb ? 0.004 : 0.0028, 24), this.targetMat));
+    if (!thumb) {
+      // A crosshair through the center, clear of the dot, inside the ring.
+      for (const [x, y, len, rot] of [[0.012, 0, 0.012, 0], [-0.012, 0, 0.012, 0], [0, 0.012, 0.012, Math.PI / 2], [0, -0.012, 0.012, Math.PI / 2]]) {
+        const bar = flat(new THREE.PlaneGeometry(len, 0.0016), this.targetMat);
+        bar.position.set(x, y, 0);
+        bar.rotation.z = rot;
+        this.target.add(bar);
+      }
+    }
+    this.target.position.z = MARK_Z;
+    this.target.visible = false;
+    s.add(this.target);
+
+    this.endDot = new THREE.Mesh(new THREE.CircleGeometry(0.006, 24), this.endMat);
+    this.endLine = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.0035), this.endMat);
+    this.endDot.renderOrder = this.endLine.renderOrder = 4;
+    this.end.add(this.endLine, this.endDot);
+    this.end.position.z = MARK_Z + 0.0004;
+    this.end.visible = false;
+    s.add(this.end);
+    this.canId = data.bodies.find((b) => b.name === "can")?.id ?? null;
+
     this.bodies = new Bodies(data, shadows);
     s.add(this.bodies.root);
+  }
+
+  /** Where the can's center is in the last frame of `m`, on the floor (x, y), or null. */
+  canEnd(m: MotionData): [number, number] | null {
+    if (this.canId == null) return null;
+    const k = m.bodies.indexOf(this.canId);
+    if (k >= 0 && m.n > 0) { const f = m.frames[m.n - 1]; return [f[k * 7], f[k * 7 + 1]]; }
+    const st = m.static[String(this.canId)];
+    return st ? [st[0], st[1]] : null;
+  }
+
+  /** Show (or hide, with null) the can's end mark: a dot under its final center and a line from the target's center.
+   *  Returns the dot's world position, for the label. */
+  showEnd(m: MotionData | null): { at: THREE.Vector3; mid: THREE.Vector3; far: boolean } | null {
+    const tgt = m?.place_target;
+    const at = m ? this.canEnd(m) : null;
+    if (!m || !tgt || tgt.length < 2 || !at) { this.end.visible = false; return null; }
+    this.endMat.color.setHex(END_TONE[resultTone(m.result)]);
+    const dx = at[0] - tgt[0], dy = at[1] - tgt[1];
+    const len = Math.hypot(dx, dy);
+    this.endDot.position.set(at[0], at[1], 0);
+    this.endLine.visible = len > 0.001;
+    this.endLine.position.set((at[0] + tgt[0]) / 2, (at[1] + tgt[1]) / 2, 0);
+    this.endLine.scale.set(Math.max(len, 0.0001), 1, 1);
+    this.endLine.rotation.z = Math.atan2(dy, dx);
+    this.end.visible = true;
+    return { at: new THREE.Vector3(at[0], at[1], MARK_Z), mid: new THREE.Vector3((at[0] + tgt[0]) / 2, (at[1] + tgt[1]) / 2, MARK_Z), far: len > 0.06 };
   }
 
   setTheme(theme: Theme): void {
@@ -215,6 +322,7 @@ class World {
     gm.opacity = 0.9;
     gm.needsUpdate = true;
     this.startMark.material.color.setHex(theme === "dark" ? 0x9aa3ad : 0x6b7480);
+    this.targetMat.color.setHex(RING[theme]);
   }
 
   pose(m: MotionData, t: number): void {
@@ -222,6 +330,9 @@ class World {
     const start = m.frames.length && m.bodies.length ? m.can_start : null;
     this.startMark.visible = !!start;
     if (start) this.startMark.position.set(start[0], start[1], 0.0006);
+    const tgt = m.place_target;
+    this.target.visible = !!tgt && tgt.length >= 2;
+    if (tgt && tgt.length >= 2) { this.target.position.x = tgt[0]; this.target.position.y = tgt[1]; }
   }
 }
 
@@ -237,7 +348,11 @@ const duration = (m: MotionData): number => m.t[m.n - 1] ?? 0;
 
 // ── the run page's player ────────────────────────────────────────────────────
 
-const SPEEDS = [1, 2, 4];
+const SPEEDS = [1, 2, 4, 8, 16];
+/** The wheel zooms the view only when at least this share of it is on screen. */
+const ZOOM_SHOWN = 0.8;
+/** A wheel gesture that was scrolling the page keeps scrolling it until it pauses this long (ms). */
+const SCROLL_PAUSE_MS = 500;
 /** At the end of a looping episode, wait this long on the last frame before starting again. */
 const LOOP_HOLD_S = 1.2;
 
@@ -258,11 +373,14 @@ function parseFiles(el: HTMLElement): string[] {
 export function mountPlayer(el: HTMLElement): { dispose(): void } {
   const batch = el.dataset.batch ?? "";
   const files = parseFiles(el);
+  const renderer = makeRenderer();
+  if (!renderer) return mountPlayerWithoutGl(el, batch, files);
   el.innerHTML = `<div class="rb-result" data-rb-result aria-live="polite"></div>`
     + `<div class="rb-stage">`
     + `<div class="rb-loading" data-rb-loading>Loading the robot…</div>`
     + `<button type="button" class="rb-icon rb-reset" data-rb-reset title="Reset the view" aria-label="Reset the camera">${ICON.view}</button>`
-    + `<div class="rb-hint">Drag to turn · click, then scroll to zoom</div>`
+    + `<div class="rb-endl" data-rb-endl hidden></div>`
+    + `<div class="rb-hint">Drag to turn · scroll to zoom once the view is on screen · ctrl+scroll any time</div>`
     + `</div>`
     + `<div class="rb-bar" role="group" aria-label="Episode replay">`
     + `<button type="button" class="rb-icon rb-play" data-rb-play aria-label="Play">${ICON.play}</button>`
@@ -271,6 +389,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     + `<span class="rb-speeds" role="group" aria-label="Speed">${SPEEDS.map((s) => `<button type="button" class="rb-speed" data-rb-speed="${s}" aria-pressed="${s === 1}">${s}x</button>`).join("")}</span>`
     + `<button type="button" class="rb-icon rb-loop" data-rb-loop aria-pressed="true" title="Loop" aria-label="Loop">${ICON.loop}</button>`
     + `</div>`
+    + `<p class="rb-legend"><span class="rb-legend-ring" aria-hidden="true"></span><span>${esc(SUCCESS_LEGEND)}</span></p>`
     + (files.length > 1 ? `<div class="rb-files-h">Episodes <span>${files.length}</span></div>` : "")
     + `<div class="rb-files" role="listbox" aria-label="Motion files">${files.map((f, i) => fileButton(f, i, null)).join("")}</div>`;
 
@@ -282,11 +401,10 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
   const seek = q<HTMLInputElement>("[data-rb-seek]");
   const timeEl = q<HTMLElement>("[data-rb-time]");
   const listEl = q<HTMLElement>(".rb-files");
+  const endLabel = q<HTMLElement>("[data-rb-endl]");
+  const projected = new THREE.Vector3();
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.domElement.className = "rb-canvas";
   renderer.domElement.setAttribute("aria-label", "3D replay of the robot arm");
   stage.prepend(renderer.domElement);
@@ -298,10 +416,35 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
   controls.minDistance = 0.4;
   controls.maxDistance = 4;
   controls.maxPolarAngle = Math.PI * 0.495; // never under the floor
-  // The wheel scrolls the page until the person grabs the view: zooming starts after a click in it.
-  controls.enableZoom = false;
-  const grab = (): void => { controls.enableZoom = true; stage.classList.add("is-grabbed"); };
-  const letGo = (): void => { controls.enableZoom = false; stage.classList.remove("is-grabbed"); };
+  // The wheel over the view zooms it, without a click first, but never traps the page's scrolling:
+  //  - only while the view is mostly on screen (a wheel over a half-hidden view scrolls the page, bringing it in),
+  //  - and not in the middle of a scroll: a gesture that was moving the page keeps moving it until it pauses,
+  //    so scrolling past the view never gets caught by it.
+  // Ctrl or cmd + wheel (and a trackpad pinch, which arrives as ctrl + wheel) always zooms; so does any wheel after a
+  // click in the view, until the pointer leaves it. The decision is made in the capture phase, before OrbitControls'
+  // own wheel listener reads `enableZoom` (it calls preventDefault only when zooming).
+  let grabbed = false;
+  let lastScroll = -Infinity;
+  const shownShare = (): number => {
+    const r = stage.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    const h = Math.min(r.height, vh);
+    return h > 0 ? Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0)) / h : 0;
+  };
+  const onStageWheel = (e: WheelEvent): void => {
+    const now = performance.now();
+    const zoom = grabbed || e.ctrlKey || e.metaKey || (shownShare() >= ZOOM_SHOWN && now - lastScroll > SCROLL_PAUSE_MS);
+    controls.enableZoom = zoom;
+    if (!zoom) lastScroll = now;
+  };
+  // Wheels elsewhere on the page are scrolls too: the view may slide under a still pointer mid-scroll.
+  const onPageWheel = (e: WheelEvent): void => {
+    if (!stage.contains(e.target as Node)) lastScroll = performance.now();
+  };
+  stage.addEventListener("wheel", onStageWheel, { capture: true, passive: true });
+  window.addEventListener("wheel", onPageWheel, { passive: true });
+  const grab = (): void => { grabbed = true; stage.classList.add("is-grabbed"); };
+  const letGo = (): void => { grabbed = false; stage.classList.remove("is-grabbed"); };
   renderer.domElement.addEventListener("pointerdown", grab);
   stage.addEventListener("pointerleave", letGo);
   controls.update();
@@ -340,7 +483,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     if (!m) { resultEl.innerHTML = ""; return; }
     const tone = resultTone(m.result);
     const text = resultText(m.result);
-    const facts = resultFacts(m.result).filter((f) => !(f.endsWith("from target") && text.includes(" cm")));
+    const facts = resultFacts(m.result).filter((f) => !(f.endsWith("from center") && text.includes(" cm")));
     resultEl.innerHTML = `<span class="rb-result-n" title="${attr(path)}">${esc(motionName(path))}</span>`
       + `<span class="rb-tag rb-tag--${tone}">${tone === "ok" ? "Success" : tone === "bad" ? "Fail" : "No result"}</span>`
       + `<span class="rb-result-t">${esc(text)}</span>`
@@ -388,6 +531,31 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
   const io = new IntersectionObserver((es) => { visible = es.some((x) => x.isIntersecting); last = 0; });
   io.observe(stage);
 
+  // At the end of the episode (or scrubbed to it): where the can's center ended, its distance from the target's center.
+  const placeEnd = (w: World, m: MotionData): void => {
+    const d = duration(m);
+    const end = t >= d - 0.5 / (m.fps || 30) ? w.showEnd(m) : w.showEnd(null);
+    if (!end) { endLabel.hidden = true; return; }
+    const err = typeof m.result.place_error_cm === "number" ? m.result.place_error_cm
+      : m.place_target ? Math.hypot(end.at.x - m.place_target[0], end.at.y - m.place_target[1]) * 100 : null;
+    if (err == null) { endLabel.hidden = true; return; }
+    // Close: under the can. Far off: beside the can's end, on the side away from the target, so the line shows.
+    let side = "";
+    if (end.far && m.place_target) {
+      const from = projected.set(m.place_target[0], m.place_target[1], MARK_Z).project(cam).x;
+      side = end.at.clone().project(cam).x >= from ? "right" : "left";
+    }
+    endLabel.dataset.side = side;
+    projected.copy(end.at).project(cam);
+    const behind = projected.z > 1;
+    endLabel.hidden = behind;
+    if (behind) return;
+    endLabel.textContent = `${cm(err)} from center`;
+    endLabel.dataset.tone = resultTone(m.result);
+    endLabel.style.left = `${((projected.x + 1) / 2) * stage.clientWidth}px`;
+    endLabel.style.top = `${((1 - projected.y) / 2) * stage.clientHeight}px`;
+  };
+
   const frame = (now: number): void => {
     raf = requestAnimationFrame(frame);
     if (!visible || document.hidden) { last = 0; return; }
@@ -408,6 +576,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     if (!world || !motion || !dirty) return;
     world.setTheme(themeOf(el));
     world.pose(motion, t);
+    placeEnd(world, motion);
     renderer.render(world.scene, cam);
     dirty = false;
   };
@@ -476,11 +645,47 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
       ro.disconnect();
       io.disconnect();
       controls.dispose();
+      window.removeEventListener("wheel", onPageWheel);
       el.removeEventListener("click", onClick);
       renderer.dispose();
       renderer.forceContextLoss();
     },
   };
+}
+
+/** The player without WebGL: the message with the episode's result, and the picker to read the others' results. */
+function mountPlayerWithoutGl(el: HTMLElement, batch: string, files: string[]): { dispose(): void } {
+  let disposed = false;
+  let current = files.length - 1;
+  el.innerHTML = `<div class="rb-stage rb-stage--nogl" data-rb-nogl></div>`
+    + `<div class="rb-files" role="listbox" aria-label="Motion files">${files.map((f, i) => fileButton(f, i, null)).join("")}</div>`;
+  const box = el.querySelector<HTMLElement>("[data-rb-nogl]")!;
+  const listEl = el.querySelector<HTMLElement>(".rb-files")!;
+  const mark = (): void => {
+    for (const b of Array.from(listEl.children)) b.setAttribute("aria-selected", String(Number((b as HTMLElement).dataset.rbFile) === current));
+  };
+  const show = (i: number): void => {
+    current = i;
+    mark();
+    box.innerHTML = noWebglView(motionName(files[i]), null);
+    fetchMotion(batch, files[i]).then((m) => {
+      if (!disposed && current === i) box.innerHTML = noWebglView(motionName(files[i]), m.result);
+    }).catch(() => undefined);
+  };
+  const onClick = (e: MouseEvent): void => {
+    const b = (e.target as Element).closest<HTMLElement>("[data-rb-file]");
+    if (b && el.contains(b)) show(Number(b.dataset.rbFile));
+  };
+  el.addEventListener("click", onClick);
+  show(current);
+  if (files.length > 1) {
+    fetchSummaries(batch, files).then((s) => {
+      if (disposed) return;
+      listEl.innerHTML = files.map((f, i) => fileButton(f, i, s[f] ?? null)).join("");
+      mark();
+    }).catch(() => undefined);
+  }
+  return { dispose(): void { disposed = true; el.removeEventListener("click", onClick); } };
 }
 
 function fileButton(path: string, i: number, s: MotionSummary | null): string {
@@ -519,8 +724,10 @@ class Thumbs {
   }, { rootMargin: "120px" });
   private raf = 0;
   private last = 0;
+  private readonly size = new THREE.Vector2();
 
   add(el: HTMLElement): { dispose(): void } {
+    if (!webglAvailable()) return this.withoutGl(el);
     const canvas = document.createElement("canvas");
     canvas.className = "rb-thumb-c";
     el.prepend(canvas);
@@ -531,7 +738,7 @@ class Thumbs {
     const file = el.dataset.file ?? "";
     Promise.all([fetchScene(), fetchMotion(batch, file)]).then(([scene, m]) => {
       if (!this.items.has(th)) return;
-      if (!this.world) this.world = new World(scene, true);
+      if (!this.world) this.world = new World(scene, true, true);
       th.motion = m;
       th.start = performance.now();
       el.classList.add("is-ready");
@@ -550,8 +757,26 @@ class Thumbs {
     };
   }
 
+  /** A thumbnail without WebGL: the message and its result line, and nothing to draw. */
+  private withoutGl(el: HTMLElement): { dispose(): void } {
+    let live = true;
+    const file = el.dataset.file ?? "";
+    el.classList.add("is-nogl");
+    el.innerHTML = noWebglView(motionName(file), null);
+    fetchMotion(el.dataset.batch ?? "", file).then((m) => { if (live) el.innerHTML = noWebglView(motionName(file), m.result); }).catch(() => undefined);
+    return { dispose: (): void => { live = false; } };
+  }
+
+  /** WebGL turned out to be missing: every thumbnail becomes its stand-in, and the loop stops for good. */
+  private fallBack(): void {
+    cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    for (const th of this.items) { th.canvas.remove(); this.io.unobserve(th.el); this.withoutGl(th.el); }
+    this.items.clear();
+  }
+
   private run(): void {
-    if (!this.raf) this.raf = requestAnimationFrame((now) => this.frame(now));
+    if (!this.raf && webglAvailable()) this.raf = requestAnimationFrame((now) => this.frame(now));
   }
 
   private stop(): void {
@@ -573,9 +798,16 @@ class Thumbs {
       const w = Math.round(th.canvas.clientWidth * dpr), h = Math.round(th.canvas.clientHeight * dpr);
       if (!w || !h) continue;
       if (th.canvas.width !== w || th.canvas.height !== h) { th.canvas.width = w; th.canvas.height = h; }
+      // One drawing buffer for thumbnails of every size (run tiles and the smaller fork children): grown to the
+      // largest, each drawn into its bottom-left corner and copied from there, so it is never reallocated per frame.
       const r = this.renderer ?? this.makeRenderer();
-      const size = r.getSize(new THREE.Vector2());
-      if (size.x !== w || size.y !== h) r.setSize(w, h, false);
+      if (!r) { this.fallBack(); return; }
+      const size = r.getSize(this.size);
+      if (size.x < w || size.y < h) r.setSize(Math.max(w, size.x), Math.max(h, size.y), false);
+      const bufH = r.getSize(this.size).y;
+      r.setViewport(0, 0, w, h);
+      r.setScissor(0, 0, w, h);
+      r.setScissorTest(true);
       if (this.cam.aspect !== w / h) { this.cam.aspect = w / h; this.cam.updateProjectionMatrix(); }
       const d = duration(th.motion);
       const loopS = d + LOOP_HOLD_S;
@@ -583,15 +815,13 @@ class Thumbs {
       this.world.setTheme(themeOf(th.el));
       this.world.pose(th.motion, t);
       r.render(this.world.scene, this.cam);
-      th.ctx.drawImage(r.domElement, 0, 0, w, h);
+      th.ctx.drawImage(r.domElement, 0, bufH - h, w, h, 0, 0, w, h);
     }
   }
 
-  private makeRenderer(): THREE.WebGLRenderer {
-    const r = new THREE.WebGLRenderer({ antialias: true });
-    r.setPixelRatio(1);
-    r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFSoftShadowMap;
+  private makeRenderer(): THREE.WebGLRenderer | null {
+    const r = makeRenderer();
+    r?.setPixelRatio(1);
     this.renderer = r;
     return r;
   }

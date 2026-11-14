@@ -11,7 +11,7 @@
 .rb-canvas:active { cursor:grabbing; }
 .rb-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; text-align:center; font-size:13px; color:var(--fg-55); pointer-events:none; }
 .rb-loading[hidden] { display:none; }
-.rb-hint { position:absolute; left:10px; top:8px; font-family:var(--label); font-size:11px; color:var(--fg-40); pointer-events:none; }
+.rb-hint { position:absolute; left:10px; right:48px; top:8px; line-height:1.4; font-family:var(--label); font-size:11px; color:var(--fg-40); pointer-events:none; }
 
 .rb-result { display:flex; align-items:center; flex-wrap:wrap; gap:4px 10px; min-height:22px; min-width:0; font-size:13px; }
 .rb-result-n { font-weight:600; color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
@@ -65,5 +65,26 @@
   .rb-hint { display:none; }
   .rb-bar { flex-wrap:wrap; row-gap:6px; }
   .rb-seek { flex:1 1 100%; order:-1; margin:6px 4px 2px; }
-  .rb-time { min-width:0; margin-right:auto; text-align:left; }
+  .rb-time { min-width:0; margin-right:auto; text-align:left; font-size:11.5px; }
+  /* five speeds, the play and loop buttons and the time on one row at phone width */
+  .rb-bar { column-gap:4px; }
+  .rb-speed { padding:3px 5px; }
 }
+
+/* the can's end mark's label (viewer.ts placeEnd): under the dot, centered on it */
+.rb-endl { position:absolute; transform:translate(-50%, 14px); padding:2px 7px; border-radius:6px; font-family:var(--label); font-size:11.5px; font-weight:600; white-space:nowrap; pointer-events:none; color:#fff; background:#6b7480; box-shadow:0 1px 3px rgb(0 0 0 / 20%); }
+.rb-endl[data-tone="ok"] { background:#15803d; }
+.rb-endl[data-tone="bad"] { background:#dc2626; }
+.rb-endl[data-side="right"] { transform:translate(12px, -50%); }
+.rb-endl[data-side="left"] { transform:translate(calc(-100% - 12px), -50%); }
+.rb-endl[hidden] { display:none; }
+/* the legend under the player: what the green ring means */
+.rb-legend { display:flex; align-items:flex-start; gap:8px; margin:0; font-size:12px; line-height:1.45; color:var(--fg-55); }
+.rb-legend-ring { flex:none; width:12px; height:12px; margin-top:2px; border-radius:50%; border:2px solid #0b6b35; box-sizing:border-box; }
+[data-cnpy-theme="dark"] .rb-legend-ring { border-color:#5be38f; }
+/* without WebGL (viewer.ts): the message and the episode's result line in place of the 3D view */
+.rb-nogl { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:10px; text-align:center; }
+.rb-nogl-t { font-size:12.5px; font-weight:500; color:var(--fg-55); }
+.rb-nogl-r { display:inline-flex; align-items:center; flex-wrap:wrap; justify-content:center; gap:4px 7px; max-width:100%; font-family:var(--label); font-size:11.5px; color:var(--fg-70); }
+.rb-nogl-r > span:last-child:not(.rb-dot) { color:var(--fg-55); }
+.rb-stage.rb-stage--nogl { min-height:160px; aspect-ratio:auto; }

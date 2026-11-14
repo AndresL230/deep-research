@@ -23,7 +23,7 @@ describe("markup helpers", () => {
   });
 
   it("says how an episode ended", () => {
-    expect(resultText({ success: true, place_error_cm: 0.81 })).toBe("Placed 0.8 cm from target");
+    expect(resultText({ success: true, place_error_cm: 0.81 })).toBe("Placed 0.8 cm from center");
     expect(resultText({ success: false, dropped: true, place_error_cm: 20 })).toBe("Dropped the can");
     expect(resultText({ success: false, upright: false })).toBe("Can tipped over");
     expect(resultText({ success: false, upright: true, place_error_cm: 12.3 })).toBe("Missed by 12 cm");
@@ -37,7 +37,7 @@ describe("markup helpers", () => {
 
   it("lists the facts, leaving out the usual ending", () => {
     expect(resultFacts({ success: true, place_error_cm: 0.81, upright: true, max_height_cm: 12.88, end_reason: "controller_done" }))
-      .toEqual(["0.8 cm from target", "upright", "lifted 13 cm"]);
+      .toEqual(["0.8 cm from center", "upright", "lifted 13 cm"]);
     expect(resultFacts({ upright: false, tilt_deg: 88.6, dropped: true, end_reason: "max_time" })).toEqual(["dropped", "tipped 89°", "max time"]);
     expect(xy([0.5, -0.1])).toBe("(0.50, -0.10)");
   });
