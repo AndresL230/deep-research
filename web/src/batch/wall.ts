@@ -12,6 +12,8 @@ import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { pct, pts, tokens, usd } from "./format";
 import { ACT, type BatchVm } from "./model";
+import { isMotionBatch, robotThumb } from "../robot/markup";
+import "../robot/mount";
 
 export interface WallSummary {
   total: number;
@@ -96,6 +98,11 @@ function pill(status: RunStatus): string {
 
 /** The tile's screen: the end of the run's notebook, code typing itself out, then its output and charts. */
 function picture(vm: BatchVm, run: RunRecord, step: string, cells: NbCell[]): string {
+  // A robot run that has recorded its episodes: the arm moving, its last episode on a loop.
+  const motion = run.motion_files ?? [];
+  if (isMotionBatch(vm.case.config) && motion.length) {
+    return `<div class="bw-pic bw-pic--robot" data-morph-key="robot">${robotThumb(vm.id, motion[motion.length - 1])}</div>`;
+  }
   if (cells.length) {
     return `<div class="bw-pic bw-pic--nb" data-morph-key="nb">${notebookTail(cells, { image: (name) => chartUrl(vm, run.id, name) })}</div>`;
   }

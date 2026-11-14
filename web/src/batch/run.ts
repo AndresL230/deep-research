@@ -21,6 +21,8 @@ import { attr, esc } from "../ui";
 import { ACT, type BatchVm, type EventKey } from "./model";
 import { duration, pct, pts, tokens, usd } from "./format";
 import { evidenceParts, trapOf } from "./trap";
+import { isMotionBatch, robotView } from "../robot/markup";
+import "../robot/mount";
 
 // ── text helpers ─────────────────────────────────────────────────────────────
 
@@ -247,6 +249,8 @@ interface Subject {
   score: Partial<Pick<RunRecord, "reported_accuracy" | "true_accuracy" | "gap" | "overlap_share" | "reason">>;
   labUrl: string | null;
   charts: string[];
+  /** A robot run's motion files (`visual` "motion"). */
+  motion: string[];
   durationS: number | null;
   scope: string;
   tokens: { input: number; output: number } | null;
@@ -261,7 +265,7 @@ function subject(vm: BatchVm, key: EventKey): Subject {
     const r = vm.case.runs[key];
     return {
       name: `Run ${key}`, status: r?.status ?? null, score: r ?? {}, labUrl: r?.lab_url ?? null, charts: r?.charts ?? [],
-      durationS: r?.duration_s ?? fromEvents, scope: `run:${key}`, tokens: r?.tokens ?? null, fork: null,
+      motion: r?.motion_files ?? [], durationS: r?.duration_s ?? fromEvents, scope: `run:${key}`, tokens: r?.tokens ?? null, fork: null,
     };
   }
   const forkId = key.slice(0, slash);
@@ -272,7 +276,7 @@ function subject(vm: BatchVm, key: EventKey): Subject {
   const arm = c?.arm ?? (childId.startsWith("forced") ? "forced" : childId.startsWith("control") ? "control" : null);
   return {
     name: `Fork ${forkId}, ${childId.replace(/-(\d+)$/, " $1")}`, status: c?.status ?? null, score: c ?? {}, labUrl: c?.lab_url ?? null,
-    charts: [], durationS: fromEvents, scope: `fork:${forkId}:${childId}`, tokens: null, fork: { exp, child: childId, arm },
+    charts: [], motion: c?.motion_files ?? [], durationS: fromEvents, scope: `fork:${forkId}:${childId}`, tokens: null, fork: { exp, child: childId, arm },
   };
 }
 
@@ -343,7 +347,11 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
     money != null ? stat("Cost", usd(money)) : "",
   ].join("");
 
-  const charts = s.charts.length
+  // A robot run shows its episodes in 3D where a tabular run shows its charts.
+  const motion = isMotionBatch(vm.case.config) && (s.motion.length || scored || status === "failed")
+    ? robotView(vm.id, key, s.motion)
+    : "";
+  const charts = motion ? motion : s.charts.length
     ? `<div class="rn-charts" data-morph-list>${s.charts.map((p) => {
       const url = batchFileUrl(vm.id, p);
       const name = chartName(p);

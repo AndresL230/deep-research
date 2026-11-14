@@ -307,7 +307,7 @@ function without<T extends object>(o: T, keys: readonly string[]): Partial<T> {
   return out as Partial<T>;
 }
 
-const RUN_LIVE_FIELDS = [...SCORE_FIELDS, "status", "todos", "step", "last_tool", "duration_s", "charts", "tokens", "vm_id", "lab_url"];
+const RUN_LIVE_FIELDS = [...SCORE_FIELDS, "status", "todos", "step", "last_tool", "duration_s", "charts", "motion_files", "tokens", "vm_id", "lab_url"];
 
 function runAt(r: RunRecord, slot: RunSlot, evs: AgentEvent[], times: number[], t: number): RunRecord {
   if (t >= slot.end) return { ...r };

@@ -8,6 +8,7 @@ export default defineConfig({
     // ws: true so the batch websocket (/api/batches/{id}/ws) works in dev too.
     proxy: { "/api": { target: "http://localhost:8000", changeOrigin: true, ws: true } },
   },
-  build: { outDir: "dist", emptyOutDir: true },
+  // The 3D robot viewer (src/robot/viewer.ts, three.js) is its own chunk of about 530 kB, loaded only for robot batches.
+  build: { outDir: "dist", emptyOutDir: true, chunkSizeWarningLimit: 600 },
   test: { include: ["test/**/*.test.ts"], environment: "node" },
 });

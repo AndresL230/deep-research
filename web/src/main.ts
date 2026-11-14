@@ -291,8 +291,9 @@ function afterPaint(): void {
     shownSections = new Set();
   }
   const k = routeKey(S.route);
-  // The conversation keeps to the bottom while the person has not scrolled up, as in the chat.
-  if (k && S.cv.stick && S.batch?.events[k]?.length) scrollEl.scrollTop = scrollEl.scrollHeight;
+  // The conversation keeps to the bottom while the person has not scrolled up, as in the chat. Not on a finished robot
+  // run's page: its 3D replay at the top is what the page is for.
+  if (k && S.cv.stick && S.batch?.events[k]?.length && !scrollEl.querySelector("[data-robot-view]")) scrollEl.scrollTop = scrollEl.scrollHeight;
   if (!ticker && scrollEl.querySelector("[data-ask-think]")) {
     ticker = setInterval(() => {
       const els = Array.from(scrollEl.querySelectorAll<HTMLElement>("[data-ask-think]"));
