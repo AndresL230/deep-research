@@ -10,6 +10,7 @@ import robotRaw from "../../fixtures/robot-demo-batch/case/case.json?raw";
 import type { BatchConfig, CaseFile, DomainWords, ForkChild, ForkExperiment, RunRecord, Verdict } from "../src/api";
 import type { BatchVm } from "../src/batch/model";
 import { claimHeadline, wallView } from "../src/batch/wall";
+import { overviewView, pageHeadView } from "../src/batch/overview";
 import {
   armSummaryText, forcedArmText, forkOutcome, forkOutcomeText, forkView, investigatorView, investigatorSentence, splitView, verdictEvidence,
   verdictText, verdictView,
@@ -91,15 +92,22 @@ describe("claimHeadline", () => {
     expect(claimHeadline(caseOf(ROBOT_CONFIG, runs))).toBeNull();
     expect(claimHeadline(caseOf(ROBOT_CONFIG, { r07: robotRuns().r07 }))).toBeNull();
     expect(claimHeadline(caseOf(ROBOT_CONFIG, {}))).toBeNull();
-    expect(wallView(vmOf(caseOf(ROBOT_CONFIG, runs)))).not.toContain("bw-headline");
+    const html = overviewView(vmOf(caseOf(ROBOT_CONFIG, runs, { phase: "running" })));
+    expect(text(html.slice(html.indexOf("<h1"), html.indexOf("</h1>")))).not.toContain("claimed");
   });
 
-  it("is the batch page's top line; the counts stay, quieter, under it", () => {
-    const html = wallView(vmOf(caseOf(ROBOT_CONFIG, robotRuns())));
-    const head = html.indexOf("bw-headline");
-    expect(head).toBeGreaterThan(-1);
-    expect(head).toBeLessThan(html.indexOf("12 runs: 4 honest, 6 inflated, 1 unclear, 1 failed"));
-    expect(html).toContain('<p class="bw-sum bw-sum--quiet" aria-live="polite">12 runs: 4 honest, 6 inflated, 1 unclear, 1 failed</p>');
+  it("is the batch page's title, the overview's; the counts stay, quieter, under it; no second headline", () => {
+    const vm = vmOf(caseOf(ROBOT_CONFIG, robotRuns()));
+    const html = overviewView(vm);
+    const title = html.slice(html.indexOf('<h1 class="ov-title"'), html.indexOf("</h1>"));
+    expect(title).toContain('<span class="mo-sr">6 of 12 agents claimed 99%. Measured at 20 positions they never tested: 59%.</span>');
+    expect(html.indexOf("</h1>")).toBeLessThan(html.indexOf("12 runs: 4 honest, 6 inflated, 1 unclear, 1 failed"));
+    expect(html).toContain('<p class="ov-count" data-morph-key="count" aria-live="polite">12 runs: 4 honest, 6 inflated, 1 unclear, 1 failed</p>');
+    // The wall under it, the other part of the same page, repeats neither.
+    const wall = wallView(vm);
+    expect(wall).not.toContain("bw-headline");
+    expect(wall).not.toContain("6 of 12 agents claimed");
+    expect(wall).not.toContain("12 runs: 4 honest");
   });
 
   it("rounds to whole percents", () => {
@@ -265,7 +273,7 @@ describe("domain words", () => {
 const text = (html: string): string => html.replace(/<[^>]*>/g, " ").replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 /** The headlines and section titles of a page. */
 const titles = (html: string): string[] =>
-  [...html.matchAll(/<(h2|h3|p|div)[^>]*class="(?:ln-h|ln-h3|ln-headline|ln-sub|ln-exp-t|ln-hyp-h|ln-sentence|ln-outcome|ln-arm-plain|ln-note|bw-headline)[^"]*"[^>]*>([\s\S]*?)<\/\1>/g)].map((m) => text(m[2]));
+  [...html.matchAll(/<(h1|h2|h3|p|div)[^>]*class="(?:ln-h|ln-h3|ln-headline|ln-sub|ln-exp-t|ln-hyp-h|ln-sentence|ln-outcome|ln-arm-plain|ln-note|bw-headline|bw-sum|ov-title|ov-card-t)[^"]*"[^>]*>([\s\S]*?)<\/\1>/g)].map((m) => text(m[2]));
 
 const BANNED = [
   /splitting into train and test/i, /split into train and test/i, /test rows/i, /rows were also in training/i, /reported accuracy/i,
@@ -276,7 +284,7 @@ describe("robot screens say robot words", () => {
   const pages = (c: CaseFile): Record<string, string> => {
     const vm = vmOf(c);
     return {
-      wall: wallView(vm), split: splitView(vm), investigator: investigatorView(vm), fork: forkView(vm), verdict: verdictView(vm),
+      overview: overviewView(vm), wall: wallView(vm), split: splitView(vm), investigator: investigatorView(vm), fork: forkView(vm), verdict: verdictView(vm),
       run: runSummaryView(vm, "r02"), failed: runSummaryView(vm, "r07"), task: taskText(vm),
     };
   };
@@ -347,7 +355,7 @@ describe("cleanup", () => {
   it("says Simulated once, in the header, and nowhere else on the page", () => {
     const c = { ...robotFixture };
     const vm = vmOf(c);
-    const body = [wallView(vm), splitView(vm), investigatorView(vm), forkView(vm), verdictView(vm), runSummaryView(vm, "r02")].join("");
+    const body = [overviewView(vm), pageHeadView(vm, "fork"), wallView(vm), splitView(vm), investigatorView(vm), forkView(vm), verdictView(vm), runSummaryView(vm, "r02")].join("");
     expect(body).not.toContain("Simulated");
     const header = costBar(c.costs ?? {}, { simulated: true });
     expect(text(header).match(/Simulated/g)).toHaveLength(1);
@@ -382,6 +390,6 @@ describe("no em dashes", () => {
   it("in anything these screens write", () => {
     const c = caseOf(ROBOT_CONFIG, robotRuns(), { forks: { f1: robotFork() }, verdict: verdict() });
     const vm = vmOf(c);
-    for (const html of [wallView(vm), forkView(vm), verdictView(vm), runSummaryView(vm, "r07")]) expect(html).not.toContain("\u2014");
+    for (const html of [overviewView(vm), wallView(vm), forkView(vm), verdictView(vm), runSummaryView(vm, "r07")]) expect(html).not.toContain("\u2014");
   });
 });
