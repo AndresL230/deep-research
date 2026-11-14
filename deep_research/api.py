@@ -36,6 +36,7 @@ from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_price
 from .cost_report import cost_report  # noqa: E402
 from .costs import CostTracker, OverBudget, estimate_batch_usd, run_rate  # noqa: E402
 from .events import read_events  # noqa: E402
+from .gateway_guard import GatewayGuard  # noqa: E402
 
 log = logging.getLogger("deep_research.api")
 
@@ -91,6 +92,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Orro", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Added last, so it runs first: with ORRO_GATEWAY_SECRET set, only the Cloudflare gateway gets in (gateway_guard.py).
+app.add_middleware(GatewayGuard)
 
 BATCHES: dict[str, Batch] = {}
 TASKS: dict[str, asyncio.Task] = {}

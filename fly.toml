@@ -1,0 +1,47 @@
+# Orro on Fly.io: one machine with a volume for saved batches. See docs/deploy-fly.md.
+#
+# The app name must be unique on Fly: change it before the first `fly launch` / `fly deploy` if it is taken.
+
+app = "orro-research"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  DATA_DIR = "/data"
+
+# Saved batches, uploaded datasets, scripts and controllers. One volume, so one machine: the server also keeps its
+# running batches in memory, so it must not be spread over several.
+[[mounts]]
+  source = "orro_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Off: batches run on the server with no browser attached, and a stop would cut them short (and lose credits
+  # already spent). Only the Cloudflare gateway reaches this machine (ORRO_GATEWAY_SECRET). See docs/deploy-fly.md
+  # and docs/cloudflare-gateway.md. Set "stop" and 0 to save money when no live batches are expected.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 200
+    hard_limit = 250
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/api/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+
+# 1 GB is enough for the demo and for scoring a robot batch; raise it with `fly scale memory 2048` for heavy use.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
