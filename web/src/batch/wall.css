@@ -4,7 +4,11 @@
 
 /* ── the line above the grid ── */
 .bw-head { display:flex; flex-direction:column; gap:4px; }
+/* The claim against the truth, once every run is in; the counts sit under it as a quieter line. */
+.bw-headline { margin:0; font-size:22px; line-height:1.3; font-weight:600; letter-spacing:-0.015em; color:var(--fg); text-wrap:pretty; font-variant-numeric:tabular-nums; }
 .bw-sum { margin:0; font-size:15px; font-weight:600; letter-spacing:-0.01em; color:var(--fg); font-variant-numeric:tabular-nums; }
+.bw-sum--quiet { font-size:13px; font-weight:500; letter-spacing:0; color:var(--fg-70); }
+@container (max-width: 480px) { .bw-headline { font-size:18px; } }
 /* The mix of runs as one bar: honest, inflated, failed, still running, not started. */
 .bw-mix { display:flex; gap:2px; height:6px; margin:2px 0 4px; border-radius:3px; overflow:hidden; }
 .bw-mix-s { min-width:0; transition:flex-grow var(--fx-slow) var(--fx-ease); }
@@ -16,8 +20,6 @@
 .bw-mix-s--queued { background:var(--border-strong); }
 .bw-sum-models { margin:0; font-size:12.5px; color:var(--fg-70); font-variant-numeric:tabular-nums; }
 .bw-explain { margin:0; font-size:12.5px; line-height:1.45; color:var(--fg-55); }
-.bw-sim { margin:0; align-self:flex-start; max-width:100%; padding:3px 8px; border:1px solid color-mix(in srgb, var(--amber) 35%, var(--border)); border-radius:6px; background:color-mix(in srgb, var(--amber) 8%, transparent); font-size:12px; line-height:1.45; color:var(--fg-70); }
-.bw-sim strong { font-weight:600; color:var(--amber); }
 .bw-empty { padding:24px 12px; border:1px dashed var(--border-strong); border-radius:8px; font-size:13px; color:var(--fg-55); text-align:center; }
 
 /* ── the grid: 3 columns on a desktop, 2 on a tablet, 1 on a phone (by the wall's own width) ── */
@@ -83,7 +85,6 @@
 .bw-tile--honest .bw-gap { color:var(--green); }
 .bw-tile--inflated .bw-gap { color:var(--red); }
 .bw-ovl-t { font-size:11.5px; line-height:1.35; color:var(--fg-70); min-width:0; }
-.bw-rev--failed { font-size:12px; line-height:1.4; color:var(--fg-55); overflow-wrap:anywhere; }
 @keyframes bw-in { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
 
 /* per-tile cost */

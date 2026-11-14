@@ -171,7 +171,7 @@ describe("helpers", () => {
 });
 
 describe("runSummaryView", () => {
-  it("shows a run: back, name, status, score, tokens, charts, simulated", () => {
+  it("shows a run: back, name, status, score, tokens, charts, and no simulated tag (the header has it)", () => {
     const html = runSummaryView(vmOf(), "r01");
     expect(html).toContain('data-act="back"');
     expect(html).toContain("Run r01");
@@ -181,19 +181,20 @@ describe("runSummaryView", () => {
     expect(html).toContain("-0.4 pts");
     expect(html).toContain("1m 03s");
     expect(html).toContain("32k in, 5k out");
-    expect(html).toContain("Simulated");
+    expect(html).not.toContain("Simulated");
     expect(html).toContain('href="/api/batches/demo-batch/files/runs/r01/live/02_confusion.png" target="_blank" rel="noopener"');
     expect(html).not.toContain("Open lab page");
     expect(html).not.toMatch(/\u2014/);
   });
 
-  it("words a robot run's scores as claimed vs hidden test, with the batch's own gap bands", () => {
+  it("words a robot run's scores as claimed vs measured, with the batch's own gap bands", () => {
     const config = { ...demo.config, visual: "motion", inflation_threshold: 0.275, unclear_threshold: 0.12 } as unknown as typeof demo.config;
     const html = runSummaryView(vmOf({ case: { ...demo, config } }), "r02");
     expect(html).toContain(">Claimed<");
-    expect(html).toContain(">Hidden test<");
+    expect(html).toContain(">Measured<");
+    expect(html).not.toContain("Hidden test");
     expect(html).toContain("+13.2 pts over");
-    expect(html).toContain('title="Claimed minus hidden test. Up to 12 pts honest, 12 to 27.5 unclear, over 27.5 inflated."');
+    expect(html).toContain('title="Claimed minus measured. Up to 12 pts honest, 12 to 27.5 unclear, over 27.5 inflated."');
     expect(html).toContain("20 can positions spread over the table that it never saw");
     // Tabular batches keep their labels.
     const tab = runSummaryView(vmOf(), "r02");
