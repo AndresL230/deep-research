@@ -1,17 +1,20 @@
-/* Orro's logo (brand.ts). The tile is the dashboard's purple, flat, in both themes; the wordmark takes its colour
-   from the text around it. */
-.brand-word { display:block; width:auto; flex:none; }
-.brand-tile { flex:none; display:grid; place-items:center; width:var(--brand-tile); height:var(--brand-tile); border-radius:22%; background:#b07af2; color:#190a30; }
-.brand-tile .brand-sym { display:block; }
+/* Orro's logo (brand.ts): the Fault symbol and the wordmark, in the colour of the text around them. The lockup keeps
+   the identity's proportions: symbol twice the x-height, a one-bar gap (0.41 x-height), the word centred on it. */
+.brand-word, .brand-mark, .brand-sym { display:block; flex:none; }
+.brand-lock { display:inline-flex; align-items:center; gap:calc(var(--xh) * 0.41); }
 
-/* The app header: tile, then the wordmark, which dims like the old text did once there are crumbs after it. */
-.pg-home .brand-word { height:19px; }
-.pg-home .brand-tile { width:26px; height:26px; }
-.pg-home .brand-tile .brand-sym { width:17px; height:17px; }
+/* Small marks inside buttons, pills and chips: the symbol on the dashboard's purple tile, flat, in both themes. */
+.brand-tile { flex:none; display:grid; place-items:center; width:var(--brand-tile); height:var(--brand-tile); border-radius:22%; background:#b07af2; color:#121317; }
+
+/* The app header: the symbol, then the wordmark (x-height 15), which dims like the old text once crumbs follow it.
+   It overrides page.css's phone rule that hid the old text title, so the lockup stays whole on phones too. */
+.pg-home { gap:6px; }
 .pg-home .ask-h1 { display:flex; align-items:center; }
 
-/* The landing nav: the tile replaces the old grey mark box. */
-.lp-mark.brand-tile { width:38px; height:38px; border-radius:9px; background:#b07af2; box-shadow:none; }
-.lp-mark.brand-tile .brand-sym { width:24px; height:24px; }
-.lp-name .brand-word { height:24px; }
-@media (max-width: 640px) { .lp-mark.brand-tile { width:34px; height:34px; } .lp-mark.brand-tile .brand-sym { width:22px; height:22px; } .lp-name .brand-word { height:21px; } }
+/* The landing nav: the same lockup at x-height 21 (18 on phones). */
+.lp-nav .lp-brand { gap:9px; }
+@media (max-width: 640px) {
+  .lp-nav .lp-brand { gap:7px; }
+  .lp-nav .lp-brand .brand-mark { height:36px; width:auto; }
+  .lp-nav .lp-brand .brand-word { height:18.5px; width:auto; }
+}
