@@ -396,7 +396,7 @@ export function costGroups(costs: Costs): CostGroup[] {
   const seen = new Set<string>();
   for (const [key, s] of Object.entries(costs.scopes ?? {})) {
     const name = key === "runs" || key.startsWith("run:") ? "Runs" : key === "forks" || key.startsWith("fork:") ? "Forks"
-      : key.startsWith("investigator") ? "Investigator" : key;
+      : key.startsWith("investigator") ? "Investigator" : key === "commentary" ? "Commentary" : key;
     const g = groups.get(name) ?? { name, tokens: 0, usd: null };
     g.tokens += scopeTokens(s);
     if (s.total_usd != null) g.usd = (g.usd ?? 0) + s.total_usd;

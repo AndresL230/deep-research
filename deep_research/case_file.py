@@ -47,6 +47,8 @@ class CaseFile:
                 "trace_comparison": None,
                 # The grader's checks of the verdict against the investigator's rubric, one per iteration.
                 "rubric": [],
+                # The live commentary's feed of notable moments across runs (commentary.py), oldest first.
+                "feed": [],
             }
             self._save()
         # Case files saved before these sections existed.
@@ -54,6 +56,7 @@ class CaseFile:
         self.data.setdefault("fix", None)
         self.data.setdefault("trace_comparison", None)
         self.data.setdefault("rubric", [])
+        self.data.setdefault("feed", [])
 
     # ---- plumbing ----
     def subscribe(self, fn: Listener) -> None:
@@ -103,6 +106,12 @@ class CaseFile:
         with self._lock:
             self.data["forks"].pop(fork_id, None)
             self._changed("forks")
+
+    def add_feed(self, item: dict, cap: int = 200) -> None:
+        """One item of the commentary feed, `{"t", "run", "model", "kind", "text"}`. Only the newest `cap` are kept."""
+        with self._lock:
+            self.data["feed"] = [*self.data.get("feed", []), item][-cap:]
+            self._changed("feed")
 
     def set_costs(self, costs: dict) -> None:
         with self._lock:

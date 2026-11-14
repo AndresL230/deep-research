@@ -8,7 +8,7 @@
 
 /** The case file's sections, in order. */
 export const CASE_SECTIONS = [
-  "config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "trace_comparison", "rubric", "costs",
+  "config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "trace_comparison", "rubric", "feed", "costs",
 ] as const;
 export type CaseSection = (typeof CASE_SECTIONS)[number];
 
@@ -122,6 +122,12 @@ export interface BatchConfig {
   robot_hidden_positions?: number | null;
   /** robot_arm only: the seeds each hidden position is run with (one to five). */
   robot_eval_seeds?: number[];
+  /** Live commentary (deep_research/commentary.py): captions of each run and a feed of notable moments. The server
+   *  turns it on for robot_arm and off for tabular when it is left out. */
+  commentary?: boolean | null;
+  commentary_model?: string;
+  /** The most the captions may spend in one batch; counted under the cost scope `commentary`. */
+  commentary_budget_usd?: number;
   /** Only on fixtures made by scripts/make_fixture.py: the agents' choices are scripted. */
   simulated?: boolean;
 }
@@ -401,7 +407,22 @@ export interface CaseFile {
   trace_comparison?: TraceComparison | null;
   /** The grader's checks of the verdict, oldest first. Absent on older case files. */
   rubric?: RubricCheck[];
+  /** The live commentary's notable moments, oldest first (at most 200). Absent on case files saved before it existed,
+   *  and empty in a batch without commentary. */
+  feed?: FeedItem[];
   costs: Costs;
+}
+
+/** One item of the commentary feed (deep_research/commentary.py). */
+export interface FeedItem {
+  /** Seconds on the run's own clock, like its events' `t`. */
+  t: number;
+  run: string;
+  /** The run's model, short: "Sonnet". May be empty. */
+  model: string;
+  /** What made it notable: "first_success", "drop", "label" (a step such as moving the can), "finish", "failed". */
+  kind: string;
+  text: string;
 }
 
 export const isPendingForks = (f: ForkExperiment | PendingForks): f is PendingForks => f.id === "pending";
@@ -419,6 +440,9 @@ export type AgentEvent = { t: number; /** Investigator only: which agent or suba
   /** Robot runs and fork children only: a motion file arrived from the VM (new, or changed since it last did), at
    *  `path`, batch-relative as in `motion_files`. Batches saved before these existed have none. */
   | { type: "motion"; path: string }
+  /** Runs with live commentary only: a short caption of what the run is doing. `final`: written once the run was
+   *  scored, with its claim and its result. */
+  | { type: "caption"; text: string; final?: boolean }
 );
 
 // ── the websocket ────────────────────────────────────────────────────────────
@@ -544,7 +568,7 @@ export interface Estimate {
 // The cost report (deep_research/cost_report.py, `GET /api/costs`): spend across every batch.
 export interface CostTokens { input: number; output: number; cache_read: number; cache_write: number }
 /** One total split two ways: by group (runs + forks + investigator + other) and by kind (model + vm). */
-export interface CostUsd { total: number; runs: number; forks: number; investigator: number; other: number; model: number; vm: number }
+export interface CostUsd { total: number; runs: number; forks: number; investigator: number; /** The live commentary; absent in reports from before it. */ commentary?: number; other: number; model: number; vm: number }
 export interface BatchCost {
   id: string;
   kind: "live" | "replay";
@@ -571,7 +595,7 @@ export interface ModelCost {
   batches: number;
   /** Model spend only: VM time belongs to no model. */
   usd: number;
-  usd_by_group: { runs: number; forks: number; investigator: number };
+  usd_by_group: { runs: number; forks: number; investigator: number; commentary?: number };
   usd_partial: boolean;
   tokens: CostTokens;
 }

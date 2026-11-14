@@ -12,6 +12,7 @@ import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { modelShort, pct, pts, tokens, usd } from "./format";
 import { ACT, type BatchVm } from "./model";
+import { tileCaption } from "./commentary";
 import { isMotionBatch, robotThumb, scoreWords } from "../robot/markup";
 import "../robot/mount";
 
@@ -214,6 +215,7 @@ function tile(vm: BatchVm, run: RunRecord, multiModel = false): string {
   return `<div class="bw-tile bw-tile--${run.status}" data-morph-key="tile:${attr(run.id)}" role="button" tabindex="0" data-act="${ACT.openRun}" data-arg="${attr(run.id)}" aria-label="${attr(label)}">`
     + `<div class="bw-hd"><span class="bw-id">${esc(run.id)}</span>${multiModel && run.model ? `<span class="bw-model" title="${attr(run.model)}">${esc(modelShort(run.model))}</span>` : ""}${pill(run.status)}</div>`
     + picture(vm, run, step, cells)
+    + tileCaption(vm, run)
     + `<div class="bw-step${run.status === "failed" ? " bw-step--failed" : ""}" title="${attr(step)}">${esc(truncate(step, 120))}</div>`
     + strip(run, todos, cells)
     + reveal(run, trapOf(vm.case), vm.case.config)
