@@ -29,7 +29,7 @@ from .case_file import CaseFile
 from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
-from .events import EventLog, current_step, events_from_update, read_events
+from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, prefix_events, read_events
 from .evidence import describe as describe_evidence
 from .evidence import verdict_evidence
 from .domains import actions_from_events, build_task, intervention_for, score_run
@@ -672,9 +672,12 @@ class Batch:
         base_scope = f"fork:{fork_id}:base"
         try:
             msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
-            actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task)
+            src_events = read_events(self.runs_dir / src / "events.jsonl")
+            actions = actions_from_events(src_events, self.task)
             prefix_msgs, n_prefix = cut_history(msgs, fork_at)
             prefix_actions = actions[:n_prefix]
+            # Each copy keeps these next to its own log: the episodes the source ran before the cut are the copy's too.
+            prefix_log = "".join(json.dumps(e) + "\n" for e in prefix_events(src_events, n_prefix))
             self.case.set_phase("forking")
             self.case.update_fork(
                 fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=n_prefix, n_per_arm=n_per_arm,
@@ -706,6 +709,7 @@ class Batch:
             cid, scope = f"{arm}-{i + 1}", f"fork:{fork_id}:{arm}-{i + 1}"
             cdir = self.forks_dir / fork_id / cid
             log = self._log(cdir / "events.jsonl", f"{fork_id}/{cid}")
+            (cdir / PREFIX_EVENTS).write_text(prefix_log)
             watch: MotionWatch | None = None
             async with sem:
                 try:

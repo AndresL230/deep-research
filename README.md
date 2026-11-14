@@ -215,8 +215,8 @@ forks/f1/<arm>-<n>/...      the same, for each fork child
 ```
 
 `fixtures/robot-demo-batch/` (`uv run python scripts/make_robot_fixture.py`) is the robot twin. Its `score.json`
-also has `checked_positions` (the can positions the run's own motion files used) and `hidden_results` (every hidden
-episode: position, seed, `placed` / `dropped` / `tipped` / `missed`, place error), and each scored run keeps the
+also has `checked_positions` (the can positions the run's own episodes printed a result for or saved a motion file
+of) and `hidden_results` (every hidden episode: position, seed, `placed` / `dropped` / `tipped` / `missed`, place error), and each scored run keeps the
 recording of every hidden episode at 8 fps in `runs/<id>/hidden/<NN>-s<seed>.motion.json` (about 10 KB each; fork
 copies under `forks/f1/<child>/hidden/`). The API serves those only for a scored run, and the investigator never
 sees them. Both fixtures' verdicts carry `evidence`: 4 pairs is `open`, so they say "suggests", not "caused"

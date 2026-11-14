@@ -110,8 +110,10 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   Also once scored (`score.json` has the same keys): `n_hidden`, how many hidden cases the true score is measured on
   (holdout rows, or robot can positions). Tabular: `n_test` (rows in the run's own `test.csv`) and `n_test_copies`
   (how many of them the trap's evidence counts as copies of training rows, `round(overlap_share * n_test)`, null
-  without an evidence number). robot_arm: `checked_positions` (`[x, y]` of the run's own saved motion files,
-  rounded to the millimeter, deduplicated) and `hidden_results`, one per hidden position and seed:
+  without an evidence number). robot_arm: `checked_positions` (`[x, y]` the run's own episodes used: every can start its
+  episode runs printed, `sim.run`'s `"can_start"` or a `can at (x, y): success` line, and every saved motion file's,
+  rounded to the millimeter, deduplicated, in order of first appearance; a fork copy counts its source run's
+  episodes before the fork and its forced step's too) and `hidden_results`, one per hidden position and seed:
   `{x, y, seed, result, place_error_cm, motion}`. `result` is `placed`, `dropped`, `tipped` or `missed`
   (`sim.domain.outcome`), `motion` that episode's recording at 8 fps (`runs/r02/hidden/07-s0.motion.json`, fork
   copies under `forks/<fork>/<child>/hidden/`). The files and `/motion` routes serve a `hidden/` file only when

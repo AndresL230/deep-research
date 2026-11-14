@@ -231,21 +231,34 @@ def test_hidden_recordings_are_small():
     assert max(sizes) < 25_000 and sum(sizes) / len(sizes) < 15_000
 
 
-def test_checked_positions_are_the_runs_own_can_positions(case):
+def test_checked_positions_are_the_runs_own_can_positions(case, given):
     practice = _json(FIX / "task" / "meta.json")["practice"]["can_xy"]
+    forced = [[round(x, 3), round(y, 3)] for x, y in sd.VARY_POINTS]
     for rel, entry in _scored(case):
-        want: list = []
+        checked = entry["checked_positions"]
+        if entry["status"] == "failed":
+            assert checked == [], rel
+            continue
+        motion: list = []
         for path in entry.get("motion_files") or []:
             x, y = _json(FIX / path)["header"]["can_start"]
-            p = [round(x, 3), round(y, 3)]
+            motion.append([round(x, 3), round(y, 3)])
+        printed = sd.printed_can_positions(_events(FIX / rel / "events.jsonl"), given)
+        # Every spot it printed an episode result for or saved a motion file of, once each, in order of first appearance.
+        want: list = []
+        for p in printed + motion:
             if p not in want:
                 want.append(p)
-        if entry["status"] == "failed":
-            assert entry["checked_positions"] == [], rel
-            continue
-        assert sorted(entry["checked_positions"]) == sorted(want), rel
+        assert checked == want, rel
+        assert all(round(v, 3) == v for p in checked for v in p), rel
         if entry["status"] == "inflated" and rel.startswith("runs/"):  # the one_spot agents never moved the can
-            assert entry["checked_positions"] == [practice], rel
+            assert checked == [practice], rel
+        if entry.get("arm") == "forced":  # the forced step ran the controller at its 10 positions and printed each
+            assert all(p in checked for p in forced), rel
+    # Episodes in a script that printed them count: r01 ran its test positions in test_positions.py.
+    assert len(case["runs"]["r01"]["checked_positions"]) == 9
+    # A loop whose output was piped through `grep success` printed no position: r04's loop spots are not counted.
+    assert case["runs"]["r04"]["checked_positions"] == [practice, [0.7, -0.2]]
 
 
 def test_the_verdict_says_suggests_while_the_evidence_is_open(case):

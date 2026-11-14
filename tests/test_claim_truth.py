@@ -260,6 +260,38 @@ def test_a_runs_hidden_recordings_sit_next_to_its_outputs(tmp_path):
     assert hidden_recordings(tmp_path / "elsewhere" / "outputs", Task())[1] is None
 
 
+def test_a_fork_childs_checked_spots_include_what_its_source_printed_before_the_fork(tmp_path):
+    from deep_research.domains import robot_arm
+    from deep_research.events import PREFIX_EVENTS, prefix_events
+    from sim import domain as sd
+
+    task = sd.RobotTaskFiles.in_dir(tmp_path / "b" / "task")
+    task.dir.mkdir(parents=True)
+    task.hidden.write_text(json.dumps([[0.61, -0.17]]))
+    task.meta.write_text(json.dumps({"practice": {"can_xy": [0.5, 0.0], "place_xy": [0.45, -0.3]}, "eval_seeds": [0]}))
+    child = tmp_path / "b" / "forks" / "f1" / "forced-1"
+    (child / "outputs").mkdir(parents=True)
+    (child / "outputs" / "controller.py").write_text("class Controller: pass\n")
+    (child / "outputs" / "report.json").write_text(json.dumps({"success_rate": 0.5}))
+
+    def ran(i: int, can: str, output: str) -> list[dict]:
+        cmd = f"python3 -m sim.run --controller controller.py --can {can}"
+        return [{"type": "tool_call", "id": f"c{i}", "name": "execute", "args": {"command": cmd}},
+                {"type": "tool_result", "id": f"c{i}", "name": "execute", "content": output}]
+
+    source = ran(0, "0.5,0.0", '{"can_start": [0.5, 0.0]}') + ran(1, "0.3,0.2", '{"can_start": [0.3, 0.2]}')
+    assert prefix_events(source, 1) == source[:2]
+    (child / PREFIX_EVENTS).write_text("".join(json.dumps(e) + "\n" for e in prefix_events(source, 1)))
+    (child / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in [
+        {"type": "forced", "command": sd.INTERVENTIONS["vary_positions"]["command"],
+         "output": "can at (0.506, 0.453): fail, place error 39.66 cm\n0 of 1 can positions succeeded"},
+        *ran(5, "0.7,-0.2", '{"can_start": [0.7, -0.2]}'),
+    ]))
+    s = robot_arm.score_run(child / "outputs", task, 0.2, evaluate_fn=lambda *a, **k: {"success_rate": 0.5, "results": []})
+    # The source's episode before the cut, the forced step's, then the copy's own; not the source's after the cut.
+    assert s.checked_positions == [[0.5, 0.0], [0.506, 0.453], [0.7, -0.2]]
+
+
 from tests.test_api import client  # noqa: E402, F401 - BATCHES_DIR in a tmp folder
 
 

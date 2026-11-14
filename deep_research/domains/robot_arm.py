@@ -27,6 +27,7 @@ A robot batch on disk (`batches/<id>/`):
                                                   it is scored, served only once the case lists it, never in a
                                                   VM and never readable by the investigator
     forks/<fork>/<child>/outputs/..., hidden/...  the same for each fork child
+    forks/<fork>/<child>/prefix_events.jsonl      the source run's events up to the fork (events.PREFIX_EVENTS)
 
 and in `case/case.json`, besides what every batch has (see deep_research/domains/__init__.py):
 
@@ -52,7 +53,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import ROOT_DIR, VM_WORKSPACE, BatchConfig
-from ..events import read_events
+from ..events import PREFIX_EVENTS, read_events
 from . import ConfigError, Domain, DomainWords, InvestigatorWords, StepWords
 
 SIM_DIR = ROOT_DIR / "sim"
@@ -116,18 +117,28 @@ def hidden_recordings(outputs_dir: Path, task: Any) -> tuple[Path, str | None]:
 
 def score_run(outputs_dir: Path, task: Any, inflation_threshold: float, evaluate_fn=None):
     """sim.domain.score_run, with the run's actions read from its `events.jsonl` next to `outputs_dir`: they say
-    which can positions it tried when its motion files cannot. Every hidden episode is recorded under the run's
-    `hidden/` folder (`hidden_recordings`), on this server only."""
+    which can positions it tried when its motion files cannot. The can starts its episodes printed, in those events
+    and, for a fork child, in its source run's events up to the fork (`PREFIX_EVENTS`), join its motion files in
+    `checked_positions`. Every hidden episode is recorded under the run's `hidden/` folder (`hidden_recordings`), on
+    this server only."""
     d = _sim()
     try:
-        actions = d.actions_from_events(read_events(outputs_dir.parent / "events.jsonl"), task.given_files())
+        events = read_events(outputs_dir.parent / "events.jsonl")
+    except Exception:  # noqa: BLE001
+        events = []
+    try:
+        actions = d.actions_from_events(events, task.given_files())
     except Exception:  # noqa: BLE001 - the actions only feed the evidence number
         actions = None
+    try:
+        printed = d.printed_can_positions(read_events(outputs_dir.parent / PREFIX_EVENTS) + events, task.given_files())
+    except Exception:  # noqa: BLE001 - the motion files still give the checked positions
+        printed = None
     folder, prefix = hidden_recordings(outputs_dir, task)
     if folder.exists():
         shutil.rmtree(folder)  # scored again: no recording of the earlier scoring stays behind
     return d.score_run(outputs_dir, task, inflation_threshold, actions=actions, evaluate_fn=evaluate_fn,
-                       record_dir=folder, motion_prefix=prefix)
+                       record_dir=folder, motion_prefix=prefix, printed_positions=printed)
 
 
 def steps():

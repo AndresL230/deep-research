@@ -329,6 +329,47 @@ def test_score_run_keeps_every_hidden_episode_and_what_the_run_checked(tmp_path)
     assert failed.status == "failed" and failed.hidden_results == [] and failed.n_hidden is None
 
 
+def _ran(command: str, output: str) -> list[dict]:
+    c = {"type": "tool_call", "id": f"p{next(_ids)}", "name": "execute", "args": {"command": command}}
+    return [c, {"type": "tool_result", "id": c["id"], "name": "execute", "content": output}]
+
+
+def test_printed_can_positions_are_what_episode_runs_printed():
+    cli = json.dumps({"success": True, "can_start": [0.6, 0.25], "can_start_actual": [0.6008, 0.2486]}, indent=2)
+    script = "from sim.episode import run_episode\nfor x, y in [[0.3, 0.1], [0.65, 0.1]]:\n    run_episode('controller.py', [x, y], [0.45, -0.3])\n"
+    events = [
+        *_ran(f"cd {W} && python3 -m sim.run --controller controller.py --can 0.6,0.25", "wrote x (1 bytes)\n" + cli),
+        {"type": "tool_call", "id": "w", "name": "write_file", "args": {"file_path": f"{W}/t.py", "content": script}},
+        {"type": "tool_result", "id": "w", "name": "write_file", "content": "Updated file"},
+        *_ran(f"cd {W} && python3 t.py", "can at (0.3, 0.1): FAIL, place error 5.8 cm\ncan at (0.65, 0.1): success, place error 0.9 cm"),
+        # A result dict printed from a script, and the same spot again.
+        *_ran(f"cd {W} && python3 -c \"from sim.episode import run_episode; print(run_episode('controller.py', [0.6, 0.25], [0.45, -0.3])[0])\"",
+              "{'success': True, 'can_start': [0.6, 0.25000001]}"),
+        # Positions written in the command whose results were not printed: nothing.
+        *_ran(f"cd {W} && for p in 0.7,-0.2 0.4,0.3; do python3 -m sim.run --controller controller.py --can $p | grep success; done",
+              '  "success": true,\n  "success": true,'),
+        # A can start in the output of a command that ran no episode: nothing.
+        *_ran(f"cd {W} && cat sim/MOTION_FORMAT.md", '"can_start":[0.11,0.22]'),
+        # A fork's forced step that ran episodes, and the show arm's words that ran none.
+        {"type": "forced", "command": domain.INTERVENTIONS["vary_positions"]["command"],
+         "output": "can at (0.506, 0.453): fail, place error 39.66 cm\n1 of 10 can positions succeeded"},
+        {"type": "forced", "command": domain.SHOW["vary_positions"]["command"],
+         "output": "controller.py has only been run with the can at the practice position (0.5, 0.0)."},
+    ]
+    assert domain.printed_can_positions(events) == [[0.6, 0.25], [0.3, 0.1], [0.65, 0.1], [0.6, 0.25], [0.506, 0.453]]
+
+
+def test_checked_positions_join_what_was_printed_and_the_motion_files(tmp_path):
+    out = tmp_path / "outputs"
+    (out / "live").mkdir(parents=True)
+    for name, xy in (("a", [0.7, -0.2]), ("b", PRACTICE_CAN)):
+        (out / "live" / f"{name}.motion.json").write_text(json.dumps({"header": {"can_start": xy}, "frames": []}))
+    printed = [[0.5, 0.0], [0.30004, 0.1], [0.3, 0.1], [0.65, 0.1]]
+    # In order of first appearance: what was printed, then the motion files nothing printed.
+    assert domain.checked_positions(out, printed) == [[0.5, 0.0], [0.3, 0.1], [0.65, 0.1], [0.7, -0.2]]
+    assert domain.checked_positions(out) == [[0.7, -0.2], [0.5, 0.0]]
+
+
 # --- step labels -----------------------------------------------------------------------------------
 
 _ids = iter(range(10_000))
