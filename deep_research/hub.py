@@ -255,3 +255,100 @@ def pusher() -> Pusher | None:
         if _pusher is None or _pusher.cfg != cfg:
             _pusher = Pusher(cfg)
         return _pusher
+
+
+# ── uploading saved batches ──────────────────────────────────────────────────
+
+
+def started_from_id(batch_id: str, year: int | None = None) -> str | None:
+    """A batch id is `MMDD-HHMMSS-xxxx`, in this machine's local time: turn it into an ISO time, or None."""
+    import re
+
+    m = re.match(r"^(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-", batch_id)
+    if not m:
+        return None
+    month, day, hh, mm, ss = (int(x) for x in m.groups())
+    try:
+        t = time.mktime((year or time.localtime().tm_year, month, day, hh, mm, ss, 0, 0, -1))
+    except (OverflowError, ValueError):
+        return None
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(t))
+
+
+def event_logs(batch_dir) -> dict[str, Any]:
+    """Every event log a saved batch has, by hub key: runs ("r01"), fork children ("f1/control-1"), "investigator"."""
+    from pathlib import Path
+
+    d = Path(batch_dir)
+    logs: dict[str, Path] = {}
+    for p in sorted((d / "runs").glob("*/events.jsonl")):
+        logs[p.parent.name] = p
+    for p in sorted((d / "forks").glob("*/*/events.jsonl")):
+        logs[f"{p.parent.parent.name}/{p.parent.name}"] = p
+    if (d / "investigator" / "events.jsonl").is_file():
+        logs["investigator"] = d / "investigator" / "events.jsonl"
+    return logs
+
+
+def queue_batch(p: Pusher, batch_dir) -> tuple[int, int]:
+    """Queue a saved batch's case file and every event log on `p`. Returns (logs, events)."""
+    import json
+    from pathlib import Path
+
+    d = Path(batch_dir)
+    case = json.loads((d / "case" / "case.json").read_text())
+    p.push_case(d.name, case, started_from_id(d.name))
+    n_logs = n_events = 0
+    for key, path in event_logs(d).items():
+        n_logs += 1
+        seq = 0
+        for line in path.read_text().splitlines():
+            if line.strip():
+                p.push_event(d.name, key, seq, json.loads(line))
+                seq += 1
+        n_events += seq
+    return n_logs, n_events
+
+
+def _main(argv: list[str]) -> int:
+    """`python -m deep_research.hub push-all`: upload every saved batch in batches/ (never the fixtures)."""
+    import argparse
+
+    from dotenv import load_dotenv
+
+    from .config import BATCHES_DIR, ROOT_DIR
+
+    load_dotenv(ROOT_DIR / ".env")
+    parser = argparse.ArgumentParser(prog="python -m deep_research.hub")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    push = sub.add_parser("push-all", help="upload every saved batch to the hub")
+    push.add_argument("--only", nargs="*", help="batch ids to upload (default: all)")
+    sub.add_parser("status", help="show the hub settings and what it holds")
+    args = parser.parse_args(argv)
+
+    cfg = config()
+    if cfg is None:
+        print("The hub is not set up: add HUB_URL and HUB_TOKEN to .env")
+        return 1
+    if args.cmd == "status":
+        rows = list_batches()
+        print(f"hub {cfg.url} as {cfg.machine}: " + ("unreachable" if rows is None else f"{len(rows)} batches"))
+        for r in rows or []:
+            print(f"  {r['id']:20s} {r['machine']:20s} {r['phase']}")
+        return 0 if rows is not None else 1
+
+    p = Pusher(cfg)
+    dirs = [d for d in sorted(BATCHES_DIR.iterdir()) if (d / "case" / "case.json").is_file()] if BATCHES_DIR.exists() else []
+    if args.only:
+        dirs = [d for d in dirs if d.name in set(args.only)]
+    for d in dirs:
+        n_logs, n_events = queue_batch(p, d)
+        ok = p.flush()
+        print(f"{d.name}: {n_logs} logs, {n_events} events {'sent' if ok else 'NOT sent (see the warnings above)'}")
+    return 0 if p.flush() else 1
+
+
+if __name__ == "__main__":
+    import sys
+
+    raise SystemExit(_main(sys.argv[1:]))

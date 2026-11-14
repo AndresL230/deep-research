@@ -168,3 +168,140 @@ def test_reads_return_none_when_the_hub_is_down(fake):
     c = client_for(fake)
     assert hub.list_batches(client=c) is None
     assert hub.get_case("b1", client=c) is None
+
+
+# ---- wiring: event logs, batches, the API, the backfill ----
+
+
+class RecordingPusher:
+    """Stands in for hub.Pusher: records what would be sent."""
+
+    def __init__(self):
+        self.cases: list[tuple[str, dict, str | None]] = []
+        self.events: list[tuple[str, str, int, dict]] = []
+
+    def push_case(self, batch_id, case, started_at=None):
+        self.cases.append((batch_id, case, started_at))
+
+    def push_event(self, batch_id, log_key, seq, event):
+        self.events.append((batch_id, log_key, seq, event))
+
+    def close(self, timeout=5.0):
+        pass
+
+
+def test_event_log_numbers_events_and_continues_after_a_reopen(tmp_path):
+    from deep_research.events import EventLog
+
+    seen = []
+    log = EventLog(tmp_path / "events.jsonl", on_write=lambda seq, ev: seen.append((seq, ev["type"])))
+    log.write({"type": "thought", "text": "a"})
+    log.write({"type": "thought", "text": "b"})
+    log.close()
+    again = EventLog(tmp_path / "events.jsonl", on_write=lambda seq, ev: seen.append((seq, ev["type"])))
+    again.write({"type": "todos", "todos": []})
+    again.close()
+    assert seen == [(0, "thought"), (1, "thought"), (2, "todos")]
+
+
+def test_a_failing_callback_never_loses_the_event(tmp_path):
+    from deep_research.events import EventLog, read_events
+
+    def boom(seq, ev):
+        raise RuntimeError("hub down")
+
+    log = EventLog(tmp_path / "events.jsonl", on_write=boom)
+    log.write({"type": "thought", "text": "kept"})
+    log.close()
+    assert read_events(tmp_path / "events.jsonl")[0]["text"] == "kept"
+
+
+def test_a_batch_pushes_its_case_and_its_events(tmp_path, monkeypatch):
+    from deep_research import batch as batch_mod
+    from deep_research.config import BatchConfig
+
+    rec = RecordingPusher()
+    monkeypatch.setattr(batch_mod.hub, "pusher", lambda: rec)
+    b = batch_mod.Batch(BatchConfig(n_runs=1), batch_id="b1", root=tmp_path)
+    assert rec.cases and rec.cases[-1][0] == "b1" and rec.cases[-1][1]["config"]["n_runs"] == 1
+    b.case.update_run("r01", status="running")
+    assert rec.cases[-1][1]["runs"]["r01"]["status"] == "running"
+    # A copy is pushed: later changes do not reach what was queued.
+    queued = rec.cases[-1][1]
+    b.case.update_run("r01", status="honest")
+    assert queued["runs"]["r01"]["status"] == "running"
+    log = b._log(tmp_path / "r01.jsonl", "r01")
+    log.write({"type": "thought", "text": "hi"})
+    flog = b._log(tmp_path / "c1.jsonl", "f1/control-1")
+    flog.write({"type": "forced", "command": "x", "output": "y"})
+    assert [(e[1], e[2], e[3]["type"]) for e in rec.events] == [("r01", 0, "thought"), ("f1/control-1", 0, "forced")]
+
+
+def test_without_the_hub_a_batch_pushes_nothing(tmp_path, monkeypatch):
+    from deep_research import batch as batch_mod
+    from deep_research.config import BatchConfig
+
+    monkeypatch.delenv("HUB_URL", raising=False)
+    b = batch_mod.Batch(BatchConfig(n_runs=1), batch_id="b2", root=tmp_path)
+    assert b._hub is None
+    b._log(tmp_path / "r.jsonl", "r01").write({"type": "thought", "text": "local only"})
+
+
+@pytest.fixture
+def api_client(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from deep_research import api
+
+    monkeypatch.setattr(api, "BATCHES_DIR", tmp_path / "batches")
+    monkeypatch.setattr(api, "STATS_FILE", tmp_path / "batches" / "_stats.json")
+    monkeypatch.setattr(api, "_hub_cache", {})
+    monkeypatch.setenv("HUB_URL", "https://hub.test")
+    monkeypatch.setenv("HUB_TOKEN", "t0k")
+    remote_case = {"phase": "done", "config": {"dataset": "pima", "analyst_model": "m"}, "runs": {"r01": {"id": "r01", "status": "honest"}},
+                   "forks": {}, "costs": {"spent_usd": 0.5, "scopes": {"run:r01": {"input_tokens": 10, "output_tokens": 2, "total_usd": 0.5, "model_usd": 0.5, "vm_usd": 0.0}}}}
+    monkeypatch.setattr(api.hub, "load_runner_env", lambda client=None: [])
+    monkeypatch.setattr(api.hub, "list_batches", lambda client=None: [{"id": "1114-050000-abcd", "machine": "laptop-b", "phase": "done"}])
+    monkeypatch.setattr(api.hub, "all_cases", lambda client=None: [{"id": "1114-050000-abcd", "machine": "laptop-b", "case": remote_case}])
+    monkeypatch.setattr(api.hub, "get_case", lambda bid, client=None: remote_case if bid == "1114-050000-abcd" else None)
+    monkeypatch.setattr(api.hub, "get_events", lambda bid, key, client=None: [{"t": 1, "type": "thought", "text": f"{bid}:{key}"}])
+    monkeypatch.setattr(api.hub, "pusher", lambda: None)
+    with TestClient(api.app) as c:
+        yield c
+
+
+def test_the_api_lists_and_opens_batches_from_the_hub(api_client):
+    batches = api_client.get("/api/batches").json()
+    remote = [b for b in batches if b["id"] == "1114-050000-abcd"]
+    assert remote == [{"id": "1114-050000-abcd", "kind": "replay", "machine": "laptop-b", "remote": True}]
+    assert any(b["id"] == "demo-batch" and "remote" not in b for b in batches)
+    assert api_client.get("/api/batches/1114-050000-abcd/case").json()["phase"] == "done"
+    assert api_client.get("/api/batches/1114-050000-abcd/runs/r01/events").json()[0]["text"] == "1114-050000-abcd:r01"
+    assert api_client.get("/api/batches/1114-050000-abcd/forks/f1/control-1/events").json()[0]["text"].endswith(":f1/control-1")
+    assert api_client.get("/api/batches/1114-050000-abcd/investigator/events").json()[0]["text"].endswith(":investigator")
+    assert api_client.get("/api/batches/nope/case").status_code == 404
+    with api_client.websocket_connect("/api/batches/1114-050000-abcd/ws") as ws:
+        assert ws.receive_json()["case"]["phase"] == "done"
+
+
+def test_the_cost_screen_includes_the_team(api_client):
+    report = api_client.get("/api/costs").json()
+    assert "1114-050000-abcd" in [b["id"] for b in report["batches"]]
+    assert report["totals"]["usd"]["total"] >= 0.5
+
+
+def test_push_all_uploads_a_saved_batch(fake, tmp_path):
+    d = tmp_path / "1114-024515-6bad"
+    (d / "case").mkdir(parents=True)
+    (d / "case" / "case.json").write_text(json.dumps({"phase": "done", "runs": {}}))
+    (d / "runs" / "r01").mkdir(parents=True)
+    (d / "runs" / "r01" / "events.jsonl").write_text('{"t": 1, "type": "thought", "text": "a"}\n{"t": 2, "type": "thought", "text": "b"}\n')
+    (d / "forks" / "f1" / "control-1").mkdir(parents=True)
+    (d / "forks" / "f1" / "control-1" / "events.jsonl").write_text('{"t": 1, "type": "forced", "command": "x", "output": "y"}\n')
+    c = client_for(fake)
+    p = hub.Pusher(hub.config(), client=c)
+    assert hub.queue_batch(p, d) == (2, 3)
+    assert p.flush(c)
+    assert fake.batches["1114-024515-6bad"]["started_at"].startswith(f"{__import__('time').localtime().tm_year}-11-14T02:45:15")
+    assert sorted(fake.events) == [("1114-024515-6bad", "f1/control-1"), ("1114-024515-6bad", "r01")]
+    assert hub.started_from_id("demo-batch") is None

@@ -11,6 +11,7 @@ import logging
 import mimetypes
 import os
 import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -28,6 +29,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 from . import datasets, user_scripts  # noqa: E402
 from .batch import Batch  # noqa: E402 - needs the environment loaded first
+from . import hub  # noqa: E402
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
 from .costs import OverBudget, estimate_batch_usd  # noqa: E402
@@ -74,8 +76,13 @@ def lab_client() -> httpx.AsyncClient:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Keys this machine does not have come from the team hub, when one is set up (hub.py).
+    await asyncio.to_thread(hub.load_runner_env)
     yield
     await close_all()
+    pusher = hub.pusher()
+    if pusher is not None:
+        await asyncio.to_thread(pusher.close)  # send what is still queued
     if _lab_client is not None:
         await _lab_client.aclose()
 
@@ -117,6 +124,40 @@ def _inside(base: Path, candidate: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+# ---- the team hub: batches other machines ran ----
+
+HUB_CACHE_SECONDS = 10.0
+_hub_cache: dict[str, tuple[float, object]] = {}
+
+
+def _hub_cached(name: str, fetch) -> object:
+    """A hub read shared for a few seconds, so the home screen and the cost screen do not wait on it each time."""
+    hit = _hub_cache.get(name)
+    if hit and time.monotonic() - hit[0] < HUB_CACHE_SECONDS:
+        return hit[1]
+    value = fetch()
+    if value is not None:
+        _hub_cache[name] = (time.monotonic(), value)
+    return value
+
+
+def _is_local(batch_id: str) -> bool:
+    return any((root / batch_id / "case" / "case.json").exists() for root in (BATCHES_DIR, FIXTURES_DIR))
+
+
+def _remote_case(batch_id: str) -> dict:
+    case = hub.get_case(batch_id) if hub.enabled() else None
+    if case is None:
+        raise HTTPException(404, f"no batch {batch_id}")
+    return case
+
+
+def _remote_events(batch_id: str, key: str) -> list[dict]:
+    if not hub.enabled():
+        raise HTTPException(404, f"no batch {batch_id}")
+    return hub.get_events(batch_id, key) or []
 
 
 def _batch_dir(batch_id: str) -> Path:
@@ -250,6 +291,11 @@ def list_batches():
             for d in sorted(root.iterdir()):
                 if (d / "case" / "case.json").exists():
                     out.append({"id": d.name, "kind": "live" if _running(d.name) else "replay"})
+    # Batches other machines ran, from the team hub. They open as replays, read from the hub.
+    seen = {b["id"] for b in out}
+    for row in (_hub_cached("batches", hub.list_batches) if hub.enabled() else None) or []:
+        if isinstance(row, dict) and row.get("id") not in seen:
+            out.append({"id": row["id"], "kind": "replay", "machine": row.get("machine"), "remote": True})
     return out
 
 
@@ -273,6 +319,11 @@ def costs():
             except (OSError, ValueError):
                 continue  # a case file that cannot be read is left out, not a failed report
             entries.append({"id": d.name, "kind": "live" if _running(d.name) else "replay", "case": case, "mtime": mtime})
+    # The rest of the team's spend, from the hub.
+    for row in (_hub_cached("cases", hub.all_cases) if hub.enabled() else None) or []:
+        if isinstance(row, dict) and row.get("id") not in seen and isinstance(row.get("case"), dict):
+            seen.add(row["id"])
+            entries.append({"id": row["id"], "kind": "replay", "case": row["case"], "mtime": None, "machine": row.get("machine")})
     return cost_report(entries)
 
 
@@ -331,23 +382,31 @@ def _with_charts(case: dict, root: Path) -> dict:
 
 @app.get("/api/batches/{batch_id}/case")
 def get_case(batch_id: str):
+    if not _is_local(batch_id):
+        return _remote_case(batch_id)
     root = _batch_dir(batch_id)
     return _with_charts(json.loads((root / "case" / "case.json").read_text()), root)
 
 
+def _events(batch_id: str, rel: str, key: str) -> list[dict]:
+    if not _is_local(batch_id):
+        return _remote_events(batch_id, key)
+    return read_events(_batch_dir(batch_id) / rel / "events.jsonl")
+
+
 @app.get("/api/batches/{batch_id}/runs/{run_id}/events")
 def run_events(batch_id: str, run_id: str):
-    return read_events(_batch_dir(batch_id) / "runs" / run_id / "events.jsonl")
+    return _events(batch_id, f"runs/{run_id}", run_id)
 
 
 @app.get("/api/batches/{batch_id}/forks/{fork_id}/{child}/events")
 def fork_events(batch_id: str, fork_id: str, child: str):
-    return read_events(_batch_dir(batch_id) / "forks" / fork_id / child / "events.jsonl")
+    return _events(batch_id, f"forks/{fork_id}/{child}", f"{fork_id}/{child}")
 
 
 @app.get("/api/batches/{batch_id}/investigator/events")
 def investigator_events(batch_id: str):
-    return read_events(_batch_dir(batch_id) / "investigator" / "events.jsonl")
+    return _events(batch_id, "investigator", "investigator")
 
 
 @app.get("/api/batches/{batch_id}/files/{path:path}")

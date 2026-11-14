@@ -17,6 +17,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from . import hub  # noqa: E402
+
+hub.load_runner_env()  # keys this machine does not have come from the team hub
+
 from .batch import Batch  # noqa: E402
 from .config import BATCHES_DIR, BatchConfig  # noqa: E402
 

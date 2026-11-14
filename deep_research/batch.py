@@ -16,6 +16,7 @@ from langchain_core.messages import messages_from_dict, messages_to_dict
 from langchain_daytona import DaytonaSandbox
 from langgraph.types import Command
 
+from . import hub
 from . import sandboxes as vms
 from .agents.analyst import build_analyst
 from .agents.investigator import build_investigator
@@ -58,7 +59,25 @@ class Batch:
         self._investigator = None
         self._inv_config: dict | None = None
         self.case.subscribe(lambda section, value: self._emit({"kind": "case", "section": section, "value": value}))
+        # The team hub (hub.py), when it is set up: every change to the case file and every agent event goes there.
+        self._hub = hub.pusher()
+        self.started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        if self._hub is not None:
+            self.case.subscribe(lambda section, value: self._push_case())
         self.case.set_config(cfg.model_dump())
+
+    # ---- the team hub ----
+    def _push_case(self) -> None:
+        # Called inside the case file's lock, so the data is consistent; copy it, the push happens later elsewhere.
+        if self._hub is not None:
+            self._hub.push_case(self.id, json.loads(json.dumps(self.case.data, default=str)), self.started_at)
+
+    def _log(self, path: Path, key: str) -> EventLog:
+        """An event log whose events also go to the hub, under `key` (a run, a fork child, or "investigator")."""
+        pusher = self._hub
+        if pusher is None:
+            return EventLog(path)
+        return EventLog(path, on_write=lambda seq, ev: pusher.push_event(self.id, key, seq, ev))
 
     # ---- live updates to the UI ----
     def subscribe(self) -> asyncio.Queue:
@@ -131,7 +150,7 @@ class Batch:
 
     async def run_one(self, run_id: str) -> None:
         scope, rdir = f"run:{run_id}", self.runs_dir / run_id
-        log = EventLog(rdir / "events.jsonl")
+        log = self._log(rdir / "events.jsonl", run_id)
         self.case.update_run(run_id, status="starting")
         try:
             sb = await asyncio.to_thread(vms.create_vm, f"{self.id}-{run_id}")
@@ -255,7 +274,7 @@ class Batch:
         async def child(arm: str, i: int) -> None:
             cid, scope = f"{arm}-{i + 1}", f"fork:{fork_id}:{arm}-{i + 1}"
             cdir = self.forks_dir / fork_id / cid
-            log = EventLog(cdir / "events.jsonl")
+            log = self._log(cdir / "events.jsonl", f"{fork_id}/{cid}")
             async with sem:
                 try:
                     try:
@@ -349,7 +368,7 @@ class Batch:
         await self._stream_investigator(Command(resume={"decisions": [decision]}))
 
     async def _stream_investigator(self, inp) -> None:
-        log = EventLog(self.dir / "investigator" / "events.jsonl")
+        log = self._log(self.dir / "investigator" / "events.jsonl", "investigator")
         try:
             async for chunk in self._investigator.astream(inp, self._inv_config, stream_mode="updates", subgraphs=True):
                 ns, update = chunk if isinstance(chunk, tuple) else ((), chunk)
