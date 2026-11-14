@@ -28,6 +28,7 @@ def client(tmp_path, monkeypatch):
 def test_lists_and_serves_the_demo_batch(client):
     listed = {b["id"]: b for b in client.get("/api/batches").json()}
     assert listed[DEMO]["kind"] == "replay" and listed[DEMO]["summary"]["simulated"] is True
+    assert listed[DEMO]["fixture"] is True
     case = client.get(f"/api/batches/{DEMO}/case").json()
     assert case["config"]["simulated"] is True and case["runs"]
     events = client.get(f"/api/batches/{DEMO}/runs/r01/events").json()
@@ -651,7 +652,7 @@ def test_saved_batch_is_listed_as_resumable_and_comes_back_live(client, tmp_path
     _saved_batch(tmp_path, forks={"pending": {"status": "awaiting_approval", "n_per_arm": 4}})
     monkeypatch.setattr(batch_mod, "BATCHES_DIR", tmp_path / "batches")
     saved = next(it for it in client.get("/api/batches").json() if it["id"] == "saved")
-    assert saved["kind"] == "replay" and saved["resumable"] is True
+    assert saved["kind"] == "replay" and saved["resumable"] is True and "fixture" not in saved
     # Stopped at its fork, waiting for approval.
     assert saved["summary"]["verdict"] == {"state": "awaiting_approval"}
     # The fixture itself is never resumable: it is simulated and has its verdict.

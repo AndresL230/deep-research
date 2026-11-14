@@ -475,6 +475,8 @@ def list_batches():
                     item = {"id": d.name, "kind": "live" if _running(d.name) else "replay"}
                     if root is BATCHES_DIR and _resumable(d.name):
                         item["resumable"] = True
+                    if root is FIXTURES_DIR:
+                        item["fixture"] = True
                     item["summary"] = _disk_summary(d.name, path, root == FIXTURES_DIR)
                     out.append(item)
     # Batches other machines ran, from the team hub. They open as replays, read from the hub.
