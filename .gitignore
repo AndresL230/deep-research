@@ -21,3 +21,6 @@ dist/
 
 # Claude Code worktrees
 .claude/
+
+# The panda meshes are downloaded by sim/fetch_assets.py, not committed.
+sim/assets/
