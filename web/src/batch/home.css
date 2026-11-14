@@ -68,6 +68,10 @@
 .hm-seg-o:hover span { color:var(--fg); }
 .hm-seg-o input:checked + span { color:var(--fg); background:var(--surface); box-shadow:0 0 0 1px var(--border-strong); }
 .hm-seg-o input:focus-visible + span { outline:2px solid var(--accent); outline-offset:1px; }
+/* an option that cannot be picked yet ("Your upload" before a controller is uploaded) */
+.hm-seg-o input:disabled { cursor:default; }
+.hm-seg-o input:disabled + span, .hm-seg-o:hover input:disabled + span { color:var(--fg-40); }
+
 /* The analyst models: a multi-choice row in the same frame as .hm-seg, each chip on or off. */
 .hm-chips { display:flex; height:32px; padding:2px; gap:2px; box-sizing:border-box; border:1px solid var(--border-strong); border-radius:8px; background:var(--bg); }
 .hm-chip { flex:1 1 0; min-width:0; padding:0 12px; border-radius:6px; font-size:12.5px; font-weight:500; color:var(--fg-55); white-space:nowrap; transition:color var(--fx-fast) var(--fx-ease), background var(--fx-fast) var(--fx-ease); }
@@ -167,3 +171,8 @@
 /* A teammate's batch, from the hub: whose machine ran it. */
 .hm-batch-from { display:block; margin-top:1px; font-family:var(--sans); font-size:10.5px; color:var(--fg-55); overflow:hidden; text-overflow:ellipsis; }
 .hm-batch:has(.hm-batch-from) { height:auto; min-height:40px; padding-top:5px; padding-bottom:5px; }
+
+/* Three choices need the whole field: let the segment grow and each option shrink to its text. */
+.hm-seg--3 { width:100%; }
+.hm-seg--3 .hm-seg-o { flex:1 1 0; min-width:0; }
+.hm-seg--3 .hm-seg-o span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

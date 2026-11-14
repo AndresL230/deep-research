@@ -651,6 +651,56 @@ async def test_two_resumes_at_once_build_one_batch_and_one_investigator(tmp_path
         t.cancel()
 
 
+# ---- uploaded robot controllers ----
+
+GOOD_CONTROLLER = b'''import numpy as np
+from sim.control import GRIPPER_OPEN, HOME_QPOS
+
+class Controller:
+    def reset(self, task):
+        self.task = task
+        self.done = False
+
+    def act(self, obs):
+        return list(HOME_QPOS) + [GRIPPER_OPEN]
+'''
+
+
+def test_upload_a_controller_and_start_checks_it(client, tmp_path, monkeypatch):
+    from deep_research import controllers
+    from deep_research import config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "CONTROLLERS_DIR", tmp_path / "controllers")
+    res = client.post("/api/controllers?name=my_arm.py", content=GOOD_CONTROLLER)
+    assert res.status_code == 200, res.text
+    info = res.json()
+    assert info["id"].startswith("ct-") and info["name"] == "my_arm.py" and info["lines"] == 10
+    assert info["imports"] == ["numpy", "sim"] and info["missing_packages"] == []
+    assert client.get("/api/controllers").json() == [info]
+    text, loaded = controllers.load(info["id"])
+    assert "class Controller" in text and loaded == info
+
+    # Refusals say why.
+    bad = client.post("/api/controllers", content=b"def act(obs): pass\n")
+    assert bad.status_code == 422 and "no `class Controller`" in bad.json()["detail"]
+    bad = client.post("/api/controllers", content=b"class Controller:\n    def reset(self, t): pass\n")
+    assert bad.status_code == 422 and "missing the method act" in bad.json()["detail"]
+    assert client.post("/api/controllers", content=b"class Controller(\n").status_code == 422
+    assert client.post("/api/controllers", content=b"x" * (200 * 1024 + 1)).status_code == 413
+    # A subclass may inherit the methods, and an import the VM lacks is a warning.
+    sub = client.post("/api/controllers?name=sub.py", content=b"import torch\nfrom sim.controllers.baseline import Controller as B\nclass Controller(B):\n    pass\n")
+    assert sub.status_code == 200 and sub.json()["missing_packages"] == ["torch"]
+
+    # Starting a robot batch from an upload needs a controller that exists; the config is refused before any VM.
+    monkeypatch.setattr(api, "Batch", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not build")))
+    body = {"domain": "robot_arm", "robot_start": "uploaded", "n_runs": 1}
+    res = client.post("/api/batches", json=body)
+    assert res.status_code == 422 and "no controller was uploaded" in res.json()["detail"]
+    res = client.post("/api/batches", json={**body, "robot_controller": "ct-00000000"})
+    assert res.status_code == 422 and "unknown controller" in res.json()["detail"]
+    assert client.post("/api/batches", json={**body, "robot_controller": "nope"}).status_code == 422
+
+
 def test_api_root_and_missing_assets_are_404_not_the_page(client):  # noqa: F811
     from deep_research import api
 

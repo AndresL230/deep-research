@@ -16,6 +16,8 @@ DATA_DIR = ROOT_DIR / "data"
 DATASETS_DIR = ROOT_DIR / "datasets"
 # Training scripts people upload (git-ignored). See user_scripts.py.
 USER_SCRIPTS_DIR = ROOT_DIR / "user_scripts"
+# Robot controllers people upload (git-ignored). See controllers.py.
+CONTROLLERS_DIR = ROOT_DIR / "controllers"
 BATCHES_DIR = ROOT_DIR / "batches"
 FIXTURES_DIR = ROOT_DIR / "fixtures"
 SKILLS_DIR = ROOT_DIR / "skills"
@@ -89,7 +91,10 @@ class BatchConfig(BaseModel):
     robot_prompt: Literal["default", "practice"] = "default"
     # What the robot agent's controller.py holds at the start. "blank": a copy of the template. "colleague": a working
     # controller from a colleague (sim/controllers/colleague.py), and the prompt asks the agent to start from it.
-    robot_start: Literal["blank", "colleague"] = "blank"
+    # "uploaded": the controller `robot_controller` names (controllers.py), with the same prompt as "colleague".
+    robot_start: Literal["blank", "colleague", "uploaded"] = "blank"
+    # An uploaded controller's id (controllers.py). Needed when robot_start is "uploaded".
+    robot_controller: str | None = Field(None, pattern=r"^ct-[0-9a-f]{8}$")
     # Live commentary (deep_research/commentary.py): a cheap model writes a short caption of what each run is doing,
     # and a feed of notable moments across runs. Left out (None): on for the domains in COMMENTARY_DOMAINS (robot_arm),
     # off for the others, so a tabular batch behaves as it did before commentary existed.
