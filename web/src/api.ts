@@ -312,6 +312,10 @@ export interface ForkExperiment {
   arms?: Partial<Record<ForkArm, ArmSummary>>;
   /** A fix experiment's patch, as the server copied it onto the fork (batch.py). */
   fix?: ProposedFix;
+  /** Rounds of more pairs run on this fork after its verdict (`POST .../more-pairs`), oldest first. Absent until one
+   *  runs. Their children are in `children` with the numbers after the first round's, `arms` counts every copy, and
+   *  `n_per_arm` is the copies per arm over all rounds. */
+  more_pairs?: MorePairsRound[];
   // Planned (MASTER_PLAN 6.1): the evidence the server will record. Until it does, the UI computes these itself
   // (batch/evidence.ts) and labels them as derived.
   /** The direction saved before any copy ran. */
@@ -322,6 +326,62 @@ export interface ForkExperiment {
   score?: number;
   p_exact?: number;
   level?: "open" | "supported" | "cleared";
+}
+
+/** One round of more pairs on a fork (`ForkExperiment.more_pairs`). */
+export interface MorePairsRound {
+  /** Unix seconds, when it was confirmed. */
+  at: number;
+  n_per_arm: number;
+  /** The children it adds, in run order: `control-5`, `control-6`, ..., `forced-5`, ... */
+  children: string[];
+  /** "rebuilding" and "running" while it runs; "done"; "failed" when the base VM could not be rebuilt (no copy ran,
+   *  nothing else changed); "stopped" when it was stopped or the server stopped (its scored copies count). */
+  status: "rebuilding" | "running" | "done" | "failed" | "stopped";
+  estimate_usd: number | null;
+  pairs_before: number;
+  level_before: VerdictEvidence["level"];
+  /** The fork's `n_per_arm` before this round. */
+  n_per_arm_before: number;
+  /** Once it ended. */
+  pairs_after?: number;
+  level_after?: VerdictEvidence["level"];
+  /** Why it failed or stopped. */
+  reason?: string;
+}
+
+/** `GET /api/batches/{id}/more-pairs?n=`: what more pairs would run and cost, for the confirmation. */
+export interface MorePairsQuote {
+  /** The fork the verdict rests on, which the new copies join. */
+  fork_id: string;
+  /** Copies per arm: `n` as asked, held to 1..`max_per_arm`; by default the pairs still needed, at least 1. */
+  n_per_arm: number;
+  max_per_arm: number;
+  /** The same arms the fork ran, in order. */
+  arms: ForkArm[];
+  /** One base VM plus `n_per_arm` per arm. */
+  vm_count: number;
+  /** null when prices or earlier spend are unknown. */
+  estimate_usd: number | null;
+  pairs_now: number;
+  /** If every new copy is scored. */
+  pairs_after: number;
+  needed_pairs: number;
+  level_now: VerdictEvidence["level"];
+  p_value_now: number | null;
+  budget_usd: number;
+  spent_usd: number | null;
+  /** The POST refuses it with 409 and `budget_problem`. */
+  over_budget: boolean;
+  budget_problem: string | null;
+}
+
+/** `POST /api/batches/{id}/more-pairs?n=`: started. The batch is live again (open its websocket). */
+export interface MorePairsStarted extends MorePairsQuote {
+  id: string;
+  phase: Phase;
+  /** The new children's ids, as in `MorePairsRound.children`. */
+  children: string[];
 }
 
 /** forks["pending"]: the investigator asked for forks and is waiting for `postDecision`. */
@@ -370,6 +430,19 @@ export interface Verdict extends SplitFields {
   /** How strong the fork evidence is (deep_research/evidence.py). The words follow it: "suggests" while open,
    *  "caused" only when supported. Absent on verdicts saved before it: read it as open. */
   evidence?: VerdictEvidence;
+  /** What the verdict said before each change that did not come from the investigator, oldest first: more pairs
+   *  reword `sentence` by the new evidence level and update `arms`, `numbers` and `evidence`. Absent until then. */
+  revisions?: VerdictRevision[];
+}
+
+export interface VerdictRevision {
+  /** Unix seconds. */
+  at: number;
+  by: "more_pairs";
+  fork_id: string;
+  /** The sentence and evidence it replaced. */
+  sentence: string;
+  evidence: VerdictEvidence;
 }
 
 /** "supported": at least `needed_pairs` control and forced pairs, and the forced arm's inflated count is lower than
@@ -809,6 +882,14 @@ export const startInvestigation = (id: string, o: Opts = {}) => call<{ ok: true 
  *  in the same call. 409 with the reason when the batch cannot be resumed. */
 export const resumeBatch = (id: string, investigate = false, o: Opts = {}) =>
   call<{ id: string; phase: string }>(`${batchPath(id)}/resume${investigate ? "?investigate=true" : ""}`, { ...o, method: "POST" });
+const morePairsPath = (id: string, n?: number) => `${batchPath(id)}/more-pairs${n === undefined ? "" : `?n=${n}`}`;
+/** For a saved batch whose verdict is open: what `n` more copies per arm (default: the pairs still needed) would run
+ *  and cost. Starts nothing. 409 with the reason when more pairs cannot run on it. */
+export const fetchMorePairs = (id: string, n?: number, o: Opts = {}) => call<MorePairsQuote>(morePairsPath(id, n), o);
+/** Run them: loads the batch back live (reopen its websocket to follow the new copies), then updates the verdict.
+ *  409 with the reason when they cannot run, an over-budget estimate included. */
+export const startMorePairs = (id: string, n?: number, o: Opts = {}) =>
+  call<MorePairsStarted>(morePairsPath(id, n), { ...o, method: "POST" });
 /** Live batches only: answer `forks.pending` while the phase is `awaiting_approval`. */
 export const postDecision = (id: string, approve: boolean, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/decision`, { ...o, json: { approve } });
 /** Live batches only: cancel the work and stop every VM. */

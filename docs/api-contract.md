@@ -32,6 +32,8 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | POST | `/api/batches/{id}/decision` | Live only. `{"approve": bool}` answers `forks.pending` (phase `awaiting_approval`) |
 | POST | `/api/batches/{id}/stop` | Live only. Cancels the work and stops every VM |
 | POST | `/api/batches/{id}/resume?investigate=<bool>` | Bring a saved batch of ours back live, in phase `ready`, so the investigator and the fork experiment can run on it after a server restart. With `investigate=true` the investigator starts in the same call. Only a batch whose runs are all scored, with a split and no verdict yet; `409 {"detail"}` says why otherwise. The list and the websocket snapshot flag such a batch with `resumable: true` |
+| GET | `/api/batches/{id}/more-pairs?n=<copies per arm>` | For a saved batch whose verdict is `open`: what running `n` more copies per arm of the verdict's fork experiment would add and cost, for the confirmation (`MorePairsQuote`, see More pairs below). Starts and loads nothing. `409 {"detail"}` says why more pairs cannot run; `422` for `n` below 1 |
+| POST | `/api/batches/{id}/more-pairs?n=<copies per arm>` | Run them: loads the saved batch back into this server (as `resume` does), claims it (phase `forking`) and starts the copies, then updates the fork and the verdict. Returns the quote plus `id`, `phase` and the new `children`. `409 {"detail"}` when it cannot run, an over-budget estimate included |
 | WS | `/api/batches/{id}/ws` | See below |
 
 Errors: unknown batch is `404 {"detail": ...}`; a live-only call on a replay is `409`; any other unknown `/api/*`
@@ -162,12 +164,23 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   in them is `honest` of `scored` and `mean_true` (did the code get better), not the inflation. `forks.pending`
   carries the same `kind`, so the approval card can say which experiment is being asked for. The verdict always
   belongs to the method experiment; a fix experiment's result is recorded on `fix`.
+
+  `more_pairs` (absent until one runs): the rounds of more pairs run on this fork after its verdict, oldest first
+  (see More pairs below), each `{at, n_per_arm, children, status, estimate_usd, pairs_before, level_before,
+  n_per_arm_before}` plus `pairs_after` and `level_after` once it ended and `reason` when it `failed` or `stopped`.
+  `status` is `rebuilding` and `running` while it runs (the fork's own `status` follows: `rebuilding`, `running`,
+  then `done` again), then `done`, `failed` (the base VM could not be rebuilt: no copy ran and nothing else
+  changed) or `stopped` (stopped, or the server stopped: its scored copies count, the others are failed children).
+  The fork's `children` gain the round's copies, `arms` counts every copy of every round, and `n_per_arm` becomes
+  the copies per arm over all rounds.
 - `verdict`: `{sentence, step_label, numbers, evidence}` or null. `evidence` (`deep_research/evidence.py`,
   `VerdictEvidence` in `web/src/api.ts`): `{level, pairs, needed_pairs, control_inflated, control_total,
   forced_inflated, forced_total, p_value}`. `pairs` is min(control, forced scored copies); `level` is `supported`
   when pairs >= 8 and a one-sided Fisher exact test of fewer inflated forced copies than control copies gives
   p < 0.05, else `open`. The sentence says "suggests", with the score and the pairs, while it is open, and "caused"
   only when supported (`record_verdict` refuses a causal word while open). Verdicts saved before it get it when read.
+  More pairs (below) change `sentence`, `arms`, `numbers` and `evidence` and add `revisions`: `[{at, by:
+  "more_pairs", fork_id, sentence, evidence}]`, what the verdict said before each such change, oldest first.
 - `trace`: what the investigator's `code-tracer` subagent found, in order: `[]` until it records something (absent on
   case files saved before it existed; read as `[]`). Each entry has `at` (unix seconds), `run_id` (the run whose
   code was traced), `symptom` (one sentence read from a recording, with its time and distances), `line` (1-based,
@@ -182,7 +195,60 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   showed) once recorded.
 - `costs`: `budget_usd`, `spent_usd` (null when a price is unknown), `prices_missing`, and `scopes`
   (`run:r01`, `fork:f1:base`, `fork:f1:control-1`, `investigator`), each with input, output, cache read and
-  cache write tokens, `model_usd`, `vm_seconds`, `vm_usd`, `total_usd`.
+  cache write tokens, `model_usd`, `vm_seconds`, `vm_usd`, `total_usd`. A round of more pairs rebuilds its own
+  base VM: `fork:f1:base-2` for the first, `fork:f1:base-3` for the next.
+
+## More pairs
+
+A verdict whose evidence is `open` (too few pairs, or no clear difference yet) can be given more pairs without the
+investigator: more copies in each arm of the fork experiment it rests on (the newest finished method experiment),
+the same arms with the same steps, forked from the same moment of the same run. When they are scored, the fork's
+`arms` and the verdict's `arms`, `numbers` and `evidence` are recomputed from every copy so far, and the sentence is
+reworded in plain code by the new level, the same rule the investigator follows (`evidence.verdict_sentence`):
+
+- open: `Skipping the step of removing duplicate rows suggests why the claims were inflated: forcing it left 1 of 6
+  copies inflated, against 4 of 6 without (6 pairs of the 8 needed, p = 0.121).`
+- supported: `Skipping the step of removing duplicate rows caused the inflated claims: forcing it left 0 of 8 copies
+  inflated, against 8 of 8 without (8 pairs, one-sided Fisher p < 0.001).`
+
+The step is its words from `config.domain_info.words.steps`; when `placebo` or `show` ran, their counts follow
+control's (`..., 5 of 5 after the placebo step, and 2 of 5 when only shown the problem`). The sentence it replaces
+is kept in `verdict.revisions`; `confidence` and the split's numbers stay the investigator's.
+
+New children continue each arm's numbers: after `control-1..4` and `forced-1..4` come `control-5..` and
+`forced-5..`, so copies pair by number as before.
+
+`GET /api/batches/{id}/more-pairs?n=4` (`MorePairsQuote` in `web/src/api.ts`):
+
+```json
+{"fork_id": "f1", "n_per_arm": 4, "max_per_arm": 8, "arms": ["control", "forced"], "vm_count": 9,
+ "estimate_usd": 1.12, "pairs_now": 4, "pairs_after": 8, "needed_pairs": 8, "level_now": "open",
+ "p_value_now": 0.0714, "budget_usd": 10.0, "spent_usd": 3.4, "over_budget": false, "budget_problem": null}
+```
+
+`n` defaults to `needed_pairs - pairs_now`, at least 1, and is held to 1..8 (`max_per_arm`). `vm_count` is one base
+VM plus `n` per arm. `pairs_after` assumes every new copy is scored. `estimate_usd` is the average spend of this
+fork's copies so far per new copy (else of a run on the source run's model, else of any run), plus one base VM at
+what the first one cost; null when prices or earlier spend are unknown. `over_budget` with `budget_problem`: the
+POST would refuse it.
+
+`POST /api/batches/{id}/more-pairs?n=4` answers the same fields plus `{"id", "phase": "forking", "children":
+["control-5", ..., "forced-8"]}`. The batch is live from then on: open the websocket again to follow it. It sends
+the same messages a first experiment does: `case` sections (`phase` `forking`, `forks` as the fork goes
+`rebuilding`, `running` and `done` and as each child appears and is scored, `verdict` at the end, `costs`) and
+`fork_event` for each new child's events. The phase ends `done`; `stop` works while it runs.
+
+Both answer `409 {"detail": "cannot run more pairs: <why>"}` when:
+
+- the batch is a fixture (`fixtures/`), or simulated;
+- it has no verdict yet, or its evidence is already `supported`;
+- no method experiment finished with a `control` and a `forced` arm, or the files needed to fork its run are gone;
+- it is running something else in this server (any phase but an ended one), or an experiment is running or waiting
+  for approval: one experiment at a time;
+- (POST) the arms cannot be rebuilt as they ran (the step of an arm changed);
+- (POST) the batch has spent its budget, or spent plus the estimate is over it.
+
+An unknown batch is `404`.
 
 ## The cost report
 

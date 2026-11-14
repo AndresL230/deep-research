@@ -29,11 +29,11 @@ from .config import ROOT_DIR
 load_dotenv(ROOT_DIR / ".env")
 
 from . import controllers, datasets, domains, hub, notebook, robot_view, traps, user_scripts  # noqa: E402
-from .batch import Batch, resume_problem  # noqa: E402 - needs the environment loaded first
+from .batch import Batch, Refused, more_pairs_problem, more_pairs_quote, resume_problem  # noqa: E402 - needs the environment loaded first
 from .case_file import with_evidence  # noqa: E402
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
-from .costs import OverBudget, estimate_batch_usd, run_rate  # noqa: E402
+from .costs import CostTracker, OverBudget, estimate_batch_usd, run_rate  # noqa: E402
 from .events import read_events  # noqa: E402
 
 log = logging.getLogger("deep_research.api")
@@ -498,6 +498,72 @@ async def _resume(batch_id: str, investigate: bool) -> dict:
     if investigate and b.case.data.get("phase") == "ready" and (task is None or task.done()):
         _spawn(b.id, b.investigate())
     return {"id": b.id, "phase": b.case.data.get("phase")}
+
+
+# ---- more pairs: more copies per arm for a verdict whose evidence is still open ----
+
+
+def _more_pairs_case(batch_id: str) -> dict:
+    """The saved case file of a batch of ours that more pairs could run on, or 404/409 with the reason it cannot."""
+    if not (BATCHES_DIR / batch_id / "case" / "case.json").is_file():
+        if (FIXTURES_DIR / batch_id / "case" / "case.json").is_file():
+            raise HTTPException(409, "cannot run more pairs: this is a fixture, a saved example with no real runs to fork")
+        raise HTTPException(404, f"no batch {batch_id}")
+    b, task = _running(batch_id), TASKS.get(batch_id)
+    if b is not None or (task is not None and not task.done()):
+        phase = b.case.data.get("phase") if b is not None else "closing"
+        raise HTTPException(409, f"cannot run more pairs: this batch is running something else (phase {phase}); "
+                                 f"one experiment at a time")
+    try:
+        case = with_evidence(json.loads((BATCHES_DIR / batch_id / "case" / "case.json").read_text()))
+    except (OSError, ValueError) as e:
+        raise HTTPException(409, f"cannot run more pairs: the case file cannot be read ({type(e).__name__})") from e
+    problem = more_pairs_problem(case, BATCHES_DIR / batch_id)
+    if problem:
+        raise HTTPException(409, f"cannot run more pairs: {problem}")
+    return case
+
+
+def _n_per_arm(n: int | None) -> int | None:
+    if n is not None and n < 1:
+        raise HTTPException(422, "n must be 1 or more")
+    return n
+
+
+@app.get("/api/batches/{batch_id}/more-pairs")
+def more_pairs_estimate(batch_id: str, n: int | None = None):
+    """What `POST .../more-pairs?n=` would run and cost, for the confirmation: nothing is started or loaded.
+
+    `n` (copies per arm) defaults to what reaches the needed pairs, at least 1, and is held to at most 8. 409 with the
+    reason when more pairs cannot run on this batch; a budget that cannot cover it is `over_budget` here (the POST
+    refuses it)."""
+    case = _more_pairs_case(batch_id)
+    tracker = CostTracker(budget_usd=float((case.get("config") or {}).get("budget_usd") or BatchConfig().budget_usd))
+    tracker.restore(case.get("costs") or {})
+    try:
+        return more_pairs_quote(case, tracker, _n_per_arm(n))
+    except Refused as e:
+        raise HTTPException(409, f"cannot run more pairs: {e}") from e
+
+
+@app.post("/api/batches/{batch_id}/more-pairs")
+async def more_pairs(batch_id: str, n: int | None = None):
+    """Run `n` more copies per arm of the fork experiment an open verdict rests on, then update the verdict.
+
+    Loads the saved batch back into this server the way `/resume` does, claims it (phase `forking`) and starts the
+    copies; the live websocket then shows them as it shows a first experiment. Returns the quote with the new
+    children's ids. 409 with the reason when it cannot run, the budget included."""
+    async with _RESUME_LOCKS.setdefault(batch_id, asyncio.Lock()):
+        _more_pairs_case(batch_id)
+        n = _n_per_arm(n)
+        try:
+            b = await asyncio.to_thread(Batch.reopen, batch_id, BATCHES_DIR)
+            job = b.reserve_more_pairs(n)
+        except Refused as e:
+            raise HTTPException(409, f"cannot run more pairs: {e}") from e
+        BATCHES[b.id] = b
+        _spawn(b.id, b.run_more_pairs(reserved=job))
+        return {"id": b.id, "phase": b.case.data.get("phase"), **job}
 
 
 @app.post("/api/batches")
