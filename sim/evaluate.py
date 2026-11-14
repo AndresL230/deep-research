@@ -59,7 +59,7 @@ MAX_STARTUP_FAILURES = 3
 """Workers in a row that die or time out before they are ready; one more raises RuntimeError."""
 
 CONTROLLERS_DIR = Path(__file__).resolve().parent / "controllers"
-CALIBRATION_CONTROLLERS = ("baseline", "one_spot", "spread")
+CALIBRATION_CONTROLLERS = ("baseline", "one_spot", "spread", "colleague")
 
 
 def default_controller_timeout(n_episodes: int, workers: int, timeout: float = DEFAULT_TIMEOUT) -> float:
