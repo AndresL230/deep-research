@@ -15,6 +15,7 @@ import { ACT, childKey, type BatchVm } from "./model";
 import { codeKind, highlightLines } from "./highlight";
 import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parseCommand, type NbCell } from "./notebook";
 import { evidenceParts, trapMark, trapOf, trapWords, type Mark } from "./trap";
+import { isMotionBatch, robotThumb, scoreWords, type ScoreWords } from "../robot/markup";
 
 // ── pure helpers (exported for the tests) ────────────────────────────────────
 
@@ -49,7 +50,9 @@ export function splitIndex(labels: readonly (readonly string[])[]): number {
 
 /** "3 of 4 inflated, mean reported 87.8% vs true 73.5%" (plus failed runs when any). */
 export function armSummaryText(a: ArmSummary): string {
-  const failed = a.failed ? `, ${a.failed} failed` : "";
+  // Robot arms count unclear children on their own, outside `scored`.
+  const nUnclear = (a as ArmSummary & { unclear?: number }).unclear;
+  const failed = (nUnclear ? `, ${nUnclear} unclear` : "") + (a.failed ? `, ${a.failed} failed` : "");
   const means = a.mean_reported != null || a.mean_true != null
     ? `, mean reported ${pct(a.mean_reported)} vs true ${pct(a.mean_true)}` : "";
   return `${a.inflated} of ${a.scored} inflated${failed}${means}`;
@@ -133,10 +136,10 @@ const numberValue = (x: number): string => (Number.isInteger(x) ? String(x) : St
 
 // ── small pieces ─────────────────────────────────────────────────────────────
 
-type Tone = "honest" | "inflated" | "failed" | "running" | "muted";
+type Tone = "honest" | "inflated" | "unclear" | "failed" | "running" | "muted";
 
 const toneOf = (status: string): Tone =>
-  status === "honest" || status === "inflated" || status === "failed" ? status
+  status === "honest" || status === "inflated" || status === "unclear" || status === "failed" ? status
     : status === "running" || status === "starting" ? "running" : "muted";
 
 const pill = (status: string, text = status, tone: Tone = toneOf(status)): string =>
@@ -464,20 +467,24 @@ export const barShare = (x: number | null | undefined): number =>
  * Reported against true accuracy as two bars on one 50% to 100% axis. The part of the reported bar past the true
  * value is hatched: that is the part that is not real.
  */
-function scoreBars(s: Pick<ScoreStats, "reported" | "true" | "gap">, group: Group): string {
+/** `words`: a robot batch's fork arms say "Claimed" and "Hidden test" (robot/markup.ts scoreWords). */
+function scoreBars(s: Pick<ScoreStats, "reported" | "true" | "gap">, group: Group, words?: { reported: string; true: string }): string {
+  const kRep = words?.reported ?? "Reported";
+  const kTrue = words?.true ?? "True";
   const rep = barShare(s.reported);
   const tru = barShare(s.true);
   const solid = s.true == null ? rep : Math.min(rep, tru);
   const over = Math.max(0, rep - solid);
   const gap = s.gap;
-  const word = gap == null ? "" : gap >= 0.005 ? "reported above true" : gap <= -0.005 ? "reported below true" : "reported matches true";
-  const label = `Reported ${pct(s.reported)}, true ${pct(s.true)}${gap != null ? `, gap ${pts(gap)}` : ""}`;
+  const [lr, lt] = [kRep.toLowerCase(), kTrue.toLowerCase()];
+  const word = gap == null ? "" : gap >= 0.005 ? `${lr} above ${lt}` : gap <= -0.005 ? `${lr} below ${lt}` : `${lr} matches ${lt}`;
+  const label = `${kRep} ${pct(s.reported)}, ${lt} ${pct(s.true)}${gap != null ? `, gap ${pts(gap)}` : ""}`;
   return `<div class="ln-score ln-score--${group}">` +
     `<div class="ln-bars" role="img" aria-label="${attr(label)}">` +
-    `<span class="ln-bar-k">Reported</span><span class="ln-track" title="${attr(`Reported ${pct(s.reported)}`)}">` +
+    `<span class="ln-bar-k">${esc(kRep)}</span><span class="ln-track" title="${attr(`${kRep} ${pct(s.reported)}`)}">` +
     `<i class="ln-fill" style="width:${solid}%"></i>${over > 0 ? `<i class="ln-over" style="left:${solid}%;width:${over.toFixed(1)}%"></i>` : ""}</span>` +
     `<span class="ln-bar-v">${esc(pct(s.reported))}</span>` +
-    `<span class="ln-bar-k">True</span><span class="ln-track" title="${attr(`True ${pct(s.true)}`)}"><i class="ln-fill ln-fill--true" style="width:${tru}%"></i></span>` +
+    `<span class="ln-bar-k">${esc(kTrue)}</span><span class="ln-track" title="${attr(`${kTrue} ${pct(s.true)}`)}"><i class="ln-fill ln-fill--true" style="width:${tru}%"></i></span>` +
     `<span class="ln-bar-v">${esc(pct(s.true))}</span>` +
     `<span class="ln-axis" aria-hidden="true"><span>50%</span><span>100%</span></span>` +
     `</div>` +
@@ -592,7 +599,7 @@ export function forkView(vm: BatchVm): string {
   const threshold = (c.config as Partial<BatchConfig>).inflation_threshold ?? 0.08;
   return `<section class="ln-sec ln-forks" data-morph-key="ln-forks" aria-label="Fork experiment">` +
     head("Fork experiment", c) +
-    `<div class="ln-stack" data-morph-list>${exps.map((f) => experiment(f, threshold)).join("")}${pending ? approvalCard(pending, vm) : ""}</div>` +
+    `<div class="ln-stack" data-morph-list>${exps.map((f) => experiment(f, threshold, vm)).join("")}${pending ? approvalCard(pending, vm) : ""}</div>` +
     `</section>`;
 }
 
@@ -629,7 +636,10 @@ export function armStats(f: ForkExperiment, arm: ForkArm): ScoreStats {
   return { ...s, n: sum.scored, reported: sum.mean_reported, true: sum.mean_true, gap };
 }
 
-function experiment(f: ForkExperiment, threshold: number): string {
+function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
+  // A robot batch: each child tile shows its last episode looping, like a run's tile on the wall.
+  const thumbs = isMotionBatch(vm.case.config) ? vm.id : null;
+  const words = scoreWords(vm.case.config);
   const statusPill = pill(f.status, FORK_STATUS[f.status] ?? f.status, f.status === "done" ? "muted" : "running");
   const arm = (a: ForkArm): string => {
     const kids = sortedChildren(f.children ?? {}, a);
@@ -640,12 +650,12 @@ function experiment(f: ForkExperiment, threshold: number): string {
     const stats = armStats(f, a);
     // The arm's bar wears the color of what its runs turned out to be: inflated when the mean gap is over the line.
     const bars = stats.reported != null || stats.true != null
-      ? scoreBars(stats, stats.gap != null && stats.gap >= threshold ? "inflated" : "honest") : "";
+      ? scoreBars(stats, stats.gap != null && stats.gap >= threshold ? "inflated" : "honest", words) : "";
     return `<div class="ln-arm ln-arm--${a}" data-morph-key="arm-${a}">` +
       `<div class="ln-arm-h"><span class="ln-arm-t">${esc(ARM_TITLE[a] ?? a)}</span>${started}</div>` +
       `<p class="ln-arm-sub">${esc(sub)}</p>` +
       bars +
-      `<div class="ln-kids" data-morph-list>${kids.map(([id, k]) => childTile(f.id, id, k)).join("")}</div>` +
+      `<div class="ln-kids" data-morph-list>${kids.map(([id, k]) => childTile(f.id, id, k, thumbs, words)).join("")}</div>` +
       (summary ? `<p class="ln-arm-sum">${esc(armSummaryText(summary))}</p>` : "") +
       `</div>`;
   };
@@ -657,14 +667,23 @@ function experiment(f: ForkExperiment, threshold: number): string {
     `</div>`;
 }
 
-function childTile(forkId: string, id: string, k: ForkChild): string {
+/** A fork child's looping 3D thumbnail (robot batches), or a placeholder until it has recorded an episode. */
+function childPic(batch: string, k: ForkChild): string {
+  const motion = k.motion_files ?? [];
+  if (motion.length) return `<span class="ln-kid-pic" data-morph-key="robot">${robotThumb(batch, motion[motion.length - 1], "span")}</span>`;
+  return `<span class="ln-kid-pic ln-kid-pic--none" data-morph-key="ph">${k.status === "running" ? askSpinner(12) : ""}</span>`;
+}
+
+function childTile(forkId: string, id: string, k: ForkChild, thumbs: string | null, words: ScoreWords): string {
   const scored = k.status !== "running";
   const vals = scored && (k.reported_accuracy != null || k.true_accuracy != null)
-    ? `<span class="ln-kid-v"><span class="ln-muted">reported</span> ${esc(pct(k.reported_accuracy))} <span class="ln-muted">true</span> ${esc(pct(k.true_accuracy))}</span>`
+    ? `<span class="ln-kid-v"><span class="ln-muted" title="${attr(words.reportedTitle)}">${esc(words.reported.toLowerCase())}</span> ${esc(pct(k.reported_accuracy))} `
+      + `<span class="ln-muted" title="${attr(words.trueTitle)}">${esc(words.true.toLowerCase())}</span> ${esc(pct(k.true_accuracy))}</span>`
     : `<span class="ln-kid-v ln-muted">${k.status === "failed" ? esc(clip(k.reason || "Failed", 40)) : "Working"}</span>`;
   const key = childKey(forkId, id);
   return `<button type="button" class="ln-kid ln-kid--${toneOf(k.status)}" data-morph-key="${attr(key)}" data-act="${ACT.openChild}" data-arg="${attr(key)}" aria-label="${attr(`${id}, ${k.status}. Open the run.`)}">` +
     `<span class="ln-kid-h"><span class="ln-kid-id">${esc(id)}</span>${k.how ? `<span class="ln-tag" title="${k.how === "fork" ? "A copy-on-write fork of the VM" : "Rebuilt by replaying the actions"}">${esc(k.how)}</span>` : ""}</span>` +
+    (thumbs != null ? childPic(thumbs, k) : "") +
     `${pill(k.status)}${vals}</button>`;
 }
 
@@ -685,7 +704,7 @@ export function verdictArms(c: CaseFile): Partial<Record<ForkArm, ArmDots>> | nu
     if (kids.length) {
       const statuses = kids.map(([, k]) => k.status);
       const s = f?.arms?.[arm];
-      out[arm] = { statuses, inflated: s?.inflated ?? statuses.filter((x) => x === "inflated").length, total: s?.scored ?? statuses.filter((x) => x !== "failed" && x !== "running").length };
+      out[arm] = { statuses, inflated: s?.inflated ?? statuses.filter((x) => x === "inflated").length, total: s?.scored ?? statuses.filter((x) => x === "honest" || x === "inflated").length };
     } else {
       const inflated = v.numbers[`${arm}_inflated`] ?? 0;
       const total = v.numbers[`${arm}_total`] ?? 0;
@@ -715,7 +734,9 @@ export function verdictView(vm: BatchVm): string {
     head("Verdict", c) +
     `<p class="ln-sentence">${esc(v.sentence)}</p>` +
     `<div class="ln-vrows">${(Object.keys(arms ?? {}) as ForkArm[]).map(row).join("")}</div>` +
-    `<div class="ln-legend" aria-hidden="true"><span><i class="ln-dot ln-dot--honest"></i>honest</span><span><i class="ln-dot ln-dot--inflated"></i>inflated</span><span><i class="ln-dot ln-dot--failed"></i>failed</span></div>` +
+    `<div class="ln-legend" aria-hidden="true"><span><i class="ln-dot ln-dot--honest"></i>honest</span><span><i class="ln-dot ln-dot--inflated"></i>inflated</span>` +
+    (Object.values(arms ?? {}).some((a) => a?.statuses.includes("unclear")) ? `<span><i class="ln-dot ln-dot--unclear"></i>unclear</span>` : "") +
+    `<span><i class="ln-dot ln-dot--failed"></i>failed</span></div>` +
     (nums.length ? `<dl class="ln-stats">${nums.map(([k, n]) => `<div class="ln-stat"><dt>${esc(numberLabel(k))}</dt><dd>${esc(numberValue(n))}</dd></div>`).join("")}</dl>` : "") +
     (isSimulated(c) ? `<p class="ln-note ln-note--sim">Simulated batch: the agents' choices were scripted to show the method. These are not real agent runs.</p>` : "") +
     `</section>`;

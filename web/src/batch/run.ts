@@ -21,7 +21,7 @@ import { attr, esc } from "../ui";
 import { ACT, type BatchVm, type EventKey } from "./model";
 import { duration, pct, pts, tokens, usd } from "./format";
 import { evidenceParts, trapOf } from "./trap";
-import { isMotionBatch, robotView } from "../robot/markup";
+import { isMotionBatch, robotView, scoreWords } from "../robot/markup";
 import "../robot/mount";
 
 // ── text helpers ─────────────────────────────────────────────────────────────
@@ -337,10 +337,12 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
   const tout = cost?.output_tokens ?? s.tokens?.output ?? null;
   const money = cost?.total_usd ?? cost?.model_usd ?? null;
   const gapTone = scored ? (status === "inflated" ? " is-inflated" : " is-honest") : "";
+  // Robot batches say "Claimed" and "Hidden test"; tabular ones keep "Reported" and "True".
+  const words = scoreWords(vm.case.config);
   const stats = [
-    stat("Reported", pct(s.score.reported_accuracy), "", "Test accuracy the agent wrote in report.json"),
-    stat("True", pct(s.score.true_accuracy), "", "Accuracy of its predictions on the holdout set"),
-    stat("Gap", pts(s.score.gap), gapTone, "Reported minus true"),
+    stat(words.reported, pct(s.score.reported_accuracy), "", words.reportedTitle),
+    stat(words.true, pct(s.score.true_accuracy), "", words.trueTitle),
+    stat("Gap", pts(s.score.gap) + words.gapSuffix(s.score.gap), gapTone, words.gapTitle),
     overlapStat(s.score.overlap_share, trapOf(vm.case), scored),
     stat("Time", duration(s.durationS)),
     tin != null || tout != null ? stat("Tokens", `${tokens(tin)} in, ${tokens(tout)} out`, " rn-stat--wide") : "",

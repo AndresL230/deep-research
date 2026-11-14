@@ -302,7 +302,7 @@ describe("the wall's tiles", () => {
     const html = wallView(batch(leaky, DROPPED, [null, null]));
     expect(html).not.toContain("bw-ovl-t");
     expect(html).not.toContain("Overlap unknown");
-    expect(tile(html, "r02")).toContain('<div class="bw-foot"><span class="bw-gap">+18.0 pts</span></div>');
+    expect(tile(html, "r02")).toMatch(/<div class="bw-foot"><span class="bw-gap"[^>]*>\+18\.0 pts<\/span><\/div>/);
     // A run of an evidence trap that did not keep what the number is read from.
     const partial = wallView(batch(repeat, GROUPED, [null, 0.71]));
     expect(tile(partial, "r01")).not.toContain("bw-ovl-t");

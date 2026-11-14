@@ -187,6 +187,21 @@ describe("runSummaryView", () => {
     expect(html).not.toMatch(/\u2014/);
   });
 
+  it("words a robot run's scores as claimed vs hidden test, with the batch's own gap bands", () => {
+    const config = { ...demo.config, visual: "motion", inflation_threshold: 0.275, unclear_threshold: 0.12 } as unknown as typeof demo.config;
+    const html = runSummaryView(vmOf({ case: { ...demo, config } }), "r02");
+    expect(html).toContain(">Claimed<");
+    expect(html).toContain(">Hidden test<");
+    expect(html).toContain("+13.2 pts over");
+    expect(html).toContain('title="Claimed minus hidden test. Up to 12 pts honest, 12 to 27.5 unclear, over 27.5 inflated."');
+    expect(html).toContain("20 can positions spread over the table that it never saw");
+    // Tabular batches keep their labels.
+    const tab = runSummaryView(vmOf(), "r02");
+    expect(tab).toContain(">Reported<");
+    expect(tab).toContain(">True<");
+    expect(tab).not.toContain("pts over");
+  });
+
   it("shows an inflated run in red", () => {
     const html = runSummaryView(vmOf(), "r02");
     expect(html).toContain('class="rn-pill is-inflated"');
