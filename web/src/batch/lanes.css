@@ -1,0 +1,141 @@
+/* The Split, Fork, Verdict and Investigator sections (lanes.ts). Every class is prefixed `ln-`.
+   Honest is --green, inflated is --red, failed or unknown is --fg-40, the lit split step is --accent. */
+
+/* ── shared ── */
+.ln-sec { --ln-tone:var(--fg-40); display:flex; flex-direction:column; gap:12px; min-width:0; padding:16px; border:1px solid var(--border); border-radius:8px; background:var(--surface); font-size:13px; line-height:1.5; color:var(--fg); animation:ln-in var(--fx-base) var(--fx-ease) both; }
+@keyframes ln-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+.ln-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.ln-h { margin:0; font-size:14px; font-weight:600; letter-spacing:-0.01em; }
+.ln-h3 { margin:4px 0 0; font-size:12px; font-weight:600; color:var(--fg-55); }
+.ln-lead { margin:0; font-size:14px; font-weight:500; }
+.ln-sub, .ln-note { margin:0; font-size:12.5px; color:var(--fg-70); }
+.ln-muted { color:var(--fg-55); font-weight:400; }
+.ln-lit-word { color:var(--accent); font-weight:600; }
+.ln-iv { color:var(--fg); font-weight:500; }
+.ln-err { margin:0; padding:7px 10px; border:1px solid color-mix(in srgb, var(--red) 35%, transparent); border-radius:8px; background:color-mix(in srgb, var(--red) 8%, transparent); color:var(--red); font-size:12.5px; overflow-wrap:anywhere; }
+.ln-sim { display:inline-flex; align-items:center; padding:1px 7px; border:1px solid color-mix(in srgb, var(--amber) 45%, transparent); border-radius:999px; color:var(--amber); font-size:11px; font-weight:500; }
+.ln-note--sim { padding:7px 10px; border:1px dashed color-mix(in srgb, var(--amber) 45%, transparent); border-radius:8px; color:var(--fg-70); }
+.ln-tag { display:inline-flex; align-items:center; padding:0 5px; border:1px solid var(--border-strong); border-radius:4px; font-size:10.5px; font-family:var(--code); color:var(--fg-55); line-height:16px; }
+.ln-card { display:flex; flex-direction:column; gap:10px; min-width:0; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); }
+.ln-stack { display:flex; flex-direction:column; gap:12px; }
+.ln-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.ln-approve { color:var(--accent-fg); background:var(--accent); border-color:var(--accent); }
+.ln-approve:hover { color:var(--accent-fg); background:color-mix(in srgb, var(--accent) 88%, var(--fg)); }
+
+/* tones: set --ln-tone, children read it */
+.ln-pill--honest, .ln-lane--honest, .ln-kid--honest, .ln-code--honest, .ln-group--honest { --ln-tone:var(--green); }
+.ln-pill--inflated, .ln-lane--inflated, .ln-kid--inflated, .ln-code--inflated, .ln-group--inflated { --ln-tone:var(--red); }
+.ln-pill--failed, .ln-lane--failed, .ln-kid--failed, .ln-group--failed, .ln-pill--muted, .ln-lane--muted, .ln-kid--muted { --ln-tone:var(--fg-40); }
+.ln-pill--running, .ln-kid--running { --ln-tone:var(--fg-55); }
+.ln-pill-dot { display:inline-block; flex:none; width:7px; height:7px; border-radius:50%; background:var(--ln-tone, var(--fg-40)); }
+.ln-pill { display:inline-flex; align-items:center; gap:5px; width:max-content; padding:1px 8px 1px 6px; border:1px solid color-mix(in srgb, var(--ln-tone) 40%, transparent); border-radius:999px; color:var(--ln-tone); font-size:11px; font-weight:500; line-height:17px; white-space:nowrap; }
+
+/* code boxes: the two differing commands */
+.ln-cmp { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+.ln-code { margin:0; min-width:0; display:flex; flex-direction:column; border:1px solid var(--border); border-left:2px solid var(--ln-tone, var(--border-strong)); border-radius:8px; background:var(--bg); overflow:hidden; }
+.ln-code-cap { display:flex; align-items:center; gap:6px; padding:6px 10px; border-bottom:1px solid var(--border); font-size:11.5px; font-weight:500; color:var(--fg-70); }
+.ln-code-pre { margin:0; padding:8px 10px; max-height:180px; overflow:auto; font-family:var(--code); font-size:11.5px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--fg); }
+.ln-card .ln-code { background:var(--surface); }
+.ln-cmp--sm .ln-code-pre { max-height:120px; }
+
+/* ── 1. the lane chart ── */
+.ln-chart { contain:inline-size; max-width:100%; overflow-x:auto; overscroll-behavior-x:contain; margin:0 -4px; padding:0 4px 4px; }
+.ln-lanes { display:grid; grid-template-columns:var(--ln-cols); width:max-content; min-width:100%; }
+.ln-lrow { grid-column:1 / -1; display:grid; grid-template-columns:var(--ln-cols); align-items:center; column-gap:0; }
+.ln-lrow--head { padding-bottom:4px; }
+.ln-lh { font-size:11px; color:var(--fg-55); white-space:nowrap; padding:0 4px; }
+.ln-lh--mark { align-self:stretch; }
+.ln-group { grid-column:1 / -1; margin-top:8px; padding:0 4px 2px; font-size:11.5px; font-weight:600; color:var(--ln-tone); }
+.ln-lane { position:relative; width:100%; min-height:30px; padding:0; border-radius:6px; text-align:left; font:inherit; color:inherit; transition:background var(--fx-fast) var(--fx-ease); }
+.ln-lane:hover { background:var(--hover); }
+.ln-lane:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.ln-run { grid-column:1; display:inline-flex; align-items:center; gap:6px; padding:0 6px; font-family:var(--code); font-size:12px; color:var(--fg-70); }
+.ln-run .ln-pill-dot { background:var(--ln-tone); }
+.ln-cell { display:flex; justify-content:center; padding:3px 3px; min-width:0; }
+.ln-chip { display:block; width:100%; min-width:0; height:22px; padding:0 6px; line-height:20px; text-align:center; border:1px solid var(--border); border-radius:6px; background:var(--surface); font-size:11px; color:var(--fg-70); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ln-chip.is-split { border-style:dashed; border-color:var(--border-strong); color:var(--fg-55); }
+.ln-chip.is-lit { border-color:var(--accent); background:var(--accent-soft); color:var(--accent); font-weight:600; }
+.ln-chip--empty { display:flex; align-items:center; justify-content:center; border-color:transparent; background:none; }
+.ln-chip--empty i { width:4px; height:4px; border-radius:50%; background:var(--fg-40); }
+/* The split column: one dashed line through every lane, the fork point marked on the fork run's lane. */
+.ln-mark { position:relative; align-self:stretch; display:flex; align-items:center; justify-content:center; }
+.ln-mark::before, .ln-lh--mark::before { content:""; position:absolute; top:0; bottom:0; left:50%; border-left:1px dashed var(--border-strong); }
+.ln-lh--mark { position:relative; }
+.ln-mark.is-fork::before { border-left:2px solid var(--accent); }
+.ln-fork-tag { position:relative; z-index:1; padding:0 3px; border-radius:4px; background:var(--accent); color:var(--accent-fg); font-size:9.5px; font-weight:600; line-height:14px; }
+
+/* ── 2. the fork experiment ── */
+.ln-approval { border-color:color-mix(in srgb, var(--accent) 45%, var(--border)); background:color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.ln-approval-t { margin:0; font-size:13.5px; font-weight:500; }
+.ln-approval-est { margin:0; font-size:12.5px; color:var(--fg-70); }
+.ln-approval-est b { color:var(--fg); font-weight:600; }
+.ln-exp-h { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.ln-exp-id { font-size:13px; font-weight:600; }
+.ln-exp-t { margin:0; font-size:12.5px; color:var(--fg-70); }
+.ln-exp-t b { color:var(--fg); font-weight:600; }
+.ln-arms { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+.ln-arm { display:flex; flex-direction:column; gap:8px; min-width:0; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
+.ln-arm--forced { border-color:color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.ln-arm-h { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.ln-arm-t { font-size:12.5px; font-weight:600; }
+.ln-arm-sub { margin:0; font-size:12px; color:var(--fg-55); overflow-wrap:anywhere; }
+.ln-arm-sum { margin:0; padding-top:8px; border-top:1px solid var(--border); font-size:12px; color:var(--fg-70); }
+.ln-kids { display:grid; grid-template-columns:repeat(auto-fill, minmax(124px, 1fr)); gap:6px; }
+.ln-kid { display:flex; flex-direction:column; align-items:flex-start; gap:5px; min-width:0; padding:8px; border:1px solid var(--border); border-left:2px solid var(--ln-tone); border-radius:8px; background:var(--bg); text-align:left; font:inherit; color:inherit; animation:ln-in var(--fx-base) var(--fx-ease) both; transition:background var(--fx-fast) var(--fx-ease), border-color var(--fx-fast) var(--fx-ease); }
+.ln-kid:hover { background:var(--hover); }
+.ln-kid:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.ln-kid-h { display:flex; align-items:center; justify-content:space-between; gap:6px; width:100%; }
+.ln-kid-id { font-family:var(--code); font-size:11.5px; color:var(--fg-70); }
+.ln-kid-v { font-size:11.5px; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+
+/* ── 3. the verdict ── */
+.ln-sentence { margin:0; font-size:18px; line-height:1.4; font-weight:500; letter-spacing:-0.01em; text-wrap:pretty; }
+.ln-vrows { display:flex; flex-direction:column; gap:8px; }
+.ln-vrow { display:grid; grid-template-columns:64px auto 1fr; align-items:center; gap:12px; }
+.ln-vrow-t { font-size:12.5px; font-weight:600; }
+.ln-vrow-n { font-size:12.5px; color:var(--fg-70); font-variant-numeric:tabular-nums; }
+.ln-dots { display:flex; flex-wrap:wrap; gap:5px; }
+.ln-dot { display:inline-block; flex:none; width:14px; height:14px; border-radius:50%; background:var(--fg-40); }
+.ln-dot--honest { background:var(--green); }
+.ln-dot--inflated { background:var(--red); }
+.ln-dot--failed, .ln-dot--muted { background:var(--fg-40); }
+.ln-dot--running { background:none; border:1.5px dashed var(--fg-40); }
+.ln-legend { display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--fg-55); }
+.ln-legend span { display:inline-flex; align-items:center; gap:5px; }
+.ln-legend .ln-dot { width:8px; height:8px; }
+.ln-stats { display:flex; flex-wrap:wrap; gap:6px 18px; margin:0; padding-top:10px; border-top:1px solid var(--border); }
+.ln-stat { display:flex; flex-direction:column; gap:1px; }
+.ln-stat dt { font-size:11px; color:var(--fg-55); }
+.ln-stat dd { margin:0; font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; }
+
+/* ── 4. the investigator ── */
+.ln-inv-status { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.ln-phase { display:inline-flex; align-items:center; gap:8px; margin:0; font-size:13px; font-weight:500; }
+.ln-phase-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--fg-40); }
+.ln-evs { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.ln-ev { display:flex; align-items:baseline; gap:8px; min-width:0; padding:5px 10px; font-size:12px; border-top:1px solid var(--border); animation:ln-in var(--fx-fast) var(--fx-ease) both; }
+.ln-ev:first-child { border-top:none; }
+.ln-ev-t { flex:none; width:44px; font-size:11px; color:var(--fg-40); font-variant-numeric:tabular-nums; }
+.ln-ev-k { flex:none; width:44px; font-size:11px; color:var(--fg-55); }
+.ln-ev-x { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg-70); }
+.ln-ev--call .ln-ev-x, .ln-ev--result .ln-ev-x, .ln-ev--forced .ln-ev-x { font-family:var(--code); font-size:11.5px; }
+.ln-ev--thought .ln-ev-x { color:var(--fg); }
+.ln-hyps { display:flex; flex-direction:column; gap:10px; }
+.ln-hyp-h { display:flex; align-items:baseline; gap:8px; }
+.ln-hyp-k { font-size:11.5px; color:var(--fg-55); }
+.ln-hyp-e { margin:0; font-size:12.5px; }
+
+/* ── phone width ── */
+@media (max-width: 640px) {
+  .ln-sec { padding:12px; }
+  .ln-cmp, .ln-arms { grid-template-columns:minmax(0, 1fr); }
+  .ln-sentence { font-size:16px; }
+  .ln-vrow { grid-template-columns:56px 1fr; }
+  .ln-vrow-n { grid-column:2; }
+  .ln-ev-k { display:none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ln-sec, .ln-kid, .ln-ev { animation:none !important; }
+  .ln-lane, .ln-kid { transition:none !important; }
+}
