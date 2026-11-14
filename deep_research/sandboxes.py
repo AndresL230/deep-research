@@ -27,6 +27,12 @@ LAB_PAGE_SRC = ROOT_DIR / "lab_page" / "server.py"
 LAB_PAGE_VM = "/home/daytona/lab_page.py"
 PY_PACKAGES = ["pandas", "scikit-learn", "matplotlib"]
 
+# Safety net for leaked VMs. A VM stops after this many idle minutes, and a
+# stopped VM is deleted this many minutes later. A batch starts 12+ VMs plus
+# forks, so one that is never cleaned up would otherwise keep billing for disk.
+AUTO_STOP_MINUTES = 60
+AUTO_DELETE_MINUTES = 60
+
 _client: Daytona | None = None
 
 
@@ -49,11 +55,12 @@ def build_snapshot(name: str) -> None:
 def create_vm(label: str) -> Sandbox:
     snapshot = os.getenv("DAYTONA_SNAPSHOT")
     labels = {"app": "deep-research", "run": label}
+    lifetimes = {"auto_stop_interval": AUTO_STOP_MINUTES, "auto_delete_interval": AUTO_DELETE_MINUTES}
     if snapshot:
-        params = CreateSandboxFromSnapshotParams(snapshot=snapshot, labels=labels, auto_stop_interval=60)
+        params = CreateSandboxFromSnapshotParams(snapshot=snapshot, labels=labels, **lifetimes)
     else:
         # Slower: builds the image on first use.
-        params = CreateSandboxFromImageParams(image=lab_image(), labels=labels, auto_stop_interval=60)
+        params = CreateSandboxFromImageParams(image=lab_image(), labels=labels, **lifetimes)
     return client().create(params, timeout=300)
 
 
@@ -107,7 +114,14 @@ def replay_actions(sb: Sandbox, actions: list[Action]) -> None:
 
 def fork_vm(sb: Sandbox, name: str | None = None) -> Sandbox:
     """Copy-on-write clone of the VM's disk. Processes do not carry over."""
-    return sb.fork(name=name, timeout=120)
+    vm = sb.fork(name=name, timeout=120)
+    # The SDK does not say whether a fork keeps its source's lifetimes, so set them.
+    try:
+        vm.set_autostop_interval(AUTO_STOP_MINUTES)
+        vm.set_auto_delete_interval(AUTO_DELETE_MINUTES)
+    except Exception:  # noqa: BLE001 - the VM is still usable, and Batch.close() stops it
+        pass
+    return vm
 
 
 def stop_vm(sb: Sandbox) -> None:

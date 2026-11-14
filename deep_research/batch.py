@@ -209,6 +209,7 @@ class Batch:
 
         base_scope = f"fork:{fork_id}:base"
         base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base")
+        self.vms[f"{fork_id}-base"] = base
         self.tracker.vm_started(base_scope)
         await asyncio.to_thread(vms.load_task, base, self.task)
         await asyncio.to_thread(vms.replay_actions, base, prefix_actions)
@@ -225,9 +226,11 @@ class Batch:
                 try:
                     try:
                         vm = await asyncio.to_thread(vms.fork_vm, base, f"{self.id}-{fork_id}-{cid}")
+                        self.vms[f"{fork_id}-{cid}"] = vm
                         how = "fork"
                     except Exception:  # noqa: BLE001 - fall back to rebuilding by replay
                         vm = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-{cid}")
+                        self.vms[f"{fork_id}-{cid}"] = vm
                         await asyncio.to_thread(vms.load_task, vm, self.task)
                         await asyncio.to_thread(vms.replay_actions, vm, prefix_actions)
                         how = "replay"
@@ -336,7 +339,8 @@ class Batch:
         self.case.set_phase("awaiting_approval")
 
     async def close(self) -> None:
-        await asyncio.gather(*(asyncio.to_thread(vms.stop_vm, sb) for sb in self.vms.values()))
+        """Stop every VM this batch started: runs, fork bases and fork children."""
+        await asyncio.gather(*(asyncio.to_thread(vms.stop_vm, sb) for sb in list(self.vms.values())))
 
 
 def _arm_summary(rows: list[dict]) -> dict:
