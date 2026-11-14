@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
-import type { BatchConfig, CaseFile, Costs, Defaults, Estimate } from "../src/api";
+import type { BatchConfig, CaseFile, ControllerInfo, Costs, Defaults, Estimate } from "../src/api";
 import {
   HM_ACT, costBar, costGroups, domainDraft, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startBlocked,
   startPayload,
@@ -322,6 +322,68 @@ describe("the domain picker", () => {
     vi.stubGlobal("localStorage", { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) });
     rememberDomain("robot_arm");
     expect(recallDomain()).toBe("robot_arm");
+  });
+});
+
+// The robot arm domain once a controller can be uploaded: both domains' configs carry the two robot start settings.
+const tabCt: BatchConfig = { ...tabCfg, robot_start: "blank", robot_controller: null };
+const robotCt: BatchConfig = { ...robotCfg, robot_start: "blank", robot_controller: null };
+const withCt: Defaults = {
+  ...withDomains, config: tabCt,
+  domains: withDomains.domains!.map((d) => ({ ...d, config: d.name === "robot_arm" ? robotCt : tabCt })),
+};
+const controller: ControllerInfo = { id: "ct-89abcdef", name: "my_<arm>.py", lines: 312, imports: ["numpy"], missing_packages: [] };
+const ctInputs = { ...inputs, controllerHtml: `<div class="di" data-morph-key="controller">CONTROLLER ROW</div>` };
+const startOpt = (html: string, val: string) => html.match(new RegExp(`<input type="radio" name="robot_start"[^>]*value="${val}"[^>]*>`))?.[0] ?? null;
+
+describe("the uploaded controller", () => {
+  it("draws the controller row in the robot domain only", () => {
+    const robot = homeView(vm({ defaults: withCt, draft: robotCt }), ctInputs);
+    expect(robot).toContain("CONTROLLER ROW");
+    expect(robot).not.toContain("DATASET ROWS");
+    expect(robot.indexOf("CONTROLLER ROW")).toBeGreaterThan(robot.indexOf("New batch"));
+    expect(robot.indexOf("CONTROLLER ROW")).toBeLessThan(robot.indexOf('data-morph-key="main"'));
+    const tab = homeView(vm({ defaults: withCt, draft: tabCt }), ctInputs);
+    expect(tab).toContain("DATASET ROWS");
+    expect(tab).not.toContain("CONTROLLER ROW");
+    // Nothing to draw: the panel is as it was.
+    expect(homeView(vm({ defaults: withCt, draft: robotCt }), inputs)).not.toContain("CONTROLLER ROW");
+  });
+
+  it("offers Your upload only once a controller is uploaded", () => {
+    const none = homeView(vm({ defaults: withCt, draft: robotCt, advanced: true }), ctInputs);
+    expect(startOpt(none, "blank")).toContain(" checked");
+    expect(startOpt(none, "colleague")).not.toContain("disabled");
+    expect(startOpt(none, "uploaded")).toBe('<input type="radio" name="robot_start" data-cfg="robot_start" value="uploaded" disabled>');
+    expect(none).toContain(">Your upload<");
+    expect(none).not.toContain("Starting from");
+    expect(none).not.toContain("hm-fixed");
+
+    const draft: BatchConfig = { ...robotCt, robot_start: "uploaded", robot_controller: controller.id };
+    const some = homeView(vm({ defaults: withCt, draft, advanced: true }), { ...ctInputs, controller });
+    expect(startOpt(some, "uploaded")).toBe('<input type="radio" name="robot_start" data-cfg="robot_start" value="uploaded" checked>');
+    expect(startOpt(some, "blank")).not.toContain("checked");
+    expect(some).toContain('<span class="hm-fixed">Starting from my_&lt;arm&gt;.py</span>');
+    expect(some).not.toContain("<arm>");
+    // A tabular draft never says it, and never shows the robot start.
+    const tab = homeView(vm({ defaults: withCt, draft: { ...tabCt, robot_controller: controller.id }, advanced: true }), { ...ctInputs, controller });
+    expect(tab).not.toContain("Starting from");
+    expect(tab).not.toContain('data-cfg="robot_start"');
+  });
+
+  it("sends the controller with a robot batch and never with a tabular one", () => {
+    const draft: BatchConfig = { ...robotCt, n_runs: 3, robot_start: "uploaded", robot_controller: controller.id };
+    const body = startPayload(draft, { dataset: "ds-0123abcd", target: "price", script: "sc-0123abcd" }, withCt);
+    expect(body).toEqual({ ...robotCt, n_runs: 3, robot_start: "uploaded", robot_controller: controller.id, mode: "live" });
+    expect(body.script).toBeNull();
+    // Switched to Data science with the controller still in the draft: the tabular defaults take its place.
+    const tab = pickDomain(vm({ defaults: withCt, draft }), "tabular").draft!;
+    expect(tab.robot_controller).toBe(controller.id);
+    expect(startPayload(tab, pima, withCt)).toEqual({ ...tabCt, n_runs: 3, mode: "live" });
+    // The same without defaults, or with defaults that do not name the keys.
+    expect(startPayload({ ...tab, domain: undefined }, pima, null)).toMatchObject({ robot_start: "blank", robot_controller: null, mode: "live" });
+    expect(startPayload(tab, pima, withDomains)).toMatchObject({ robot_start: "blank", robot_controller: null });
+    expect(startPayload({ ...tab, robot_start: "colleague" }, pima, null).robot_start).toBe("colleague");
   });
 });
 

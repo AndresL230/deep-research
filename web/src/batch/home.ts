@@ -1,6 +1,6 @@
 // OWNER: subagent A. The home screen (batch cards, the new batch panel with its estimate and Start) and the header cost bar.
 import "./home.css";
-import type { BatchConfig, BatchListItem, Costs, Defaults, Health, ScopeCost, TrapInfo } from "../api";
+import type { BatchConfig, BatchListItem, ControllerInfo, Costs, Defaults, Health, ScopeCost, TrapInfo } from "../api";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { pct, tokens, usd } from "./format";
@@ -9,26 +9,31 @@ import { DEFAULT_PLANTED, chosenTrap } from "./trap";
 
 // ── home screen ──────────────────────────────────────────────────────────────
 
-/** What the batch runs on, drawn by dataset-input.ts: its rows for the panel and a one-line summary. */
-export interface HomeInputs { html: string; label: string }
+/** What the batch runs on, drawn by dataset-input.ts: its rows for the panel and a one-line summary (tabular), and
+ *  the robot arm domain's controller row with the uploaded controller it shows, if any. */
+export interface HomeInputs { html: string; label: string; controllerHtml?: string; controller?: ControllerInfo | null }
 
 /** The home screen: the batches to open, then one panel to start a new one. Labels only, no prose. */
 export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
   const trap = chosenTrap(vm.defaults, vm.draft?.trap);
   // What the batch runs on, the trap and its strength only mean something in the tabular domain.
   const tabular = isTabular(vm.draft);
+  const controller = inputs?.controller ?? null;
+  const summary = tabular
+    ? summaryLabel(inputs?.label ?? `Pima diabetes · ${DEFAULT_PLANTED}`, trap)
+    : controller ? `Starting from ${controller.name}` : "";
   return `<div class="hm" data-morph-key="home">
     ${batchesSection(vm.batches)}
     <section class="hm-panel" data-morph-key="new" aria-labelledby="hm-new-h">
       <div class="hm-panel-h" data-morph-key="head">
         <h2 class="hm-h2" id="hm-new-h">New batch</h2>
-        ${tabular ? `<span class="hm-fixed">${esc(summaryLabel(inputs?.label ?? `Pima diabetes · ${DEFAULT_PLANTED}`, trap))}</span>` : ""}
+        ${summary ? `<span class="hm-fixed">${esc(summary)}</span>` : ""}
       </div>
       ${vm.draft ? domainRow(vm.draft, vm.defaults, vm.starting) : ""}
-      ${tabular ? inputs?.html ?? "" : ""}
+      ${tabular ? inputs?.html ?? "" : inputs?.controllerHtml ?? ""}
       ${vm.draft && tabular ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
       ${vm.draft ? mainRow(vm.draft, trap) : mainSkeleton(defaultsFailed(vm))}
-      ${advancedBlock(vm)}
+      ${advancedBlock(vm, controller)}
       ${footer(vm)}
     </section>
   </div>`;
@@ -104,6 +109,9 @@ export const TABULAR_ONLY = [
   "dataset", "target", "script", "trap", "trap_strength", "trap_noise", "trap_hidden_share", "model_hint", "holdout_fraction",
 ] as const;
 
+/** Settings only the robot domain reads: what the agents' controller.py starts as, and the uploaded controller. */
+export const ROBOT_ONLY = ["robot_start", "robot_controller"] as const;
+
 /** A domain's default config: the server's top-level one for the tabular domain, as before domains. */
 export function domainDefaults(d: Defaults, name: string): BatchConfig | null {
   if (name === DEFAULT_DOMAIN) return d.config;
@@ -150,15 +158,22 @@ export function resetDraft(vm: HomeVm): BatchConfig | null {
 }
 
 /**
- * The body of POST /api/batches. Tabular: the draft with what dataset-input.ts chose, as before domains. Any other
+ * The body of POST /api/batches. Tabular: the draft with what dataset-input.ts chose, as before domains, and its
+ * robot-only settings at the tabular defaults (an uploaded controller never reaches a tabular batch). Any other
  * domain: the draft with its tabular-only settings at that domain's defaults, so the case file never shows a dataset or
  * a trap the batch did not use.
  */
 export function startPayload(draft: BatchConfig, inputs: Pick<BatchConfig, "dataset" | "target" | "script">, defaults: Defaults | null): BatchConfig {
-  if (isTabular(draft)) return { ...draft, ...inputs, mode: "live" };
+  const tabular = isTabular(draft);
   const own = defaults ? domainDefaults(defaults, domainOf(draft)) : null;
   const reset: Record<string, unknown> = {};
-  if (own) for (const k of TABULAR_ONLY) if (k in own) reset[k] = (own as unknown as Record<string, unknown>)[k];
+  if (own) for (const k of tabular ? ROBOT_ONLY : TABULAR_ONLY) if (k in own) reset[k] = (own as unknown as Record<string, unknown>)[k];
+  if (tabular) {
+    // Even on a server whose defaults do not name the keys.
+    if (draft.robot_controller) reset.robot_controller = null;
+    if (draft.robot_start === "uploaded" && !("robot_start" in reset)) reset.robot_start = "blank";
+    return { ...draft, ...inputs, ...reset, mode: "live" } as BatchConfig;
+  }
   return { ...draft, ...reset, mode: "live" } as BatchConfig;
 }
 
@@ -214,13 +229,14 @@ function numberField(cfg: BatchConfig, f: Field, label: string, o: { min?: numbe
   </div>`;
 }
 
-/** A two or three option choice as radio inputs: main.ts reads the picked one's value, and morph.ts keeps `checked` in step. */
-function choiceField(cfg: BatchConfig, f: Field, label: string, opts: [string, string][]): string {
+/** A two or three option choice as radio inputs: main.ts reads the picked one's value, and morph.ts keeps `checked` in
+ *  step. The options in `off` cannot be picked yet. */
+function choiceField(cfg: BatchConfig, f: Field, label: string, opts: [string, string][], off: readonly string[] = []): string {
   const v = String(cfg[f]);
   return `<div class="hm-field" data-f="${f}" role="radiogroup" aria-labelledby="${fid(f)}-l">
     <span class="hm-lbl" id="${fid(f)}-l">${esc(label)}</span>
     <div class="hm-seg">${opts.map(([val, text]) =>
-      `<label class="hm-seg-o"><input type="radio" name="${f}" data-cfg="${f}" value="${attr(val)}"${val === v ? " checked" : ""}><span>${esc(text)}</span></label>`).join("")}</div>
+      `<label class="hm-seg-o"><input type="radio" name="${f}" data-cfg="${f}" value="${attr(val)}"${val === v ? " checked" : ""}${off.includes(val) ? " disabled" : ""}><span>${esc(text)}</span></label>`).join("")}</div>
   </div>`;
 }
 
@@ -274,8 +290,9 @@ function mainSkeleton(failed: boolean): string {
   </div>`;
 }
 
-/** The Advanced toggle and, when it is open, the rest of the settings and Reset. */
-function advancedBlock(vm: HomeVm): string {
+/** The Advanced toggle and, when it is open, the rest of the settings and Reset. `controller` is the robot domain's
+ *  uploaded controller, which its "Your upload" start needs. */
+function advancedBlock(vm: HomeVm, controller: ControllerInfo | null = null): string {
   const c = vm.draft;
   const open = !!vm.advanced && !!c;
   const toggle = `<button type="button" class="hm-adv-t" data-act="${ACT.toggleAdvanced}" aria-expanded="${open}"${open ? ` aria-controls="hm-adv"` : ""}${c ? "" : " disabled"}>${askIcon("chevRight", 13)}<span>Advanced</span></button>`;
@@ -286,7 +303,7 @@ function advancedBlock(vm: HomeVm): string {
     return `<div class="hm-adv" data-morph-key="adv">
     ${head}
     <div class="hm-adv-grid" id="hm-adv" data-morph-key="adv-grid">
-      ${choiceField(c, "robot_start", "Controller start", [["blank", "Blank template"], ["colleague", "Colleague's controller"]])}
+      ${choiceField(c, "robot_start", "Controller start", [["blank", "Blank template"], ["colleague", "Colleague's controller"], ["uploaded", "Your upload"]], controller || c.robot_controller ? [] : ["uploaded"])}
       ${choiceField(c, "robot_prompt", "Prompt", [["default", "Default"], ["practice", "Practice focus"]])}
       ${rangeField(c, "inflation_threshold", "Inflation threshold", 0.05, 0.5, 0.025, points(c.inflation_threshold))}
       ${numberField(c, "forks_per_choice", "Forks per arm", { min: 1, max: 8 })}

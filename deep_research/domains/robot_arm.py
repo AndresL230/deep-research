@@ -65,9 +65,27 @@ def _sim():
     return sim.domain
 
 
+def _controller(cfg: BatchConfig) -> tuple[str | None, str | None]:
+    """The uploaded controller's text and name when the batch starts from one."""
+    if cfg.robot_start != "uploaded":
+        return None, None
+    from .. import controllers
+
+    if not cfg.robot_controller:
+        raise ConfigError("robot_start is 'uploaded' but no controller was uploaded")
+    try:
+        text, info = controllers.load(cfg.robot_controller)
+    except controllers.ControllerError as e:
+        raise ConfigError(str(e)) from e
+    return text, info.get("name")
+
+
 def _robot_config(cfg: BatchConfig):
     d = _sim()
+    text, name = _controller(cfg)
     return d.RobotConfig(
+        controller_text=text,
+        controller_name=name,
         seed=cfg.seed,
         n_hidden=cfg.robot_hidden_positions,
         hint_level=cfg.hint_level,
@@ -142,6 +160,7 @@ def check_config(cfg: BatchConfig) -> None:
         raise ConfigError(f"the robot sim cannot run on this server: {e}") from e
     if missing_files():
         raise ConfigError("the panda meshes are missing: run `uv run python -m sim.fetch_assets` once")
+    _controller(cfg)  # a batch that starts from an upload must name one that exists
 
 
 DOMAIN = Domain(

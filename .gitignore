@@ -19,6 +19,9 @@ dist/
 # Training scripts uploaded through the UI
 /user_scripts/
 
+# Robot controllers uploaded through the UI
+/controllers/
+
 # Claude Code worktrees
 .claude/
 
