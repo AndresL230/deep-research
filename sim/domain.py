@@ -498,6 +498,8 @@ _RANDOM_POS = re.compile(
 # Repetition: a loop, or a count.
 _LOOP = re.compile(r"\bfor\s+[\w\s,()]+?\s+in\b|\bwhile\b|\brange\s*\(|\bseq\s+\d|\{\d+\.\.\d+\}|\brepeat\b")
 _SHELL_LOOP_VAR = re.compile(r"\bfor\s+(\w+)\s+in\b")
+# `while read c p; do ... --can $c ...`: each line read is a position, often from a file of random ones.
+_SHELL_READ_VARS = re.compile(r"\bwhile\s+(?:IFS=\S*\s+)?read\s+(?:-r\s+)?([A-Za-z_][\w ]*?)\s*(?:;|\n|$)")
 _PY_LOOP_VARS = re.compile(r"\bfor\s+\(?([\w\s,]+?)\)?\s+in\b")
 # What the can argument of an episode is: `--can X`, `can_xy=X`, or run_episode's second argument.
 _CAN_EXPR = re.compile(
@@ -524,6 +526,8 @@ def _can_positions(text: str) -> set[tuple[float, float]]:
 def _loop_moves_can(text: str) -> bool:
     """A loop variable is (part of) the can argument: `for x, y in spots: run_episode(c, [x, y], ...)`."""
     loop_vars = set(_SHELL_LOOP_VAR.findall(text))
+    for group in _SHELL_READ_VARS.findall(text):
+        loop_vars |= set(group.split())
     for group in _PY_LOOP_VARS.findall(text):
         loop_vars |= {v.strip() for v in group.split(",") if v.strip()}
     if not loop_vars:
