@@ -1,8 +1,7 @@
-/* Orro's logo (brand.ts). The tile carries the landing ribbon's gradient (pink, violet, blue) in both themes, with
-   the symbol in white on it; the wordmark takes its colour from the text around it. */
+/* Orro's logo (brand.ts). The tile is the dashboard's purple, flat, in both themes; the wordmark takes its colour
+   from the text around it. */
 .brand-word { display:block; width:auto; flex:none; }
-.brand-tile { --brand-gradient:radial-gradient(120% 120% at 0% 0%, #f472e6 0%, rgba(244,114,230,0) 58%), linear-gradient(135deg, #c069f2 0%, #8a63f6 48%, #5b7ff8 100%);
-  flex:none; display:grid; place-items:center; width:var(--brand-tile); height:var(--brand-tile); border-radius:22%; background:var(--brand-gradient); color:#ffffff; }
+.brand-tile { flex:none; display:grid; place-items:center; width:var(--brand-tile); height:var(--brand-tile); border-radius:22%; background:#b07af2; color:#190a30; }
 .brand-tile .brand-sym { display:block; }
 
 /* The app header: tile, then the wordmark, which dims like the old text did once there are crumbs after it. */
@@ -10,6 +9,6 @@
 .pg-home .ask-h1 { display:flex; align-items:center; }
 
 /* The landing nav: the tile replaces the old grey mark box. */
-.lp-mark.brand-tile { width:32px; height:32px; border-radius:8px; background:var(--brand-gradient); box-shadow:none; }
+.lp-mark.brand-tile { width:32px; height:32px; border-radius:8px; background:#b07af2; box-shadow:none; }
 .lp-name .brand-word { height:20px; }
 @media (max-width: 640px) { .lp-name .brand-word { height:18px; } }
