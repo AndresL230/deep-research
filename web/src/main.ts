@@ -45,7 +45,6 @@ import { fetchCosts, type CostReport } from "./api";
 import type { Loadable } from "./batch/model";
 import { costsLink, costsView } from "./batch/costs";
 import { landingView } from "./landing/landing";
-import { symbolTile, wordmark } from "./brand";
 import { syncLanding } from "./landing/mount";
 import { syncMotion } from "./motion";
 import { refreshMotion } from "./robot/mount";
