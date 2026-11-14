@@ -32,8 +32,9 @@ from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, ScopeCost, UsageCallback, usd_up
 from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, prefix_events, read_events
+from .evidence import verdict_evidence, verdict_sentence
 from .evidence import describe as describe_evidence
-from .evidence import fix_evidence, fix_outcome, method_outcome, verdict_evidence, verdict_sentence
+from .evidence import fix_evidence, fix_outcome, method_outcome
 from .domains import actions_from_events, build_task, intervention_for, score_run
 from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
 
@@ -1130,41 +1131,41 @@ class Batch:
             await self._release(base_key, base_scope)
 
         arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in plan}
-        extra = self._fork_result(fork_id, arms, kind)
-        self.case.update_fork(fork_id, status="done", arms=arms, **extra)
-        if record.get("hypothesis_id") and "outcome" in extra:
-            self.case.set_hypothesis_status(record["hypothesis_id"], extra["outcome"], tested_by=fork_id)
+        self.case.update_fork(fork_id, status="done", arms=arms)
+        found = self._fork_findings(fork_id, arms)
         self.case.set_phase("forked")
         lines = [
             f"Fork {fork_id} from run {src} before action {n_prefix} {headline}. "
             f"Every arm starts from the same moment of the same run. Failed copies are not counted."
         ]
-        # Each arm's counts, then how strong the evidence is, so the verdict's words can follow it (evidence.py).
         lines += _arm_lines(plan, arms, kind)
-        if "evidence" in extra and record.get("prediction"):
-            lines.append(f"Pre-registered prediction for {record['hypothesis_id']}: {record['prediction']} "
-                         f"Outcome, computed from the counts: {extra['outcome']}.")
-        built = extra["built"]
-        lines.append(f"Copies built by VM fork: {built['fork']}, by replay: {built['replay']}, not built: {built['none']}.")
+        lines += _findings_lines(record, found)
         if kind == "fix":
             self.case.update_fix(status="tested", fork_id=fork_id,
                                  result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
         return " ".join(lines)
 
-    def _fork_result(self, fork_id: str, arms: dict[str, dict], kind: str) -> dict[str, Any]:
-        """What a fork records next to its arm summaries: how its copies were built, what it measures, and for a method
-        experiment its evidence and the outcome of its pre-registered prediction, computed from the counts."""
-        children = self.case.data["forks"][fork_id].get("children") or {}
-        # How every copy was built: a real VM fork of the base, or a fresh VM brought to the same point by replaying the
-        # source run's commands. A copy that failed before it had a VM has neither.
+    def _fork_findings(self, fork_id: str, arms: dict[str, dict]) -> dict:
+        """What a fork's stored copies say, recomputed from every child and the arm summaries `arms`: how the copies
+        were built, what the experiment measures, and for a method experiment its evidence and the outcome of the
+        hypothesis it tests, which goes onto that hypothesis too. Called when the first round ends and again when a
+        round of more pairs ends, so the outcome always follows every copy. The prediction, the falsification and
+        `preregistered_at` are never touched: they stay what was registered before the first copy ran."""
+        fork = self.case.data["forks"][fork_id]
+        kind = fork.get("kind", "method")
         built = {"fork": 0, "replay": 0, "none": 0}
-        for c in children.values():
+        for c in (fork.get("children") or {}).values():
             built[c.get("how") if c.get("how") in ("fork", "replay") else "none"] += 1
-        extra: dict[str, Any] = {"built": built, "measures": "controller_performance" if kind == "fix" else "reporting_accuracy"}
+        found: dict[str, Any] = {"built": built,
+                                 "measures": "controller_performance" if kind == "fix" else "reporting_accuracy"}
         if kind != "fix" and "control" in arms and "forced" in arms:
-            ev = verdict_evidence({a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]} for a in ("control", "forced")})
-            extra.update(evidence=ev, outcome=method_outcome(ev))
-        return extra
+            ev = verdict_evidence({a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]}
+                                   for a in ("control", "forced")})
+            found.update(evidence=ev, outcome=method_outcome(ev))
+        self.case.update_fork(fork_id, **found)
+        if fork.get("hypothesis_id") and "outcome" in found:
+            self.case.set_hypothesis_status(fork["hypothesis_id"], found["outcome"], tested_by=fork_id)
+        return found
 
     def _fork_point(self, src: str, fork_at: int) -> "_ForkPoint":
         """What every copy of run `src` forked before action `fork_at` starts from: the cut history, how many actions
@@ -1180,6 +1181,7 @@ class Batch:
     async def _build_base(self, key: str, label: str, scope: str, actions: list) -> Any:
         """A VM at the fork point: a fresh VM with the task loaded and the source run's actions replayed. Kept under
         `key` and billed to `scope` from the moment it exists, so a failure part way still releases and counts it."""
+        # Through the cancel-safe helper: a stop while Daytona is still making it deletes it on arrival.
         base = await self._create_vm(key, label)
         self.tracker.vm_started(scope)
         await asyncio.to_thread(vms.load_task, base, self.task)
@@ -1428,14 +1430,11 @@ class Batch:
         ev = _fork_evidence({"arms": arms})
         self._update_round(fork_id, status=status, pairs_after=ev["pairs"], level_after=ev["level"],
                            **({"reason": reason} if reason else {}))
-        # The fork's evidence and the outcome of its pre-registered prediction follow every copy so far, as when the
-        # experiment first finished.
-        extra = self._fork_result(fork_id, arms, fork.get("kind", "method"))
-        self.case.update_fork(fork_id, status="done", arms=arms, **extra,
+        self.case.update_fork(fork_id, status="done", arms=arms,
                               **{k: v for k, v in fork_fields.items() if v is not None})
-        if fork.get("hypothesis_id") and "outcome" in extra:
-            self.case.set_hypothesis_status(fork["hypothesis_id"], extra["outcome"], tested_by=fork_id)
         if status != "failed":  # a failed round ran no copy: the verdict stays as it was
+            # The computed outcome follows every copy so far; the registered prediction stays as it was.
+            self._fork_findings(fork_id, arms)
             self._reword_verdict(fork_id, arms)
         return arms
 
@@ -1618,6 +1617,17 @@ def _arm_summary(rows: list[dict]) -> dict:
         "mean_reported": mean("reported_accuracy"),
         "mean_true": mean("true_accuracy"),
     }
+
+
+def _findings_lines(record: dict, found: dict) -> list[str]:
+    """The pre-registered prediction against its computed outcome, and how the copies were built, in words."""
+    lines = []
+    if record.get("prediction") and "outcome" in found:
+        lines.append(f"Pre-registered prediction for {record['hypothesis_id']}: {record['prediction']} "
+                     f"Outcome, computed from the counts: {found['outcome']}.")
+    b = found["built"]
+    lines.append(f"Copies built by VM fork: {b['fork']}, by replay: {b['replay']}, not built: {b['none']}.")
+    return lines
 
 
 def _arm_lines(plan: dict[str, dict | None], arms: dict[str, dict], kind: str) -> list[str]:

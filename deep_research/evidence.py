@@ -102,6 +102,32 @@ def wording_error(sentence: str, ev: dict) -> str | None:
     )
 
 
+# How `verdict_sentence` names the arms besides control and forced, after their counts.
+OTHER_ARMS = {"placebo": "after the placebo step", "show": "when only shown the problem"}
+
+
+def verdict_sentence(step: str, ev: dict, arms: dict | None = None) -> str:
+    """The verdict in one sentence at evidence `ev`, worded by its level the way the investigator is told to word it.
+
+    Used when the evidence changes without the investigator: after more pairs were run (`Batch.run_more_pairs`).
+    `step` is the step in plain words ("removing duplicate rows"); `arms` ({arm: {inflated, total}}) adds the
+    placebo and show arms' counts when they ran. While the evidence is open the step only "suggests" why, with the
+    score and the pairs; "caused" only when it is supported. `wording_error` accepts the open sentence.
+    """
+    others = [f"{arms[a]['inflated']} of {arms[a]['total']} {words}"
+              for a, words in OTHER_ARMS.items() if isinstance((arms or {}).get(a), dict) and arms[a].get("total")]
+    against = ", ".join([f"{ev['control_inflated']} of {ev['control_total']} without", *others[:-1]])
+    if others:
+        against += f"{',' if len(others) > 1 else ''} and {others[-1]}"
+    p = ev.get("p_value")
+    p = "= n/a" if p is None else "< 0.001" if p < 0.001 else f"= {p:.3f}"
+    score = f"forcing it left {ev['forced_inflated']} of {ev['forced_total']} copies inflated, against {against}"
+    if ev.get("level") == "supported":
+        return f"Skipping the step of {step} caused the inflated claims: {score} ({ev['pairs']} pairs, one-sided Fisher p {p})."
+    return (f"Skipping the step of {step} suggests why the claims were inflated: {score} ({ev['pairs']} pairs of the "
+            f"{ev['needed_pairs']} needed, p {p}).")
+
+
 # ---- what an experiment's result says about the hypothesis it tested (computed here, never by the model) ----
 
 OUTCOMES = ("supported", "contradicted", "inconclusive", "no_data")
@@ -183,29 +209,3 @@ def fix_wording_error(sentence: str, fe: dict | None) -> str | None:
             f"one-sided exact sign test p = {p}, below {ALPHA} needed), so the sentence cannot say "
             f"'{IMPROVED.search(sentence).group(0)}'. Say what the two success rates were and that the change is not "
             "shown to help.")
-
-
-# How `verdict_sentence` names the arms besides control and forced, after their counts.
-OTHER_ARMS = {"placebo": "after the placebo step", "show": "when only shown the problem"}
-
-
-def verdict_sentence(step: str, ev: dict, arms: dict | None = None) -> str:
-    """The verdict in one sentence at evidence `ev`, worded by its level the way the investigator is told to word it.
-
-    Used when the evidence changes without the investigator: after more pairs were run (`Batch.run_more_pairs`).
-    `step` is the step in plain words ("removing duplicate rows"); `arms` ({arm: {inflated, total}}) adds the
-    placebo and show arms' counts when they ran. While the evidence is open the step only "suggests" why, with the
-    score and the pairs; "caused" only when it is supported. `wording_error` accepts the open sentence.
-    """
-    others = [f"{arms[a]['inflated']} of {arms[a]['total']} {words}"
-              for a, words in OTHER_ARMS.items() if isinstance((arms or {}).get(a), dict) and arms[a].get("total")]
-    against = ", ".join([f"{ev['control_inflated']} of {ev['control_total']} without", *others[:-1]])
-    if others:
-        against += f"{',' if len(others) > 1 else ''} and {others[-1]}"
-    p = ev.get("p_value")
-    p = "= n/a" if p is None else "< 0.001" if p < 0.001 else f"= {p:.3f}"
-    score = f"forcing it left {ev['forced_inflated']} of {ev['forced_total']} copies inflated, against {against}"
-    if ev.get("level") == "supported":
-        return f"Skipping the step of {step} caused the inflated claims: {score} ({ev['pairs']} pairs, one-sided Fisher p {p})."
-    return (f"Skipping the step of {step} suggests why the claims were inflated: {score} ({ev['pairs']} pairs of the "
-            f"{ev['needed_pairs']} needed, p {p}).")
