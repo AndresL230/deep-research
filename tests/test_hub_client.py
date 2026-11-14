@@ -363,3 +363,17 @@ def test_health_carries_the_hub_status(monkeypatch):
     with TestClient(api.app) as c:
         h = c.get("/api/health").json()["hub"]
     assert h["state"] == "connected" and h["batches"] == 3 and h["queued"] == 0
+
+
+def test_machine_defaults_to_the_git_user_name(monkeypatch):
+    monkeypatch.setenv("HUB_URL", "https://hub.test")
+    monkeypatch.setenv("HUB_TOKEN", "t")
+    monkeypatch.delenv("HUB_MACHINE", raising=False)
+    hub.default_machine.cache_clear()
+    monkeypatch.setattr(hub.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "Ada L\n"})())
+    assert hub.config().machine == "Ada L"
+    hub.default_machine.cache_clear()
+    monkeypatch.setattr(hub.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError()))
+    monkeypatch.setattr(hub.socket, "gethostname", lambda: "box-1")
+    assert hub.config().machine == "box-1"
+    hub.default_machine.cache_clear()

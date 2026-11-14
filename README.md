@@ -173,7 +173,7 @@ so a teammate's replay shows code and output but no chart images.
 ### Join the hub
 
 Ask the owner for `HUB_URL` and `HUB_TOKEN`, put them in `.env` (see `.env.example`), optionally set
-`HUB_MACHINE=<your name>`, and restart the server. `uv run python -m deep_research.hub status` shows what the hub
+`HUB_MACHINE=<your name>` (it defaults to your git user name), and restart the server. `uv run python -m deep_research.hub status` shows what the hub
 holds; `uv run python -m deep_research.hub push-all` uploads the batches already saved in `batches/`.
 
 ### Keys and the token (owner)

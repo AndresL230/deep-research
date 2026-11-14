@@ -19,9 +19,11 @@ import logging
 import os
 import queue
 import socket
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
 import httpx
@@ -53,8 +55,20 @@ def config() -> HubConfig | None:
     token = os.environ.get("HUB_TOKEN", "").strip()
     if not url or not token:
         return None
-    machine = os.environ.get("HUB_MACHINE", "").strip() or socket.gethostname() or "unknown"
+    machine = os.environ.get("HUB_MACHINE", "").strip() or default_machine()
     return HubConfig(url=url, token=token, machine=machine[:64])
+
+
+@lru_cache(maxsize=1)
+def default_machine() -> str:
+    """Who this server's batches are from when HUB_MACHINE is not set: the git user's name, else the computer's."""
+    try:
+        name = subprocess.run(
+            ["git", "config", "user.name"], capture_output=True, text=True, timeout=3, check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        name = ""
+    return name or socket.gethostname() or "unknown"
 
 
 def enabled() -> bool:
