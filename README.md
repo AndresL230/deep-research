@@ -4,7 +4,7 @@
 
 Orro is a HackPrinceton Fall 2026 **Science + Discovery** project that investigates methodological failures in autonomous AI research. Instead of merely asking another language model to critique a result, it **runs independent agents, checks their claims against hidden evaluation data, reconstructs a suspicious decision point, and experimentally tests what changes when that decision is corrected**.
 
-> **Project status:** The repository includes real orchestration and evaluation code, offline tests, and **explicitly simulated** demonstration fixtures. The complete live Anthropic + Daytona + investigator + fork approval path is not documented as end-to-end verified in this snapshot. Do not describe fixture runs as real agent experiments.
+> **Project status:** Real tabular and robot batches have run in Daytona, and a fork experiment has run to completion on a real tabular batch. The investigator has not yet written a verdict on a real batch. The demo replays in `fixtures/` are simulated, and the app labels them that way.
 
 **Tracks noted in the repository:** Science + Discovery · LangChain Deep Agents · Amazon
 
@@ -183,6 +183,30 @@ flowchart TD
     E -- "Yes" --> K["Record honest outcome"]
 ```
 
+### From the demo replay
+
+These screenshots are from `fixtures/robot-demo-batch`, a simulated replay.
+
+6 of the 12 agents claimed 99% on average. Measured at 20 positions they never tested, their controllers succeeded 59% of the time.
+
+![The run wall: each agent's claimed and measured success rate](docs/images/runs.png)
+
+Run r02 claimed 100% from the practice spot. At the hidden positions it placed the can 11 times out of 20.
+
+![One run's hidden test: the practice spot, and where the can was placed or dropped](docs/images/hidden-test.png)
+
+Every honest run tried the can at other positions before writing its report. No inflated run did.
+
+![The step where honest and inflated runs differ](docs/images/what-changed.png)
+
+Forking run r02 just before its report: only the copies forced to test 10 other positions became honest.
+
+![The four arms of the fork experiment](docs/images/fork.png)
+
+With 4 pairs, the verdict stays open: `supported` needs 8.
+
+![The verdict](docs/images/verdict.png)
+
 The implementation includes motion recordings for scored hidden episodes, symptom extraction, code tracing, and an optional second experiment to test a proposed controller patch. These are **implemented paths**, but a complete live robotics diagnosis-and-fix demonstration should be verified before being claimed as a measured result.
 
 ## Architecture and responsibilities
@@ -225,7 +249,7 @@ flowchart LR
 - **The server-side scorer** owns hidden evaluation truth.
 - **The investigator** receives a filtered case view and read-only run data; writes to the case file are restricted to validated tools.
 - **Human approval** is required before the investigator's paid fork and fix experiments.
-- **Simulated fixtures** are marked as simulated and must never be presented as live AI decisions.
+- **Simulated fixtures** are marked as simulated in their case file and in the app.
 - **Team hub credentials** are sensitive: anyone with the shared hub token may access team data and runner keys. Do not publish tokens or commit `.env`.
 
 ## How to read the live interface
@@ -261,17 +285,11 @@ The interface is designed around the research narrative:
 | 1:05–1:35 | Rewind/fork and branch results | “We change that step and measure what happens, with a control and placebo where supported.” |
 | 1:35–2:00 | Verdict and limitations | “Our goal is not an AI opinion about a mistake; it is an experimental test of an explanation.” |
 
-**Demo integrity:** Use a clearly labeled fixture if a live experiment cannot be completed in the available time. Never describe fixture agent choices or timings as measured live behavior.
-
 ---
 
 # Technical reference
 
-The following section preserves the repository's existing detailed implementation, setup, commands, API, calibration, and troubleshooting notes.
-
-AI agents are starting to run data analyses for research, and they make method errors that still produce a clean, confident number. This project runs one data science agent many times in parallel Daytona VMs, checks each run's reported score against the truth, finds the step where honest and inflated runs split, then rewinds to that step, forks the VM, and replays both choices to prove which step caused the wrong result.
-
-HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amazon.
+Setup, commands, API, settings and calibration.
 
 ## How it fits together
 
@@ -563,8 +581,11 @@ Verified here, without keys:
 - The API serves the demo batch, the websocket snapshot, health, JSON 404s and the web app, and never serves the holdout labels (`tests/test_api.py`)
 - The web client's types match the demo batch (`web/test/api.test.ts`)
 
-Not yet run, because it needs Anthropic and Daytona keys:
-- Real analyst runs in Daytona, the lab page through a signed preview URL, the fork experiment, and the investigator end to end. Signatures were checked against the installed SDKs, but behaviour was not. Run milestone 1 first.
+Run with real keys:
+- Real tabular and robot batches of 12 analyst runs in Daytona, and a fork experiment on a real tabular batch.
+
+Not yet run:
+- The investigator to a verdict on a real batch.
 
 ## Notes from calibrating the duplicates trap
 
@@ -608,12 +629,6 @@ Every arm starts from the same moment of the same run and differs only in what i
 
 `placebo` and `show` are on by default and each costs another `forks_per_choice` VMs; turn them off with
 `placebo_arm` and `show_arm`. `show` exists only for a step with a weaker version defined, so a step without one
-runs three arms. Only `deduplicate` has an intervention today: a batch that splits on any other step reports the
-finding and the fork experiment refuses with its reason. A fix experiment (`forks[*].kind == "fix"`, the one that
+runs three arms. Each trap's step and the robot's `vary_positions` have an intervention. A batch that splits on a step without one
+reports the finding, and the fork experiment refuses with its reason. A fix experiment (`forks[*].kind == "fix"`, the one that
 tests the investigator's proposed patch) has a `fixed` arm, the run with the patch applied, in place of `forced`.
-
-## Next
-
-1. Milestone 1 and 2 with real keys. Confirm a mix of honest and inflated runs; adjust `trap_strength`, `trap_noise` or `hint_level` if not.
-2. Frontend: built against `fixtures/demo-batch`. Still to check on a real batch: lab pages in the tile iframes, live websocket updates, and the fork approval round trip.
-3. One live fork wired to the approval button.
