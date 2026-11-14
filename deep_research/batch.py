@@ -17,6 +17,7 @@ from langchain_daytona import DaytonaSandbox
 from langgraph.types import Command
 
 from . import sandboxes as vms
+from . import traps
 from .agents.analyst import build_analyst
 from .agents.investigator import build_investigator
 from .analysis import actions_from_events, find_split
@@ -58,7 +59,8 @@ class Batch:
         self._investigator = None
         self._inv_config: dict | None = None
         self.case.subscribe(lambda section, value: self._emit({"kind": "case", "section": section, "value": value}))
-        self.case.set_config(cfg.model_dump())
+        # `trap_info` is the trap in words and patterns, so the UI and the investigator need no list of traps.
+        self.case.set_config({**cfg.model_dump(), "trap_info": traps.get(cfg.trap).public()})
 
     # ---- live updates to the UI ----
     def subscribe(self) -> asyncio.Queue:
@@ -190,13 +192,13 @@ class Batch:
             p = self.runs_dir / r / "events.jsonl"
             if p.exists():
                 runs[r] = actions_from_events(read_events(p), self.task.given_files())
-        finding = find_split(runs, statuses)
+        finding = find_split(runs, statuses, prefer=traps.get(self.cfg.trap).label)
         if finding is None:
             self.case.set_split(None)
             self.case.set_phase("no_split")
             return
         split = finding.to_dict()
-        iv = intervention_for(finding.label)
+        iv = intervention_for(finding.label, self.cfg.trap)
         split["intervention"] = None if iv is None else iv["description"]
         self.case.set_split(split)
         self.case.set_phase("ready")
@@ -212,7 +214,7 @@ class Batch:
         split = self.case.data.get("split")
         if not split or split.get("fork_run_id") is None:
             return "error: no split finding with a run to fork from"
-        iv = intervention_for(split["label"])
+        iv = intervention_for(split["label"], self.cfg.trap)
         if iv is None:
             return f"error: no intervention is defined for '{split['label']}' yet"
         n_per_arm = max(1, min(int(n_per_arm), 8))

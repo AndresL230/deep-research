@@ -6,23 +6,27 @@ import uuid
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
-from .config import VM_WORKSPACE
+from . import traps
 
-# One forced action per label. "control" arms get nothing forced.
-INTERVENTIONS: dict[str, dict] = {
-    "deduplicate": {
-        "description": "Remove duplicate rows from data.csv before the split",
-        "command": (
-            f"cd {VM_WORKSPACE} && python3 -c \""
-            "import pandas as pd; d = pd.read_csv('data.csv'); n = len(d); "
-            "d = d.drop_duplicates(); d.to_csv('data.csv', index=False); "
-            "print(f'Removed {n - len(d)} duplicate rows. {len(d)} rows remain.')\""
-        ),
-    },
-}
+# One forced action per label: each trap's fix for its own step. "control" arms get nothing forced.
+INTERVENTIONS: dict[str, dict] = {}
+for _trap in traps.registered():
+    INTERVENTIONS.setdefault(_trap.label, _trap.intervention)
 
 
-def intervention_for(label: str) -> dict | None:
+def intervention_for(label: str, trap: str | None = None) -> dict | None:
+    """What to force for a split finding's label, in a batch that planted `trap`.
+
+    The batch trap's own intervention when the finding is that trap's step. Otherwise the table: a
+    finding can land on another label (a dataset can have real duplicates under any trap).
+    """
+    if trap is not None:
+        try:
+            own = traps.get(trap)
+        except ValueError:
+            own = None
+        if own is not None and own.label == label:
+            return own.intervention
     return INTERVENTIONS.get(label)
 
 

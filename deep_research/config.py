@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # The repo root: data/, skills/, lab_page/, prices.json, batches/, fixtures/ and web/ live here.
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -37,10 +37,13 @@ class BatchConfig(BaseModel):
     target: str | None = None
     # An uploaded training script's id (user_scripts.py). The agents then start from it instead of from nothing.
     script: str | None = Field(None, pattern=r"^sc-[0-9a-f]{8}$")
-    trap: Literal["duplicates"] = "duplicates"
-    # Share of the agent's rows that get copied once more.
+    # The flaw planted in the data: the name of a trap in `deep_research/traps/`.
+    trap: str = "duplicates"
+    # How much of it. Each trap says what this means (its `strength_label`). For duplicates: the share
+    # of the agent's rows that get copied once more.
     trap_strength: float = Field(0.5, ge=0.0, le=1.0)
-    # Small noise on the copies so exact-duplicate checks miss them. 0 = exact copies.
+    # Small noise on what is planted. For duplicates: on the copies, so exact-duplicate checks miss
+    # them (0 = exact copies).
     trap_noise: float = Field(0.0, ge=0.0, le=0.5)
     hint_level: Literal["none", "light"] = "none"
     # The model family the task asks for. Duplicates inflate tree models far more
@@ -57,6 +60,14 @@ class BatchConfig(BaseModel):
     inflation_threshold: float = Field(0.08, gt=0)
     mode: Literal["live", "replay"] = "live"
     seed: int = 0
+
+    @field_validator("trap")
+    @classmethod
+    def _known_trap(cls, name: str) -> str:
+        from . import traps  # here, not at the top: the traps import this module
+
+        traps.get(name)
+        return name
 
 
 def load_prices() -> dict:

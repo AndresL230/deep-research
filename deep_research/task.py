@@ -14,13 +14,12 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from . import datasets, user_scripts
+from . import datasets, traps, user_scripts
 from .config import VM_LIVE_DIR, VM_WORKSPACE, BatchConfig
-from .datasets import PIMA_COLUMNS, PIMA_TARGET
+from .datasets import PIMA_TARGET
 
-# Pima's names, kept for the fixture script and the tests. Other datasets carry theirs in `meta.json`.
+# Pima's target, kept for the fixture script and the tests. Other datasets carry theirs in `meta.json`.
 TARGET = PIMA_TARGET
-NOISY_COLUMNS = ["bmi", "diabetes_pedigree"]
 
 # Files the agent must write, relative to its workspace.
 OUTPUT_FILES = ["report.json", "predictions.csv", "train.csv", "test.csv"]
@@ -63,39 +62,26 @@ def read_meta(task: TaskFiles) -> dict:
         return {}
 
 
-def plant_duplicates(
-    df: pd.DataFrame, strength: float, noise: float, rng: np.random.Generator, noisy: list[str] | None = None
-) -> tuple[pd.DataFrame, int]:
-    """Copy a share of rows once more and shuffle. Returns the new frame and the copy count."""
-    n_copies = int(round(len(df) * strength))
-    if n_copies == 0:
-        return df.sample(frac=1, random_state=int(rng.integers(1 << 31))).reset_index(drop=True), 0
-    idx = rng.choice(len(df), size=n_copies, replace=False)
-    copies = df.iloc[idx].copy()
-    if noise > 0:
-        for col in NOISY_COLUMNS if noisy is None else noisy:
-            factor = 1 + rng.normal(0, noise * 0.05, size=len(copies))
-            copies[col] = (copies[col] * factor).round(3)
-    out = pd.concat([df, copies], ignore_index=True)
-    out = out.sample(frac=1, random_state=int(rng.integers(1 << 31))).reset_index(drop=True)
-    return out, n_copies
-
-
 def build_task(cfg: BatchConfig, out_dir: Path) -> TaskFiles:
     """Write the task files for a batch. Every run in the batch gets the same files."""
     out_dir.mkdir(parents=True, exist_ok=True)
     files = TaskFiles.in_dir(out_dir)
     rng = np.random.default_rng(cfg.seed)
+    trap = traps.get(cfg.trap)
 
     df, target = datasets.load(cfg.dataset, cfg.target)
-    noisy = datasets.jitter_columns(df, target)
     try:
         work, holdout = train_test_split(
             df, test_size=cfg.holdout_fraction, random_state=cfg.seed, stratify=df[target]
         )
     except ValueError as e:
         raise datasets.DatasetError(f"could not set a holdout aside: {e}") from e
-    data, n_copies = plant_duplicates(work.reset_index(drop=True), cfg.trap_strength, cfg.trap_noise, rng, noisy)
+    work, holdout = work.reset_index(drop=True), holdout.reset_index(drop=True)
+    # The trap gets the holdout's features only. The labels stay here.
+    planted = trap.plant(work, holdout.drop(columns=[target]), target, cfg, rng)
+    data, holdout_features = planted.data, planted.holdout_features
+    if len(holdout_features) != len(holdout) or target in holdout_features.columns:
+        raise ValueError(f"trap '{trap.name}' must keep the holdout rows and must not add the target to them")
 
     script_name = None
     if cfg.script:
@@ -104,23 +90,24 @@ def build_task(cfg: BatchConfig, out_dir: Path) -> TaskFiles:
         script_name = info["name"]
 
     data.to_csv(files.data, index=False)
-    holdout = holdout.reset_index(drop=True)
-    holdout.drop(columns=[target]).to_csv(files.holdout_features, index=False)
+    holdout_features.to_csv(files.holdout_features, index=False)
     holdout[[target]].to_csv(files.holdout_labels, index=False)
     files.meta.write_text(
         json.dumps(
             {
                 "dataset": cfg.dataset,
                 "target": target,
-                "columns": [str(c) for c in df.columns],
-                "noisy_columns": noisy,
+                # The columns of data.csv, the ones a trap added included.
+                "columns": [str(c) for c in data.columns],
                 "script": script_name,
                 "trap": cfg.trap,
                 "rows_given_to_agent": len(data),
                 "unique_rows_before_trap": len(work),
-                "planted_copies": n_copies,
+                "trap_strength": cfg.trap_strength,
                 "trap_noise": cfg.trap_noise,
                 "holdout_rows": len(holdout),
+                # What the trap planted, in its own words: its `evidence` reads these back.
+                **planted.meta,
             },
             indent=2,
         )

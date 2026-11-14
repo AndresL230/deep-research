@@ -9,34 +9,45 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 
-# Fixed label list. The UI colours lanes by these.
-LABELS = [
-    "load",
-    "inspect",
-    "deduplicate",
-    "clean",
-    "split",
-    "preprocess",
-    "train",
-    "evaluate",
-    "plot",
-    "predict",
-    "report",
+from . import traps
+
+# The steps any run does, in the order they usually come, each with the regex that spots it in code.
+_BASE_RULES: list[tuple[str, str]] = [
+    ("load", r"read_csv"),
+    ("inspect", r"\.describe\(|\.info\(|\.head\(|value_counts|\.isnull\(|\.isna\(|\.shape\b"),
+    ("clean", r"fillna|dropna|replace\(\s*0|\.median\(\)"),
+    ("split", r"train_test_split|KFold|StratifiedKFold|ShuffleSplit|\.sample\(\s*frac"),
+    ("preprocess", r"StandardScaler|MinMaxScaler|fit_transform|SimpleImputer"),
+    ("train", r"\.fit\("),
+    ("evaluate", r"accuracy_score|\.score\(|classification_report|confusion_matrix|cross_val_score"),
+    ("plot", r"savefig|plt\.|matplotlib"),
+    ("predict", r"holdout_features|predictions\.csv"),
+    ("report", r"report\.json"),
 ]
 
-_RULES: list[tuple[str, re.Pattern]] = [
-    ("load", re.compile(r"read_csv")),
-    ("inspect", re.compile(r"\.describe\(|\.info\(|\.head\(|value_counts|\.isnull\(|\.isna\(|\.shape\b")),
-    ("deduplicate", re.compile(r"drop_duplicates|\.duplicated\(")),
-    ("clean", re.compile(r"fillna|dropna|replace\(\s*0|\.median\(\)")),
-    ("split", re.compile(r"train_test_split|KFold|StratifiedKFold|\.sample\(\s*frac")),
-    ("preprocess", re.compile(r"StandardScaler|MinMaxScaler|fit_transform|SimpleImputer")),
-    ("train", re.compile(r"\.fit\(")),
-    ("evaluate", re.compile(r"accuracy_score|\.score\(|classification_report|confusion_matrix|cross_val_score")),
-    ("plot", re.compile(r"savefig|plt\.|matplotlib")),
-    ("predict", re.compile(r"holdout_features|predictions\.csv")),
-    ("report", re.compile(r"report\.json")),
-]
+
+def _rules() -> list[tuple[str, str]]:
+    """The base steps plus each registered trap's honest step (`deduplicate` for duplicates, and so on).
+
+    The traps' steps are checks on the data, so they sit after `inspect`. A trap whose step is a base
+    step brings its own pattern for it.
+    """
+    rules = dict(_BASE_RULES)
+    own: dict[str, str] = {}
+    for t in traps.registered():
+        if t.label in rules:
+            rules[t.label] = t.pattern
+        else:
+            own.setdefault(t.label, t.pattern)
+    base = list(rules.items())
+    return base[:2] + list(own.items()) + base[2:]
+
+
+_RULES: list[tuple[str, re.Pattern]] = [(label, re.compile(pattern)) for label, pattern in _rules()]
+# Every step label, in order. The case file and the investigator's prompt take the list from here.
+LABELS = [label for label, _ in _RULES]
+# Steps that can be part of the split itself (see `Trap.at_split`).
+_AT_SPLIT = {t.label for t in traps.registered() if t.at_split}
 
 # Tool calls that change the VM. These are what we replay to rebuild a VM.
 VM_TOOLS = {"execute", "write_file", "edit_file", "delete"}
@@ -127,7 +138,8 @@ def _did_before_split(actions: list[Action], label: str) -> bool:
         if label not in a.labels:
             continue
         # The same action can dedupe and then split, as in one script: then the order inside it decides.
-        if "split" not in a.labels or _order_in_text(a.source or a.text, label, "split"):
+        # Unless the step can be the split itself (a grouped split): then being in that action is enough.
+        if "split" not in a.labels or label in _AT_SPLIT or _order_in_text(a.source or a.text, label, "split"):
             return True
     return False
 
@@ -171,8 +183,15 @@ class SplitFinding:
         return asdict(self)
 
 
-def find_split(runs: dict[str, list[Action]], statuses: dict[str, str]) -> SplitFinding | None:
-    """Find the label done before the train/test split by honest runs but not inflated ones."""
+def find_split(
+    runs: dict[str, list[Action]], statuses: dict[str, str], prefer: str | None = None
+) -> SplitFinding | None:
+    """Find the label done before the train/test split by honest runs but not inflated ones.
+
+    `prefer` is the batch trap's label. It wins a tie: one line of code can carry two labels
+    (`drop_duplicates(subset='subject_id')` is both `deduplicate` and `group_split`), and the step
+    that was planted for is the one the fork experiment can test.
+    """
     honest = [r for r, s in statuses.items() if s == "honest" and r in runs]
     inflated = [r for r, s in statuses.items() if s == "inflated" and r in runs]
     if not honest or not inflated:
@@ -184,7 +203,7 @@ def find_split(runs: dict[str, list[Action]], statuses: dict[str, str]) -> Split
             continue
         h = sum(_did_before_split(runs[r], label) for r in honest) / len(honest)
         i = sum(_did_before_split(runs[r], label) for r in inflated) / len(inflated)
-        if best is None or (h - i) > best[0]:
+        if best is None or (h - i) > best[0] or ((h - i) == best[0] and label == prefer):
             best = (h - i, label)
     assert best is not None
     label = best[1]
