@@ -30,13 +30,14 @@ import { DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputs
 import { wallView } from "./batch/wall";
 import { diagnosisView, fixView, forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
-import { eventsToConvo, runSummaryView, taskText } from "./batch/run";
+import { eventsToConvo, runSummaryView, taskText, workStrip } from "./batch/run";
 import { agentTimes, caseAt, eventsAt, replayBar, replayDuration, replaySchedule } from "./batch/replay";
 import { LABEL_PATTERNS, chartUrl, logOf, notebookCells, notebookView } from "./batch/notebook";
 import { fetchCosts, type CostReport } from "./api";
 import type { Loadable } from "./batch/model";
 import { costsLink, costsView } from "./batch/costs";
 import { refreshMotion } from "./robot/mount";
+import { isMotionBatch } from "./robot/markup";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -69,6 +70,8 @@ interface AppState {
   cvKey: string;
   /** A run's page: its notebook, or the same log as conversation steps. */
   runView: "notebook" | "steps";
+  /** A robot run's page: the notebook is folded under the player until asked for. Reset per run. */
+  workOpen: boolean;
   /** The cost screen's report (GET /api/costs), loaded again on every visit. */
   costs: Loadable<CostReport>;
   /** Where the cost screen was opened from, for its back button. */
@@ -86,6 +89,7 @@ const S: AppState = {
   cv: initialConversationUi(),
   cvKey: "",
   runView: "notebook",
+  workOpen: false,
   costs: { state: "loading" },
   costsBack: { name: "home" },
   hub: null,
@@ -239,6 +243,11 @@ function runBody(vm: BatchVm, key: EventKey): string {
     const body = cells.length
       ? notebookView(cells, { image: (name) => chartUrl(vm, key, name), mark: trapMark(trapOf(vm.case), label) ?? (label ? LABEL_PATTERNS[label] ?? null : null) })
       : `<p class="pg-note">Nothing has run yet.</p>`;
+    // A robot run: the player is the thing to look at, so the notebook stays folded under a line of what the agent did.
+    if (isMotionBatch(vm.case.config) && cells.length) {
+      const strip = workStrip(vm, key, cells.length, S.workOpen, ACT.workToggle);
+      return `${summary}${strip}${S.workOpen ? `<div class="pg-nb" data-morph-key="nb:${attr(key)}">${body}</div>` : ""}`;
+    }
     return `${summary}<div class="pg-nb" data-morph-key="nb:${attr(key)}">${body}</div>`;
   }
   const convo = eventsToConvo(key, events, { task: taskText(vm), finished: finished(vm.case, S.route), now: Date.now() });
@@ -644,7 +653,7 @@ function onRoute(): void {
   S.route = parseRoute(location.hash);
   const r = S.route;
   const key = routeKey(r) ?? "";
-  if (key !== S.cvKey) { S.cv = initialConversationUi(); S.cvKey = key; }
+  if (key !== S.cvKey) { S.cv = initialConversationUi(); S.cvKey = key; S.workOpen = false; }
   if (prev.name !== r.name || routeKey(prev) !== routeKey(r)) scrollEl.scrollTop = 0;
   if (r.name === "home") {
     closeBatch();
@@ -697,6 +706,7 @@ root.addEventListener("click", (e) => {
       return;
     }
     case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
+    case ACT.workToggle: S.workOpen = !S.workOpen; paint(); return;
     case ACT.resetConfig:
       if (S.home.defaults) { S.home = { ...S.home, draft: resetDraft(S.home), error: null }; paint(); scheduleEstimate(); }
       return;

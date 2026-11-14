@@ -22,6 +22,7 @@ export const ACT = {
   openChild: "open-child",      // arg: "<fork>/<child>" ("f1/control-1")
   back: "back",                 // from a run or child back to its batch
   runView: "run-view",          // arg: "notebook" | "steps", how a run's page shows its log
+  workToggle: "work-toggle",    // a robot run's page: unfold or fold the agent's notebook under the player
   investigate: "investigate",   // live only: start the investigator
   approve: "approve",           // live only: approve forks.pending
   decline: "decline",           // live only: decline forks.pending

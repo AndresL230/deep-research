@@ -250,3 +250,33 @@ describe("taskText on an uploaded dataset", () => {
     expect(churn).not.toContain("random forest");
   });
 });
+
+describe("workSteps and workStrip", async () => {
+  const { workSteps, workStrip } = await import("../src/batch/run");
+  const robotRaw = (await import("../../fixtures/robot-demo-batch/case/case.json?raw")).default;
+  const robot = JSON.parse(robotRaw) as CaseFile;
+  const rvm = (over: Partial<BatchVm> = {}): BatchVm => ({ id: "robot-demo-batch", live: false, case: robot, events: {}, replay: null, busy: null, error: null, now: NOW, ...over });
+
+  it("folds a run's labels into words, repeats counted", () => {
+    const steps = workSteps(rvm(), "r02");
+    expect(steps[0]).toBe("read the scene ×3");
+    expect(steps).toContain("wrote controller.py");
+    expect(steps).toContain("tested one position ×2");
+    expect(steps[steps.length - 1]).toBe("wrote report.json");
+    expect(workSteps(rvm(), "f1/control-1")).toEqual([]);  // a fork child has no labels
+    expect(workSteps(vmOf(), "r01").length).toBeGreaterThan(0);  // tabular labels read too
+  });
+
+  it("draws the strip with a toggle, and only the toggle for a run without labels", () => {
+    const closed = workStrip(rvm(), "r02", 9, false, "work-toggle");
+    expect(closed).toContain("What it did");
+    expect(closed).toContain("read the scene ×3");
+    expect(closed).toContain('data-act="work-toggle" aria-expanded="false"');
+    expect(closed).toContain("(9 cells)");
+    const open = workStrip(rvm(), "r02", 1, true, "work-toggle");
+    expect(open).toMatch(/Hide the agent.{0,8}s work/);
+    const child = workStrip(rvm(), "f1/control-1", 0, false, "work-toggle");
+    expect(child).not.toContain("What it did");
+    expect(child).toMatch(/Show the agent.{0,8}s work</);
+  });
+});

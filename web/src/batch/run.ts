@@ -370,3 +370,46 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
 
   return `<section class="rn" data-morph-key="rn:${attr(key)}">${top}${head}${note}<dl class="rn-stats">${stats}</dl>${charts}${lab}</section>`;
 }
+
+
+// ── what the agent did, in a line ────────────────────────────────────────────
+
+/** Step labels as words, for the strip over a folded notebook. A label not listed here reads with its underscores as spaces. */
+const STEP_WORDS: Record<string, string> = {
+  inspect_scene: "read the scene", write_controller: "wrote controller.py", run_single_episode: "ran an episode",
+  test_one_position: "tested one position", vary_positions: "tested other positions", tune_params: "tuned the numbers",
+  write_report: "wrote report.json",
+  load: "loaded the data", inspect: "looked at the data", deduplicate: "removed duplicates", clean: "cleaned",
+  split: "split train/test", preprocess: "preprocessed", train: "trained", evaluate: "evaluated", plot: "plotted",
+  predict: "predicted", report: "wrote the report",
+};
+
+/** The run's steps as a short list, consecutive repeats folded ("ran an episode ×4"). Empty when the run has no labels
+ *  yet (a fork child, a run still going). */
+export function workSteps(vm: BatchVm, key: EventKey): string[] {
+  const slash = key.indexOf("/");
+  const labels = slash < 0 ? vm.case.runs[key]?.labels : undefined;
+  if (!labels?.length) return [];
+  const out: { word: string; n: number }[] = [];
+  for (const action of labels) {
+    // One word per action: its first label is the step it is mostly about.
+    const label = action[0];
+    if (!label) continue;
+    const word = STEP_WORDS[label] ?? label.replace(/_/g, " ");
+    const last = out[out.length - 1];
+    if (last && last.word === word) last.n += 1;
+    else out.push({ word, n: 1 });
+  }
+  return out.map((x) => (x.n > 1 ? `${x.word} ×${x.n}` : x.word));
+}
+
+/** The strip: the steps joined, and a button that unfolds the full notebook. `cells` is how many cells it holds. */
+export function workStrip(vm: BatchVm, key: EventKey, cells: number, open: boolean, act: string): string {
+  const steps = workSteps(vm, key);
+  const what = steps.length ? steps.map((w) => `<span class="pg-work-step">${esc(w)}</span>`).join(`<span class="pg-work-sep" aria-hidden="true">›</span>`) : "";
+  const label = open ? "Hide the agent's work" : `Show the agent's work${cells ? ` (${cells} ${cells === 1 ? "cell" : "cells"})` : ""}`;
+  return `<div class="pg-work" data-morph-key="work:${attr(key)}">` +
+    (what ? `<p class="pg-work-strip"><span class="pg-work-lbl">What it did</span>${what}</p>` : "") +
+    `<button type="button" class="ask-ghostbtn ask-ghostbtn--outline pg-work-btn" data-act="${act}" aria-expanded="${open}">${esc(label)}</button>` +
+    `</div>`;
+}
