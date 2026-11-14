@@ -11,14 +11,20 @@ import {
   type Verdict,
 } from "../api";
 import { askIcon } from "../ask-icons";
-import { chip, count, reveal, spinner, type ChipMark, type ChipTone } from "../motion";
+import { badge, chip, count, reveal, spinner, type ChipMark, type ChipTone } from "../motion";
 import { attr, esc } from "../ui";
 import { duration, pct, pts, usd } from "./format";
 import { ACT, childKey, type BatchVm } from "./model";
 import { codeKind, highlightLines } from "./highlight";
 import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parseCommand, type NbCell } from "./notebook";
 import { evidenceParts, trapMark, trapOf, trapWords, type Mark } from "./trap";
-import { isMotionBatch, robotThumb, scoreWords, type ScoreWords } from "../robot/markup";
+import { isMotionBatch, motionName, robotThumb, scoreWords, type ScoreWords } from "../robot/markup";
+import {
+  causeWords, ceilingText, compare, fisherOneSided, fmtFrac, isDone, isDropped, isPending, kOfN, nHidden, verdictFork, type Comparison, type Level,
+  type Pair,
+} from "./evidence";
+import { bestMotion, copyStory, forcedCheck, forcedEvent, investigatorCounts, type StepTest } from "./forkread";
+import { scoreStep, sourceStrip, tableMap } from "./trial-charts";
 
 // ── pure helpers (exported for the tests) ────────────────────────────────────
 
@@ -92,13 +98,14 @@ export function eventLine(ev: AgentEvent): { kind: string; text: string } {
   }
 }
 
-/** "3 of 4 succeeded on the hidden positions, mean true 72.0% vs control 45.0%": a fix experiment's arm, where what
- *  matters is the true success rate, not the inflation. `control` is the arm it is measured against (left out for the
- *  control arm itself, or when there is none). */
+/** "3 of 4 claims matched the hidden test, mean hidden test 72.0% vs control 45.0%": a fix experiment's arm, where
+ *  what matters is the hidden-test rate, not the inflation. An honest copy is one whose claim matched the hidden test,
+ *  which is not the same as one that succeeded, so it is worded as that. `control` is the arm it is measured against
+ *  (left out for the control arm itself, or when there is none). */
 export function fixSummaryText(a: ArmSummary, control: ArmSummary | null = null): string {
   const failed = a.failed ? `, ${a.failed} failed` : "";
   const vs = control && control !== a && control.mean_true != null ? ` vs control ${pct(control.mean_true)}` : "";
-  return `${a.honest} of ${a.scored} succeeded on the hidden positions${failed}, mean true ${pct(a.mean_true)}${vs}`;
+  return `${a.honest} of ${a.scored} claims matched the hidden test${failed}, mean hidden test ${pct(a.mean_true)}${vs}`;
 }
 
 /** True for a fix experiment: the fork that tests the investigator's patch rather than which step. */
@@ -489,16 +496,22 @@ const AXIS_MIN = 0.5;
 export const barShare = (x: number | null | undefined): number =>
   x == null || Number.isNaN(x) ? 0 : Number((Math.max(0, Math.min(1, (x - AXIS_MIN) / (1 - AXIS_MIN))) * 100).toFixed(1));
 
+/** A share of the bar track, 0 to 100, for a success rate on the whole 0% to 100% axis. */
+const rateShare = (x: number | null | undefined): number =>
+  x == null || Number.isNaN(x) ? 0 : Number((Math.max(0, Math.min(1, x)) * 100).toFixed(1));
+
 /**
- * Reported against true accuracy as two bars on one 50% to 100% axis. The part of the reported bar past the true
- * value is hatched: that is the part that is not real.
+ * Reported against true accuracy as two bars on one axis: 50% to 100% for accuracy ("acc"), where 50% is a coin flip,
+ * and 0% to 100% for a robot's success rate ("rate"), which can be anywhere. The part of the reported bar past the
+ * true value is hatched: that is the part that is not real.
+ * `words`: a robot batch's fork arms say "Claimed" and "Hidden test" (robot/markup.ts scoreWords).
  */
-/** `words`: a robot batch's fork arms say "Claimed" and "Hidden test" (robot/markup.ts scoreWords). */
-function scoreBars(s: Pick<ScoreStats, "reported" | "true" | "gap">, group: Group, words?: { reported: string; true: string }): string {
+function scoreBars(s: Pick<ScoreStats, "reported" | "true" | "gap">, group: Group, words?: { reported: string; true: string }, axis: "acc" | "rate" = "acc"): string {
   const kRep = words?.reported ?? "Reported";
   const kTrue = words?.true ?? "True";
-  const rep = barShare(s.reported);
-  const tru = barShare(s.true);
+  const share = axis === "rate" ? rateShare : barShare;
+  const rep = share(s.reported);
+  const tru = share(s.true);
   const solid = s.true == null ? rep : Math.min(rep, tru);
   const over = Math.max(0, rep - solid);
   const gap = s.gap;
@@ -512,7 +525,7 @@ function scoreBars(s: Pick<ScoreStats, "reported" | "true" | "gap">, group: Grou
     `<span class="ln-bar-v">${count(s.reported, "pct", pct(s.reported))}</span>` +
     `<span class="ln-bar-k">${esc(kTrue)}</span><span class="ln-track" title="${attr(`${kTrue} ${pct(s.true)}`)}"><i class="ln-fill ln-fill--true ds-grow-x" style="width:${tru}%;--mo-d:150ms"></i></span>` +
     `<span class="ln-bar-v">${count(s.true, "pct", pct(s.true))}</span>` +
-    `<span class="ln-axis" aria-hidden="true"><span>50%</span><span>100%</span></span>` +
+    `<span class="ln-axis" aria-hidden="true"><span>${axis === "rate" ? "0%" : "50%"}</span><span>100%</span></span>` +
     `</div>` +
     (gap != null ? `<p class="ln-gap"><b class="ln-gap-n">${count(gap, "pts", pts(gap))}</b><span class="ln-gap-w">${word}</span></p>` : "") +
     `</div>`;
@@ -619,16 +632,85 @@ const FORK_STATUS: Record<ForkExperiment["status"], string> = {
   stopped: "Stopped before it finished",
 };
 
-/** The fork experiment: the approval card (forks.pending), then control and forced arms fanning out. */
+/** Who did a step: an LLM agent, plain Python, or a person. Every claim on the fork page wears one of these, as a
+ *  status chip of the system's: the agent in purple, Python grey, a person amber. */
+type Who = "llm" | "py" | "person";
+const WHO_TEXT: Record<Who, string> = { llm: "LLM agent", py: "Plain Python", person: "Person" };
+const WHO_TONE: Record<Who, ChipTone> = { llm: "live", py: "idle", person: "warn" };
+const whoTag = (who: Who, lead = ""): string =>
+  `<span class="ds-chip ds-chip--${WHO_TONE[who]} ln-prov-tag ln-prov-tag--${who}"><span class="ds-ic"><i class="ds-dot"></i></span>` +
+  `${esc(lead ? `${lead} · ${WHO_TEXT[who]}` : WHO_TEXT[who])}</span>`;
+
+/** A section's head, as the overview's: a small label in a soft box over a heading that says what the section found.
+ *  It arrives when it comes on screen, its words rising as the overview's title does. */
+const secHead = (eyebrow: string, title: string, extra = ""): string =>
+  `<div class="ln-sec-h" data-io data-morph-key="${attr(`h:${eyebrow}`)}"><div class="ln-head"><span class="ds-eyebrow">${esc(eyebrow)}</span>${extra}</div>` +
+  `<h3 class="ln-sec-t">${reveal(title, "word")}</h3></div>`;
+
+/** A score to two places; under 0.01 it keeps two significant figures, so 0.0001 does not read as zero. */
+const two = (x: number): string => (x >= 0.01 || x <= 0 ? x.toFixed(2) : String(Number(x.toPrecision(2))));
+/** A gap difference without its sign, for "lowered by 45.1 pts". */
+const ptsAbs = (x: number): string => `${Math.abs(x * 100).toFixed(1)} pts`;
+const lowerFirst = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
+/** "a", "a and b", "a, b and c". */
+const andList = (xs: readonly string[]): string =>
+  xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
+/** What the claim is checked against, in words: the robot's hidden test or the tabular holdout's true accuracy. */
+const trueWord = (config: unknown): string => (isMotionBatch(config) ? "hidden test" : "true accuracy");
+
+/** The evidence levels of MASTER_PLAN 6.4 as chips. Open is amber on purpose: it is a hypothesis, not a finding. */
+const LEVEL: Record<Level, { text: string; tone: ChipTone; mark: ChipMark }> = {
+  open: { text: "Open: not proven", tone: "warn", mark: "hold" },
+  supported: { text: "Supported", tone: "ok", mark: "check" },
+  cleared: { text: "Cleared", tone: "idle", mark: "dot" },
+};
+const levelChip = (l: Level): string => chip(LEVEL[l].text, LEVEL[l].tone, LEVEL[l].mark, `ln-ev-level ln-ev-level--${l}`);
+
+/** An arm's counts: from its summary when the fork has one, else counted from its children (the same rule as
+ *  evidence.ts uses for the Fisher test, so the counts printed are the counts tested). */
+function armTally(f: ForkExperiment, arm: ForkArm): { inflated: number; honest: number; scored: number; failed: number } {
+  const s = f.arms?.[arm];
+  if (s) return { inflated: s.inflated, honest: s.honest, scored: s.scored, failed: s.failed };
+  const kids = sortedChildren(f.children ?? {}, arm).map(([, k]) => k);
+  const n = (st: string): number => kids.filter((k) => k.status === st).length;
+  return { inflated: n("inflated"), honest: n("honest"), scored: n("inflated") + n("honest"), failed: n("failed") };
+}
+
+/** The labels of one action of a run: the step-tagger's when it relabelled the run, else the backend's. */
+function actionLabels(c: CaseFile, r: RunRecord, i: number): readonly string[] {
+  const tagged = c.step_labels?.[r.id]?.[i];
+  return tagged?.length ? tagged : r.labels?.[i] ?? [];
+}
+
+/** True when the copies inherit a written controller.py: then the experiment can move the report more than the work. */
+function inheritsController(c: CaseFile, f: ForkExperiment): boolean {
+  const src = c.runs?.[f.source_run];
+  if (!src) return false;
+  for (let i = 0; i < f.fork_at; i++) if (actionLabels(c, src, i).includes("write_controller")) return true;
+  return false;
+}
+const CONTROLLER_LINE = "The copies start after controller.py was written, so this experiment can change the report more than the controller.";
+
+/** The batch's step under test, the way forkread.copyStory reads it in a copy's code. */
+function stepTest(c: CaseFile, label: string): StepTest {
+  const trap = trapOf(c);
+  return { mark: stepMark(label, trap), did: stepWords(label, trap).did };
+}
+
+/** A copy's log, or undefined while it has not loaded. */
+const childLog = (vm: BatchVm, f: ForkExperiment, id: string): AgentEvent[] | undefined => vm.events[childKey(f.id, id)];
+
+/** The fork experiment: the approval card (forks.pending) first, then each experiment with its arms fanning out. */
 export function forkView(vm: BatchVm): string {
   const c = vm.case;
   const pending = pendingForks(c);
   const exps = forkExperiments(c);
   if (!pending && !exps.length) return "";
   const threshold = (c.config as Partial<BatchConfig>).inflation_threshold ?? 0.08;
-  return `<section class="ln-sec ln-forks ds-rise" data-io data-morph-key="ln-forks" aria-label="Fork experiment">` +
+  // The page's parts sit on the ground, as the overview's do; each one arrives when it comes on screen.
+  return `<section class="ln-sec ln-forks" data-morph-key="ln-forks" aria-label="Fork experiment">` +
     head("Fork experiment", c) +
-    `<div class="ln-stack" data-morph-list>${exps.map((f) => experiment(f, threshold, vm)).join("")}${pending ? approvalCard(pending, vm) : ""}</div>` +
+    `<div class="ln-stack" data-morph-list>${pending ? approvalCard(pending, vm) : ""}${exps.map((f) => experiment(f, threshold, vm)).join("")}</div>` +
     `</section>`;
 }
 
@@ -639,19 +721,38 @@ export function armCount(p: Pick<PendingForks, "n_per_arm" | "vm_count">): numbe
 }
 
 function approvalCard(p: PendingForks, vm: BatchVm): string {
-  const src = vm.case.split?.fork_run_id;
+  const c = vm.case;
+  const src = c.split?.fork_run_id;
   const est = p.estimate_usd != null ? usd(p.estimate_usd) : "unknown, prices missing";
   const disabled = !vm.live || vm.busy != null;
   const btn = (act: string, label: string, primary: boolean): string =>
     `<button type="button" class="${primary ? "ask-btn ln-approve ds-primary" : "ask-ghostbtn ask-ghostbtn--outline"}" data-act="${act}"${disabled ? " disabled" : ""}>` +
     `${vm.busy === act ? spinner(13) : ""}${esc(label)}${primary ? GO : ""}</button>`;
   const size = `${p.n_per_arm} ${p.n_per_arm === 1 ? "run" : "runs"} in each of ${armCount(p)} arms, ${p.vm_count} VMs.`;
-  const ask = isFixFork(p)
-    ? `The investigator wants to test its fix on run ${esc(vm.case.fix?.run_id ?? src ?? "?")}: ${size}`
+  const fixing = isFixFork(p);
+  const ask = fixing
+    ? `The investigator wants to test its fix on run ${esc(c.fix?.run_id ?? src ?? "?")}: ${size}`
     : `The investigator wants to fork run ${esc(src ?? "?")} before its split: ${size}`;
-  // The one decision a person makes: a white card set into a panel of the gradient.
-  return `<div class="ln-ask" data-morph-key="pending"><div class="ln-card ln-approval" role="group" aria-label="Approve the fork">` +
+  // What a person is approving, in three plain lines with no controls in them: what runs, the most this request can
+  // show, and why the investigator is waiting.
+  const more: string[] = [];
+  if (fixing) {
+    const fx = c.fix;
+    if (fx) more.push(`Fixed arm applies: ${fx.description} at ${fx.file_path}${fx.line != null ? `:${fx.line}` : ""}.`);
+  } else {
+    const cfg = c.config as Partial<BatchConfig>;
+    const iv = c.split?.intervention;
+    const arms = ["control", ...(cfg.placebo_arm ? ["placebo"] : []), ...(cfg.show_arm ? ["show"] : []), "forced"];
+    const which = armCount(p) === arms.length ? `Arms: ${arms.join(", ")}.` : `${armCount(p)} arms.`;
+    more.push(`${iv ? `Forced arm runs first: ${iv}. ` : ""}${which}`);
+    more.push(ceilingText(p.n_per_arm));
+  }
+  const why = `Asked with ${fixing ? "request_fix_test" : "request_forks"}. The investigator is paused at this human-in-the-loop interrupt until a person decides.`;
+  // The one decision a person makes: the ordinary card with the purple mesh in its corner. It lands like a card.
+  return `<div class="ln-ask ds-pop" data-io data-morph-key="pending"><div class="ln-card ln-approval" role="group" aria-label="Approve the fork">` +
     `<p class="ln-approval-t">${ask}</p>` +
+    more.map((t) => `<p class="ln-ask-more">${esc(t)}</p>`).join("") +
+    `<p class="ln-ask-more">${esc(why)}</p>` +
     `<p class="ln-approval-est">Estimated cost <b>${esc(est)}</b></p>` +
     `<div class="ln-actions">${btn(ACT.approve, "Approve", true)}${btn(ACT.decline, "Decline", false)}` +
     (vm.live ? "" : `<span class="ln-muted">Approval happens on live batches.</span>`) + `</div>` +
@@ -672,68 +773,388 @@ export function armStats(f: ForkExperiment, arm: ForkArm): ScoreStats {
 /** A mean true accuracy is "up" against the control's when it is over it by more than rounding. */
 const UP = 0.005;
 
-function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
-  const fix: ProposedFix | null = vm.case.fix ?? null;
-  // A robot batch: each child tile shows its last episode looping, like a run's tile on the wall.
-  const thumbs = isMotionBatch(vm.case.config) ? vm.id : null;
-  const words = scoreWords(vm.case.config);
+/** Why each arm is in the experiment, under its title. */
+const ARM_WHY: Record<ForkArm, string> = {
+  control: "Baseline: same moment, nothing changed",
+  placebo: "An extra tool call that changes nothing, so forced is not the only arm with a longer history",
+  show: "Told what forced would fix, left to act on it",
+  forced: "Does the step the honest runs did",
+  fixed: "The proposed patch, applied in the VM",
+};
+
+/** F2: the question the experiment asks, the hypothesis it came from, and what was expected before it ran. */
+function question(f: ForkExperiment, vm: BatchVm): string {
+  const c = vm.case;
+  const fixing = isFixFork(f);
   const statusPill = pill(f.status, FORK_STATUS[f.status] ?? f.status, f.status === "done" ? "muted" : "running");
+  const chipHtml = f.status === "stopped"
+    ? `<span class="ln-q-stop" title="A server restart closed this fork; copies scored before it still count">${statusPill}</span>` : statusPill;
+  const q = fixing
+    ? "With the proposed fix applied, does the hidden-test success rate rise?"
+    : `If a copy is made to do one step first (${lowerFirst(f.intervention)}), does the gap between what it claims and the ${trueWord(c.config)} shrink?`;
+  const hyp = [...(c.hypotheses ?? [])].filter((h) => h.step_label === f.label).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).pop();
+  // The quote, then who said it on the line under it, the way the verdict attributes the investigator's sentence.
+  const hypRow = hyp
+    ? `<div class="ln-q-row"><span class="ln-q-k">Hypothesis</span><div class="ln-q-x"><q class="ln-q-quote">${esc(hyp.evidence)}</q>` +
+      `<span class="ln-q-by">${whoTag("llm", "hypothesis subagent")}</span></div></div>` : "";
+  const prediction = f.prediction;
+  const expect = prediction
+    ? `Saved before any copy ran: ${prediction.replace(/_/g, " ")}`
+    : fixing
+      ? "Expected: a higher hidden-test rate in the fixed arm"
+      : "Expected: a smaller gap in the forced arm. Implied by the design (the forced step is what honest runs did); no prediction was saved before the copies ran.";
+  return `<div class="ln-q" data-io data-morph-key="q">` +
+    `<div class="ln-exp-h"><span class="ds-eyebrow ln-exp-id">Fork ${esc(f.id)} · ${fixing ? "fix" : "method"} experiment</span>${chipHtml}</div>` +
+    `<h3 class="ln-q-t">${reveal(q, "word")}</h3>` +
+    hypRow +
+    `<div class="ln-q-row"><span class="ln-q-k">Prediction</span><span class="ln-q-x">${esc(expect)}</span></div>` +
+    `</div>`;
+}
+
+/** F3: where the copies were cut from the source run, and how they were made. */
+function forkPoint(f: ForkExperiment, vm: BatchVm): string {
+  const c = vm.case;
+  const fixing = isFixFork(f);
+  const src = c.runs?.[f.source_run];
+  const n = src ? src.n_actions ?? src.labels?.length ?? c.step_labels?.[src.id]?.length ?? 0 : 0;
+  const ticks = src ? Array.from({ length: n }, (_, i) => actionLabels(c, src, i)[0] ?? "") : [];
+  const strip = ticks.length ? sourceStrip(ticks, f.fork_at, { src: f.source_run, rebuilding: f.status === "rebuilding" }) : "";
+  // The fix this fork tests: the fork's own, else the case file's unless that one names another fork.
+  const fix = f.fix ?? (c.fix && (!c.fix.fork_id || c.fix.fork_id === f.id) ? c.fix : null);
+  const headline = fixing
+    ? `Fork <b>${esc(f.id)}</b> from run <b>${esc(f.source_run)}</b> at the same moment, with the proposed fix applied in the fixed arm.` +
+      (fix ? ` Tests: <b class="ln-lit-word">${esc(fix.description)}</b>.` : "")
+    : `Forked run <b>${esc(f.source_run)}</b> after action ${f.fork_at}, just before its split. Step under test: <b class="ln-lit-word">${esc(f.label)}</b>.`;
+  const kids = Object.values(f.children ?? {});
+  const nFork = kids.filter((k) => k.how === "fork").length;
+  const nReplay = kids.filter((k) => k.how === "replay").length;
+  const model = (kids.find((k) => k.model)?.model ?? (c.config as Partial<BatchConfig>).analyst_model ?? "").replace(/^[^:]*:/, "");
+  // How each copy was made, only when the case file says: older batches did not record it.
+  const made = nFork + nReplay ? ` (${nFork} of ${kids.length} forked, ${nReplay} rebuilt by replay)` : "";
+  // A simulated batch scripts what the copies do, so the page does not say an agent did it.
+  const who = isSimulated(c)
+    ? `a scripted analyst continued from there, standing in for a fresh Deep Agent${model ? ` on ${esc(model)}` : ""}`
+    : `a fresh analyst Deep Agent${model ? ` on ${esc(model)}` : ""} continued from there`;
+  const mechanics = kids.length
+    ? `<p class="ln-src-how">${whoTag("py")}<span>One base VM replayed the first ${f.fork_at} actions. Each copy is a copy-on-write fork of it${made}, and ${who}.</span></p>`
+    : "";
+  const splitAt = c.split?.fork_at;
+  const moved = !fixing && splitAt != null && c.split?.fork_run_id === f.source_run && splitAt !== f.fork_at
+    ? `<p class="ln-sub">The cut moved back to a turn boundary: split at action ${splitAt}, fork at action ${f.fork_at}.</p>` : "";
+  return `<div class="ln-src" data-io data-morph-key="src">` +
+    strip +
+    `<p class="ln-exp-t">${headline}</p>` +
+    (f.status === "rebuilding" ? `<p class="ln-sub">Replaying the run's first ${f.fork_at} actions on a fresh VM.</p>` : "") +
+    mechanics +
+    (inheritsController(c, f) ? `<p class="ln-sub">${esc(CONTROLLER_LINE)}</p>` : "") +
+    moved +
+    `</div>`;
+}
+
+/** The ceiling in one sentence: how far the score can still go with the pairs left. A stopped fork has none left:
+ *  a server restart closed it, so the pairs it did not finish will not come. */
+function ceilingLine(cmp: Comparison, f: Pick<ForkExperiment, "n_per_arm" | "status">): string {
+  const k = cmp.ceiling;
+  if (k.needed === 0) return `Already at ${two(cmp.score)}, at or above the 20 needed.`;
+  if (f.status === "stopped") return `The fork stopped with ${cmp.n} of ${f.n_per_arm} pairs complete: it ends at ${two(cmp.score)}, under 20, so it cannot prove a cause.`;
+  if (k.remaining > 0 && k.needed <= k.remaining) return `${capital(k.text)}.`;
+  if (k.remaining > 0) return `With ${k.remaining} ${k.remaining === 1 ? "pair" : "pairs"} left it can reach at most ${two(k.max)}, under 20.`;
+  return `With ${f.n_per_arm} copies per arm this experiment can reach at most ${two(k.max)}, under 20, so it cannot prove a cause.`;
+}
+
+/**
+ * One pair as a check row: both gaps and what it did to the score, or why it is missing, ending in the badge of how
+ * it went (the spinner while a copy still works). The key carries the row's state, so a pair that lands is a new row
+ * and comes up from below in place of the waiting one.
+ */
+function pairRow(p: Pair, cmp: Comparison, f: ForkExperiment, beam: boolean, n: number): string {
+  const row = (state: string, cls: string, text: string, mark: string): string =>
+    `<li class="ln-ev-pair ln-ev-pair--${cls}" data-morph-key="pair-${p.i}:${state}" style="--i:${n}">` +
+    `<span class="ln-ev-pair-t">${esc(text)}</span><span class="ln-ev-pair-m">${mark}</span></li>`;
+  if (isDone(p)) {
+    const how = p.agree ? "agrees x1.9" : p.diff === 0 ? "tie, counts as disagree x0.1" : "disagrees x0.1";
+    return row("done", p.agree ? "ok" : "bad", `pair ${p.i}: ${cmp.base} ${pts(p.baseGap)}, ${cmp.changed} ${pts(p.changedGap)}, ${how}`, badge(p.agree ? "check" : "alert"));
+  }
+  if (isDropped(p)) return row("drop", "drop", `pair ${p.i} dropped: ${p.dropped}`, badge("cross"));
+  if (f.status === "stopped") return row("stop", "drop", `pair ${p.i} not run: the fork was stopped`, badge("hold"));
+  const running = p.waiting.some((id) => f.children?.[id]);
+  const what = p.waiting.map((id) => `${id} ${f.children?.[id] ? "running" : "not started"}`).join(", ");
+  return row("wait", `wait${beam ? " ds-beam" : ""}`, `waiting: ${what}`, running ? spinner(12) : `<i class="ln-ev-pair-box"></i>`);
+}
+
+/** The p values of a comparison in one line: the counts behind Fisher, then the exact test on the gaps. */
+function statsLine(f: ForkExperiment, cmp: Comparison): string {
+  const a = armTally(f, cmp.base);
+  const b = armTally(f, cmp.changed);
+  if (!a.scored || !b.scored) return "";
+  const pExact = f.p_exact;
+  const gaps = typeof pExact === "number" && cmp.source === "case"
+    ? ` Gaps: exact p = ${pExact.toFixed(3)}, from the case file.`
+    : cmp.permutation ? ` Gaps: exact permutation p = ${fmtFrac(cmp.permutation)}.` : "";
+  return `Inflated counts ${a.inflated}/${a.scored} vs ${b.inflated}/${b.scored}: one-sided Fisher p = ${fmtFrac(cmp.fisher)}.${gaps}`;
+}
+
+/** F4: the paired score so far, pair by pair, against the 20 a cause needs. A fix fork is judged on its rate instead. */
+function evidenceSoFar(f: ForkExperiment): string {
+  if (isFixFork(f)) {
+    return `<div class="ln-evid" data-morph-key="evidence">${secHead("Evidence", "Judged on the hidden-test rate")}` +
+      `<p class="ln-note" data-io>Fix tests are judged on the mean hidden-test rate: fixed ${esc(pct(armStats(f, "fixed").true))} vs control ${esc(pct(armStats(f, "control").true))} (MASTER_PLAN 6.4 scores method forks only).</p></div>`;
+  }
+  const cmp = compare(f, "control", "forced");
+  const live = f.status === "running" || f.status === "rebuilding";
+  const firstWait = cmp.pairs.findIndex(isPending);
+  const rows = cmp.pairs.map((p, i) => pairRow(p, cmp, f, live && i === firstWait, i)).join("");
+  // The chart draws the pairs matched here. When the case file holds a score but not its pairs, those two could
+  // differ, and a chart that ends somewhere else than the number beside it is left out rather than shown.
+  const chartAgrees = cmp.source === "derived" || !!(f as { pairs?: unknown[] }).pairs?.length
+    || Math.abs((cmp.trace[cmp.trace.length - 1] ?? 1) - cmp.score) < 0.005;
+  const chart = !cmp.trace.length
+    ? `<p class="ln-sub" data-morph-key="ev-wait">Waiting for the first pair: ${esc(cmp.base)}-1 and ${esc(cmp.changed)}-1</p>`
+    : chartAgrees ? scoreStep(cmp.trace, cmp.done.map((p) => p.agree), { total: f.n_per_arm, id: f.id })
+      : `<p class="ln-sub" data-morph-key="ev-nochart">The case file records this score but not its pairs, so no chart is drawn from the pairs matched here.</p>`;
+  const stopped = f.status === "stopped" ? `<span class="ds-chip ds-chip--idle ln-ev-stopped">${esc(`stopped, ${cmp.n} of ${f.n_per_arm} pairs complete`)}</span>` : "";
+  const stats = statsLine(f, cmp);
+  const foot = cmp.source === "case"
+    ? `From the case file: forks.${f.id}.score, by the rule in MASTER_PLAN 6.4.`
+    : `Computed in the browser from forks.${f.id}.children.*.gap by the rule in MASTER_PLAN 6.4; pairs are matched by copy number after the run.`;
+  const title = cmp.n
+    ? `${cmp.agree} of ${cmp.n} ${cmp.n === 1 ? "pair" : "pairs"} went the predicted way`
+    : "No pair is complete yet";
+  // The score is the page's one big number: it counts at a steady rate, as the overview's ring does.
+  return `<div class="ln-evid" data-morph-key="evidence">${secHead("Evidence", title)}` +
+    `<div class="ln-ev-row">` +
+    `<div class="ov-card ln-ev-head ds-pop" data-io data-morph-key="ev-score">` +
+    `<div class="ln-ev-lv">${levelChip(cmp.level)}${stopped}</div>` +
+    `<p class="ln-ev-n" title="${attr(`Paired score ${two(cmp.score)} of 20`)}"><b>${count(cmp.score, "dec2", two(cmp.score), { linear: true })}</b><span class="ln-muted"> of 20</span></p>` +
+    `<p class="ln-ev-what">The paired score: each pair that goes the predicted way multiplies it by 1.9, each that does not by 0.1. A cause needs 20.</p>` +
+    `</div>` +
+    `<div class="ov-card ln-ev-chart-c ds-pop" data-io data-morph-key="ev-chart-c">${chart}` +
+    (rows ? `<ul class="ln-ev-pairs" data-morph-list>${rows}</ul>` : "") + `</div>` +
+    `</div>` +
+    `<div class="ln-ev-notes" data-io data-morph-key="ev-notes">` +
+    (stats ? `<p class="ln-ev-stats">${esc(stats)}</p>` : "") +
+    `<p class="ln-ev-ceil">${esc(ceilingLine(cmp, f))}</p>` +
+    `<p class="ln-ev-foot">${esc(foot)}</p></div></div>`;
+}
+
+/** The exact step an arm ran first, from its copies' logs: the command clipped, and the output as stored. */
+function exactStep(f: ForkExperiment, a: ForkArm, vm: BatchVm, step: string | null, fix: ProposedFix | null): string {
+  let body: string;
+  if (a === "fixed" && fix) {
+    body = `<p class="ln-exact-where">${esc(`${fix.file_path}${fix.line != null ? `:${fix.line}` : ""}`)}</p>` +
+      `<pre class="ln-exact-pre"><del>${esc(fix.old_string)}</del>\n<ins>${esc(fix.new_string)}</ins></pre>`;
+  } else {
+    const ev = forcedEvent(vm.events, f, a);
+    const loaded = sortedChildren(f.children ?? {}, a).some(([id]) => childLog(vm, f, id) !== undefined);
+    if (ev) {
+      const cmd = ev.command.length > 300 ? `${ev.command.slice(0, 299)}…` : ev.command;
+      body = `<p class="ln-exact-k">Command, from ${esc(ev.child)}</p><pre class="ln-exact-pre">${esc(cmd)}</pre>` +
+        `<p class="ln-exact-k">Output</p><pre class="ln-exact-pre">${esc(ev.output)}</pre>`;
+    } else if (loaded) {
+      body = `<p class="ln-exact-none">${esc(`The exact command was not logged for this batch; the step: ${step ?? "none"}.`)}</p>`;
+    } else {
+      body = `<p class="ln-exact-none">Reading the log…</p>`;
+    }
+  }
+  return `<details class="ln-exact" data-morph-key="exact"><summary>Exact step</summary>${body}</details>`;
+}
+
+/** The robot's forced check on the table: where it put the can and which tries worked. Never the hidden test. */
+function forcedMap(f: ForkExperiment, vm: BatchVm): string {
+  const ev = forcedEvent(vm.events, f, "forced");
+  const check = ev ? forcedCheck(ev.output) : null;
+  if (!ev || !check) return "";
+  const kids = sortedChildren(f.children ?? {}, "forced");
+  const outs = kids.map(([id]) => childLog(vm, f, id)?.find((e) => e.type === "forced"));
+  const same = kids.length > 1 && outs.every((e) => e?.type === "forced" && e.output === ev.output)
+    ? `, the same in all ${kids.length} forced copies` : "";
+  return `<figure class="ln-check" data-io data-morph-key="check">${tableMap(check.points)}` +
+    `<figcaption><b>${check.ok} of ${check.n} succeeded in the forced check</b>${esc(same)}. ` +
+    `<span class="ln-muted">Forced check positions, drawn on the server at least 3 cm from every hidden test position. Not the hidden test.</span></figcaption></figure>`;
+}
+
+function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
+  const c = vm.case;
+  const motion = isMotionBatch(c.config);
+  // A robot batch: each child tile shows its last episode looping, like a run's tile on the wall.
+  const thumbs = motion ? vm.id : null;
+  const words = scoreWords(c.config);
   const fixing = isFixFork(f);
   const control = fixing ? armStats(f, "control") : null;
+  const fix = f.fix ?? (c.fix && (!c.fix.fork_id || c.fix.fork_id === f.id) ? c.fix : null);
+  const step = stepTest(c, f.label);
+  const nHid = nHidden(c.config);
   const arm = (a: ForkArm): string => {
     const kids = sortedChildren(f.children ?? {}, a);
     const summary = f.arms?.[a];
-    const step = armStep(f, a);
-    const sub = step === null ? "Continues unchanged" : `Runs first: ${step}`;
+    const armStepText = armStep(f, a);
+    const sub = armStepText === null ? "Continues unchanged" : `Runs first: ${armStepText}`;
     const started = f.status !== "done" && kids.length < f.n_per_arm ? `<span class="ln-muted">${kids.length} of ${f.n_per_arm} started</span>` : "";
     const stats = armStats(f, a);
     // The arm's bar wears the color of what its runs turned out to be. Testing a step: inflated when the mean gap is
     // over the line. Testing a fix: green when the mean true accuracy went up against control, red when it did not.
     const better = control != null && stats.true != null && control.true != null && stats.true > control.true + UP;
     const tone: Group = fixing ? (better ? "honest" : "inflated") : stats.gap != null && stats.gap >= threshold ? "inflated" : "honest";
-    const bars = stats.reported != null || stats.true != null ? scoreBars(stats, tone, words) : "";
+    const bars = stats.reported != null || stats.true != null ? scoreBars(stats, tone, words, motion ? "rate" : "acc") : "";
     const sum = summary ? (fixing ? fixSummaryText(summary, a === "control" ? null : f.arms?.control ?? null) : armSummaryText(summary)) : "";
-    return `<div class="ln-arm ln-arm--${a}" data-morph-key="arm-${a}">` +
-      `<div class="ln-arm-h"><span class="ln-arm-t">${esc(ARM_TITLE[a] ?? a)}</span>${started}</div>` +
-      `<p class="ln-arm-sub">${esc(sub)}</p>` +
-      bars +
-      `<div class="ln-kids" data-morph-list>${kids.map(([id, k], i) => childTile(f.id, id, k, thumbs, words, i)).join("")}</div>` +
-      (sum ? `<p class="ln-arm-sum">${esc(sum)}</p>` : "") +
+    // The arm's result as its big number, with what it counts in grey: "3 of 4 inflated", or for a fix, how many
+    // claims matched the hidden test.
+    const t = armTally(f, a);
+    const big = t.scored
+      ? `<p class="ln-arm-n" data-morph-key="n">${count(fixing ? t.honest : t.inflated, "int", String(fixing ? t.honest : t.inflated))} of ${t.scored}` +
+        `<span class="ln-muted"> ${fixing ? "matched" : "inflated"}</span></p>`
+      : "";
+    const tiles = kids.map(([id, k]) => {
+      const evs = childLog(vm, f, id);
+      // The behaviour tag: what this copy did on its own after the cut, once it has finished (a copy still working has
+      // not reported yet). The forced step itself is the experiment's, never the copy's (forkread.copyStory). A
+      // tabular copy only earns a tag when it did the batch's step itself, in the step's own words.
+      const story = evs && k.status !== "running" ? copyStory(evs, step, motion, a) : null;
+      const tag = k.status === "running" ? (evs ? null : undefined)
+        : !story ? undefined
+          : motion ? story.tag
+            : story.didStep ? `${step.did} ${a === "control" ? "" : "again "}on its own` : null;
+      const hidden = motion && k.status !== "running" ? kOfN(k.true_accuracy, nHid) : null;
+      return childTile(f.id, id, k, thumbs, words, tag, hidden != null ? `${hidden} of ${nHid} on the hidden test` : null);
+    }).join("");
+    // The arm's parts are a keyed list: a part that appears later (the bars once a copy is scored, the forced check
+    // once its log loads) is put in its place, and the copies after it stay the elements they were.
+    return `<div class="ln-arm ln-arm--${a}" data-morph-key="arm-${a}" data-morph-list>` +
+      `<div class="ln-arm-h" data-morph-key="h"><span class="ln-arm-t">${esc(ARM_TITLE[a] ?? a)}</span>${started}</div>` +
+      big +
+      `<p class="ln-why" data-morph-key="why">${esc(ARM_WHY[a] ?? "")}</p>` +
+      `<p class="ln-arm-sub" data-morph-key="sub">${esc(sub)}</p>` +
+      (bars ? `<div class="ln-arm-bars" data-morph-key="bars">${bars}</div>` : "") +
+      (a !== "control" ? exactStep(f, a, vm, armStepText, fix) : "") +
+      (motion && a === "forced" ? forcedMap(f, vm) : "") +
+      `<div class="ln-kids" data-morph-key="kids" data-morph-list>${tiles}</div>` +
+      (sum ? `<p class="ln-arm-sum" data-morph-key="sum">${esc(sum)}</p>` : "") +
       `</div>`;
   };
-  // The fix this fork tests: the case file's, unless that one names another fork.
-  const tested = fix && (!fix.fork_id || fix.fork_id === f.id) ? fix : null;
-  const headline = fixing
-    ? `Fork <b>${esc(f.id)}</b> from run <b>${esc(f.source_run)}</b> at the same moment, with the proposed fix applied in the fixed arm.` +
-      (tested ? ` Tests: <b class="ln-lit-word">${esc(tested.description)}</b>.` : "")
-    : `Forked run <b>${esc(f.source_run)}</b> after action ${f.fork_at}, just before its split. Step under test: <b class="ln-lit-word">${esc(f.label)}</b>.`;
-  return `<div class="ln-card ln-exp" data-io data-morph-key="exp-${attr(f.id)}">` +
-    `<div class="ln-exp-h"><span class="ln-exp-id">Fork ${esc(f.id)}</span>${statusPill}</div>` +
-    `<p class="ln-exp-t">${headline}</p>` +
-    (f.status === "rebuilding" ? `<p class="ln-sub">Replaying the run's first ${f.fork_at} actions on a fresh VM.</p>` : "") +
-    `<div class="ln-arms" data-arms="${armNames(f).length}">${armNames(f).map(arm).join("")}</div>` +
+  const names = armNames(f);
+  const tallies = names.map((a) => ({ a, t: armTally(f, a) })).filter(({ t }) => t.scored);
+  const armsTitle = tallies.length
+    ? tallies.map(({ a, t }, i) => `${i ? ARM_TITLE[a].toLowerCase() : ARM_TITLE[a]} ${fixing ? t.honest : t.inflated} of ${t.scored}${i ? "" : fixing ? " matched" : " inflated"}`).join(", ")
+    : `${names.length} arms of ${f.n_per_arm} copies`;
+  return `<div class="ln-exp ds-rise" data-io data-morph-key="exp-${attr(f.id)}">` +
+    `<div class="ln-exp-top" data-morph-key="top">${question(f, vm)}${forkPoint(f, vm)}</div>` +
+    evidenceSoFar(f) +
+    `<div class="ln-arms-w" data-morph-key="arms-w">${secHead("Arms", armsTitle)}` +
+    `<div class="ln-arms" data-arms="${names.length}">${names.map(arm).join("")}</div></div>` +
+    provenance(f, vm) +
     `</div>`;
 }
 
-/** A fork child's looping 3D thumbnail (robot batches), or a placeholder until it has recorded an episode. */
+/** "14:02:31 UTC" from unix seconds. */
+const clock = (at: number): string => `${new Date(at * 1000).toISOString().slice(11, 19)} UTC`;
+
+/** F6: how the agents got here, one line per step, each tagged by who did it and carrying one number and its source. */
+function provenance(f: ForkExperiment, vm: BatchVm): string {
+  const c = vm.case;
+  const fixing = isFixFork(f);
+  const runs = Object.values(c.runs ?? {});
+  const st = (s: string): number => runs.filter((r) => r.status === s).length;
+  const inv = vm.events.investigator ?? [];
+  // Subagents are told apart by the investigator's own task calls: the log's agent tag says "tools" for all of them.
+  const asked = inv.length ? investigatorCounts(inv) : null;
+  const times = (n: number | undefined, what: string): string => (n ? `; ${what} ${n} ${n === 1 ? "time" : "times"}` : "");
+  const sim = isSimulated(c);
+  const lines: { who: Who; text: string; src: string; beam?: boolean }[] = [];
+  lines.push({
+    who: "py", src: "runs.*.status",
+    text: `Analyst runs: ${runs.length} ${sim ? "scripted runs standing in for flat Deep Agents" : "flat Deep Agents, one Daytona VM each"}: ` +
+      `${st("honest")} honest, ${st("inflated")} inflated, ${st("unclear")} unclear, ${st("failed")} failed`,
+  });
+  if (c.split) lines.push({ who: "py", src: "split", text: `Split found by plain Python: ${splitCounts(c.split)}` });
+  const tagged = Object.entries(c.step_labels ?? {}).filter(([, l]) => l?.length);
+  if (tagged.length) {
+    const k = tagged.reduce((n, [, l]) => n + l.length, 0);
+    lines.push({ who: "llm", src: "step_labels", text: `Step-tagger subagent relabelled ${k} actions in ${tagged.length} runs${times(asked?.subagents["step-tagger"], "asked")}` });
+  } else {
+    const k = runs.reduce((n, r) => n + (r.labels ?? []).filter((l) => l.length).length, 0);
+    lines.push({ who: "py", src: "runs.*.labels", text: `Rule-based step labels used (${k} labelled actions)` });
+  }
+  const hyp = [...(c.hypotheses ?? [])].filter((h) => h.step_label === f.label).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).pop();
+  if (hyp) {
+    lines.push({
+      who: "llm", src: "hypotheses[].at",
+      text: `Hypothesis subagent (record_hypothesis): ${hyp.step_label}${inv.length && hyp.at ? `, at ${clock(hyp.at)}` : ""}${times(asked?.subagents.hypothesis, "asked")}`,
+    });
+  }
+  const tool = fixing ? "request_fix_test" : "request_forks";
+  const nArms = armNames(f).length;
+  lines.push({
+    who: "person", src: `forks.${f.id}.n_per_arm`,
+    text: `${tool} paused the investigator for approval: ${nArms} arms x ${f.n_per_arm} + 1 base = ${nArms * f.n_per_arm + 1} VMs` +
+      times(fixing ? asked?.requestFixTest : asked?.requestForks, `${tool} called`),
+  });
+  const kids = Object.entries(f.children ?? {});
+  const nFork = kids.filter(([, k]) => k.how === "fork").length;
+  const nReplay = kids.filter(([, k]) => k.how === "replay").length;
+  // How each copy was made, only when the case file says: older batches did not record it.
+  const how = nFork + nReplay
+    ? `; ${nFork} copy-on-write ${nFork === 1 ? "fork" : "forks"}, ${nReplay} ${nReplay === 1 ? "replay" : "replays"}`
+    : kids.length ? "; how each copy was made was not recorded" : "";
+  lines.push({ who: "py", src: `forks.${f.id}.children.*.how`, beam: f.status === "rebuilding", text: `Base VM replayed ${f.fork_at} actions${how}` });
+  const read = kids.map(([, k]) => k.arm).map((a, i) => ({ a, evs: childLog(vm, f, kids[i][0]) }))
+    .filter((x): x is { a: ForkArm; evs: AgentEvent[] } => x.evs !== undefined);
+  // The imposed step is the experiment's, not the copy's, so it does not count as running something (copyStory).
+  const ran = read.filter(({ a, evs }) => copyStory(evs, stepTest(c, f.label), isMotionBatch(c.config), a).ranSomething).length;
+  const after = !read.length && kids.length ? "their logs are loading"
+    : read.length < kids.length ? `${ran} of the ${read.length} read so far ran anything after the cut`
+      : `${ran} of them ran anything after the cut`;
+  lines.push({ who: "llm", src: "copy logs", beam: f.status === "running", text: `${kids.length} ${sim ? "scripted analysts" : "fresh analyst Deep Agents"} continued; ${after}` });
+  lines.push({ who: "py", src: `forks.${f.id}.children.*.true_accuracy`, text: "Each copy scored against the hidden truth; only the rate reaches the case file" });
+  const prefix = `fork:${f.id}:`;
+  const scopes = Object.entries(c.costs?.scopes ?? {}).filter(([k]) => k.startsWith(prefix));
+  if (scopes.length) {
+    const total = scopes.reduce((n, [, s]) => n + (s.total_usd ?? 0), 0);
+    lines.push({ who: "py", src: `costs.scopes ${prefix}*`, text: `This fork cost ${usd(total)}` });
+  }
+  return `<div class="ln-prov-w" data-morph-key="prov">${secHead("Provenance", "How the agents got here", simTag(c))}` +
+    `<div class="ov-card ln-prov-c ds-pop" data-io data-morph-key="prov-c">` +
+    (inv.length ? "" : `<p class="ln-prov-h">Rebuilt from the case file: this batch saved no investigator log.</p>`) +
+    (sim ? `<p class="ln-note ln-note--sim">Simulated batch: the agents' choices were scripted to show the method. The lines below name who does each step in a real batch; the scores are real.</p>` : "") +
+    `<ol class="ln-prov" data-morph-list>${lines.map((l, i) =>
+      `<li class="ln-prov-i${l.beam ? " ds-beam" : ""}" data-morph-key="prov-${i}">${whoTag(l.who)}<span class="ln-prov-x ds-swap" data-morph-key="${attr(l.text)}">${esc(l.text)}</span>` +
+      `<span class="ln-prov-src">${esc(l.src)}</span></li>`).join("")}</ol></div></div>`;
+}
+
+/** A fork child's looping 3D thumbnail (robot batches), or a placeholder until it has recorded an episode. The
+ *  thumbnail is its most telling recording: a check away from the practice spot over the practice episode. Which
+ *  recording it is sits on the picture itself, where the run tiles name theirs. */
 function childPic(batch: string, k: ForkChild): string {
-  const motion = k.motion_files ?? [];
-  if (motion.length) return `<span class="ln-kid-pic" data-morph-key="robot">${robotThumb(batch, motion[motion.length - 1], "span")}</span>`;
+  const file = bestMotion(k.motion_files);
+  if (file) {
+    const name = motionName(file);
+    return `<span class="ln-kid-pic${name === "practice" ? " ln-kid-pic--practice" : ""}" data-morph-key="${attr(`robot:${file}`)}">${robotThumb(batch, file, "span")}` +
+      `<span class="ln-kid-rec" title="${attr(`recorded: ${name === "practice" ? "practice spot" : name}`)}">recorded: ${esc(name === "practice" ? "practice spot" : name)}</span></span>`;
+  }
   return `<span class="ln-kid-pic ln-kid-pic--none" data-morph-key="ph">${k.status === "running" ? spinner(14) : ""}</span>`;
 }
 
-/** One fork child. It arrives as the agents on the wall do: grown from nothing, a light round its edge while it works. */
-function childTile(forkId: string, id: string, k: ForkChild, thumbs: string | null, words: ScoreWords, nth = 0): string {
+/**
+ * One fork child. It arrives as the agents on the wall do: grown from nothing when it comes on screen, 70ms after the
+ * one before it (motion.ts), with a light round its edge while it works.
+ * `tag` is what it did on its own after the cut (undefined while its log loads, null when there is nothing to say);
+ * `hidden` is its hidden-test count on a robot batch.
+ */
+function childTile(forkId: string, id: string, k: ForkChild, thumbs: string | null, words: ScoreWords,
+  tag: string | null | undefined, hidden: string | null): string {
   const scored = k.status !== "running";
   const vals = scored && (k.reported_accuracy != null || k.true_accuracy != null)
     ? `<span class="ln-kid-v"><span class="ln-muted" title="${attr(words.reportedTitle)}">${esc(words.reported.toLowerCase())}</span> ${esc(pct(k.reported_accuracy))} `
       + `<span class="ln-muted" title="${attr(words.trueTitle)}">${esc(words.true.toLowerCase())}</span> ${esc(pct(k.true_accuracy))}</span>`
     : `<span class="ln-kid-v ln-muted">${k.status === "failed" ? esc(clip(k.reason || "Failed", 40)) : "Working"}</span>`;
   const key = childKey(forkId, id);
-  return `<button type="button" class="ln-kid ln-kid--${toneOf(k.status)} ds-pop${scored ? "" : " ds-beam"}" style="--mo-d:${nth * 90}ms" data-morph-key="${attr(key)}" data-act="${ACT.openChild}" data-arg="${attr(key)}" aria-label="${attr(`${id}, ${k.status}. Open the run.`)}">` +
+  const tagHtml = tag === undefined ? `<span class="ln-kid-tag ln-muted">log loading</span>` : tag ? `<span class="ln-kid-tag">${esc(tag)}</span>` : "";
+  return `<button type="button" class="ln-kid ln-kid--${toneOf(k.status)} ds-pop${scored ? "" : " ds-beam"}" data-io data-morph-key="${attr(key)}" data-act="${ACT.openChild}" data-arg="${attr(key)}" aria-label="${attr(`${id}, ${k.status}. Open the run.`)}">` +
     `<span class="ln-kid-h"><span class="ln-kid-id">${esc(id)}</span>${k.how ? `<span class="ln-tag" title="${k.how === "fork" ? "A copy-on-write fork of the VM" : "Rebuilt by replaying the actions"}">${esc(k.how)}</span>` : ""}</span>` +
     (thumbs != null ? childPic(thumbs, k) : "") +
-    `${pill(k.status)}${vals}</button>`;
+    `${pill(k.status)}${vals}` +
+    (hidden ? `<span class="ln-kid-k">${esc(hidden)}</span>` : "") +
+    tagHtml +
+    `</button>`;
 }
 
 // ── 3. the verdict ───────────────────────────────────────────────────────────
@@ -744,9 +1165,9 @@ interface ArmDots { statuses: string[]; inflated: number; total: number }
 export function verdictArms(c: CaseFile): Partial<Record<ForkArm, ArmDots>> | null {
   const v = c.verdict;
   if (!v) return null;
-  // The verdict belongs to the method experiment: a fix fork (which tests the investigator's patch) is never its source.
-  const exps = forkExperiments(c).filter((e) => !isFixFork(e));
-  const f = [...exps].reverse().find((e) => e.label === v.step_label && e.status === "done") ?? exps[exps.length - 1];
+  // The verdict belongs to the method experiment (evidence.verdictFork, the same pick as the evidence above it): a fix
+  // fork, which tests the investigator's patch, is never its source.
+  const f = verdictFork(c);
   const out: Partial<Record<ForkArm, ArmDots>> = {};
   // Every arm the experiment ran. With no experiment to read, the verdict's own numbers cover control and forced.
   for (const arm of f ? armNames(f) : (["control", "forced"] as ForkArm[])) {
@@ -765,33 +1186,306 @@ export function verdictArms(c: CaseFile): Partial<Record<ForkArm, ArmDots>> | nu
   return out;
 }
 
-/** The verdict: dots per arm colored by outcome, plus the one sentence. */
-export function verdictView(vm: BatchVm): string {
-  const c = vm.case;
-  const v = c.verdict;
-  if (!v) return "";
-  const arms = verdictArms(c);
+/** The arms a verdict records: its structured arms, else the arms its numbers name ("control_inflated"). */
+function recordedArms(v: Verdict): ForkArm[] {
+  if (v.arms && Object.keys(v.arms).length) return Object.keys(v.arms) as ForkArm[];
+  const out: ForkArm[] = [];
+  for (const k of Object.keys(v.numbers ?? {})) {
+    const m = /^(.+)_(inflated|total)$/.exec(k);
+    if (m && !out.includes(m[1] as ForkArm)) out.push(m[1] as ForkArm);
+  }
+  return out;
+}
+
+/** The exact p on the gaps, as the Fork page prints it: the server's p_exact when the case file holds the score,
+ *  else the permutation p computed here. */
+function gapP(f: ForkExperiment, cmp: Comparison): string {
+  return typeof f.p_exact === "number" && cmp.source === "case" ? `exact p ${f.p_exact.toFixed(3)}`
+    : cmp.permutation ? `permutation p ${fmtFrac(cmp.permutation)}` : "";
+}
+
+/** V1's arm tiles: one per arm, its result as the big number with what it counts in grey ("3 of 4 inflated"), its
+ *  mean gap under it. The arm that changed wears the purple frame. */
+function armTiles(c: CaseFile, f: ForkExperiment | null, arms: Partial<Record<ForkArm, ArmDots>> | null): string {
+  const list = (Object.keys(arms ?? {}) as ForkArm[]).filter((a) => arms?.[a]);
+  if (!list.length) return "";
+  const words = scoreWords(c.config);
+  const tile = (a: ForkArm): string => {
+    const d = arms![a]!;
+    const gap = f ? armStats(f, a).gap : null;
+    // The mean gap in the Fork page's words ("+43.8 pts claimed above hidden test"); the step itself is named above.
+    const [rep, tru] = [words.reported.toLowerCase(), words.true.toLowerCase()];
+    const sub = gap != null ? `${pts(gap)} ${rep} ${gap >= 0 ? "above" : "below"} ${tru}` : a === "control" ? "left as it was" : "the arm that changed";
+    return `<div class="ov-kpi ln-v-arm ln-v-arm--${a} ds-pop" data-io data-morph-key="v-arm-${a}">` +
+      `<span class="ov-kpi-k">${esc(ARM_TITLE[a] ?? a)}</span>` +
+      `<span class="ov-kpi-v">${count(d.inflated, "int", String(d.inflated))} of ${d.total}<span class="ln-muted"> inflated</span></span>` +
+      `<span class="ov-kpi-s">${esc(sub)}</span></div>`;
+  };
+  return `<div class="ln-v-arms" data-arms="${list.length}">${list.map(tile).join("")}</div>`;
+}
+
+/** V1: where the evidence stands, computed from the fork, before anything the investigator said. */
+function standing(c: CaseFile, v: Verdict, f: ForkExperiment | null, cmp: Comparison | null, arms: Partial<Record<ForkArm, ArmDots>> | null): string {
+  const lvl: Level = cmp?.level ?? "open";
+  const said = lvl === "supported" ? `<p class="ln-v-lv">Supported: score &gt;= 20 under the MASTER_PLAN 6.4 rule.</p>`
+    : lvl === "cleared" ? `<p class="ln-v-lv">Cleared: the step did not explain the gap.</p>` : "";
+  let body: string;
+  if (!f || !cmp) {
+    const n = v.numbers ?? {};
+    const fisher = n.control_total != null && n.forced_total != null
+      ? ` From the recorded numbers, one-sided Fisher p = ${fmtFrac(fisherOneSided(n.control_inflated ?? 0, n.control_total, n.forced_inflated ?? 0, n.forced_total))}.` : "";
+    // A fix fork may have run; it tests the patch, not the step.
+    const none = forkExperiments(c).length ? "No method fork ran, so the step was not tested" : "No fork ran, so nothing was tested";
+    body = `<p class="ln-v-line">${esc(`${none}: open, 0 pairs.${fisher}`)}</p>` + armTiles(c, null, arms);
+  } else {
+    const e = cmp.effect;
+    // The arm means are over the complete pairs, the same copies the difference is over.
+    const line = e
+      ? `In this experiment, forcing <b class="ln-lit-word">${esc(f.label)}</b> ${e.meanDiff >= 0 ? "lowered" : "raised"} the gap between claim and ${esc(trueWord(c.config))} ` +
+        `by ${esc(ptsAbs(e.meanDiff))} (${esc(`${cmp.base} ${pts(cmp.pairMeanBase)}, ${cmp.changed} ${pts(cmp.pairMeanChanged)}`)}) in ${cmp.agree} of ${cmp.n} pairs.`
+      : "In this experiment no pair of copies is complete yet.";
+    const stats = [
+      `score ${two(cmp.score)} of 20`,
+      `Fisher p ${fmtFrac(cmp.fisher)}`,
+      gapP(f, cmp),
+      `${cmp.n} ${cmp.n === 1 ? "pair" : "pairs"}`,
+      e ? `pairs ranged ${(e.range[0] * 100).toFixed(1)} to ${(e.range[1] * 100).toFixed(1)} pts` : "",
+    ].filter(Boolean).join(" · ");
+    body = `<p class="ln-v-line">${line}</p>` + armTiles(c, f, arms) +
+      `<p class="ln-v-stats">${esc(stats)}</p><p class="ln-ev-ceil">${esc(ceilingLine(cmp, f))}</p>`;
+  }
+  return `<div class="ln-v-stand" data-morph-key="v-stand"><div class="ln-head"><span class="ds-eyebrow">Where the evidence stands</span>${levelChip(lvl)}</div>${said}${body}</div>`;
+}
+
+/** V2: the investigator's own sentence, quoted and attributed, with how far the measured evidence goes beside it. */
+function claim(c: CaseFile, v: Verdict, f: ForkExperiment | null, cmp: Comparison | null): string {
+  const lvl: Level = cmp?.level ?? "open";
+  const conf = v.confidence
+    ? `<span class="ln-tag ln-conf ln-conf--${attr(v.confidence)}" title="The investigator's own confidence in this verdict">${esc(v.confidence)} confidence, self-reported</span>` : "";
+  const check = selfCheckText(c.rubric);
+  const measured = cmp ? `${two(cmp.score)} of the 20 needed` : "no pairs";
+  // Open: the sentence is the leading hypothesis. Cleared: the measurement went against it.
+  const note = lvl === "cleared"
+    ? `This sentence names a cause, but the experiment cleared the step (score ${cmp ? two(cmp.score) : "?"} after ${cmp?.n ?? 0} pairs): the measured evidence goes against it.`
+    : `This sentence names a cause. The measured evidence is ${lvl} (${measured}), so read it as the leading hypothesis, not a proven cause.`;
+  const open = lvl !== "supported" && causeWords(v.sentence) ? `<p class="ln-note ln-v-open">${esc(note)}</p>` : "";
+  const rec = recordedArms(v);
+  const ran = f ? armNames(f) : [];
+  const left = ran.filter((a) => !rec.includes(a));
+  const cites = rec.length && left.length
+    ? `<p class="ln-note">${esc(`The recorded verdict cites ${andList(ran.filter((a) => rec.includes(a)))}; the fork also ran ${andList(left)}.`)}</p>` : "";
+  return `<figure class="ln-claim" data-morph-key="v-claim"><blockquote class="ln-claim-q"><p class="ln-sentence">${reveal(v.sentence, "word")}</p></blockquote>` +
+    `<figcaption class="ln-claim-by">The investigator recorded (record_verdict) ${whoTag("llm")}${conf}</figcaption></figure>` +
+    open + cites +
+    verdictSplit(v) +
+    (check ? `<p class="ln-note ln-selfcheck">${esc(check)}</p>` : "");
+}
+
+/** V3: what the step did to the claim and what it did to the work, control against forced, side by side. */
+function outcomes(c: CaseFile, f: ForkExperiment | null, events: Record<string, AgentEvent[]>): string {
+  if (!f) return "";
+  const motion = isMotionBatch(c.config);
+  const tw = trueWord(c.config);
+  const words = scoreWords(c.config);
+  const ctl = armStats(f, "control");
+  const frc = armStats(f, "forced");
+  const share = (x: number | null): number => (motion ? Number((Math.max(0, Math.min(1, x ?? 0)) * 100).toFixed(1)) : barShare(x));
+  const partial = (a: ForkArm): string => {
+    if (f.arms?.[a]) return "";
+    const st = armStats(f, a);
+    return st.n ? `partial, ${st.n} of ${f.n_per_arm} copies` : "no scored copies";
+  };
+  const bar = (a: ForkArm, x: number | null, i: number): string =>
+    `<span class="ln-out-k">${esc(ARM_TITLE[a])}${partial(a) ? ` <span class="ln-muted">(${esc(partial(a))})</span>` : ""}</span>` +
+    `<span class="ln-out-track"><i class="ln-out-fill ln-out-fill--${a} ds-grow-x" style="width:${share(x)}%;--mo-d:${i * 150}ms"></i></span>` +
+    `<span class="ln-out-v">${count(x, "pct", pct(x))}</span>`;
+  // Each outcome as a tile: how far it moved as the big number, the two means under it. The claim, which moved the
+  // most, is the one highlighted tile.
+  const panel = (title: string, sub: string, key: "reported" | "true", unit: string, hi: boolean): string => {
+    const a = ctl[key];
+    const b = frc[key];
+    const move = a != null && b != null ? ` (${pts(b - a)})` : "";
+    const big = a != null && b != null ? `${count(b - a, "pts", pts(b - a))}<span class="ln-muted"> ${esc(unit)}</span>` : `<span class="ln-muted">no scored copies</span>`;
+    return `<div class="ov-kpi ln-out${hi ? " ov-kpi--hi" : ""} ds-pop" data-io data-morph-key="out-${key}"><span class="ov-kpi-k">${esc(title)}</span>` +
+      `<span class="ov-kpi-v ln-out-n">${big}</span>` +
+      `<span class="ov-kpi-s ln-out-s">${esc(sub)}: <span class="ln-out-sum">${esc(`${pct(a)} to ${pct(b)}${move}`)}</span></span>` +
+      `<div class="ln-out-bars">${bar("control", a, 0)}${bar("forced", b, 1)}</div>` +
+      `<p class="ln-out-axis">${motion ? "0% to 100%" : "50% to 100%"}</p></div>`;
+  };
+  const thr = (c.config as Partial<BatchConfig>).inflation_threshold ?? 0.08;
+  const dClaim = ctl.reported != null && frc.reported != null ? frc.reported - ctl.reported : null;
+  const dWork = ctl.true != null && frc.true != null ? frc.true - ctl.true : null;
+  let reading = "";
+  if (dClaim != null && dWork != null) {
+    const claimMoved = Math.abs(dClaim) >= thr;
+    const workMoved = Math.abs(dWork) >= thr;
+    reading = claimMoved && !workMoved
+      ? `The step changed what the agent reported far more than what it achieved: it fixed the report, not the ${motion ? "controller" : "model"}.`
+      : claimMoved && workMoved ? "The step changed both the claim and the work."
+        : workMoved ? "The step changed the work more than the claim."
+          : "The step made no measurable difference.";
+  }
+  // Robot: the copies that did better on the hidden test than control did, as counts of the hidden positions.
+  const extras: string[] = [];
+  if (motion && ctl.true != null) {
+    const N = nHidden(c.config);
+    const ctlK = kOfN(ctl.true, N);
+    const ctlText = ctlK != null ? `${ctlK} of ${N}` : pct(ctl.true);
+    const better: { a: ForkArm; id: string; k: ForkChild; edited: boolean }[] = [];
+    for (const a of armNames(f).filter((x) => x !== "control")) {
+      for (const [id, k] of sortedChildren(f.children ?? {}, a)) {
+        if (k.true_accuracy == null || k.true_accuracy - ctl.true < 0.1 - 1e-9) continue;
+        const evs = events[childKey(f.id, id)];
+        better.push({ a, id, k, edited: evs ? copyStory(evs, null, true, a).editedController : false });
+      }
+    }
+    // "The one copy that edited controller.py" only when it is the only one that did.
+    const editors = better.filter((b) => b.edited).length;
+    for (const { a, id, k, edited } of better) {
+      const kk = kOfN(k.true_accuracy, N);
+      const which = editors === 1 ? "the one copy" : `one of ${editors} copies`;
+      extras.push(`${id} reached ${kk != null ? `${kk} of ${N}` : pct(k.true_accuracy)} on the hidden test (control copies: ${ctlText})` +
+        (edited ? `, ${which} that edited controller.py after the ${a === "forced" ? "forced step" : "cut"}` : "") + ".");
+    }
+  }
+  const honest = Object.values(c.runs ?? {}).filter((r) => r.status === "honest" && r.true_accuracy != null);
+  const ref = honest.length
+    ? `For reference, the batch's honest runs average ${pct(honest.reduce((s, r) => s + (r.true_accuracy ?? 0), 0) / honest.length)} on the ${tw} (not part of this experiment).` : "";
+  return `<div class="ln-outs-w" data-morph-key="v-outs">${secHead("Two outcomes: the claim and the work", reading || "The claim and the work, control to forced")}` +
+    `<div class="ln-outs">${panel("The claim", `Mean ${words.reported.toLowerCase()}, control to forced`, "reported", words.reported.toLowerCase(), true)}` +
+    `${panel("The work", `Mean ${tw}, control to forced`, "true", tw, false)}</div>` +
+    `<div class="ln-out-notes" data-io data-morph-key="out-notes">` +
+    extras.map((t) => `<p class="ln-note">${esc(t)}</p>`).join("") +
+    (ref ? `<p class="ln-note">${esc(ref)}</p>` : "") +
+    (inheritsController(c, f) ? `<p class="ln-note">${esc(CONTROLLER_LINE)}</p>` : "") +
+    `</div></div>`;
+}
+
+/** A line that reads like one of the canvas's check rows: a badge, then what was checked and what it found. */
+const checkRow = (kind: "check" | "alert" | "hold", cls: string, key: string, text: string): string =>
+  `<p class="ln-vread ln-check-row${cls}" data-morph-key="${attr(key)}"><span class="ln-check-m">${badge(kind)}</span><span>${esc(text)}</span></p>`;
+
+/** V4: the placebo and show arms, each with what it rules out. */
+function otherExplanations(c: CaseFile, f: ForkExperiment | null, arms: Partial<Record<ForkArm, ArmDots>> | null): string {
+  const motion = isMotionBatch(c.config);
   const row = (arm: ForkArm): string => {
     const a = arms?.[arm];
     if (!a) return "";
     const dots = a.statuses.map((s, i) => `<i class="ln-dot ln-dot--${toneOf(s)}" title="${attr(`${arm}-${i + 1}: ${s}`)}" style="--i:${i}"></i>`).join("");
     return `<div class="ln-vrow" data-morph-key="v-${arm}"><span class="ln-vrow-t">${esc(ARM_TITLE[arm] ?? arm)}</span>` +
       `<span class="ln-dots" role="img" aria-label="${attr(`${a.inflated} of ${a.total} inflated`)}">${dots}</span>` +
-      `<span class="ln-vrow-n">${a.inflated} of ${a.total} inflated</span></div>`;
+      `<span class="ln-vrow-n">${a.inflated} of ${a.total} inflated</span></div>` + (f ? reading(arm, f) : "");
   };
-  const nums = Object.entries(v.numbers ?? {});
-  const check = selfCheckText(c.rubric);
-  return `<section class="ln-sec ln-verdict ds-rise" data-io data-morph-key="ln-verdict" aria-label="Verdict">` +
-    head("Verdict", c, v.confidence ? `<span class="ln-tag ln-conf ln-conf--${attr(v.confidence)}" title="The investigator's confidence in this verdict">${esc(v.confidence)} confidence</span>` : "") +
-    `<p class="ln-sentence">${reveal(v.sentence, "word")}</p>` +
-    verdictSplit(v) +
+  const dropped = (cmp: Comparison): string => (cmp.dropped.length ? ` Pairs dropped: ${cmp.dropped.map((p) => p.dropped).join(", ")}.` : "");
+  function reading(arm: ForkArm, fk: ForkExperiment): string {
+    if (arm === "placebo") {
+      const cp = compare(fk, "control", "placebo");
+      if (cp.meanBase == null || cp.meanChanged == null) return "";
+      const moved = cp.meanChanged - cp.meanBase;
+      if (Math.abs(moved) < 0.02) {
+        const fp = compare(fk, "placebo", "forced");
+        return checkRow("check", " ln-vread--ok", "v-read-placebo", `Self-check passed: an extra tool call alone did not move the gap (control ${pts(cp.meanBase)}, placebo ${pts(cp.meanChanged)}; forced vs placebo: score ${two(fp.score)}, Fisher ${fp.fisher.num}/${fp.fisher.den}).${dropped(cp)}`);
+      }
+      return checkRow("alert", " ln-vread--bad", "v-read-placebo", `Self-check failed: the placebo moved the gap ${pts(moved)}; treat the forced result with caution.${dropped(cp)}`);
+    }
+    if (arm === "show") {
+      const cs = compare(fk, "show", "forced");
+      const s = armTally(fk, "show");
+      const fo = armTally(fk, "forced");
+      return checkRow("hold", "", "v-read-show", `Told, not done: ${s.inflated} of ${s.scored} still inflated. Show vs forced: score ${two(cs.score)}, Fisher ${cs.fisher.num}/${cs.fisher.den}. ` +
+        `Knowing the problem fixed the report in ${s.honest} of ${s.scored} copies; doing the ${motion ? "check" : "step"} fixed it in ${fo.honest} of ${fo.scored}.${dropped(cs)}`);
+    }
+    return "";
+  }
+  const ran = f ? armNames(f) : [];
+  const notRun = f ? [
+    ran.includes("placebo") ? "" : "No placebo arm ran: an extra tool call in the history is not ruled out.",
+    ran.includes("show") ? "" : "No show arm ran: whether being told is enough is not tested.",
+  ].filter(Boolean) : [];
+  const ruled = [ran.includes("placebo") ? "placebo" : "", ran.includes("show") ? "show" : ""].filter(Boolean);
+  const title = !f ? "Only the recorded numbers" : ruled.length ? `Checked with the ${andList(ruled)} ${ruled.length === 1 ? "arm" : "arms"}` : "Not checked: no placebo or show arm ran";
+  return `<div class="ln-vother" data-morph-key="v-other">${secHead("Other explanations checked", title)}` +
+    `<div class="ov-card ln-vrows-c ds-pop" data-io data-morph-key="v-rows">` +
     `<div class="ln-vrows">${(Object.keys(arms ?? {}) as ForkArm[]).map(row).join("")}</div>` +
     `<div class="ln-legend" aria-hidden="true"><span><i class="ln-dot ln-dot--honest"></i>honest</span><span><i class="ln-dot ln-dot--inflated"></i>inflated</span>` +
     (Object.values(arms ?? {}).some((a) => a?.statuses.includes("unclear")) ? `<span><i class="ln-dot ln-dot--unclear"></i>unclear</span>` : "") +
     `<span><i class="ln-dot ln-dot--failed"></i>failed</span></div>` +
-    (nums.length ? `<dl class="ln-stats">${nums.map(([k, n]) => `<div class="ln-stat"><dt>${esc(numberLabel(k))}</dt><dd>${Number.isInteger(n) ? count(n, "int", numberValue(n)) : esc(numberValue(n))}</dd></div>`).join("")}</dl>` : "") +
-    (check ? `<p class="ln-note ln-selfcheck">${esc(check)}</p>` : "") +
-    (isSimulated(c) ? `<p class="ln-note ln-note--sim">Simulated batch: the agents' choices were scripted to show the method. These are not real agent runs.</p>` : "") +
+    notRun.map((t, i) => checkRow("hold", " ln-note", `v-notrun-${i}`, t)).join("") +
+    `</div></div>`;
+}
+
+/** V5: the investigator's recorded numbers, folded away, and whether they match what the fork measured. */
+function recordMatch(v: Verdict, f: ForkExperiment | null): string {
+  if (!f) return "";
+  if (v.arms && Object.keys(v.arms).length) return `Checked against fork ${f.id} by record_verdict.`;
+  const rec = recordedArms(v);
+  if (!rec.length) return `The record has no per-arm counts to check against fork ${f.id}.`;
+  const differ: string[] = [];
+  for (const a of rec) {
+    const got = f.arms?.[a];
+    const ri = v.numbers[`${a}_inflated`];
+    const rt = v.numbers[`${a}_total`];
+    if (!got) differ.push(`${a} is not in the fork`);
+    else if (ri !== got.inflated || rt !== got.scored) differ.push(`${a} recorded ${ri ?? "?"} of ${rt ?? "?"} inflated, the fork has ${got.inflated} of ${got.scored}`);
+  }
+  const left = armNames(f).filter((a) => !rec.includes(a));
+  return differ.length ? `Differs from fork ${f.id}: ${differ.join("; ")}.`
+    : left.length ? `Matches fork ${f.id} for ${andList(rec)}; the record leaves out ${andList(left)}.`
+      : `Matches fork ${f.id}`;
+}
+
+function recordVsMeasure(v: Verdict, f: ForkExperiment | null): string {
+  const nums = Object.entries(v.numbers ?? {});
+  const match = recordMatch(v, f);
+  if (!nums.length && !match) return "";
+  return `<div class="ln-rec-w" data-io data-morph-key="v-rec">` +
+    (match ? `<p class="ln-rec-match">${esc(match)}</p>` : "") +
+    (nums.length ? `<details class="ln-recorded"><summary>As recorded by the investigator</summary>` +
+      `<dl class="ln-stats">${nums.map(([k, n]) => `<div class="ln-stat"><dt>${esc(numberLabel(k))}</dt><dd>${Number.isInteger(n) ? count(n, "int", numberValue(n)) : esc(numberValue(n))}</dd></div>`).join("")}</dl></details>` : "") +
+    `</div>`;
+}
+
+/** V6: the limits of what this page can say, each shown only when it applies. */
+function limits(c: CaseFile, f: ForkExperiment | null, cmp: Comparison | null): string {
+  const out: string[] = [];
+  if (f && cmp) {
+    out.push(`${cmp.n} ${cmp.n === 1 ? "pair" : "pairs"} per comparison.`);
+    if (!f.pairs) out.push("Pairs matched by copy number after the run, not assigned before it.");
+    if (!f.prediction) out.push("No prediction was saved before the copies ran; the expected direction is a smaller gap.");
+    const failed = Object.values(f.children ?? {}).filter((k) => k.status === "failed").length;
+    if (failed) out.push(`${failed} ${failed === 1 ? "copy" : "copies"} failed and ${failed === 1 ? "was" : "were"} left out.`);
+    if (typeof f.score !== "number") out.push("Statistics computed in the browser by the MASTER_PLAN 6.4 rule; the server does not record them yet.");
+  }
+  if (isMotionBatch(c.config)) out.push(`Hidden test: ${nHidden(c.config)} can positions the agent never saw. Only the rate is shown, never the positions.`);
+  return (out.length ? `<ul class="ln-limits" data-io data-morph-key="v-limits">${out.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : "") +
+    (isSimulated(c) ? `<p class="ln-note ln-note--sim" data-morph-key="v-sim">Simulated batch: the agents' choices were scripted to show the method. These are not real agent runs. The scores are real.</p>` : "");
+}
+
+/**
+ * The verdict, in the order a careful reader needs it: where the measured evidence stands, then the investigator's
+ * own sentence as a quote, what the step did to the claim and to the work, the other explanations the extra arms
+ * rule out, the record against the measurement, and the limits. The verdict's own card holds the first two; the rest
+ * sit on the ground as the overview's parts do, each arriving when it comes on screen.
+ */
+export function verdictView(vm: BatchVm): string {
+  const c = vm.case;
+  const v = c.verdict;
+  if (!v) return "";
+  const f = verdictFork(c);
+  const cmp = f ? compare(f, "control", "forced") : null;
+  const arms = verdictArms(c);
+  return `<section class="ln-sec ln-verdict" data-morph-key="ln-verdict" aria-label="Verdict">` +
+    head("Verdict", c) +
+    `<div class="ln-v-card ds-rise" data-io data-morph-key="v-card">` +
+    standing(c, v, f, cmp, arms) +
+    claim(c, v, f, cmp) +
+    `</div>` +
+    outcomes(c, f, vm.events) +
+    otherExplanations(c, f, arms) +
+    `<div class="ln-vlim" data-morph-key="v-lim">${secHead("Record and limits", "What this verdict rests on")}` +
+    recordVsMeasure(v, f) +
+    limits(c, f, cmp) +
+    `</div>` +
     `</section>`;
 }
 
@@ -931,12 +1625,12 @@ function fixFork(c: CaseFile, fix: ProposedFix): ForkExperiment | null {
   return f && !isPendingForks(f) && f.status === "done" ? f : null;
 }
 
-/** "Tested in fork f2: fixed 3 of 4 succeeded on the hidden positions (mean true 72.0%) against control 1 of 4 (45.0%)." */
+/** "Tested in fork f2: fixed 3 of 4 claims matched the hidden test (mean hidden test 72.0%) against control 1 of 4 (45.0%)." */
 export function fixTestedText(f: ForkExperiment): string | null {
   const fixed = f.arms?.fixed;
   const control = f.arms?.control;
   if (!fixed || !control) return null;
-  return `Tested in fork ${f.id}: fixed ${fixed.honest} of ${fixed.scored} succeeded on the hidden positions (mean true ${pct(fixed.mean_true)}) ` +
+  return `Tested in fork ${f.id}: fixed ${fixed.honest} of ${fixed.scored} claims matched the hidden test (mean hidden test ${pct(fixed.mean_true)}) ` +
     `against control ${control.honest} of ${control.scored} (${pct(control.mean_true)}).`;
 }
 

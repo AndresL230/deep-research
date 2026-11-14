@@ -253,6 +253,18 @@ export interface ForkExperiment {
   children: Record<string, ForkChild>;
   /** Set when status is "done". */
   arms?: Partial<Record<ForkArm, ArmSummary>>;
+  /** A fix experiment's patch, as the server copied it onto the fork (batch.py). */
+  fix?: ProposedFix;
+  // Planned (MASTER_PLAN 6.1): the evidence the server will record. Until it does, the UI computes these itself
+  // (batch/evidence.ts) and labels them as derived.
+  /** The direction saved before any copy ran. */
+  prediction?: "smaller_gap" | "larger_gap";
+  /** Control and changed copies matched before the run, with whether each pair went the predicted way. */
+  pairs?: { i: number; control_gap: number; changed_gap: number; agree: boolean }[];
+  /** The paired score: x1.9 per agreeing pair, x0.1 per disagreeing one. */
+  score?: number;
+  p_exact?: number;
+  level?: "open" | "supported" | "cleared";
 }
 
 /** forks["pending"]: the investigator asked for forks and is waiting for `postDecision`. */

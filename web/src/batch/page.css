@@ -24,7 +24,7 @@ button.pg-crumb.is-cur:hover { background:none; cursor:default; }
 .pg-sub[hidden] { display:none; }
 
 /* A gutter on both edges keeps the centred column under the header whether or not a scrollbar shows. */
-.pg-scroll { flex:1; min-height:0; overflow-y:auto; overflow-anchor:none; scrollbar-gutter:stable both-edges; display:flex; flex-direction:column; }
+.pg-scroll { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overflow-anchor:none; scrollbar-gutter:stable both-edges; display:flex; flex-direction:column; }
 .pg-batch { width:100%; max-width:1240px; margin:0 auto; padding:20px 24px 96px; display:flex; flex-direction:column; gap:36px; }
 .pg-hdr .ask-h1 { font-weight:500; }
 .pg-sec { min-width:0; scroll-margin-top:16px; animation:ask-fade-in var(--fx-base) var(--fx-ease) both; }

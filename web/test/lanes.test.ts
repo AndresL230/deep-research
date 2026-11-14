@@ -6,6 +6,7 @@ import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import forcedEventsRaw from "../../fixtures/demo-batch/forks/f1/forced-1/events.jsonl?raw";
 import r01Raw from "../../fixtures/demo-batch/runs/r01/events.jsonl?raw";
 import r02Raw from "../../fixtures/demo-batch/runs/r02/events.jsonl?raw";
+import robotCaseRaw from "../../fixtures/robot-demo-batch/case/case.json?raw";
 import type { AgentEvent, CaseFile, ForkExperiment, PendingForks, ProposedFix, RunRecord, SplitFinding, StepLabel, TraceEntry } from "../src/api";
 import {
   armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, diagnosisView, eventLine, fixSummaryText, fixTestedText, fixView,
@@ -687,9 +688,9 @@ describe("fixView", () => {
   it("reads what the fix experiment showed from its fork's control and fixed arms", () => {
     const tested = { ...proposedFix, status: "tested" as const, fork_id: "f2", verdict: "Scaling the carry time fixed 3 of the 4 hidden positions." };
     const html = fixView(vmOf({ forks: { f1: demo.forks.f1, f2: fixFork }, fix: tested }));
-    expect(html).toContain("Tested in fork f2: fixed 3 of 4 succeeded on the hidden positions (mean true 72.0%) against control 1 of 4 (45.0%).");
+    expect(html).toContain("Tested in fork f2: fixed 3 of 4 claims matched the hidden test (mean hidden test 72.0%) against control 1 of 4 (45.0%).");
     expect(html).toContain('<p class="ln-sentence"><span class="mo-sr">Scaling the carry time fixed 3 of the 4 hidden positions.</span>');
-    expect(fixTestedText(fixFork)).toBe("Tested in fork f2: fixed 3 of 4 succeeded on the hidden positions (mean true 72.0%) against control 1 of 4 (45.0%).");
+    expect(fixTestedText(fixFork)).toBe("Tested in fork f2: fixed 3 of 4 claims matched the hidden test (mean hidden test 72.0%) against control 1 of 4 (45.0%).");
     // Not until the fork is done, and not for a fork the case file does not have.
     const running = { ...fixFork, status: "running" as const, arms: undefined };
     expect(fixView(vmOf({ forks: { f2: running }, fix: { ...tested, status: "testing" } }))).not.toContain("Tested in fork");
@@ -725,17 +726,17 @@ describe("the fix experiment", () => {
     expect(html).toContain('data-arg="f2/fixed-1"');
   });
 
-  it("sums each arm by its true success rate and colors the bar by whether it beat control", () => {
+  it("sums each arm by its hidden-test rate and colors the bar by whether it beat control", () => {
     const html = forkView(vmOf({ forks: { f2: fixFork }, fix: proposedFix }));
     const control = html.slice(html.indexOf('data-morph-key="arm-control"'), html.indexOf('data-morph-key="arm-placebo"'));
     const fixed = html.slice(html.indexOf('data-morph-key="arm-fixed"'));
-    expect(fixed).toContain("3 of 4 succeeded on the hidden positions, mean true 72.0% vs control 45.0%");
+    expect(fixed).toContain("3 of 4 claims matched the hidden test, mean hidden test 72.0% vs control 45.0%");
     expect(fixed).toContain('class="ln-score ln-score--honest"');
-    expect(control).toContain("1 of 4 succeeded on the hidden positions, mean true 45.0%</p>");
+    expect(control).toContain("1 of 4 claims matched the hidden test, mean hidden test 45.0%</p>");
     expect(control).toContain('class="ln-score ln-score--inflated"');
     expect(html).not.toContain("inflated, mean reported");
-    expect(fixSummaryText(armOf(2, 0.5, 0.9), armOf(1, 0.45, 1))).toBe("2 of 4 succeeded on the hidden positions, mean true 50.0% vs control 45.0%");
-    expect(fixSummaryText({ ...armOf(2, 0.5, 0.9), failed: 1 })).toBe("2 of 4 succeeded on the hidden positions, 1 failed, mean true 50.0%");
+    expect(fixSummaryText(armOf(2, 0.5, 0.9), armOf(1, 0.45, 1))).toBe("2 of 4 claims matched the hidden test, mean hidden test 50.0% vs control 45.0%");
+    expect(fixSummaryText({ ...armOf(2, 0.5, 0.9), failed: 1 })).toBe("2 of 4 claims matched the hidden test, 1 failed, mean hidden test 50.0%");
     // The method experiment reads as before.
     const method = forkView(vmOf());
     expect(method).toContain("3 of 4 inflated, mean reported 87.8% vs true 73.5%");
@@ -807,10 +808,332 @@ describe("investigatorView", () => {
   });
 });
 
+// ── the fork and verdict pages on both committed batches, with the copies' logs ──
+
+const robotCase = JSON.parse(robotCaseRaw) as CaseFile;
+/** Every copy's saved log, keyed the way BatchVm.events keys them ("f1/control-1"). */
+const forkLogs = (glob: Record<string, string>): Record<string, AgentEvent[]> =>
+  Object.fromEntries(Object.entries(glob).map(([path, raw]) => [`f1/${path.split("/").at(-2)}`, jsonl(raw)]));
+const robotLogs = forkLogs(import.meta.glob("../../fixtures/robot-demo-batch/forks/f1/*/events.jsonl", { query: "?raw", import: "default", eager: true }) as Record<string, string>);
+const demoLogs = forkLogs(import.meta.glob("../../fixtures/demo-batch/forks/f1/*/events.jsonl", { query: "?raw", import: "default", eager: true }) as Record<string, string>);
+const robotVm = (c: Partial<CaseFile> = {}, over: Partial<BatchVm> = {}): BatchVm => ({
+  id: "robot", live: false, case: { ...structuredClone(robotCase), ...c }, events: robotLogs, replay: null, busy: null, error: null, now: 0, ...over,
+});
+/** One arm card of a rendered fork. */
+const armCard = (html: string, arm: string): string => {
+  const from = html.indexOf(`data-morph-key="arm-${arm}"`);
+  expect(from).toBeGreaterThan(-1);
+  const next = html.indexOf('data-morph-key="arm-', from + 10);
+  return html.slice(from, next < 0 ? html.indexOf('data-morph-key="prov"') : next);
+};
+/** One child tile. */
+const tile = (html: string, key: string): string => {
+  const from = html.indexOf(`data-morph-key="${key}"`);
+  expect(from).toBeGreaterThan(-1);
+  return html.slice(from, html.indexOf("</button>", from));
+};
+/** The verdict without the investigator's quoted sentence. */
+const outsideQuote = (html: string): string => html.replace(/<blockquote[\s\S]*?<\/blockquote>/g, "");
+
+describe("fork page", () => {
+  it("puts the approval card first, and renders it alone when nothing has run yet", () => {
+    const pending: PendingForks = { id: "pending", status: "awaiting_approval", n_per_arm: 4, vm_count: 9, estimate_usd: 1.234 };
+    const alone = forkView(vmOf({ forks: { pending } }));
+    expect(alone).toContain('data-morph-key="pending"');
+    expect(alone).not.toContain("ln-exp");
+    const both = forkView(vmOf({ forks: { f1: demo.forks.f1, pending } }));
+    expect(both.indexOf('data-morph-key="pending"')).toBeLessThan(both.indexOf('data-morph-key="exp-f1"'));
+  });
+
+  it("says on the approval card what runs, the most it can show, and why the investigator waits", () => {
+    const pending: PendingForks = { id: "pending", status: "awaiting_approval", n_per_arm: 4, vm_count: 9, estimate_usd: 1.234 };
+    const html = forkView(vmOf({ forks: { pending } }));
+    expect(count(html, '<p class="ln-ask-more">')).toBe(3);
+    expect(html).toContain("Forced arm runs first: Remove duplicate rows from data.csv before the split. Arms: control, forced.");
+    expect(html).toContain("1.9^4 = 13.03. Supported needs 20, so this request cannot prove a cause; 5 or more copies per arm can.");
+    expect(html).toContain("Asked with request_forks.");
+    expect(count(html, " disabled")).toBe(2);
+    expect(forkView(vmOf({ forks: { pending: { ...pending, n_per_arm: 5, vm_count: 11 } } }))).toContain("Supported needs a score of 20: at least 5 agreeing pairs.");
+    // A robot request with every arm turned on names all four.
+    const robot = forkView(robotVm({ forks: { pending: { ...pending, vm_count: 17 } } }));
+    expect(robot).toContain("Arms: control, placebo, show, forced.");
+    // A fix request names the patch, and has no ceiling line.
+    const fix = forkView(vmOf({ forks: { pending: { ...pending, kind: "fix", vm_count: 13 } }, fix: proposedFix }));
+    expect(fix).toContain("Fixed arm applies: Scale the carry time with the carry distance at /home/daytona/workspace/controller.py:25.");
+    expect(fix).toContain("Asked with request_fix_test.");
+    expect(fix).not.toContain("13.03");
+    expect(count(fix, '<p class="ln-ask-more">')).toBe(2);
+  });
+
+  it("reads the demo fork as open at 13.03 of 20, with both p values and the ceiling", () => {
+    const html = forkView(vmOf({}, { events: demoLogs }));
+    expect(html).toContain("Fork f1 · method experiment");
+    expect(html).toContain("does the gap between what it claims and the true accuracy shrink?");
+    expect(html).toContain("hypothesis subagent · LLM agent");
+    expect(html).toContain("no prediction was saved before the copies ran");
+    expect(html).toContain("Open: not proven");
+    expect(html).toContain("13.03 of 20");
+    expect(html).toContain("one-sided Fisher p = 5/70 (0.071)");
+    expect(html).toContain("exact permutation p = 1/70 (0.014)");
+    expect(html).toContain("can reach at most 13.03");
+    expect(html).toContain("pair 2: control +22.2 pts, forced +3.4 pts, agrees x1.9");
+    expect(html).not.toContain("Supported");
+    expect(html).not.toContain("ln-conf");
+    // The step chart: a log scale with the rule at 20, its label carrying the score.
+    expect(html).toMatch(/aria-label="Paired score after 4 pairs: 13\.03 of the 20 needed/);
+    // The question, the fork point, the evidence, the arms, then how the agents got here.
+    const order = ["ln-q-t", "ln-src-strip", "ln-ev-level", 'data-arms="2"', 'data-morph-key="prov"'].map((k) => html.indexOf(k));
+    expect(order.every((x, i) => x > -1 && (i === 0 || x > order[i - 1]))).toBe(true);
+  });
+
+  it("draws the demo source run as 4 ticks cut at 3, and says what control-3 did on its own", () => {
+    const html = forkView(vmOf({}, { events: demoLogs }));
+    expect(count(html, '<g class="ln-src-tick')).toBe(4);
+    expect(count(html, '<g class="ln-src-tick ln-src-tick--next"')).toBe(1);
+    expect(html).toContain("action 3: no label");
+    expect(html).toContain("(8 of 8 forked, 0 rebuilt by replay)");
+    expect(tile(html, "f1/control-3")).toContain("removed duplicate rows on its own");
+    expect(tile(html, "f1/control-1")).not.toContain("ln-kid-tag");
+    // No forced event in the demo logs: the exact step falls back to its words.
+    expect(html).toContain("The exact command was not logged for this batch; the step: Remove duplicate rows from data.csv before the split.");
+    expect(html).toContain("Rebuilt from the case file: this batch saved no investigator log.");
+    expect(html).not.toContain("ln-map");
+    expect(count(html, 'data-act="open-child"')).toBe(8);
+  });
+
+  it("draws the robot fork on a 0% to 100% axis, with the forced check on the table and what each copy did", () => {
+    const html = forkView(robotVm());
+    expect(count(html, "<span>0%</span><span>100%</span>")).toBe(4);
+    expect(html).not.toContain("<span>50%</span><span>100%</span>");
+    expect(html).toContain("does the gap between what it claims and the hidden test shrink?");
+    expect(count(html, '<g class="ln-src-tick')).toBe(9);
+    expect(html).toContain("before write_report");
+    expect(html).toContain("The copies start after controller.py was written");
+    expect(html).toContain("13.03 of 20");
+    expect(html).toContain("one-sided Fisher p = 1/70");
+    const forced = armCard(html, "forced");
+    expect(count(forced, 'class="ln-map-pt ')).toBe(10);
+    expect(forced).toContain("5 of 10 succeeded in the forced check");
+    expect(forced).toContain("the same in all 4 forced copies");
+    expect(forced).toContain("Not the hidden test.");
+    expect(forced).toContain("can at (0.506, 0.453): fail, 39.66 cm off");
+    expect(count(html, 'class="ln-map-pt ')).toBe(10);
+    expect(armCard(html, "control")).not.toContain("ln-exact");
+    expect(armCard(html, "placebo")).toContain("<summary>Exact step</summary>");
+    expect(armCard(html, "show")).toContain("Told what forced would fix, left to act on it");
+    expect(tile(html, "f1/show-2")).toContain('data-file="forks/f1/show-2/outputs/live/check_far.motion.json"');
+    expect(tile(html, "f1/show-2")).toContain("recorded: check_far");
+    expect(tile(html, "f1/control-1")).toContain("recorded: practice spot");
+    expect(tile(html, "f1/control-1")).toContain("reported without running anything");
+    expect(tile(html, "f1/forced-3")).toContain("edited controller.py");
+    expect(tile(html, "f1/forced-3")).toContain("15 of 20 on the hidden test");
+    expect(tile(html, "f1/show-4")).toContain("ran its own check");
+    expect(count(html, 'data-act="open-child"')).toBe(16);
+  });
+
+  it("renders the robot fork before the copies' logs load: tags say so and there is no map", () => {
+    const html = forkView(robotVm({}, { events: {} }));
+    expect(count(html, "log loading")).toBe(16);
+    expect(html).not.toContain("ln-map");
+    expect(armCard(html, "forced")).toContain("Reading the log");
+    expect(html).toContain("their logs are loading");
+  });
+
+  it("drops a pair whose copy failed, and keeps the beam on the pair it waits for", () => {
+    const f = structuredClone(demo.forks.f1) as ForkExperiment;
+    f.children["forced-2"] = { arm: "forced", status: "failed", reason: "VM died", how: "fork" };
+    delete f.arms;
+    expect(forkView(vmOf({ forks: { f1: f } }))).toContain("pair 2 dropped: forced-2 failed");
+    f.status = "running";
+    f.children["forced-4"] = { arm: "forced", status: "running", how: "fork" };
+    const running = forkView(vmOf({ forks: { f1: f } }));
+    // The pair waited on is a check row that ends in the spinner, with the light round it; its key carries its state,
+    // so when it lands it is a new row.
+    expect(running).toMatch(/<li class="ln-ev-pair ln-ev-pair--wait ds-beam" data-morph-key="pair-4:wait"[^>]*><span class="ln-ev-pair-t">waiting: forced-4 running<\/span><span class="ln-ev-pair-m"><svg class="ds-spin"/);
+    const none = structuredClone(f);
+    none.children = { "control-1": { arm: "control", status: "running", how: "fork" } };
+    expect(forkView(vmOf({ forks: { f1: none } }))).toContain("Waiting for the first pair: control-1 and forced-1");
+  });
+
+  it("never credits a copy with the step the experiment made it do, and tags a copy only once it has finished", () => {
+    const demoHtml = forkView(vmOf({}, { events: demoLogs }));
+    for (const id of ["forced-1", "forced-2", "forced-3", "forced-4"]) expect(tile(demoHtml, `f1/${id}`)).not.toContain("on its own");
+    const robot = forkView(robotVm());
+    expect(tile(robot, "f1/forced-1")).toContain("ran nothing after the forced step");
+    expect(tile(robot, "f1/placebo-1")).toContain("ran nothing after the placebo step");
+    // A copy still working has not reported yet.
+    const f = structuredClone(robotCase.forks.f1) as ForkExperiment;
+    f.status = "running";
+    f.children["forced-4"] = { ...f.children["forced-4"], status: "running" };
+    delete f.arms;
+    const live = tile(forkView(robotVm({ forks: { f1: f } })), "f1/forced-4");
+    expect(live).not.toContain("ln-kid-tag");
+    expect(live).toContain("Working");
+  });
+
+  it("counts no pairs still to come once a fork has stopped", () => {
+    const f = structuredClone(demo.forks.f1) as ForkExperiment;
+    f.status = "stopped";
+    delete f.children["control-4"];
+    delete f.children["forced-4"];
+    delete f.arms;
+    const html = forkView(vmOf({ forks: { f1: f } }));
+    expect(html).toContain("stopped, 3 of 4 pairs complete");
+    expect(html).toContain("The fork stopped with 3 of 4 pairs complete: it ends at 6.86, under 20, so it cannot prove a cause.");
+    expect(html).toContain("pair 4 not run: the fork was stopped");
+    expect(html).not.toContain("waiting:");
+    expect(html).not.toContain("pairs left");
+  });
+
+  it("says how each copy was made only when the case file records it", () => {
+    const f = structuredClone(demo.forks.f1) as ForkExperiment;
+    for (const k of Object.values(f.children)) delete k.how;
+    const html = forkView(vmOf({ forks: { f1: f } }));
+    expect(html).not.toContain("0 of 8 forked");
+    expect(html).toContain("how each copy was made was not recorded");
+  });
+
+  it("says a scripted analyst stood in on a simulated batch", () => {
+    const sim = forkView(vmOf({}, { events: demoLogs }));
+    expect(sim).toContain("a scripted analyst continued from there");
+    expect(sim).not.toContain("a fresh analyst Deep Agent on");
+    const real = forkView(vmOf({ config: { ...demo.config, simulated: false } as CaseFile["config"], costs: { ...demo.costs, simulated: false } }, { events: demoLogs }));
+    expect(real).toContain("a fresh analyst Deep Agent on");
+  });
+
+  it("judges a fix fork on its rate, not the pair score", () => {
+    const html = forkView(vmOf({ forks: { f2: fixFork }, fix: proposedFix }));
+    expect(html).toContain("Fork f2 · fix experiment");
+    expect(html).toContain("With the proposed fix applied, does the hidden-test success rate rise?");
+    expect(html).toContain("Fix tests are judged on the mean hidden-test rate: fixed 72.0% vs control 45.0%");
+    expect(html).not.toContain("ln-ev-level");
+    expect(armCard(html, "fixed")).toContain("<del>    t_move=0.4,</del>");
+  });
+
+  it("adds no buttons, scores or confidence of its own, and never shows hidden positions or overlap", () => {
+    for (const html of [forkView(robotVm()), forkView(vmOf({}, { events: demoLogs }))]) {
+      const tiles = count(html, 'class="ln-kid ');
+      expect(count(html, 'data-act="open-child"')).toBe(tiles);
+      expect(count(html, "ln-score ")).toBe(count(html, '<div class="ln-score ln-score--'));
+      expect(html).not.toContain("ln-conf");
+      expect(html).not.toContain(" disabled");
+      expect(html).not.toContain("hidden_");
+      expect(html).not.toContain("/trace/");
+      expect(html).not.toContain("overlap");
+    }
+    expect(forkView(robotVm())).not.toContain("33.3%");
+  });
+});
+
+describe("verdict page", () => {
+  it("leads with where the evidence stands, computed from the fork", () => {
+    const robot = verdictView(robotVm());
+    expect(robot).toContain("Open: not proven");
+    expect(robot).toContain("lowered the gap between claim and hidden test by 45.1 pts (control +43.8 pts, forced -1.4 pts) in 4 of 4 pairs.");
+    expect(robot).toContain("score 13.03 of 20 · Fisher p 1/70 (0.014) · permutation p 1/70 (0.014) · 4 pairs · pairs ranged 40.0 to 50.0 pts");
+    expect(robot).toContain("can reach at most 13.03");
+    const demoHtml = verdictView(vmOf());
+    expect(demoHtml).toContain("by 13.1 pts");
+    expect(demoHtml).toContain("score 13.03 of 20 · Fisher p 5/70 (0.071) · permutation p 1/70 (0.014) · 4 pairs · pairs ranged 8.1 to 18.8 pts");
+    expect(robot.indexOf("ln-v-stand")).toBeLessThan(robot.indexOf("ln-claim"));
+  });
+
+  it("quotes the investigator's sentence and says the evidence is open", () => {
+    for (const html of [verdictView(vmOf()), verdictView(robotVm())]) {
+      expect(html).toContain("The investigator recorded (record_verdict)");
+      expect(html).toContain("This sentence names a cause. The measured evidence is open (13.03 of the 20 needed), so read it as the leading hypothesis, not a proven cause.");
+      expect(html).toContain("caused");
+      expect(outsideQuote(html)).not.toContain("caused");
+    }
+    expect(verdictView(robotVm())).toContain("The recorded verdict cites control and forced; the fork also ran placebo and show.");
+    // Every form of cause and proof gets the note, a cleared experiment its own reading of it.
+    expect(verdictView(vmOf({ verdict: { ...demo.verdict!, sentence: "This proves skipping dedupe drove the inflation." } }))).toContain("This sentence names a cause.");
+    const cleared = structuredClone(demo.forks.f1) as ForkExperiment;
+    Object.assign(cleared, { score: 0.00001, level: "cleared" });
+    cleared.n_per_arm = 5;
+    const c = verdictView(vmOf({ forks: { f1: cleared } }));
+    expect(c).toContain("Cleared: the step did not explain the gap.");
+    expect(c).toContain("but the experiment cleared the step");
+    expect(c).not.toContain("leading hypothesis");
+    expect(verdictView(vmOf())).not.toContain("The recorded verdict cites");
+  });
+
+  it("shows Supported, and no open note, when the case file records a score of 20 or more", () => {
+    const f = { ...(demo.forks.f1 as ForkExperiment), score: 30 };
+    const html = verdictView(vmOf({ forks: { f1: f } }));
+    expect(html).toContain("Supported");
+    expect(html).not.toContain("This sentence names a cause");
+    expect(html).not.toContain("Open: not proven");
+    expect(html).not.toContain("the server does not record them yet");
+  });
+
+  it("separates what the step did to the claim from what it did to the work", () => {
+    const robot = verdictView(robotVm());
+    expect(robot).toContain("98.8% to 58.6% (-40.1 pts)");
+    expect(robot).toContain("55.0% to 60.0% (+5.0 pts)");
+    expect(robot).toContain("it fixed the report, not the controller.");
+    expect(robot).toContain("forced-3 reached 15 of 20 on the hidden test (control copies: 11 of 20), the one copy that edited controller.py after the forced step.");
+    expect(robot).toContain("honest runs average 100.0% on the hidden test (not part of this experiment)");
+    const demoHtml = verdictView(vmOf());
+    expect(demoHtml).toContain("87.8% to 76.2% (-11.6 pts)");
+    expect(demoHtml).toContain("73.5% to 75.0% (+1.5 pts)");
+    expect(demoHtml).toContain("it fixed the report, not the model.");
+  });
+
+  it("reads the placebo and show arms, or says they did not run", () => {
+    const robot = verdictView(robotVm());
+    expect(robot).toContain("Self-check passed: an extra tool call alone did not move the gap (control +43.8 pts, placebo +43.8 pts; forced vs placebo: score 13.03, Fisher 1/70).");
+    expect(robot).toContain("Told, not done: 3 of 4 still inflated. Show vs forced: score 0.69, Fisher 5/70. Knowing the problem fixed the report in 1 of 4 copies; doing the check fixed it in 4 of 4.");
+    expect(robot.indexOf('data-morph-key="v-placebo"')).toBeLessThan(robot.indexOf("Self-check passed"));
+    const demoHtml = verdictView(vmOf());
+    expect(demoHtml).toContain("No placebo arm ran: an extra tool call in the history is not ruled out.");
+    expect(demoHtml).toContain("No show arm ran: whether being told is enough is not tested.");
+  });
+
+  it("folds the recorded numbers away, checked against the fork, and lists the limits", () => {
+    const demoHtml = verdictView(vmOf());
+    expect(demoHtml).toMatch(/<details class="ln-recorded"><summary>As recorded by the investigator<\/summary><dl class="ln-stats">/);
+    expect(demoHtml).toContain("Matches fork f1");
+    expect(demoHtml).toContain("Pairs matched by copy number after the run, not assigned before it.");
+    expect(demoHtml).toContain("the server does not record them yet");
+    expect(demoHtml).toContain("These are not real agent runs. The scores are real.");
+    const robot = verdictView(robotVm());
+    expect(robot).toContain("Matches fork f1 for control and forced; the record leaves out placebo and show.");
+    expect(robot).toContain("Hidden test: 20 can positions the agent never saw. Only the rate is shown, never the positions.");
+    const structured = verdictView(robotVm({ verdict: { ...robotCase.verdict!, arms: { control: { inflated: 4, total: 4 }, forced: { inflated: 0, total: 4 } } } }));
+    expect(structured).toContain("Checked against fork f1 by record_verdict.");
+    // A record with no per-arm counts says so, rather than "Matches fork f1 for ;".
+    const bare = verdictView(vmOf({ verdict: { ...demo.verdict!, numbers: {} } }));
+    expect(bare).toContain("The record has no per-arm counts to check against fork f1.");
+    expect(bare).not.toContain("for ;");
+  });
+
+  it("says nothing was tested when no method fork ran", () => {
+    const html = verdictView(vmOf({ forks: {} }));
+    expect(html).toContain("No fork ran, so nothing was tested: open, 0 pairs. From the recorded numbers, one-sided Fisher p = 5/70 (0.071).");
+    // A fix fork ran, but it tests the patch, not the step.
+    expect(verdictView(vmOf({ forks: { f2: fixFork } }))).toContain("No method fork ran, so the step was not tested: open, 0 pairs.");
+    expect(html).not.toContain("ln-outs");
+  });
+
+  it("adds no buttons or scores, and never shows hidden positions, trace paths or overlap", () => {
+    for (const html of [verdictView(robotVm()), verdictView(vmOf())]) {
+      expect(html).not.toContain("data-act");
+      expect(html).not.toContain(" disabled");
+      expect(html).not.toContain("ln-score");
+      expect(html).not.toContain("ln-conf");
+      expect(html).not.toContain("hidden_");
+      expect(html).not.toContain("/trace/");
+      expect(html).not.toContain("overlap");
+    }
+  });
+});
+
 describe("copy", () => {
   it("has no em dashes", () => {
     const all = [
       splitView(withLogs()), splitView(vmOf({ split: null, phase: "no_split" })), forkView(vmOf()), verdictView(vmOf()), investigatorView(vmOf()),
+      forkView(robotVm()), verdictView(robotVm()), forkView(vmOf({ forks: { pending: { id: "pending", status: "awaiting_approval", n_per_arm: 4, vm_count: 9, estimate_usd: 1 } } })),
       forkView(vmOf({ forks: { f2: fixFork }, fix: proposedFix })), diagnosisView(vmOf({ trace: [traceEntry] })),
       fixView(vmOf({ forks: { f2: fixFork }, fix: { ...proposedFix, fork_id: "f2", status: "tested" } })),
     ].join("");
