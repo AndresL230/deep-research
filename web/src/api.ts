@@ -8,7 +8,7 @@
 
 /** The case file's sections, in order. */
 export const CASE_SECTIONS = [
-  "config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "trace_comparison", "rubric", "feed", "costs",
+  "config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "trace_comparison", "rubric", "feed", "baseline", "costs",
 ] as const;
 export type CaseSection = (typeof CASE_SECTIONS)[number];
 
@@ -445,10 +445,49 @@ export interface ProposedFix {
   status: "proposed" | "testing" | "tested" | "rejected";
   /** Unix seconds. */
   proposed_at: number;
-  /** The fix experiment's fork id ("f2") once it runs. */
+  /** The fix experiment's fork id ("f2") once it runs. Absent when the fix was measured on the code itself
+   *  (`measured`), with no fork. */
   fork_id?: string;
-  /** The investigator's one sentence on what the fix experiment showed, once recorded. */
+  /** The fix measured on the run's code itself, with no agent: the file as the run left it against the same file
+   *  with the patch applied, on the hidden test. Absent until it is tested, and on a fix tested by a fork. */
+  measured?: FixMeasured;
+  /** The patched file, for the files route: "fix/controller.py". */
+  patched_file?: string;
+  /** The investigator's one sentence on what the fix test showed, once recorded. */
   verdict?: string;
+}
+
+/** One piece of code scored on the hidden test with no agent in between (`Domain.score_code`). */
+export interface MeasuredRate {
+  /** The success rate, 0 to 1. */
+  true_accuracy: number;
+  /** How many of the `n` hidden cases succeeded. Null when the evaluation does not count them. */
+  successes: number | null;
+  n: number | null;
+}
+
+/** A proposed fix measured on the code itself (`ProposedFix.measured`). */
+export interface FixMeasured {
+  before: MeasuredRate;
+  after: MeasuredRate;
+  /** Hidden cases that failed without the patch and succeed with it, and the other way round. Null when the two
+   *  measurements cannot be paired. */
+  gained: number | null;
+  lost: number | null;
+  /** The distinct errors the patched code raised, one line each (at most 3). Empty when it raised none. */
+  exceptions: string[];
+  /** The patched code's hidden episodes, in evaluation order. */
+  hidden_results?: HiddenResult[];
+}
+
+/** The code every run of the batch started from (an uploaded controller), scored as it was handed over. */
+export interface Baseline extends Partial<MeasuredRate> {
+  status: "scoring" | "scored" | "failed";
+  /** The file's name: "controller.py", or the name it was uploaded under. */
+  name: string;
+  /** Why it could not be scored, when `status` is "failed". */
+  reason?: string;
+  hidden_results?: HiddenResult[];
 }
 
 export interface ScopeCost {
@@ -496,6 +535,9 @@ export interface CaseFile {
   /** The live commentary's notable moments, oldest first (at most 200). Absent on case files saved before it existed,
    *  and empty in a batch without commentary. */
   feed?: FeedItem[];
+  /** The code the runs started from, scored unchanged. Null when they start from nothing, absent on case files
+   *  saved before it existed. */
+  baseline?: Baseline | null;
   costs: Costs;
 }
 

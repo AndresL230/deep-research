@@ -350,6 +350,11 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-fix-pre { margin:0; padding:8px 10px; max-height:260px; overflow:auto; font-family:var(--code); font-size:11.5px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; tab-size:4; color:var(--fg); }
 .ln-fix-why { margin:0; font-size:13.5px; color:var(--fg-55); }
 .ln-fix-tested { padding:8px 10px; border-radius:var(--r-ctl); background:var(--muted); color:var(--fg); }
+.ln-fix-measured { --ln-tone:var(--fg-40); display:flex; flex-direction:column; gap:8px; padding:10px 12px; border-left:2px solid var(--ln-tone); border-radius:var(--r-ctl); background:var(--muted); }
+.ln-fix-measured--up { --ln-tone:var(--green); }
+.ln-fix-measured--down { --ln-tone:var(--red); }
+.ln-fix-measured .ln-gap-n { color:var(--ln-tone); }
+.ln-fix-raised code { font-family:var(--code); font-size:11.5px; overflow-wrap:anywhere; }
 
 /* ── phone width ── */
 @media (max-width: 640px) {

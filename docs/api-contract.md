@@ -157,7 +157,10 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
 
   `kind` says what the experiment tests: absent or `method` is the experiment above, which step caused the
   inflation. `fix` is the second experiment, forked from the same moment of the same run, that tests the
-  investigator's proposed patch (`fix` below): its `arm_steps` has `control`, optionally `placebo`, and `fixed`,
+  investigator's proposed patch (`fix` below). A robot batch has none: its fix is measured on the code itself
+  (`fix.measured`), with no fork, since a copy's agent may undo an edit it did not make. A fix experiment runs only
+  in a domain that cannot score code without a run, and on batches saved before. Its `arm_steps` has `control`,
+  optionally `placebo`, and `fixed`,
   the run with the patch applied, in place of `forced`; its `arms` summaries read the same way, and what matters
   in them is `honest` of `scored` and `mean_true` (did the code get better), not the inflation. `forks.pending`
   carries the same `kind`, so the approval card can say which experiment is being asked for. The verdict always
@@ -177,9 +180,23 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
 - `fix`: the investigator's proposed patch, or null (absent on older case files; read as null): `run_id` (the run
   whose controller is patched), `file_path` (in the VM, `/home/daytona/workspace/controller.py`), `line` (the line
   it targets, or null), `old_string` and `new_string` (the exact text replaced and its replacement), `description`
-  (one line), `why`, `status` (`proposed`, `testing`, `tested`, `rejected`), `proposed_at`, then `fork_id` (the fix
-  experiment's id, `f2`) once it runs and `verdict` (the investigator's one sentence on what that experiment
-  showed) once recorded.
+  (one line), `why`, `status` (`proposed`, `testing`, `tested`, `rejected`), `proposed_at`, and `verdict` (the
+  investigator's one sentence on what the test showed) once recorded. Once tested it has one of two results.
+  `measured`, in a domain that scores code by itself (the robot arm): the run's `controller.py` as the run left it
+  against the same file with the patch applied, both run on the hidden positions on the server with no agent in
+  between. `{before, after, gained, lost, exceptions, hidden_results}`: `before` and `after` are
+  `{true_accuracy, successes, n}`; `gained` and `lost` count hidden episodes that failed without the patch and
+  succeed with it, and the other way round (null when they cannot be paired); `exceptions` is the distinct errors
+  the patched code raised, one line each, at most 3; `hidden_results` is the patched code's episodes, as on a run.
+  `patched_file` (`fix/controller.py`, served by the files route) is the patched copy. Or `fork_id` (the fix
+  experiment's id, `f2`), where the fix ran as a fork experiment: a `fixed` copy whose final file no longer holds
+  the patch is a failed copy with a reason starting "the copy undid the fix", never a result of its arm.
+- `baseline`: the code every run started from, scored as it was handed over, or null when the runs start from
+  nothing (the robot arm's blank template) and absent on case files saved before it existed. `status` (`scoring`,
+  `scored`, `failed`), `name` (the file: `controller.py`, or the name it was uploaded under), then
+  `true_accuracy`, `successes`, `n` and `hidden_results` once scored, or `reason` when it could not be. It is
+  measured on the server while the runs work, with `robot_start` `colleague` or `uploaded`, and costs nothing. A
+  run's own `true_accuracy` above it means that run's agent made the controller better.
 - `costs`: `budget_usd`, `spent_usd` (null when a price is unknown), `prices_missing`, and `scopes`
   (`run:r01`, `fork:f1:base`, `fork:f1:control-1`, `investigator`), each with input, output, cache read and
   cache write tokens, `model_usd`, `vm_seconds`, `vm_usd`, `total_usd`.

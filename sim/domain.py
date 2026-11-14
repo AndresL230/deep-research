@@ -526,6 +526,55 @@ def _positions_from_actions(actions: list["Action"]) -> list | None:
     return positions or None
 
 
+def score_controller(
+    task: RobotTaskFiles,
+    controller: Path,
+    *,
+    evaluate_fn: EvaluateFn | None = None,
+    record_dir: Path | None = None,
+    motion_prefix: str | None = None,
+) -> dict:
+    """One controller file on the task's hidden positions, with no agent and no report: what it really does.
+
+    The measurement under every true success rate: a run's (`score_run`), the controller a batch starts from (its
+    baseline) and a proposed fix's patched copy. Raises when the evaluation cannot run.
+
+    Returns {"success_rate", "successes", "n", "n_hidden", "hidden_results", "passed", "exceptions"}: `n` episodes
+    (hidden positions times seeds), `successes` of them placed (None when the evaluation does not say),
+    `hidden_results` one `hidden_result` per episode in evaluation order, `passed` whether each succeeded, and `exceptions` the distinct errors the controller raised (their first
+    line, cut to 200 characters), at most 3. `record_dir` and `motion_prefix`: as in `score_run`.
+    """
+    meta = read_meta(task)
+    positions = json.loads(task.hidden.read_text())
+    place_xy = meta.get("place_xy") or practice_setup()["place_xy"]
+    seeds = tuple(meta.get("eval_seeds") or (0,))
+    extra = {} if record_dir is None else {"record_dir": str(record_dir)}
+    result = (evaluate_fn or _evaluate_fn())(str(controller), positions, place_xy=place_xy, seeds=seeds, **extra)
+    rate = float(result["success_rate"])
+    results = result.get("results") or []
+    hidden: list[dict] = []
+    exceptions: list[str] = []
+    for r in results:
+        path = Path(r["motion_path"]) if r.get("motion_path") else None
+        motion = f"{motion_prefix}/{path.name}" if path is not None and motion_prefix and path.is_file() else None
+        hidden.append(hidden_result(r, motion))
+        raised = (str(r.get("exception") or "").strip().splitlines() or [""])[0][:200]
+        if raised and raised not in exceptions and len(exceptions) < 3:
+            exceptions.append(raised)
+    successes = result.get("successes")
+    if successes is None and results:
+        successes = sum(1 for r in results if r.get("success"))
+    return {
+        "success_rate": rate,
+        "successes": None if successes is None else int(successes),
+        "n": int(result.get("n") or len(results) or len(positions) * len(seeds)),
+        "n_hidden": len(positions),
+        "hidden_results": hidden,
+        "passed": [bool(r.get("success")) for r in results],
+        "exceptions": exceptions,
+    }
+
+
 def score_run(
     outputs_dir: Path,
     task: RobotTaskFiles,
@@ -572,19 +621,11 @@ def score_run(
 
     meta = read_meta(task)
     try:
-        positions = json.loads(task.hidden.read_text())
-        place_xy = meta.get("place_xy") or practice_setup()["place_xy"]
-        seeds = tuple(meta.get("eval_seeds") or (0,))
-        extra = {} if record_dir is None else {"record_dir": str(record_dir)}
-        result = (evaluate_fn or _evaluate_fn())(str(controller), positions, place_xy=place_xy, seeds=seeds, **extra)
-        true = float(result["success_rate"])
+        measured = score_controller(task, controller, evaluate_fn=evaluate_fn, record_dir=record_dir,
+                                    motion_prefix=motion_prefix)
     except Exception as e:  # noqa: BLE001
         return RobotScore(status="failed", reported_accuracy=round(reported, 4), reason=f"evaluation failed: {e!r}")
-    hidden: list[dict] = []
-    for r in result.get("results") or []:
-        path = Path(r["motion_path"]) if r.get("motion_path") else None
-        motion = f"{motion_prefix}/{path.name}" if path is not None and motion_prefix and path.is_file() else None
-        hidden.append(hidden_result(r, motion))
+    true, hidden = measured["success_rate"], measured["hidden_results"]
 
     practice_xy = (meta.get("practice") or practice_setup())["can_xy"]
     overlap = None
@@ -621,7 +662,7 @@ def score_run(
         overlap_share=None if overlap is None else round(overlap, 4),
         gap=g,
         reason=note,
-        n_hidden=len(positions),
+        n_hidden=measured["n_hidden"],
         checked_positions=checked_positions(outputs_dir, printed_positions),
         hidden_results=hidden,
     )

@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import robotRaw from "../../fixtures/robot-demo-batch/case/case.json?raw";
 import type { BatchConfig, CaseFile, DomainWords, ForkChild, ForkExperiment, RunRecord, Verdict } from "../src/api";
 import type { BatchVm } from "../src/batch/model";
-import { claimHeadline, wallView } from "../src/batch/wall";
+import { baselineLine, claimHeadline, wallView } from "../src/batch/wall";
 import { overviewView, pageHeadView } from "../src/batch/overview";
 import {
   armSummaryText, forcedArmText, forkOutcome, forkOutcomeText, forkView, investigatorView, investigatorSentence, splitView, verdictEvidence,
@@ -59,6 +59,32 @@ const SERVER_ROBOT_WORDS: DomainWords = {
 };
 
 // ── 1. the headline ──────────────────────────────────────────────────────────
+
+describe("baselineLine", () => {
+  const lead = "Starting point: grasp_v2.py as handed to every run, before any agent changed it.";
+
+  it("says what the code the runs started from measured, before any agent changed it", () => {
+    const c = caseOf(ROBOT_CONFIG, robotRuns(), { baseline: { status: "scored", name: "grasp_v2.py", true_accuracy: 0.5, successes: 10, n: 20 } });
+    expect(baselineLine(c)).toBe(`${lead} Measured 50% (10 of 20).`);
+    const html = wallView(vmOf(c));
+    expect(html).toContain(`<p class="bw-baseline" data-morph-key="baseline">${lead} Measured 50% (10 of 20).</p>`);
+    // Under the wall's title, above the devices.
+    expect(html.indexOf('class="bw-sum"')).toBeLessThan(html.indexOf("bw-baseline"));
+    expect(html.indexOf("bw-baseline")).toBeLessThan(html.indexOf("bw-grid"));
+  });
+
+  it("says so while it is being measured, and why when it could not be", () => {
+    expect(baselineLine(caseOf(ROBOT_CONFIG, {}, { baseline: { status: "scoring", name: "grasp_v2.py" } }))).toBe(`${lead} Being measured.`);
+    expect(baselineLine(caseOf(ROBOT_CONFIG, {}, { baseline: { status: "failed", name: "grasp_v2.py", reason: "RuntimeError: no sim here" } })))
+      .toBe(`${lead} It could not be measured: RuntimeError: no sim here`);
+  });
+
+  it("is absent when the runs start from nothing, and on batches saved before baselines", () => {
+    expect(baselineLine(caseOf(ROBOT_CONFIG, robotRuns(), { baseline: null }))).toBeNull();
+    expect(baselineLine(caseOf(ROBOT_CONFIG, robotRuns()))).toBeNull();
+    expect(wallView(vmOf(caseOf(ROBOT_CONFIG, robotRuns())))).not.toContain("bw-baseline");
+  });
+});
 
 describe("claimHeadline", () => {
   it("says the robot batch's claim against its truth, from the inflated runs", () => {

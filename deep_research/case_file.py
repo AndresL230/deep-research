@@ -30,8 +30,8 @@ def with_evidence(case: dict) -> dict:
 
 def investigator_view(data: dict) -> dict:
     """The case file as the investigator may read it: without any run's or fork copy's per hidden case results
-    (`hidden_results`, every hidden can position with what really happened there), and without the screens' words
-    (`config.domain_info.words`, only for the UI). Everything else is kept."""
+    (`hidden_results`, every hidden can position with what really happened there), the same for the baseline and the
+    measured fix, and without the screens' words (`config.domain_info.words`, only for the UI). Everything else is kept."""
     view = dict(data)
     cfg = data.get("config")
     if isinstance(cfg, dict) and isinstance(cfg.get("domain_info"), dict) and "words" in cfg["domain_info"]:
@@ -45,6 +45,11 @@ def investigator_view(data: dict) -> dict:
                                    for cid, c in f["children"].items()}}
         forks[fid] = f
     view["forks"] = forks
+    if isinstance(data.get("baseline"), dict):
+        view["baseline"] = {k: v for k, v in data["baseline"].items() if k not in VIEW_HIDDEN}
+    fix = data.get("fix")
+    if isinstance(fix, dict) and isinstance(fix.get("measured"), dict):
+        view["fix"] = {**fix, "measured": {k: v for k, v in fix["measured"].items() if k not in VIEW_HIDDEN}}
     return view
 
 
@@ -84,6 +89,9 @@ class CaseFile:
                 "rubric": [],
                 # The live commentary's feed of notable moments across runs (commentary.py), oldest first.
                 "feed": [],
+                # The code every run started from, scored as it was handed over (`Batch.score_baseline`). None when
+                # the runs start from nothing.
+                "baseline": None,
             }
             self._save()
         # Case files saved before these sections existed.
@@ -92,6 +100,7 @@ class CaseFile:
         self.data.setdefault("trace_comparison", None)
         self.data.setdefault("rubric", [])
         self.data.setdefault("feed", [])
+        self.data.setdefault("baseline", None)
         with_evidence(self.data)
         self._save_view()
 
@@ -232,6 +241,11 @@ class CaseFile:
             )
             self._changed("trace")
         return f"trace saved: {run_id} line {line}"
+
+    def set_baseline(self, baseline: dict | None) -> None:
+        with self._lock:
+            self.data["baseline"] = baseline
+            self._changed("baseline")
 
     def set_fix(self, fix: dict | None) -> None:
         with self._lock:

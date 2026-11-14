@@ -227,6 +227,15 @@ class Domain:
     # (`fix_output`), where the patch is checked before it is accepted. None: no fix step in this domain.
     fix_file: str | None = None
     fix_output: str | None = None
+    # score_code(task, file): one copy of the agents' code on the hidden test, with no agent and no report. Returns
+    # {"success_rate", "successes", "n", "hidden_results", "passed", "exceptions"} (sim.domain.score_controller:
+    # `passed` is one bool per hidden case, in the same order every time for one task) and raises
+    # when it cannot run. With it a proposed fix is measured on the code itself (`Batch.measure_fix`) instead of in
+    # a fork experiment, and the batch can score the code it starts from. None: only a whole run can be scored.
+    score_code: Callable[[Any, Path], dict] | None = None
+    # baseline_code(cfg, task): the code file every run of this batch starts from and its name for the screens,
+    # when the batch hands the agents working code (an uploaded controller). None: they start from nothing.
+    baseline_code: Callable[["BatchConfig", Any], tuple[Path, str] | None] = lambda cfg, task: None
 
     def arm_plan(self, label: str, cfg: "BatchConfig") -> dict[str, dict | None]:
         """The fork experiment's arms for a finding's `label`, in order (forks.arm_plan)."""
