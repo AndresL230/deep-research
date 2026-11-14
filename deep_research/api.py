@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 from dotenv import dotenv_values, load_dotenv
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -26,6 +26,7 @@ from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
+from . import datasets, user_scripts  # noqa: E402
 from .batch import Batch  # noqa: E402 - needs the environment loaded first
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .costs import OverBudget, estimate_batch_usd  # noqa: E402
@@ -125,8 +126,18 @@ def _batch_dir(batch_id: str) -> Path:
     raise HTTPException(404, f"no batch {batch_id}")
 
 
-def _live(batch_id: str) -> Batch:
+# Phases after which nothing more happens: the batch is a saved replay from then on, even in the server that ran it.
+OVER = {"done", "no_split", "stopped"}
+
+
+def _running(batch_id: str) -> Batch | None:
+    """The batch, while it is still live in this server: started here and not over yet."""
     b = BATCHES.get(batch_id)
+    return b if b is not None and b.case.data.get("phase") not in OVER else None
+
+
+def _live(batch_id: str) -> Batch:
+    b = _running(batch_id)
     if b is None:
         raise HTTPException(409, "this batch is not live (replays are read-only)")
     return b
@@ -185,6 +196,50 @@ def estimate(cfg: BatchConfig):
     }
 
 
+@app.get("/api/datasets")
+def list_datasets():
+    return datasets.list_datasets()
+
+
+async def _read_body(request: Request, limit: int) -> bytes:
+    """The request body, refused once it passes `limit` bytes."""
+    too_big = HTTPException(413, f"the file is larger than {_size(limit)}")
+    if int(request.headers.get("content-length") or 0) > limit:
+        raise too_big
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > limit:
+            raise too_big
+    if not raw:
+        raise HTTPException(422, "the file is empty")
+    return bytes(raw)
+
+
+def _size(n: int) -> str:
+    return f"{n // (1024 * 1024)} MB" if n >= 1024 * 1024 else f"{n // 1024} KB"
+
+
+@app.post("/api/datasets")
+async def upload_dataset(request: Request, name: str = "dataset.csv"):
+    """The request body is the CSV file itself. Returns its columns and a suggested target."""
+    raw = await _read_body(request, datasets.MAX_UPLOAD_BYTES)
+    try:
+        return await asyncio.to_thread(datasets.save_upload, name, raw)
+    except datasets.DatasetError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@app.post("/api/scripts")
+async def upload_script(request: Request, name: str = "train.py"):
+    """The request body is the Python training script. It is parsed, never run, on this server."""
+    raw = await _read_body(request, user_scripts.MAX_UPLOAD_BYTES)
+    try:
+        return user_scripts.save_upload(name, raw)
+    except user_scripts.ScriptError as e:
+        raise HTTPException(422, str(e)) from e
+
+
 @app.get("/api/batches")
 def list_batches():
     out = []
@@ -193,13 +248,20 @@ def list_batches():
         if root.exists():
             for d in sorted(root.iterdir()):
                 if (d / "case" / "case.json").exists():
-                    out.append({"id": d.name, "kind": "live" if d.name in BATCHES else "replay"})
+                    out.append({"id": d.name, "kind": "live" if _running(d.name) else "replay"})
     return out
 
 
 @app.post("/api/batches")
 async def start_batch(cfg: BatchConfig):
-    b = Batch(cfg)
+    try:
+        # Check the dataset, target and script before anything is written or started.
+        await asyncio.to_thread(datasets.load, cfg.dataset, cfg.target)
+        if cfg.script:
+            user_scripts.load(cfg.script)
+        b = await asyncio.to_thread(Batch, cfg)
+    except (datasets.DatasetError, user_scripts.ScriptError) as e:
+        raise HTTPException(422, str(e)) from e
     BATCHES[b.id] = b
 
     async def go():
@@ -349,7 +411,7 @@ async def stop(batch_id: str):
 @app.websocket("/api/batches/{batch_id}/ws")
 async def ws(websocket: WebSocket, batch_id: str):
     await websocket.accept()
-    b = BATCHES.get(batch_id)
+    b = _running(batch_id)
     if b is None:
         try:
             case = get_case(batch_id)

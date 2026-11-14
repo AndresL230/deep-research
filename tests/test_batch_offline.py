@@ -224,7 +224,7 @@ async def test_an_experiment_whose_base_vm_cannot_be_built_reports_why_and_leave
     assert result.startswith("error: ") and "quota exceeded" in result
     assert case["phase"] == "ready"  # back where it was, so the experiment can be asked for again
     assert case["forks"] == {}       # no half-built experiment is left looking as if it were running
-    assert set(b.vms) == {"r01", "r02"}
+    assert b.vms == {}               # each run's VM was released when it finished, and the base was never made
     await b.close()
 
 

@@ -19,12 +19,13 @@ import { morphInner } from "./morph";
 import { AWAY_PX, conversationView, initialConversationUi, jumpButton, stickAfterScroll, thinkingLabel, type ConversationUi } from "./ask-conversation";
 import { scheduleOrbs } from "./thinking-orb";
 import {
-  applyMessage, fetchBatches, fetchCase, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
-  fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, startBatch, startInvestigation, stopBatch,
+  applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
+  fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, startBatch, uploadDataset, uploadScript, startInvestigation, stopBatch,
   type AgentEvent, type BatchConfig, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
 import { costBar, homeView } from "./batch/home";
+import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, type DatasetUi, type UploadKind } from "./dataset-input";
 import { wallView } from "./batch/wall";
 import { forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { eventsToConvo, runSummaryView, taskText } from "./batch/run";
@@ -52,6 +53,8 @@ interface AppState {
   route: Route;
   home: HomeVm;
   homeLoaded: boolean;
+  /** What a new batch runs on: the dataset, the target column and the training script (dataset-input.ts). */
+  ds: DatasetUi;
   batch: BatchState | null;
   /** The conversation view's UI state (open steps, sticking to the bottom); reset per run. */
   cv: ConversationUi;
@@ -64,6 +67,7 @@ const S: AppState = {
   route: parseRoute(location.hash),
   home: { batches: { state: "loading" }, health: null, defaults: null, draft: null, estimate: null, starting: false, error: null },
   homeLoaded: false,
+  ds: initialDatasetUi(),
   batch: null,
   cv: initialConversationUi(),
   cvKey: "",
@@ -236,12 +240,13 @@ function render(): void {
   if (showReplay && vm?.replay) morphInner(subEl, replayBar(vm.replay));
 
   let body: string;
-  if (r.name === "home") body = homeView(S.home);
+  if (r.name === "home") body = homeView(S.home, { html: inputsView(S.ds, S.home.starting), label: inputsLabel(S.ds) });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
   else if (!vm) body = messageView("loading", "Opening the batch", "Loading its case file and event logs…");
   else if (r.name === "batch") body = batchBody(vm);
   else body = runBody(vm, routeKey(r)!);
   scrollEl.dataset.view = r.name;
+  root.dataset.view = r.name;
   morphInner(scrollEl, body);
   afterPaint();
 }
@@ -428,6 +433,7 @@ async function loadHome(force = false): Promise<void> {
   S.homeLoaded = true;
   S.home = { ...S.home, batches: { state: "loading" } };
   paint();
+  void loadInputs();
   const [batches, health, defaults] = await Promise.allSettled([fetchBatches(), fetchHealth(), fetchDefaults()]);
   S.home = {
     ...S.home,
@@ -438,6 +444,44 @@ async function loadHome(force = false): Promise<void> {
   };
   paint();
   scheduleEstimate();
+}
+
+/** The datasets a batch can run on (the built-in table and earlier uploads). */
+async function loadInputs(): Promise<void> {
+  try {
+    S.ds = { ...S.ds, datasets: await fetchDatasets(), loadError: null };
+  } catch (e) {
+    S.ds = { ...S.ds, loadError: message(e, "Couldn't load the datasets.") };
+  }
+  paint();
+}
+
+/** A refusal (HTTP 422) carries the server's reason; say it without the status line. */
+const refusal = (e: unknown, lead: string, fallback: string): string =>
+  message(e, fallback).replace(/^The server answered HTTP 422: /, `${lead}: `);
+
+/** Upload a CSV (a dataset) or a .py file (the training script). `expected` is what the picker was opened for. */
+async function upload(file: File, expected?: UploadKind): Promise<void> {
+  if (S.ds.upload.state === "busy" || S.home.starting) return;
+  const k = fileKind(file);
+  const problem = "problem" in k ? k.problem
+    : expected && k.kind !== expected ? (expected === "dataset" ? "Choose a CSV file for the dataset." : "Choose a Python file (.py) for the training script.")
+    : null;
+  if (problem !== null || "problem" in k) { S.ds = { ...S.ds, upload: { state: "error", message: problem ?? "" } }; paint(); return; }
+  S.ds = { ...S.ds, upload: { state: "busy", kind: k.kind } };
+  S.home = { ...S.home, error: null };
+  paint();
+  try {
+    if (k.kind === "dataset") {
+      const info = await uploadDataset(file);
+      S.ds = { ...S.ds, datasets: [...(S.ds.datasets ?? []), info], selected: info.id, upload: { state: "idle" } };
+    } else {
+      S.ds = { ...S.ds, script: await uploadScript(file), upload: { state: "idle" } };
+    }
+  } catch (e) {
+    S.ds = { ...S.ds, upload: { state: "error", message: refusal(e, "That file can't be used", "The upload failed.") } };
+  }
+  paint();
 }
 
 let estimateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -475,15 +519,15 @@ function setDraft(field: string, raw: string, numeric: boolean): void {
 
 async function start(): Promise<void> {
   const draft = S.home.draft;
-  if (!draft || S.home.starting) return;
+  if (!draft || S.home.starting || S.ds.upload.state === "busy") return;
   S.home = { ...S.home, starting: true, error: null };
   paint();
   try {
-    const { id } = await startBatch({ ...draft, mode: "live" });
+    const { id } = await startBatch({ ...draft, ...inputsConfig(S.ds), mode: "live" });
     S.home = { ...S.home, starting: false };
     go({ name: "batch", id });
   } catch (e) {
-    S.home = { ...S.home, starting: false, error: message(e, "Couldn't start the batch.") };
+    S.home = { ...S.home, starting: false, error: refusal(e, "Couldn't start the batch", "Couldn't start the batch.") };
     paint();
   }
 }
@@ -548,6 +592,13 @@ root.addEventListener("click", (e) => {
     case ACT.home: go({ name: "home" }); if (S.home.batches.state === "error") void loadHome(true); return;
     case ACT.openBatch: go({ name: "batch", id: arg }); return;
     case ACT.start: void start(); return;
+    case DI_ACT.dataset: S.ds = { ...S.ds, selected: arg, upload: { state: "idle" } }; S.home = { ...S.home, error: null }; paint(); return;
+    case DI_ACT.upload: {
+      const kind: UploadKind = arg === "script" ? "script" : "dataset";
+      void pickFile(kind).then((f) => { if (f) void upload(f, kind); });
+      return;
+    }
+    case DI_ACT.scriptRemove: S.ds = { ...S.ds, script: null, upload: { state: "idle" } }; paint(); return;
     case ACT.toggleAdvanced: S.home = { ...S.home, advanced: !S.home.advanced }; paint(); return;
     case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
     case ACT.resetConfig:
@@ -609,6 +660,10 @@ function onField(e: Event): void {
     if (rp) { rp.t = Math.max(0, Math.min(rp.duration, Number(el.value))); paint(); }
     return;
   }
+  if (el.dataset?.change === "target") {
+    if (e.type === "change") { S.ds = { ...S.ds, targets: { ...S.ds.targets, [S.ds.selected]: el.value } }; S.home = { ...S.home, error: null }; paint(); }
+    return;
+  }
   const field = el.dataset?.cfg;
   if (!field) return;
   const numeric = el instanceof HTMLInputElement && (el.type === "number" || el.type === "range");
@@ -616,6 +671,27 @@ function onField(e: Event): void {
 }
 root.addEventListener("input", onField);
 root.addEventListener("change", onField);
+
+// Dropping a CSV or a .py file on the new batch panel's data rows uploads it. Elsewhere a dropped file does nothing
+// (not a page load).
+const hasFiles = (e: DragEvent): boolean => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+const overDrop = (e: DragEvent): boolean => !!(e.target as Element | null)?.closest?.("[data-drop]");
+function setDragging(on: boolean): void {
+  if (S.ds.dragging !== on) { S.ds = { ...S.ds, dragging: on }; paint(); }
+}
+root.addEventListener("dragover", (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  setDragging(overDrop(e));
+});
+root.addEventListener("dragleave", (e) => { if (!e.relatedTarget) setDragging(false); });
+root.addEventListener("drop", (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  const file = overDrop(e) ? e.dataTransfer?.files[0] : null;
+  setDragging(false);
+  if (file) void upload(file);
+});
 
 // Scrolling in a run: scrolling up lets go of the bottom; the jump arrow shows once away from it.
 let lastTop = 0;

@@ -77,6 +77,8 @@ def install_local_vms(monkeypatch, tmp_path: Path) -> dict:
         "start_lab_page": lambda sb: f"https://lab.invalid/{sb.label}",
         "download_charts": lambda sb, dest: [],
         "stop_vm": lambda sb: log["stopped"].append(sb.label),
+        # A finished VM is deleted, which also ends its billing. Recorded the same way as a stop.
+        "delete_vm": lambda sb: log["stopped"].append(sb.label),
     }
     for name, fn in patches.items():
         monkeypatch.setattr(batch_mod.vms, name, fn)

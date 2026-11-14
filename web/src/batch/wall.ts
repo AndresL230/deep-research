@@ -184,6 +184,8 @@ export function wallView(vm: BatchVm): string {
   const simulated = (vm.case.config as { simulated?: boolean }).simulated === true || vm.case.costs?.simulated === true;
   const head = `<div class="bw-head">`
     + `<p class="bw-sum" aria-live="polite">${esc(summaryLine(s))}</p>`
+    + (s.total ? `<div class="bw-mix" aria-hidden="true">${(["honest", "inflated", "failed", "running", "queued"] as const)
+      .filter((k) => s[k] > 0).map((k) => `<span class="bw-mix-s bw-mix-s--${k}" data-morph-key="${k}" style="flex-grow:${s[k]}"></span>`).join("")}</div>` : "")
     + (simulated ? `<p class="bw-sim"><strong>Simulated batch:</strong> the agents' choices are scripted, the scores and charts are real</p>` : "")
     + `</div>`;
   const grid = runs.length

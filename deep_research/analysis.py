@@ -50,8 +50,8 @@ class Action:
     tool: str
     args: dict
     labels: list[str] = field(default_factory=list)
-    # For `python3 x.py`: the content of the script it runs, when the run wrote that script with the file tools.
-    script: str = ""
+    # For `python3 x.py`: the text of x.py as it stood when it ran. Not saved with the action.
+    source: str = ""
 
     @property
     def text(self) -> str:
@@ -69,8 +69,12 @@ def label_text(text: str) -> list[str]:
     return [label for label, rx in _RULES if rx.search(text)]
 
 
-def actions_from_events(events: list[dict]) -> list[Action]:
-    """Pull the agent's tool calls out of a run's event log, in order."""
+def actions_from_events(events: list[dict], given_files: dict[str, str] | None = None) -> list[Action]:
+    """Pull the agent's tool calls out of a run's event log, in order.
+
+    `given_files` are scripts that were in the VM before the agent started (an uploaded
+    training script), by file name.
+    """
     actions: list[Action] = []
     for ev in events:
         if ev.get("type") != "tool_call":
@@ -78,65 +82,80 @@ def actions_from_events(events: list[dict]) -> list[Action]:
         a = Action(index=len(actions), tool=ev["name"], args=ev.get("args", {}))
         a.labels = label_text(a.text) if a.tool in VM_TOOLS else []
         actions.append(a)
-    return _resolve_script_runs(actions)
+    return _resolve_script_runs(actions, given_files or {})
 
 
-def _resolve_script_runs(actions: list[Action]) -> list[Action]:
-    """`python3 analysis.py` says nothing by itself. Give it the labels, and the text, of the file it runs.
+_RUN_SCRIPT = re.compile(r"python3?\s+(?:-\S+\s+)*(\S+\.py)")
 
-    The file's content is followed through `write_file` and `edit_file`, so a run of the script is
-    labeled by what the script held at that moment.
-    """
-    scripts: dict[str, str] = {}
+
+def _resolve_script_runs(actions: list[Action], given_files: dict[str, str]) -> list[Action]:
+    """`python3 analysis.py` says nothing by itself. Give it the labels and the text of the file it runs."""
+    files: dict[str, str] = dict(given_files)
+
+    def name(path: str) -> str:
+        return path.rsplit("/", 1)[-1]
+
     for a in actions:
-        if a.tool in ("write_file", "edit_file"):
-            name = a.args.get("file_path", "").rsplit("/", 1)[-1]
-            if a.tool == "write_file":
-                scripts[name] = a.args.get("content", "")
-            else:
-                old, new, before = a.args.get("old_string", ""), a.args.get("new_string", ""), scripts.get(name, "")
-                if old and old in before:
-                    scripts[name] = before.replace(old, new) if a.args.get("replace_all") else before.replace(old, new, 1)
-                else:
-                    # The file was not written with the file tool (a heredoc, say): keep the part we can see.
-                    scripts[name] = f"{before}\n{new}"
-            # Writing or editing a script is not doing the work. Running it is.
+        if a.tool == "write_file":
+            files[name(a.args.get("file_path", ""))] = a.args.get("content", "")
+            # Writing a script is not doing the work. Running it is.
+            a.labels = []
+        elif a.tool == "edit_file" and name(a.args.get("file_path", "")) in files:
+            n = name(a.args.get("file_path", ""))
+            old, new = a.args.get("old_string", ""), a.args.get("new_string", "")
+            if old:
+                files[n] = files[n].replace(old, new) if a.args.get("replace_all") else files[n].replace(old, new, 1)
             a.labels = []
         elif a.tool == "execute":
-            m = re.search(r"python3?\s+(\S+\.py)", a.args.get("command", ""))
-            name = m.group(1).rsplit("/", 1)[-1] if m else None
-            if name in scripts:
-                a.script = scripts[name]
-                a.labels = sorted(set(a.labels) | set(label_text(a.script)), key=LABELS.index)
+            m = _RUN_SCRIPT.search(a.args.get("command", ""))
+            if m and name(m.group(1)) in files:
+                a.source = files[name(m.group(1))]
+                a.labels = sorted(set(a.labels) | set(label_text(a.source)), key=LABELS.index)
     return actions
 
 
 def _did_before_split(actions: list[Action], label: str) -> bool:
-    for a in actions:
-        if label in a.labels and "split" not in a.labels:
+    """Did the run do `label` before the split its results come from, which is its last one?
+
+    An agent often splits more than once: it runs the script it was given to see what happens, then
+    fixes it and runs it again. Only the last split feeds the reported score, so a step added before
+    that one counts, even though an earlier split went without it.
+    """
+    splits = [i for i, a in enumerate(actions) if "split" in a.labels]
+    last = splits[-1] if splits else len(actions) - 1
+    for a in actions[: last + 1]:
+        if label not in a.labels:
+            continue
+        # The same action can dedupe and then split, as in one script: then the order inside it decides.
+        if "split" not in a.labels or _order_in_text(a.source or a.text, label, "split"):
             return True
-        if "split" in a.labels:
-            # Same action can dedupe and then split, as in one script. The order is read from the
-            # command and from the script it runs.
-            return label in a.labels and _order_in_text(f"{a.text}\n{a.script}", label, "split")
     return False
 
 
-# An import statement, up to the end of the line or the next `;`. Naming a function in an import is not using it.
-_IMPORT = re.compile(
-    r"""(^|[;"'])[ \t]*(?:from[ \t]+[\w.]+[ \t]+)?import[ \t]+(?:\([^)]*\)|[^;\n"']*)""", re.MULTILINE
-)
+_IMPORT_LINE = re.compile(r"^\s*(?:import|from)\s.*$", re.MULTILINE)
+# `from x import (\n    a,\n    b,\n)`: the whole statement, across its lines.
+_IMPORT_BLOCK = re.compile(r"^[ \t]*from\s+[\w.]+\s+import\s*\([^)]*\)", re.MULTILINE)
+
+
+# `python3 -c "import pandas as pd; from sklearn.model_selection import train_test_split; ..."`: an import
+# that starts after a `;` or a quote, up to the next one. The line patterns above only see a line's start.
+_IMPORT_INLINE = re.compile(r"""(?<=[;"'])[ \t]*(?:from[ \t]+[\w.]+[ \t]+)?import[ \t]+[^;\n"']*""")
+
+
+def _blank(m: re.Match) -> str:
+    """Spaces for everything but the line breaks, so positions after it do not move."""
+    return re.sub(r"[^\n]", " ", m.group())
 
 
 def _order_in_text(text: str, first: str, second: str) -> bool:
     """True if `first`'s pattern appears before `second`'s inside one action.
 
-    Import statements are skipped: `from sklearn.model_selection import train_test_split`
+    Import lines are blanked first: `from sklearn.model_selection import train_test_split`
     at the top of a script is not the split.
     """
-    body = _IMPORT.sub(r"\1", text)
+    text = _IMPORT_INLINE.sub(_blank, _IMPORT_LINE.sub(_blank, _IMPORT_BLOCK.sub(_blank, text)))
     rx = dict(_RULES)
-    m1, m2 = rx[first].search(body), rx[second].search(body)
+    m1, m2 = rx[first].search(text), rx[second].search(text)
     return bool(m1 and m2 and m1.start() < m2.start())
 
 

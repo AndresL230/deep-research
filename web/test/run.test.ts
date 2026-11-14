@@ -222,3 +222,16 @@ describe("runSummaryView", () => {
     expect(html).not.toContain("Simulated");
   });
 });
+
+describe("taskText on an uploaded dataset", () => {
+  it("names the target and the script the agents start from", async () => {
+    const { taskText } = await import("../src/batch/run");
+    const vm = (config: object) => ({ case: { config } }) as unknown as Parameters<typeof taskText>[0];
+    expect(taskText(vm({ dataset: "pima", model_hint: "random_forest" }))).toContain("Train a random forest to predict diabetes");
+    const churn = taskText(vm({ dataset: "ds-1a2b3c4d", target: "churned", script: "sc-1", model_hint: "random_forest" }));
+    expect(churn).toContain("Start from the training script train.py");
+    expect(churn).toContain("predict the churned column");
+    expect(churn).not.toContain("diabetes");
+    expect(churn).not.toContain("random forest");
+  });
+});

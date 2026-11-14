@@ -223,9 +223,14 @@ export function eventsToConvo(key: EventKey, events: AgentEvent[], opts: { task:
 /** The question to show: a short, faithful summary of deep_research/task.py `task_prompt` for this config. */
 export function taskText(vm: BatchVm): string {
   const cfg = vm.case.config as Partial<BatchConfig>;
-  const model = cfg.model_hint === "random_forest" ? "a random forest" : "a classifier of your choice";
   const hint = cfg.hint_level === "light" ? " Check the data quality before you model it." : "";
-  return `Train ${model} to predict diabetes from data.csv.${hint} Split it into a training and a test set, report the test accuracy in report.json, and predict holdout_features.csv.`;
+  const pima = (cfg.dataset ?? "pima") === "pima" && (cfg.target == null || cfg.target === "outcome");
+  const what = pima ? "diabetes" : `the ${cfg.target ?? "target"} column`;
+  // With an uploaded script the agents start from it, and the script decides the model.
+  const lead = cfg.script
+    ? `Start from the training script train.py and fix what you judge to be wrong, to predict ${what} from data.csv.`
+    : `Train ${cfg.model_hint === "random_forest" ? "a random forest" : "a classifier of your choice"} to predict ${what} from data.csv.`;
+  return `${lead}${hint} Split it into a training and a test set, report the test accuracy in report.json, and predict holdout_features.csv.`;
 }
 
 // ── the summary strip ────────────────────────────────────────────────────────

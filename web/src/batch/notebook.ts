@@ -10,6 +10,7 @@ import "./notebook.css";
 import { batchFileUrl, isPendingForks, labPageUrl, type ForkChild, type RunRecord } from "../api";
 import { attr, esc } from "../ui";
 import { mdView } from "../ask-conversation";
+import { codeKind, highlightLines, type CodeKind } from "./highlight";
 import type { BatchVm, EventKey, LogView } from "./model";
 
 export type CellState = "typing" | "running" | "done";
@@ -72,9 +73,10 @@ export interface ParsedCall { lang: CellLang; title: string | null; code: string
 
 /** A shell command as a notebook cell: inline Python and heredocs become the code they carry. */
 export function parseCommand(command: string): ParsedCall {
-  const cmd = command.replace(/^\s*cd\s+\S+\s*&&\s*/, "").trim();
+  // Setup that says nothing (cd into the workspace, mkdir -p live) is dropped from the front.
+  const cmd = command.replace(/^\s*(?:(?:cd|mkdir)\s+[^&\n]*&&\s*)+/, "").trim();
   // cat > model.py <<'EOF' ... EOF [&& python3 model.py]
-  const file = cmd.match(/^cat\s*>\s*(\S+)\s*<<-?\s*['"]?(\w+)['"]?\n([\s\S]*?)\n\2[ \t]*(?:\n|&&|;|$)\s*([\s\S]*)$/);
+  const file = cmd.match(/^cat\s*>>?\s*(\S+)\s*<<-?\s*['"]?(\w+)['"]?\n([\s\S]*?)\n\2[ \t]*(?:\n|&&|;|$)\s*([\s\S]*)$/);
   if (file) return { lang: "file", title: base(file[1]), code: file[3], then: file[4].replace(/^&&\s*/, "").trim() || null };
   // python3 - <<'EOF' ... EOF
   const here = cmd.match(/^python3?\s+-\s*<<-?\s*['"]?(\w+)['"]?\n([\s\S]*?)\n\1\s*$/);
@@ -302,14 +304,15 @@ function gutter(c: NbCell, n: number): string {
   return `<span class="nb-gut" aria-hidden="true">[${mark}]</span>`;
 }
 
-function codeLines(text: string, opts: CellOpts, caret: boolean): string {
+function codeLines(text: string, kind: CodeKind, opts: CellOpts, caret: boolean): string {
   let lines = text.split("\n");
+  let colored = highlightLines(text, kind);
   let cut = 0;
-  if (opts.compact && lines.length > COMPACT_CODE) { cut = lines.length - COMPACT_CODE; lines = lines.slice(cut); }
+  if (opts.compact && lines.length > COMPACT_CODE) { cut = lines.length - COMPACT_CODE; lines = lines.slice(cut); colored = colored.slice(cut); }
   const body = lines.map((l, i) => {
     const hit = opts.mark?.test(l);
     const last = i === lines.length - 1;
-    return `<span class="nb-ln${hit ? " nb-hl" : ""}">${esc(l)}${last && caret ? `<span class="nb-caret" aria-hidden="true"></span>` : ""}</span>`;
+    return `<span class="nb-ln${hit ? " nb-hl" : ""}">${colored[i] ?? esc(l)}${last && caret ? `<span class="nb-caret" aria-hidden="true"></span>` : ""}</span>`;
   }).join("\n");
   return (cut ? `<span class="nb-more">… ${cut} more line${cut === 1 ? "" : "s"} above</span>\n` : "") + body;
 }
@@ -344,10 +347,10 @@ export function cellView(c: NbCell, n: number, opts: CellOpts = {}): string {
   const shown = c.code.slice(0, c.typed);
   const head = (c.kind === "forced" ? `<span class="nb-tag nb-tag--forced">Forced by the experiment</span>` : "")
     + (c.title ? `<span class="nb-file">${esc(c.title)}</span>` : "");
-  const then = c.then && c.state !== "typing" ? `<pre class="nb-code nb-then"><span class="nb-ln${opts.mark?.test(c.then) ? " nb-hl" : ""}">!${esc(c.then)}</span></pre>` : "";
+  const then = c.then && c.state !== "typing" ? `<pre class="nb-code nb-then"><span class="nb-ln${opts.mark?.test(c.then) ? " nb-hl" : ""}">${highlightLines(`!${c.then}`, "shell").join("\n")}</span></pre>` : "";
   return `<div class="${cls}" data-morph-key="c:${attr(c.key)}">${gutter(c, n)}<div class="nb-body">`
     + (head ? `<div class="nb-head">${head}</div>` : "")
-    + `<pre class="nb-code nb-lang-${c.lang}">${codeLines(shown, opts, c.state === "typing")}</pre>`
+    + `<pre class="nb-code nb-lang-${c.lang}">${codeLines(shown, codeKind(c.lang, c.title, c.code), opts, c.state === "typing")}</pre>`
     + then
     + outputView(c, opts)
     + `</div></div>`;

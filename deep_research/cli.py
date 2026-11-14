@@ -6,6 +6,8 @@
     python -m deep_research.cli forks <batch_id> --n 4
     python -m deep_research.cli investigate <batch_id>                  # asks before each experiment
     python -m deep_research.cli investigate <batch_id> --auto-approve   # unattended, small budgets only
+    python -m deep_research.cli vms                 # count the running VMs on the Daytona key
+    python -m deep_research.cli cleanup             # stop every running deep-research VM (any machine)
 """
 
 from __future__ import annotations
@@ -114,6 +116,22 @@ async def investigate(batch_id: str, auto_approve: bool) -> None:
     print("verdict:", json.dumps(c["verdict"], indent=2) if c["verdict"] else "none recorded")
 
 
+def vms() -> None:
+    from . import sandboxes
+
+    running = sandboxes.running_vms()
+    print(f"{len(running)} running deep-research VMs")
+    for sb in running:
+        print(f"  {sb.id}  {(sb.labels or {}).get('run', '?')}  since {sb.created_at}")
+
+
+def cleanup() -> None:
+    from . import sandboxes
+
+    stopped, failed = sandboxes.stop_all_vms()
+    print(f"stopped {stopped} VMs" + (f", {failed} failed (see warnings)" if failed else ""))
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -130,8 +148,14 @@ def main(argv: list[str] | None = None) -> None:
     i.add_argument("batch_id")
     i.add_argument("--auto-approve", action="store_true",
                    help=f"approve the investigator's experiments unattended (budget ${AUTO_APPROVE_MAX_BUDGET_USD:.0f} or less)")
+    sub.add_parser("vms", help="count the running VMs on the Daytona key")
+    sub.add_parser("cleanup", help="stop every running deep-research VM, from any machine sharing the key")
     a = p.parse_args(argv)
-    if a.cmd == "runs":
+    if a.cmd == "vms":
+        vms()
+    elif a.cmd == "cleanup":
+        cleanup()
+    elif a.cmd == "runs":
         asyncio.run(runs(a.n, a.strength, a.hint, a.budget))
     elif a.cmd == "forks":
         asyncio.run(forks(a.batch_id, a.n))

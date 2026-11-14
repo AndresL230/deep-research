@@ -5,7 +5,9 @@ All functions here are blocking. Call them with `asyncio.to_thread` from async c
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from pathlib import Path
 
 from daytona import (
@@ -23,15 +25,17 @@ from .analysis import Action
 from .config import ROOT_DIR, LAB_PAGE_PORT, VM_LIVE_DIR, VM_WORKSPACE
 from .task import OUTPUT_FILES, TaskFiles
 
+log = logging.getLogger(__name__)
+
 LAB_PAGE_SRC = ROOT_DIR / "lab_page" / "server.py"
 LAB_PAGE_VM = "/home/daytona/lab_page.py"
 PY_PACKAGES = ["pandas", "scikit-learn", "matplotlib"]
 
-# Safety net for leaked VMs. A VM stops after this many idle minutes, and a
-# stopped VM is deleted this many minutes later. A batch starts 12+ VMs plus
-# forks, so one that is never cleaned up would otherwise keep billing for disk.
-AUTO_STOP_MINUTES = 60
-AUTO_DELETE_MINUTES = 60
+# A batch deletes each VM as soon as its run is scored (`delete_vm`), so nothing keeps billing.
+# These are the safety net for a VM that leaks anyway (a crash, a killed server): it stops after
+# this many idle minutes, and a stopped VM is deleted right away (0), which also frees its disk.
+AUTO_STOP_MINUTES = 30
+AUTO_DELETE_MINUTES = 0
 
 _client: Daytona | None = None
 
@@ -69,6 +73,8 @@ def load_task(sb: Sandbox, task: TaskFiles) -> None:
     sb.process.exec(f"mkdir -p {VM_LIVE_DIR}")
     sb.fs.upload_file(task.data.read_bytes(), f"{VM_WORKSPACE}/data.csv")
     sb.fs.upload_file(task.holdout_features.read_bytes(), f"{VM_WORKSPACE}/holdout_features.csv")
+    if task.script.is_file():
+        sb.fs.upload_file(task.script.read_bytes(), f"{VM_WORKSPACE}/{task.script.name}")
 
 
 def start_lab_page(sb: Sandbox) -> str:
@@ -108,7 +114,8 @@ def download_charts(sb: Sandbox, dest: Path) -> list[str]:
     """
     try:
         entries = [e for e in sb.fs.list_files(VM_LIVE_DIR) if not e.is_dir and e.name.lower().endswith(CHART_SUFFIXES)]
-    except Exception:  # noqa: BLE001 - no live folder
+    except Exception as e:  # noqa: BLE001 - no live folder
+        log.warning("listing %s failed: %r", VM_LIVE_DIR, e)
         return []
     entries.sort(key=lambda e: str(getattr(e, "mod_time", "") or ""))
     saved: list[str] = []
@@ -116,7 +123,8 @@ def download_charts(sb: Sandbox, dest: Path) -> list[str]:
         name = Path(e.name).name
         try:
             data = sb.fs.download_file(f"{VM_LIVE_DIR}/{name}")
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            log.warning("downloading chart %s failed: %r", name, e)
             continue
         if data:
             dest.mkdir(parents=True, exist_ok=True)
@@ -150,6 +158,46 @@ def fork_vm(sb: Sandbox, name: str | None = None) -> Sandbox:
     except Exception:  # noqa: BLE001 - the VM is still usable, and Batch.close() stops it
         pass
     return vm
+
+
+def running_vms() -> list[Sandbox]:
+    """Every started VM this app made on the account, from any machine sharing the key."""
+    return [
+        s for s in client().list()
+        if (s.labels or {}).get("app") == "deep-research" and str(s.state).rsplit(".", 1)[-1].upper() == "STARTED"
+    ]
+
+
+def stop_all_vms() -> tuple[int, int]:
+    """Stop every running deep-research VM on the account. Returns (stopped, failed)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def stop(sb: Sandbox) -> bool:
+        try:
+            sb.stop()
+            return True
+        except Exception as e:  # noqa: BLE001
+            log.warning("stopping %s failed: %r", sb.id, e)
+            return False
+
+    vms = running_vms()
+    with ThreadPoolExecutor(16) as ex:
+        results = list(ex.map(stop, vms))
+    return sum(results), len(results) - sum(results)
+
+
+def delete_vm(sb: Sandbox) -> None:
+    """Delete the VM: it stops billing for compute and for disk. Falls back to stopping it."""
+    for attempt in range(4):
+        try:
+            sb.delete(timeout=120)
+            return
+        except Exception as e:  # noqa: BLE001
+            # "state change in progress": the VM is starting or stopping. Wait and try again.
+            if "in progress" not in str(e) or attempt == 3:
+                break
+            time.sleep(5)
+    stop_vm(sb)  # with AUTO_DELETE_MINUTES = 0 a stopped VM is deleted by Daytona
 
 
 def stop_vm(sb: Sandbox) -> None:

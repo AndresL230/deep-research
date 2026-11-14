@@ -28,6 +28,7 @@ def offline(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "BATCHES_DIR", tmp_path)
     stopped = []
     monkeypatch.setattr(batch_mod.vms, "stop_vm", stopped.append)
+    monkeypatch.setattr(batch_mod.vms, "delete_vm", stopped.append)
 
     def no_vm(*args, **kwargs):
         raise AssertionError("an offline test tried to create a VM")

@@ -10,8 +10,14 @@ import type { AgentEvent, CaseFile, ForkExperiment, PendingForks, RunRecord, Spl
 import {
   armStats, armSummaryText, barShare, clip, eventLine, forkView, investigatorView, isProblemPhase, lineWindows,
   numberLabel, phaseText, pickRuns, planCells, scoreStats, shortArgs, sortedChildren, splitCounts, splitHeadline,
-  splitIndex, splitView, stepWords, verdictArms, verdictView,
+  splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictView,
 } from "../src/batch/lanes";
+
+// The code is syntax colored (highlight.ts, tested on its own). These tests are about which lines show, so read the
+// view without the token spans.
+const splitView = (vm: Parameters<typeof coloredSplitView>[0]): string =>
+  coloredSplitView(vm).replace(/<span class="tk-\w">([^<]*)<\/span>/g, "$1");
+
 import type { BatchVm } from "../src/batch/model";
 import { LABEL_PATTERNS, notebookCells } from "../src/batch/notebook";
 

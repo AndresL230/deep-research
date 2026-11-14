@@ -1,0 +1,25 @@
+/* The data rows of the home screen's "New batch" panel (dataset-input.ts). Tokens only; labels and controls reuse
+   home.css (.hm-field, .hm-lbl, .hm-ctl, .hm-input) so they line up with the settings under them. */
+.di { display:flex; flex-direction:column; gap:10px; min-width:0; padding-bottom:20px; border-bottom:1px solid var(--border); border-radius:2px; transition:outline-color var(--fx-fast) var(--fx-ease); outline:2px dashed transparent; outline-offset:8px; }
+.di[data-dragging="1"] { outline-color:var(--accent); }
+.di-row { display:flex; flex-wrap:wrap; align-items:flex-end; gap:16px 24px; }
+/* The dataset takes the whole first line; the target and the script share the next one. */
+.di-grow { flex:1 1 100%; }
+.di-target { flex:0 1 240px; }
+.di-rows { color:var(--fg-55); }
+.di-chips { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:32px; }
+.di-chip { display:inline-flex; align-items:center; gap:6px; max-width:100%; height:32px; padding:0 11px; box-sizing:border-box; border:1px solid var(--border-strong); border-radius:8px; background:var(--bg); color:var(--fg-70); font-size:12.5px; font-weight:500; cursor:pointer; transition:border-color var(--fx-fast) var(--fx-ease), color var(--fx-fast) var(--fx-ease), background var(--fx-fast) var(--fx-ease); }
+.di-chip > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.di-chip:hover { border-color:var(--fg-40); color:var(--fg); }
+.di-chip[aria-checked="true"] { border-color:var(--accent); background:var(--accent-soft); color:var(--fg); }
+.di-chip--add { border-style:dashed; }
+.di-chip--file { cursor:default; padding-right:5px; }
+.di-chip--file:hover { border-color:var(--border-strong); color:var(--fg-70); }
+.di-chip-sub { flex:none; font-weight:400; color:var(--fg-55); }
+.di-chip:disabled { opacity:.6; cursor:default; }
+.di-chip:focus-visible, .di-x:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.di-x { flex:none; display:grid; place-items:center; width:20px; height:20px; border-radius:5px; color:var(--fg-55); cursor:pointer; }
+.di-x:hover { background:var(--hover); color:var(--fg); }
+.di-select { cursor:pointer; }
+.di-meta { display:flex; align-items:center; gap:8px; margin:0; font-size:12.5px; color:var(--fg-55); }
+.di-err { margin:0; font-size:12.5px; line-height:1.5; color:var(--red); overflow-wrap:anywhere; }
