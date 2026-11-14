@@ -1,7 +1,7 @@
 /* The home screen (home.ts homeView) and the header cost bar (home.ts costBar). Tokens only. */
 
 /* ── home: the column ── */
-.hm { width:100%; max-width:808px; margin:0 auto; padding:40px 24px 64px; box-sizing:border-box; display:flex; flex-direction:column; gap:32px; font-size:13.5px; color:var(--fg); animation:hm-fade var(--fx-base) var(--fx-ease) both; }
+.hm { width:100%; max-width:var(--pg-w, 1240px); margin:0 auto; padding:40px var(--pg-pad, 24px) 64px; box-sizing:border-box; display:flex; flex-direction:column; gap:32px; font-size:13.5px; color:var(--fg); animation:hm-fade var(--fx-base) var(--fx-ease) both; }
 @keyframes hm-fade { from { opacity:0; } to { opacity:1; } }
 .hm-sec { display:flex; flex-direction:column; gap:10px; min-width:0; }
 .hm-h2 { margin:0; font-size:20px; font-weight:400; letter-spacing:-0.02em; color:var(--fg); }
@@ -10,20 +10,14 @@
 .hm-errtext { margin:0; font-size:12.5px; line-height:1.5; color:var(--red); overflow-wrap:anywhere; }
 .hm-warn { margin:0; font-size:12px; line-height:1.5; color:var(--amber); }
 
-/* ── the batch cards ── */
-.hm-batches { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap:8px; }
-.hm-batch { display:flex; align-items:center; justify-content:space-between; gap:10px; min-width:0; height:40px; padding:0 10px 0 12px; text-align:left; border:1px solid var(--border); border-radius:var(--r-ctl); background:var(--surface); color:var(--fg); transition:border-color var(--t-hover) ease, background var(--t-hover) ease, opacity var(--t-hover) ease; }
-.hm-batch:hover { border-color:var(--border-strong); background:var(--muted); }
-/* Under the pointer the other batches step back. */
-.hm-batches:hover .hm-batch:not(:hover) { opacity:.6; }
-.hm-batch:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
-.hm-batch-id { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--code); font-size:12px; }
+/* ── a batch's kind, as its badge in the batch table (batch-table.ts, batch-table.css) ── */
 .hm-kind { flex:none; padding:1px 7px; border-radius:var(--r-ctl); font-size:11.5px; font-weight:500; color:var(--fg-55); background:var(--hover); }
 .hm-kind[data-kind="live"] { color:var(--accent); background:var(--accent-soft); }
 .hm-kind[data-kind="ready"] { color:var(--fg-70); background:var(--hover); box-shadow:inset 0 0 0 1px var(--accent-soft); }
 
 /* ── the new batch panel ── */
-.hm-panel { display:flex; flex-direction:column; gap:20px; min-width:0; padding:20px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
+/* The form keeps its own measure under the wide table. */
+.hm-panel { width:100%; max-width:808px; align-self:center; box-sizing:border-box; display:flex; flex-direction:column; gap:20px; min-width:0; padding:20px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
 .hm-panel-h { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:2px 16px; }
 .hm-fixed { font-size:12.5px; color:var(--fg-55); }
 
@@ -167,12 +161,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .hm, .hm-skel, .hm-adv-grid { animation:none !important; }
-  .hm-batch, .hm-input, .hm-seg-o span, .hm-dom-o, .hm-chip, .hm-adv-t, .hm-adv-t svg, .hm-go, .hm-cb-fill { transition:none !important; }
+  .hm-input, .hm-seg-o span, .hm-dom-o, .hm-chip, .hm-adv-t, .hm-adv-t svg, .hm-go, .hm-cb-fill { transition:none !important; }
 }
-
-/* A teammate's batch, from the hub: whose machine ran it. */
-.hm-batch-from { display:block; margin-top:1px; font-family:var(--sans); font-size:10.5px; color:var(--fg-55); overflow:hidden; text-overflow:ellipsis; }
-.hm-batch:has(.hm-batch-from) { height:auto; min-height:40px; padding-top:5px; padding-bottom:5px; }
 
 /* Three choices need the whole field: let the segment grow and each option shrink to its text. */
 .hm-seg--3 { width:100%; }

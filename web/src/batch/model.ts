@@ -7,6 +7,7 @@
 // is an `<input type="range" data-replay-seek>` whose value is seconds.
 
 import type { AgentEvent, BatchConfig, BatchListItem, CaseFile, Defaults, Estimate, Health } from "../api";
+import type { TableView } from "./batch-table";
 
 export const ACT = {
   // anywhere
@@ -152,5 +153,7 @@ export interface HomeVm {
   advanced?: boolean;
   /** POST /api/batches in flight. */
   starting: boolean;
+  /** How the batch table is sorted and filtered (batch-table.ts); absent: newest first, every domain. */
+  table?: TableView;
   error: string | null;
 }

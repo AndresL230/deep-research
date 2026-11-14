@@ -1,9 +1,10 @@
-// OWNER: subagent A. The home screen (batch cards, the new batch panel with its estimate and Start) and the header cost bar.
+// OWNER: subagent A. The home screen (the batch table from batch-table.ts, the new batch panel with its estimate and Start) and the header cost bar.
 import "./home.css";
 import type { BatchConfig, BatchListItem, ControllerInfo, Costs, Defaults, Health, ScopeCost, TrapInfo } from "../api";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { pct, tokens, usd } from "./format";
+import { DEFAULT_VIEW, batchTable, type TableView } from "./batch-table";
 import { ACT, type HomeVm, type Loadable } from "./model";
 import { DEFAULT_PLANTED, chosenTrap } from "./trap";
 
@@ -23,7 +24,7 @@ export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
     ? summaryLabel(inputs?.label ?? `Pima diabetes · ${DEFAULT_PLANTED}`, trap)
     : controller ? `Starting from ${controller.name}` : "";
   return `<div class="hm" data-morph-key="home">
-    ${batchesSection(vm.batches)}
+    ${batchesSection(vm.batches, vm.table)}
     <section class="hm-panel" data-morph-key="new" aria-labelledby="hm-new-h">
       <div class="hm-panel-h" data-morph-key="head">
         <h2 class="hm-h2" id="hm-new-h">New batch</h2>
@@ -66,7 +67,7 @@ function missingKeys(h: Health | null): string[] {
 /** The batches and the defaults load together, so no draft once the list has settled means the defaults failed. */
 const defaultsFailed = (vm: HomeVm): boolean => !vm.draft && vm.batches.state !== "loading";
 
-function batchesSection(b: Loadable<BatchListItem[]>): string {
+function batchesSection(b: Loadable<BatchListItem[]>, view: TableView = DEFAULT_VIEW): string {
   let body: string;
   if (b.state === "loading") {
     body = `<div class="hm-note" data-morph-key="loading">${askSpinner(12)}<span>Loading batches</span></div>`;
@@ -76,18 +77,9 @@ function batchesSection(b: Loadable<BatchListItem[]>): string {
   } else if (!b.value.length) {
     body = `<div class="hm-note" data-morph-key="empty">No batches yet</div>`;
   } else {
-    const cards = b.value.map((it) => {
-      // Live: running here. Ready: saved at its split, Investigate brings it back. Otherwise a replay.
-      const kind = it.kind === "live" ? "live" : it.resumable ? "ready" : "replay";
-      const word = kind === "live" ? "Live" : kind === "ready" ? "Ready to investigate" : "Replay";
-      return `<button type="button" class="hm-batch" data-morph-key="${attr(it.id)}" data-act="${ACT.openBatch}" data-arg="${attr(it.id)}" title="${attr(it.id)}">
-        <span class="hm-batch-id">${esc(it.id)}${it.remote && it.machine ? `<span class="hm-batch-from">${esc(it.machine)}</span>` : ""}</span>
-        <span class="hm-kind" data-kind="${kind}">${word}</span>
-      </button>`;
-    }).join("");
-    body = `<div class="hm-batches" data-morph-list data-morph-key="list">${cards}</div>`;
+    body = batchTable(b.value, view);
   }
-  return `<section class="hm-sec" data-morph-key="batches" aria-labelledby="hm-batches-h">
+  return `<section class="hm-sec hm-sec--batches" data-morph-key="batches" aria-labelledby="hm-batches-h">
     <h2 class="hm-h2" id="hm-batches-h">Batches</h2>
     ${body}
   </section>`;

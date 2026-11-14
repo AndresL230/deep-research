@@ -31,7 +31,7 @@ const MAIN = ["n_runs", "trap_strength", "hint_level", "budget_usd"];
 const ADVANCED = ["trap_noise", "model_hint", "holdout_fraction", "seed", "forks_per_choice", "inflation_threshold", "analyst_model", "investigator_model"];
 
 describe("homeView", () => {
-  it("shows batches as cards with their kind and open actions", () => {
+  it("shows batches as table rows with their kind and open actions", () => {
     const html = homeView(vm());
     expect(html).toContain('data-act="open-batch" data-arg="demo-batch"');
     expect(html).toContain('data-morph-key="b-20261114"');
@@ -64,7 +64,9 @@ describe("homeView", () => {
       expect(html).not.toMatch(/<(fieldset|legend|details)\b/);
     }
     expect(text(homeView(vm({ advanced: true })))).toBe(
-      "Batches demo-batch Replay b-20261114 Live New batch Pima diabetes · planted duplicate rows "
+      "Batches 2 batches, newest first, simulated last "
+      + "Batch Domain Started Runs Claimed vs measured Step found Verdict Models Spend "
+      + "b-20261114 Live demo-batch Replay New batch Pima diabetes · planted duplicate rows "
       + "Runs Duplicated rows 50% Hint None Light Budget $ "
       + "Advanced Reset Trap noise 0.00 Holdout fraction 20% Inflation threshold 8 pts Model hint Random forest Any "
       + "Forks per arm Seed Analyst model Investigator model "

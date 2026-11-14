@@ -1,0 +1,155 @@
+/* The home screen's batch table (batch-table.ts). Prefix bt-. Tokens only, so both themes work. It sits in a muted
+   card like the batch overview's numbers; under 980px of room each row becomes a stacked card, so nothing scrolls
+   sideways on a phone. */
+
+/* The heading and the domain filter share a line; the table spans it. */
+.hm-sec--batches { container-type:inline-size; flex-direction:row; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px 16px; }
+.hm-sec--batches > :not(.hm-h2):not(.bt-filter) { flex:1 1 100%; min-width:0; }
+
+/* ── the domain filter ── */
+.bt-filter { display:inline-flex; height:30px; padding:2px; gap:2px; box-sizing:border-box; border:1px solid var(--border-strong); border-radius:var(--r-ctl); background:var(--bg); }
+.bt-f { display:inline-flex; align-items:center; gap:6px; min-width:0; padding:0 10px; border-radius:2px; font-size:12.5px; font-weight:500; color:var(--fg-55); white-space:nowrap; transition:color var(--fx-fast) var(--fx-ease), background var(--fx-fast) var(--fx-ease); }
+.bt-f:hover { color:var(--fg); }
+.bt-f[aria-pressed="true"] { color:var(--fg); background:var(--surface); box-shadow:0 0 0 1px var(--border-strong); }
+.bt-f:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+.bt-f-n { font-weight:400; color:var(--fg-55); font-variant-numeric:tabular-nums; }
+
+/* ── the table ── */
+.bt-wrap { min-width:0; border-radius:var(--r-card); background:var(--muted); overflow:hidden; }
+.bt { width:100%; border-collapse:collapse; table-layout:fixed; font-size:12.5px; color:var(--fg-70); font-variant-numeric:tabular-nums; }
+.bt-cap { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.bt th, .bt td { padding:12px 10px; text-align:left; vertical-align:top; font-weight:400; min-width:0; overflow-wrap:anywhere; }
+.bt th:first-child, .bt td:first-child { padding-left:16px; }
+.bt th:last-child, .bt td:last-child { padding-right:16px; }
+
+/* Column widths: the batch and the runs get the most. */
+.bt .bt-c-batch { width:14%; }
+.bt .bt-c-domain { width:8.5%; }
+.bt .bt-c-started { width:7.5%; }
+.bt .bt-c-runs { width:15%; }
+.bt .bt-c-claim { width:10%; }
+.bt .bt-c-step { width:13%; }
+.bt .bt-c-verdict { width:11%; }
+.bt .bt-c-models { width:11%; }
+.bt .bt-c-spend { width:10%; text-align:right; }
+
+/* the header: each column name sorts */
+.bt thead th { padding-top:10px; padding-bottom:8px; border-bottom:1px solid var(--border); vertical-align:bottom; }
+.bt-sort { display:inline-flex; align-items:center; gap:4px; max-width:100%; margin:0 -4px; padding:2px 4px; border-radius:var(--r-ctl); font-size:12px; font-weight:500; line-height:16px; color:var(--fg-55); text-align:left; transition:color var(--t-hover) ease, background var(--t-hover) ease; }
+.bt-sort:hover { color:var(--fg); background:var(--hover); }
+.bt-sort.is-on { color:var(--fg); }
+.bt-sort:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+.bt-sort-i { flex:none; display:grid; opacity:0; transition:opacity var(--t-hover) ease; }
+.bt-sort:hover .bt-sort-i, .bt-sort:focus-visible .bt-sort-i, .bt-sort.is-on .bt-sort-i { opacity:1; }
+.bt-sort:not(.is-on) .bt-sort-i { color:var(--fg-40); }
+.bt thead .bt-c-spend .bt-sort { flex-direction:row-reverse; margin:0 -4px 0 auto; }
+.bt thead .bt-c-spend { text-align:right; }
+
+/* the rows: the whole row opens the batch; the id is the real button */
+.bt-row { cursor:pointer; border-top:1px solid var(--border); transition:background var(--t-hover) ease; }
+tbody .bt-row:first-child { border-top:none; }
+.bt-row:hover { background:var(--hover); }
+.bt-row:has(.bt-id:focus-visible) { background:var(--hover); }
+.bt-id { display:block; max-width:100%; padding:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--code); font-size:12px; font-weight:500; line-height:18px; color:var(--fg); text-align:left; border-radius:2px; transition:color var(--t-hover) ease; }
+.bt-row:hover .bt-id { color:var(--accent); }
+.bt-id:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.bt-meta { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; margin-top:4px; min-width:0; }
+.bt-from { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11.5px; line-height:19px; color:var(--fg-55); }
+.bt-badges { display:flex; flex-wrap:wrap; gap:4px; }
+.bt-badges .hm-kind { line-height:17px; }
+.hm-kind[data-kind="sim"] { color:var(--purple); background:color-mix(in srgb, var(--purple) 14%, transparent); }
+.bt-row--sim .bt-id { color:var(--fg-70); }
+.bt td { line-height:18px; }
+.bt-c-domain, .bt-c-started, .bt-c-models { color:var(--fg-70); }
+.bt time { white-space:nowrap; }
+
+/* An empty cell: quiet words. */
+.bt-none { color:var(--fg-40); font-size:12px; }
+.bt-sub { display:block; margin-top:2px; font-size:11.5px; line-height:16px; color:var(--fg-55); }
+
+/* ── runs: one stacked bar, then the counts ── */
+.bt-bar { display:flex; gap:1.5px; width:100%; height:8px; margin:5px 0 7px; border-radius:3px; overflow:hidden; background:var(--bar-base); }
+.bt-seg { display:block; flex:1 1 0; min-width:3px; height:100%; background:var(--fg-40); }
+.bt-seg[data-k="honest"] { background:var(--ok); }
+.bt-seg[data-k="inflated"] { background:var(--bad); }
+.bt-seg[data-k="unclear"] { background:var(--warn); }
+.bt-seg[data-k="failed"] { background:repeating-linear-gradient(135deg, var(--fg-40) 0 1.5px, transparent 1.5px 4px); box-shadow:inset 0 0 0 1px var(--fg-40); }
+.bt-seg[data-k="running"] { background:var(--pu-hi); }
+.bt-seg[data-k="queued"] { background:none; box-shadow:inset 0 0 0 1.5px var(--border-strong); }
+.bt-seg[data-k="stopped"] { background:var(--border-strong); }
+.bt-counts { display:flex; flex-wrap:wrap; gap:0 9px; font-size:12px; color:var(--fg-55); }
+.bt-n { white-space:nowrap; }
+.bt-n b { font-weight:500; color:var(--fg); }
+.bt-n[data-k="honest"] b { color:var(--green); }
+.bt-n[data-k="inflated"] b { color:var(--red); }
+.bt-n[data-k="unclear"] b { color:var(--amber); }
+.bt-n[data-k="running"] b { color:var(--accent); }
+
+/* ── the claim against the truth, in the overview numbers' type ── */
+.bt-claim { display:block; }
+.bt-claim-v { display:flex; align-items:center; gap:4px; font-size:16px; line-height:20px; font-weight:400; letter-spacing:-0.02em; color:var(--fg); white-space:nowrap; }
+.bt-arrow { flex:none; display:grid; color:var(--fg-40); }
+.bt-claim:not(.bt-claim--even) .bt-sub { color:var(--red); }
+.bt-claim--even .bt-claim-v { color:var(--fg-70); }
+
+/* ── the step in words ── */
+.bt-step { color:var(--fg); }
+
+/* ── the verdict ── */
+.bt-chip { display:inline-flex; align-items:center; gap:5px; padding:1px 7px; border-radius:var(--r-ctl); font-size:11.5px; font-weight:500; line-height:17px; white-space:nowrap; color:var(--fg-70); background:var(--idle-bg); }
+.bt-chip[data-v="supported"] { color:var(--green); background:var(--ok-bg); }
+.bt-chip[data-v="open"] { color:var(--fg); background:none; box-shadow:inset 0 0 0 1px var(--border-strong); }
+.bt-chip[data-v="running"] { color:var(--accent); background:var(--accent-soft); }
+.bt-chip[data-v="wait"] { color:var(--amber); background:var(--warn-bg); }
+.bt-pulse { display:block; width:6px; height:6px; border-radius:50%; background:currentColor; }
+@media (prefers-reduced-motion: no-preference) {
+  .bt-pulse { animation:bt-pulse 1.4s ease-in-out infinite alternate; }
+}
+@keyframes bt-pulse { from { opacity:1; } to { opacity:.3; } }
+
+/* ── models and spend ── */
+.bt-models { display:block; }
+.bt-usd { font-size:13px; font-weight:500; color:var(--fg); white-space:nowrap; }
+.bt-plus { margin-left:1px; color:var(--amber); cursor:help; }
+.bt-tok { font-size:12px; color:var(--fg-55); white-space:nowrap; }
+
+/* A batch whose case file could not be read. */
+.bt-c-empty { vertical-align:middle; }
+
+/* ── narrow: each row a stacked card. The batch, its domain and start, and the runs read without labels; the rest
+   are labelled cells two to a line. ── */
+@container (max-width: 980px) {
+  .bt-wrap { background:none; overflow:visible; }
+  .bt, .bt tbody { display:block; }
+  .bt thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  .bt-row { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); grid-template-areas:"batch batch" "domain started" "runs runs" "claim step" "verdict spend" "models models"; gap:12px 16px; margin-top:8px; padding:14px 16px 16px; border:none; border-radius:var(--r-card); background:var(--muted); }
+  tbody .bt-row:first-child { margin-top:0; }
+  .bt-row:hover, .bt-row:has(.bt-id:focus-visible) { background:color-mix(in srgb, var(--fg) 4%, var(--muted)); }
+  .bt .bt-row > .bt-c { display:block; width:auto; padding:0; }
+  .bt .bt-row > th.bt-c-batch { grid-area:batch; display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; }
+  .bt-c-batch .bt-meta { flex:1 1 auto; margin:0; }
+  .bt-c-batch .bt-badges { margin-left:auto; }
+  .bt .bt-row > .bt-c-domain { grid-area:domain; margin:-6px 0 -4px; color:var(--fg-55); }
+  .bt .bt-row > .bt-c-started { grid-area:started; margin:-6px 0 -4px; color:var(--fg-55); text-align:right; }
+  .bt .bt-row > .bt-c-runs { grid-area:runs; }
+  .bt .bt-row > .bt-c-claim { grid-area:claim; }
+  .bt .bt-row > .bt-c-step { grid-area:step; }
+  .bt .bt-row > .bt-c-verdict { grid-area:verdict; }
+  .bt .bt-row > .bt-c-models { grid-area:models; }
+  .bt .bt-row > .bt-c-spend { grid-area:spend; text-align:left; }
+  .bt .bt-row > .bt-c-empty { grid-column:1 / -1; }
+  .bt td:is(.bt-c-claim, .bt-c-step, .bt-c-verdict, .bt-c-spend, .bt-c-models)::before { content:attr(data-label); display:block; margin-bottom:3px; font-size:11.5px; font-weight:500; line-height:16px; color:var(--fg-55); }
+  .bt-bar { margin-top:0; }
+  .bt-models { display:flex; flex-wrap:wrap; align-items:baseline; gap:0 8px; }
+  .bt-models .bt-sub { margin:0; }
+}
+@container (max-width: 420px) {
+  .bt-row { padding:12px 14px 14px; gap:12px; }
+}
+@media (max-width: 480px) {
+  .bt-filter { max-width:100%; overflow-x:auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bt-row, .bt-id, .bt-sort, .bt-sort-i, .bt-f { transition:none !important; }
+}
