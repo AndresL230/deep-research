@@ -88,7 +88,7 @@ def _worker_main(conn) -> None:
     """Entry point of a worker process: run episodes sent over `conn` until it sends None or closes.
 
     Runs in a fresh spawned interpreter. The BLAS thread variables are set here, in the child's own
-    environment and before `sim.episode` imports numpy and mujoco: OpenBLAS reads them once when it is
+    environment and before numpy and mujoco are imported: OpenBLAS reads them once when it is
     loaded, and nothing on the child's import path so far (multiprocessing, this module, sim.practice)
     loads numpy. The parent's environment is never touched, because changing os.environ in a threaded
     server races with every other thread that reads it or starts a process. If the caller's `__main__`
@@ -103,7 +103,10 @@ def _worker_main(conn) -> None:
     except (ValueError, OSError):
         pass
     _exit_with_parent()
-    from sim.episode import run_episode
+    # The slow import, before "ready". The episode module of each job's runner is imported when the first job needs
+    # it: a pick-and-place worker needs the panda model on disk, a humanoid one only the G1.
+    import mujoco  # noqa: F401
+    import numpy  # noqa: F401
 
     _limit_blas_threads()
     try:
@@ -121,8 +124,8 @@ def _worker_main(conn) -> None:
         try:
             record_to = kwargs.get("record_to")
             keep_all = bool(kwargs.get("record_all"))
-            episode_kwargs = {k: v for k, v in kwargs.items() if k not in ("record_to", "record_all")}
-            result, motion = run_episode(record=bool(record_to), **episode_kwargs)
+            episode_kwargs = {k: v for k, v in kwargs.items() if k not in ("record_to", "record_all", "runner")}
+            result, motion = _run_episode_fn(kwargs.get("runner"))(record=bool(record_to), **episode_kwargs)
             if record_to and motion is not None and (keep_all or not result.get("success")):
                 from sim.motion import write_motion
 
@@ -179,8 +182,30 @@ def _limit_blas_threads() -> None:
         pass
 
 
+# Other sims whose episodes the workers run: a job's "runner" key names one; a job without it is a pick-and-place
+# episode (sim.episode). Each is (the module with run_episode, a module without mujoco with
+# failure_result(kwargs, exception, end_reason)).
+RUNNERS = {"humanoid": ("sim.humanoid.episode", "sim.humanoid.outcome")}
+
+
+def _run_episode_fn(runner: str | None):
+    """The run_episode of `runner` (None: sim.episode's)."""
+    if runner is None:
+        from sim.episode import run_episode
+
+        return run_episode
+    import importlib
+
+    return importlib.import_module(RUNNERS[runner][0]).run_episode
+
+
 def _failure(kwargs: dict, exception: str, end_reason: str) -> dict:
-    """A failed episode result with the same keys `run_episode` gives."""
+    """A failed episode result with the same keys `run_episode` gives (that of the job's `runner`, if it has one)."""
+    runner = kwargs.get("runner")
+    if runner is not None:
+        import importlib
+
+        return importlib.import_module(RUNNERS[runner][1]).failure_result(kwargs, exception, end_reason)
     return {
         "success": False,
         "place_error_cm": None,
@@ -313,6 +338,9 @@ def run_jobs(
     controller_timeout: float | None = None,
 ) -> list[dict]:
     """Run `run_episode(**job)` for every job in worker processes; results in job order.
+
+    A job with a `runner` key (one of RUNNERS, such as "humanoid") runs that sim's `run_episode` instead of
+    sim.episode's, and its failures have that sim's result keys.
 
     A job may carry `record_to`, a file path: the episode is then recorded, and when it fails its motion file is
     written there by the worker and the result gets `motion_path` (sim/domain.py's `trace_run`). With `record_all`
