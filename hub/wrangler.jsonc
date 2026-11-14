@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // The team's shared record of batches, runs and costs (README.md, "The hub").
+  "name": "deep-research-hub",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "deep-research-hub",
+      // No database_id: the first `wrangler deploy` creates the database and writes its id back here.
+      "migrations_dir": "migrations"
+    }
+  ]
+  // Secrets (wrangler secret put NAME): TEAM_TOKEN, plus the runner keys the hub hands out
+  // (ANTHROPIC_API_KEY, DAYTONA_API_KEY, and optionally DAYTONA_API_URL, DAYTONA_TARGET, DAYTONA_SNAPSHOT, LANGSMITH_API_KEY).
+}
