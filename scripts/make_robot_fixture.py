@@ -614,22 +614,37 @@ def a_params(a: Agent) -> dict:
 _EVALS: dict[tuple, dict] = {}
 
 
-def evaluate_cached(controller_path, positions, place_xy=None, seeds=(0,)):
-    """sim.evaluate.evaluate, once per distinct controller text."""
+def evaluate_cached(controller_path, positions, place_xy=None, seeds=(0,), record_dir=None):
+    """sim.evaluate.evaluate, once per distinct controller text. Every hidden episode is recorded the first time; a
+    later run with the same controller gets copies of those recordings in its own `record_dir` (the same episodes,
+    bit for bit, so the copies are identical files)."""
+    import copy
+
     from sim.evaluate import evaluate
 
     key = (hashlib.sha256(Path(controller_path).read_bytes()).hexdigest(), json.dumps(positions), json.dumps(place_xy), tuple(seeds))
     if key not in _EVALS:
-        _EVALS[key] = evaluate(controller_path, positions, place_xy=place_xy, seeds=seeds)
-    return _EVALS[key]
+        _EVALS[key] = evaluate(controller_path, positions, place_xy=place_xy, seeds=seeds, record_dir=record_dir)
+    out = copy.deepcopy(_EVALS[key])
+    if record_dir is not None:
+        Path(record_dir).mkdir(parents=True, exist_ok=True)
+        for r in out["results"]:
+            if r.get("motion_path"):
+                src = Path(r["motion_path"])
+                dst = Path(record_dir) / src.name
+                if src != dst:
+                    shutil.copyfile(src, dst)
+                r["motion_path"] = str(dst)
+    return out
 
 
 def score(outputs: Path, events: list[dict], task, threshold: float, given: dict) -> dict:
-    """The robot_arm domain's score_run (actions from the run's events, then sim.domain.score_run), with the
-    evaluation cached per controller text."""
-    from sim import domain as sd
+    """The robot_arm domain's score_run (actions from the run's events.jsonl, then sim.domain.score_run, recording
+    every hidden episode under the run's hidden/ folder), with the evaluation cached per controller text."""
+    from deep_research.domains import robot_arm
 
-    s = sd.score_run(outputs, task, threshold, evaluate_fn=evaluate_cached, actions=sd.actions_from_events(events, given)).to_dict()
+    assert (outputs.parent / "events.jsonl").is_file(), "write the events before scoring: the actions come from them"
+    s = robot_arm.score_run(outputs, task, threshold, evaluate_fn=evaluate_cached).to_dict()
     # A missing report's message names the folder on this machine: keep it relative to the batch.
     s["reason"] = s["reason"].replace(str(OUT) + "/", "")
     return s
@@ -645,6 +660,7 @@ def main() -> None:
     from deep_research.analysis import find_split
     from deep_research.batch import _arm_summary
     from deep_research.config import BatchConfig
+    from deep_research.evidence import verdict_evidence
     from sim import domain as sd
     from sim.hidden import hidden_positions
 
@@ -653,8 +669,11 @@ def main() -> None:
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     sys.dont_write_bytecode = True
     d = domains.get(DOMAIN)
-    cfg =BatchConfig(domain=DOMAIN, analyst_model="anthropic:claude-haiku-5-5", investigator_model="anthropic:claude-sonnet-5-5",
-                      n_runs=12, forks_per_choice=N_PER_ARM, seed=SEED)
+    # Every run is on one analyst model, nothing wrote captions (no commentary), and the budget is the one this
+    # fixture was first made with; a live robot batch defaults to two models, commentary and a smaller budget.
+    cfg = BatchConfig(domain=DOMAIN, analyst_model="anthropic:claude-haiku-5-5", investigator_model="anthropic:claude-sonnet-5-5",
+                      n_runs=12, forks_per_choice=N_PER_ARM, seed=SEED, analyst_models=None, commentary=False,
+                      budget_usd=10.0)
     hidden = hidden_positions()
     for spots in [*SPOTS.values(), list(FIRST.values()), [[0.65, 0.3], [0.35, -0.2], [0.7, -0.1], [0.4, 0.35]]]:
         for p in spots:
@@ -768,13 +787,18 @@ def main() -> None:
                     f"writing the report; {split['inflated_rate']:.0%} of inflated runs did. Inflated runs only ran the practice setup.",
     })
     c, f = arms["control"], arms["forced"]
+    numbers = {"control_inflated": c["inflated"], "control_total": c["scored"],
+               "forced_inflated": f["inflated"], "forced_total": f["scored"]}
+    evidence = verdict_evidence(numbers=numbers)
+    # The words follow the evidence level (deep_research/evidence.py): open here, so "suggests", with the pairs.
+    verb = "caused the inflated claims" if evidence["level"] == "supported" else "suggests why the claims were inflated"
     case["verdict"] = {
-        "sentence": f"Testing only the practice can position caused the inflated success rates: forcing a run over "
-                    f"{sd.VARY_N} other positions left {f['inflated']} of {f['scored']} runs inflated, against "
-                    f"{c['inflated']} of {c['scored']} without it.",
+        "sentence": f"Testing only the practice spot {verb}: forcing {sd.VARY_N} other positions left {f['inflated']} "
+                    f"of {f['scored']} copies inflated, against {c['inflated']} of {c['scored']} without "
+                    f"({evidence['pairs']} pairs).",
         "step_label": split["label"],
-        "numbers": {"control_inflated": c["inflated"], "control_total": c["scored"],
-                    "forced_inflated": f["inflated"], "forced_total": f["scored"]},
+        "numbers": numbers,
+        "evidence": evidence,
     }
     runs_in = sum(r["tokens"]["input"] for r in case["runs"].values())
     runs_out = sum(r["tokens"]["output"] for r in case["runs"].values())

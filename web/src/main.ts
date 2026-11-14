@@ -39,7 +39,7 @@ import { feedView, notebookWithCaptions, wallWithFeed } from "./batch/commentary
 import { diagnosisView, fixView, forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, runSummaryView, taskText } from "./batch/run";
-import { agentTimes, caseAt, eventsAt, replayBar, replayDuration, replaySchedule } from "./batch/replay";
+import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule } from "./batch/replay";
 import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook";
 import { fetchCosts, type CostReport } from "./api";
 import type { Loadable } from "./batch/model";
@@ -323,6 +323,42 @@ function render(): void {
   afterPaint();
 }
 
+/** What a playing replay follows on a batch page: its sections, and what arrives inside one as the story goes on (a
+ *  page's stage replacing "Nothing here yet", a hypothesis, an experiment). */
+const FOLLOWED = ".pg-sec[data-morph-key], .ln-sec[data-morph-key], .ln-card[data-morph-key]";
+/** The batch page on screen last paint, and what on it a replay follows, so a newly revealed part can be brought into view. */
+let shownPage = "";
+let shownSections = new Set<string>();
+/** When the person last scrolled the page themselves (the listeners are with the other events below). */
+const follow = new ScrollFollow();
+
+/**
+ * Follow the story while a replay plays: a part of the page that appears scrolls into view (through Lenis, scroll.ts),
+ * unless the person scrolled in the last few seconds (then the page stays where they put it). The replay never turns
+ * the page: each stage is a page of its own, and opening one is the person's to do. A page just opened is not news, it
+ * starts at its top.
+ */
+function followStory(): void {
+  const r = S.route;
+  if (r.name !== "batch") {
+    shownPage = "";
+    shownSections = new Set();
+    return;
+  }
+  const page = `${r.id}/${r.step ?? "wall"}`;
+  const els = Array.from(scrollEl.querySelectorAll<HTMLElement>(FOLLOWED));
+  const keys = new Set(els.map((el) => el.dataset.morphKey!));
+  if (page === shownPage && S.batch?.replay?.playing && shownSections.size && follow.follows(Date.now())) {
+    // The outermost new parts (a new section brings its cards with it), and of those the last: the latest news.
+    const fresh = els.filter((el) => !shownSections.has(el.dataset.morphKey!));
+    const outer = fresh.filter((el) => !fresh.some((o) => o !== el && o.contains(el)));
+    const target = outer[outer.length - 1];
+    if (target) smooth.to(target, { offset: -16, immediate: matchMedia("(prefers-reduced-motion: reduce)").matches });
+  }
+  shownPage = page;
+  shownSections = keys;
+}
+
 let ticker: ReturnType<typeof setInterval> | null = null;
 function afterPaint(): void {
   // First, before the browser styles the page: what morph took off the elements that move (motion.ts).
@@ -330,6 +366,7 @@ function afterPaint(): void {
   // The landing page's 3D scenes are canvases, not markup: start them when the page is there, stop them when it is
   // not, and show the open item's device.
   syncLanding(scrollEl);
+  followStory();
   const k = routeKey(S.route);
   // The conversation keeps to the bottom while the person has not scrolled up, as in the chat. Not on a finished robot
   // run's page: its 3D replay at the top is what the page is for.
@@ -835,6 +872,18 @@ root.addEventListener("drop", (e) => {
   setDragging(false);
   if (file) void upload(file);
 });
+
+// The person scrolling the page themselves: a playing replay then stops following new sections for a few seconds.
+// Only input counts (wheel, touch, scroll keys, a press on the scrollbar), not the `scroll` event, which the replay's
+// own glide (followStory, through Lenis) fires too.
+const userScrolled = (): void => follow.userScrolled(Date.now());
+scrollEl.addEventListener("wheel", userScrolled, { passive: true });
+scrollEl.addEventListener("touchmove", userScrolled, { passive: true });
+scrollEl.addEventListener("pointerdown", (e) => {
+  // The scrollbar is the part of the element right of (or below) its content box.
+  if (e.target === scrollEl && (e.offsetX >= scrollEl.clientWidth || e.offsetY >= scrollEl.clientHeight)) userScrolled();
+});
+root.addEventListener("keydown", (e) => { if (isScrollKey(e.key, e.target as HTMLElement | null)) userScrolled(); });
 
 // Scrolling in a run: scrolling up lets go of the bottom; the jump arrow shows once away from it.
 let lastTop = 0;

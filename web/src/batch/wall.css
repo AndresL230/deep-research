@@ -12,8 +12,6 @@
 /* A batch on more than one analyst model: how each model's runs came out. */
 .bw-sum-models { margin:-4px 0 0; font-size:13.5px; color:var(--fg-70); font-variant-numeric:tabular-nums; }
 .bw-explain { margin:0; max-width:72ch; font-size:13.5px; line-height:1.5; color:var(--fg-55); text-wrap:pretty; }
-.bw-sim { margin:0; max-width:100%; padding:5px 9px; border-radius:var(--r-ctl); background:var(--warn-bg); font-size:12.5px; line-height:1.45; color:var(--fg-70); }
-.bw-sim strong { font-weight:500; color:var(--amber); }
 .bw-empty { padding:28px 12px; border:1px dashed var(--border-strong); border-radius:var(--r-card); font-size:13px; color:var(--fg-55); text-align:center; }
 
 /* ── the grid: 3 across, then 2, 1. A device is never narrower than about 300px, so its screen holds the readout. ── */
@@ -116,7 +114,6 @@
 .bw--robot .bw-panel { height:64px; }
 .bw-rev--robot .bw-res { width:42%; }
 .bw-rev--robot .bw-gap { font-size:17px; }
-.bw-rev--failed { font-size:12px; line-height:1.4; color:var(--fg-55); overflow:hidden; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
 @media (prefers-reduced-motion: no-preference) {
   .bw-rev { animation:mo-fade .45s linear both; }
   .bw-res { animation:ds-swap .5s var(--ease-swap) .12s both; }

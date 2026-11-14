@@ -20,14 +20,17 @@ describe("scoreStep", () => {
   it("says the last score in its label", () => {
     expect(html).toContain('role="img"');
     expect(label(html)).toContain("13.03");
-    expect(label(html)).toContain("of the 20 needed");
+    // A measure, against the plan's line: never "needed for supported" (the level is the server's rule).
+    expect(label(html)).toContain("against the line at 20 in MASTER_PLAN 6.4");
+    expect(label(html)).not.toMatch(/supported|needed/);
   });
 
   it("draws the rule at 20, the dashed rule at 1 and a line that draws in", () => {
     expect(html).toContain("ln-evc-rule--hi");
     // The axis words are HTML over the drawing, so they stay 11px at any width.
     expect(html).toContain(">20</span>");
-    expect(html).toContain(">supported</span>");
+    expect(html).toContain(">plan line</span>");
+    expect(html).not.toContain(">supported</span>");
     expect(html).not.toContain(">100<");
     expect(html).toContain("ln-evc-rule--one");
     expect(html).toMatch(/<path class="ln-evc-line ds-draw" pathLength="1" d="M[^"]+"/);

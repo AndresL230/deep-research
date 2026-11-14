@@ -1,13 +1,15 @@
 // The evidence math (src/batch/evidence.ts) against the two committed batches. Every number pinned here was worked
-// out by hand from the fixtures' fork f1 gaps and arm counts; the demo's three also sit in MASTER_PLAN 6.4.
+// out by hand from the fixtures' fork f1 gaps and arm counts; the demo's three also sit in MASTER_PLAN 6.4. The level
+// is the server's rule (deep_research/evidence.py: 8 pairs and a one-sided Fisher p under 0.05); the sequential
+// score is a measure that never sets it.
 
 import { describe, expect, it } from "vitest";
 import demoRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import robotRaw from "../../fixtures/robot-demo-batch/case/case.json?raw";
 import type { CaseFile, ForkChild, ForkExperiment } from "../src/api";
 import {
-  ceiling, ceilingText, causeWords, compare, effect, fisherOneSided, fmtFrac, isDone, isDropped, isPending, kOfN, level, nHidden, pairs,
-  permutationP, trace, verdictFork,
+  ALPHA, NEEDED_PAIRS, ceiling, ceilingText, causeWords, compare, effect, evidenceFrom, fisherOneSided, fmtFrac, forkEvidence, isDone, isDropped,
+  isPending, kOfN, nHidden, pairs, permutationP, trace, verdictFork,
 } from "../src/batch/evidence";
 
 const demo = JSON.parse(demoRaw) as CaseFile;
@@ -24,10 +26,9 @@ const frac = (f: { num: number; den: number } | null): string => (f ? `${f.num}/
 describe("demo fork f1, control vs forced", () => {
   const r = compare(f1(demo), "control", "forced");
 
-  it("scores four agreeing pairs to 13.03 and stays open", () => {
+  it("scores four agreeing pairs to a sequential score of 13.03", () => {
     near(r.trace, [1.9, 3.61, 6.859, 13.0321]);
     expect(r.score).toBeCloseTo(13.0321, 4);
-    expect(r.level).toBe("open");
     expect(r.n).toBe(4);
     expect(r.agree).toBe(4);
     expect(r.source).toBe("derived");
@@ -49,11 +50,21 @@ describe("demo fork f1, control vs forced", () => {
     expect(r.done.map((p) => p.diff)).toEqual([0.1536, 0.1882, 0.0813, 0.0995]);
   });
 
-  it("has no pairs left, so it can reach at most 13.03", () => {
+  it("has no pairs left, so it can reach at most 4 of the 8 pairs needed", () => {
+    expect(r.ceiling.pairs).toBe(4);
     expect(r.ceiling.remaining).toBe(0);
-    expect(r.ceiling.max).toBeCloseTo(13.0321, 4);
-    expect(r.ceiling.needed).toBe(1);
-    expect(r.ceiling.text).toBe("can reach at most 13.03, under 20");
+    expect(r.ceiling.max).toBe(4);
+    expect(r.ceiling.needed).toBe(8);
+    expect(r.ceiling.text).toBe("can reach at most 4 pairs, under the 8 needed");
+  });
+
+  it("is open by the server's rule: 4 of 8 pairs, p 5/70, the same as the case file's verdict.evidence", () => {
+    const derived = forkEvidence(null, f1(demo));
+    expect(derived).toMatchObject({ level: "open", pairs: 4, needed: 8, controlInflated: 3, controlTotal: 4, forcedInflated: 0, forcedTotal: 4, source: "derived" });
+    expect(derived.p).toBeCloseTo(5 / 70, 4);
+    const server = forkEvidence(demo, f1(demo));
+    expect(server).toMatchObject({ level: "open", pairs: 4, needed: 8, source: "server" });
+    expect(server.p).toBeCloseTo(5 / 70, 4);
   });
 });
 
@@ -63,12 +74,17 @@ describe("robot fork f1", () => {
   it("control vs forced: 13.03, Fisher 1/70, permutation 1/70, lowered by 45.1 pts", () => {
     const r = compare(f, "control", "forced");
     expect(r.score).toBeCloseTo(13.0321, 4);
-    expect(r.level).toBe("open");
     expect(frac(r.fisher)).toBe("1/70");
     expect(frac(r.permutation)).toBe("1/70");
     expect(r.effect?.meanDiff).toBe(0.4511);
     expect(r.effect?.range).toEqual([0.4, 0.5]);
-    expect(r.ceiling.text).toBe("can reach at most 13.03, under 20");
+    expect(r.ceiling.text).toBe("can reach at most 4 pairs, under the 8 needed");
+  });
+
+  it("is open by the server's rule: 4 of 8 pairs, p 0.0143, the same as the case file's verdict.evidence", () => {
+    const derived = forkEvidence(null, f);
+    expect(derived).toMatchObject({ level: "open", pairs: 4, needed: 8, controlInflated: 4, controlTotal: 4, forcedInflated: 0, forcedTotal: 4, p: 0.0143, source: "derived" });
+    expect(forkEvidence(robot, f)).toMatchObject({ level: "open", pairs: 4, needed: 8, p: 0.0143, source: "server" });
   });
 
   it("placebo vs forced: 13.03, 1/70, 1/70", () => {
@@ -143,9 +159,10 @@ describe("pairs", () => {
     expect(isPending(ps[2]) && ps[2].waiting).toEqual(["forced-3"]);
     const r = compare(f, "control", "forced");
     near(r.trace, [1.9]);
-    // Three per arm, one done and one dropped: one pair left, and it cannot reach 20.
+    // Three per arm, one scored forced copy, one failed, one running: at most 2 pairs, under the 8 needed.
+    expect(r.ceiling.pairs).toBe(1);
     expect(r.ceiling.remaining).toBe(1);
-    expect(r.ceiling.text).toBe("can reach at most 3.61, under 20");
+    expect(r.ceiling.text).toBe("can reach at most 2 pairs, under the 8 needed");
     expect(effect(ps)).toEqual({ meanDiff: 0.2, range: [0.2, 0.2] });
   });
 
@@ -166,24 +183,32 @@ describe("pairs", () => {
 });
 
 describe("level and ceiling", () => {
-  it("follows the MASTER_PLAN 6.4 thresholds", () => {
-    expect(level(24.76, 5)).toBe("supported");
-    expect(level(0.5, 5)).toBe("cleared");
-    expect(level(0.5, 4)).toBe("open");
-    expect(level(13.03, 4)).toBe("open");
+  it("follows the server's rule: at least 8 pairs and a one-sided Fisher p under 0.05", () => {
+    expect([NEEDED_PAIRS, ALPHA]).toEqual([8, 0.05]);
+    // 8 of 8 against 0 of 8: p = 1/12870.
+    expect(evidenceFrom(8, 8, 0, 8)).toMatchObject({ level: "supported", pairs: 8, p: 0.0001 });
+    // Enough pairs, too small a difference: p = 0.31.
+    expect(evidenceFrom(4, 8, 2, 8)).toMatchObject({ level: "open", pairs: 8 });
+    expect(evidenceFrom(4, 8, 2, 8).p).toBeGreaterThan(0.05);
+    // A perfect split on 4 pairs is still open: too few pairs.
+    expect(evidenceFrom(4, 4, 0, 4)).toMatchObject({ level: "open", pairs: 4, p: 0.0143 });
+    // Pairs are the smaller arm; an empty arm has no p.
+    expect(evidenceFrom(9, 10, 1, 7)).toMatchObject({ pairs: 7 });
+    expect(evidenceFrom(3, 4, 0, 0)).toMatchObject({ level: "open", pairs: 0, p: null });
   });
 
-  it("says how many agreeing pairs would reach 20 when enough remain", () => {
-    const c = ceiling(3.61, 3);
-    expect(c.needed).toBe(3);
-    expect(c.text).toBe("3 more agreeing pairs would reach 24.76");
-    expect(ceiling(13.0321, 2).text).toBe("1 more agreeing pair would reach 24.76");
-    expect(ceiling(24.76, 0).needed).toBe(0);
+  it("says how many more pairs would reach the 8 needed when enough can still come", () => {
+    const c = ceiling(3, 9);
+    expect(c.remaining).toBe(6);
+    expect(c.text).toBe("5 more pairs would reach the 8 needed");
+    expect(ceiling(7, 8).text).toBe("1 more pair would reach the 8 needed");
+    expect(ceiling(8, 8).text).toBe("8 pairs, at least the 8 needed");
+    expect(ceiling(2, 3).text).toBe("can reach at most 3 pairs, under the 8 needed");
   });
 
-  it("tells a request with 4 copies per arm that it cannot reach 20", () => {
-    expect(ceilingText(4)).toBe("With 4 copies per arm the paired score can reach at most 1.9^4 = 13.03. Supported needs 20, so this request cannot prove a cause; 5 or more copies per arm can.");
-    expect(ceilingText(5)).toBe("Supported needs a score of 20: at least 5 agreeing pairs.");
+  it("tells a request with 4 copies per arm that it cannot be supported", () => {
+    expect(ceilingText(4)).toBe("With 4 copies per arm this experiment can reach at most 4 pairs, under the 8 needed, so it cannot be supported; 8 or more copies per arm can.");
+    expect(ceilingText(8)).toBe("Supported needs at least 8 pairs and a one-sided Fisher exact p under 0.05.");
     expect(ceilingText(4)).not.toMatch(/\u2014/);
   });
 });
@@ -203,21 +228,27 @@ describe("exact tests", () => {
 });
 
 describe("server fields", () => {
-  it("prefers forks.f1.score when the case file has it", () => {
+  it("prefers forks.f1.score when the case file has it, as a measure", () => {
     const f = { ...f1(demo), score: 30 } as ForkExperiment;
     const r = compare(f, "control", "forced");
     expect(r.source).toBe("case");
     expect(r.score).toBe(30);
-    expect(r.level).toBe("supported");
     // Only control vs forced is recorded on the server; other pairings stay derived.
     expect(compare({ ...f1(robot), score: 30 } as ForkExperiment, "placebo", "forced").source).toBe("derived");
   });
 
-  it("goes by the score when the server's level disagrees with it: never supported under 20", () => {
-    const low = compare({ ...f1(demo), score: 13.0321, level: "supported" } as ForkExperiment, "control", "forced");
-    expect(low.level).toBe("open");
-    const high = compare({ ...f1(demo), score: 30, level: "open" } as ForkExperiment, "control", "forced");
-    expect(high.level).toBe("supported");
+  it("never takes the level from a sequential score or a level recorded on the fork: the evidence rule sets it", () => {
+    const high = { ...f1(demo), score: 30, level: "supported" } as ForkExperiment;
+    expect(forkEvidence(null, high).level).toBe("open");
+    expect(forkEvidence({ ...demo, verdict: null }, high).level).toBe("open");
+  });
+
+  it("uses the verdict's evidence only for the fork the verdict was judged on", () => {
+    const other = { ...f1(demo), id: "f2", label: "other_step" } as ForkExperiment;
+    const c = { ...structuredClone(demo), verdict: { ...demo.verdict!, evidence: { ...demo.verdict!.evidence!, level: "supported" as const } } };
+    c.forks = { f1: f1(demo), f2: other };
+    expect(forkEvidence(c, c.forks.f1 as ForkExperiment)).toMatchObject({ level: "supported", source: "server" });
+    expect(forkEvidence(c, other)).toMatchObject({ level: "open", source: "derived" });
   });
 
   it("leaves no pairs to come on a stopped fork", () => {
@@ -228,7 +259,8 @@ describe("server fields", () => {
     delete (f as { arms?: unknown }).arms;
     const r = compare(f, "control", "forced");
     expect(r.ceiling.remaining).toBe(0);
-    expect(r.ceiling.max).toBeCloseTo(6.859, 3);
+    expect(r.ceiling.max).toBe(3);
+    near(r.trace, [1.9, 3.61, 6.859]);
   });
 
   it("reads the server's pairs and p_exact", () => {
@@ -263,14 +295,17 @@ describe("verdict helpers", () => {
     expect(verdictFork({ ...c, forks: {} })).toBeNull();
   });
 
-  it("finds a claim of cause in both fixtures' sentences, by whole word", () => {
-    expect(causeWords(demo.verdict?.sentence)).toBe(true);
-    expect(causeWords(robot.verdict?.sentence)).toBe(true);
-    expect(causeWords("This would PROVE it")).toBe(true);
-    expect(causeWords("This proves skipping dedupe drove the inflation.")).toBe(true);
-    expect(causeWords("It is proven.")).toBe(true);
-    expect(causeWords("The proof is in the gap.")).toBe(true);
+  it("finds a claim of cause by the server's CAUSAL words, by whole word; both fixtures now say suggests", () => {
+    expect(causeWords(demo.verdict?.sentence)).toBe(false);
+    expect(causeWords(robot.verdict?.sentence)).toBe(false);
+    expect(demo.verdict?.sentence).toContain("suggests");
+    expect(robot.verdict?.sentence).toContain("suggests");
+    expect(causeWords("Skipping dedupe CAUSED the inflation.")).toBe(true);
+    expect(causeWords("This causes it.")).toBe(true);
     expect(causeWords("A causal step.")).toBe(true);
+    expect(causeWords("Causing the gap.")).toBe(true);
+    // The server's words are about cause only: "proves" is caught by the verdict's own check (lanes.ts), not here.
+    expect(causeWords("This proves skipping dedupe drove the inflation.")).toBe(false);
     expect(causeWords("Because of the split")).toBe(false);
     expect(causeWords(null)).toBe(false);
   });

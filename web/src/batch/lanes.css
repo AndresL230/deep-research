@@ -13,8 +13,6 @@
 .ln-lit-word { color:var(--accent); font-weight:500; }
 .ln-iv { color:var(--fg); font-weight:500; }
 .ln-err { margin:0; padding:8px 10px; border-radius:var(--r-ctl); background:var(--bad-bg); color:var(--red); font-size:12.5px; overflow-wrap:anywhere; }
-.ln-sim { display:inline-flex; align-items:center; height:24px; padding:0 8px; border-radius:var(--r-ctl); background:var(--warn-bg); color:var(--amber); font-size:12px; font-weight:500; line-height:1; }
-.ln-note--sim { padding:8px 10px; border-radius:var(--r-ctl); background:var(--warn-bg); color:var(--fg-70); }
 .ln-tag { display:inline-flex; align-items:center; padding:0 5px; border:1px solid var(--border-strong); border-radius:2px; font-size:10.5px; font-family:var(--code); color:var(--fg-55); line-height:16px; }
 .ln-card { display:flex; flex-direction:column; gap:12px; min-width:0; padding:16px; border:1px solid var(--border); border-radius:var(--r-card); background:var(--bg); }
 .ln-stack { display:flex; flex-direction:column; gap:12px; }
@@ -185,6 +183,10 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-ev-n { margin:0; font-size:15px; color:var(--fg-55); }
 .ln-ev-n b { font-size:clamp(48px, 5.4vw, 72px); line-height:1; font-weight:400; letter-spacing:-0.04em; color:var(--fg); font-variant-numeric:tabular-nums; }
 .ln-ev-what { margin:auto 0 0; max-width:40ch; font-size:12.5px; line-height:1.45; color:var(--fg-55); }
+.ln-ev-lv-w { display:inline-flex; }
+/* The plan's sequential score, over its chart: a measure, so it reads as a caption with its number, not a headline. */
+.ln-ev-sq { margin:0; max-width:64ch; font-size:12.5px; line-height:1.45; color:var(--fg-55); }
+.ln-ev-sq b { margin-right:4px; font-size:17px; font-weight:500; letter-spacing:-0.01em; color:var(--fg); font-variant-numeric:tabular-nums; }
 .ln-ev-chart-c { gap:8px; }
 .ln-ev-pairs { list-style:none; display:flex; flex-direction:column; margin:0; padding:0; }
 .ln-ev-pair { display:flex; align-items:center; gap:10px; min-height:33px; padding:6px 4px 6px 0; border-top:1px solid var(--border); font-size:13px; color:var(--fg-70); font-variant-numeric:tabular-nums; }
@@ -198,6 +200,10 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-ev-foot { margin:0; font-size:12px; color:var(--fg-55); overflow-wrap:anywhere; }
 
 /* F5: the arms side by side. The arm that changed wears the purple gradient as its frame, the card plain inside it. */
+/* The fork as two outcomes, in one line over the arms: how far the claim moved, how far the subject did. */
+.ln-outcome { margin:0; max-width:880px; font-size:clamp(17px, 1.7vw, 20px); line-height:1.35; font-weight:400; letter-spacing:-0.015em; color:var(--fg); text-wrap:pretty; }
+.ln-outcome-n { font-weight:500; font-variant-numeric:tabular-nums; }
+.ln-outcome .ln-muted { font-size:12.5px; letter-spacing:0; }
 .ln-arms { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); align-items:start; gap:12px; }
 /* Four arms sit two by two, so each has room for its copies in one row and the page is half as long. */
 .ln-arms[data-arms="4"] { grid-template-columns:repeat(2, minmax(0, 1fr)); }
@@ -209,6 +215,8 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-arm-n { margin:0; font-size:40px; line-height:1; font-weight:400; letter-spacing:-0.035em; white-space:nowrap; font-variant-numeric:tabular-nums; }
 .ln-why { margin:0; font-size:12.5px; line-height:1.4; color:var(--fg-55); }
 .ln-arm-sub { margin:0; font-size:12.5px; color:var(--fg-70); overflow-wrap:anywhere; }
+/* Under the forced arm: what the fork did to the subject and to its claim, said plainly. */
+.ln-arm-plain { margin:0; font-size:13.5px; line-height:1.4; font-weight:500; color:var(--fg); text-wrap:pretty; }
 .ln-arm-sum { margin:0; padding-top:10px; border-top:1px solid var(--border); font-size:12.5px; color:var(--fg-55); }
 .ln-kids { display:grid; grid-template-columns:repeat(auto-fill, minmax(112px, 1fr)); gap:6px; }
 .ln-kid { display:flex; flex-direction:column; align-items:flex-start; gap:6px; min-width:0; padding:8px; border-radius:var(--r-ctl); background:var(--muted); text-align:left; font:inherit; color:inherit; transition:background var(--t-hover) ease; }
@@ -256,6 +264,7 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-v-stand { display:flex; flex-direction:column; gap:14px; }
 .ln-v-lv { margin:0; font-size:13px; color:var(--fg-70); }
 .ln-v-line { margin:0; max-width:44ch; font-size:clamp(20px, 2.1vw, 26px); line-height:1.25; font-weight:400; letter-spacing:-0.025em; text-wrap:pretty; }
+.ln-v-eff { max-width:72ch; }
 .ln-v-stats { margin:0; font-size:13px; color:var(--fg-55); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
 .ln-v-arms { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px; }
 .ln-v-arm .ov-kpi-v { white-space:normal; }
@@ -265,9 +274,11 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
   background:linear-gradient(var(--muted), var(--muted)) padding-box, linear-gradient(135deg, var(--pu-deep), var(--pu) 45%, var(--pu-hi)) border-box; }
 .ln-claim { display:flex; flex-direction:column; gap:10px; margin:10px 0 0; padding-top:20px; border-top:1px solid var(--border); }
 .ln-claim-q { margin:0; padding:2px 0 2px 16px; border-left:2px solid var(--pu); }
+/* The investigator's own sentence, quoted under the verdict the numbers support. */
+.ln-claim-s { margin:0; max-width:64ch; font-size:15px; line-height:1.45; color:var(--fg-70); text-wrap:pretty; }
 .ln-sentence { margin:0; max-width:52ch; font-size:clamp(17px, 1.8vw, 22px); line-height:1.32; font-weight:400; letter-spacing:-0.02em; text-wrap:pretty; }
 .ln-claim-by { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--fg-55); }
-.ln-v-open, .ln-note--sim { align-self:flex-start; max-width:min(100%, 78ch); padding:8px 10px; border-radius:var(--r-ctl); background:var(--warn-bg); color:var(--fg-70); font-size:13px; }
+.ln-v-open { align-self:flex-start; max-width:min(100%, 78ch); padding:8px 10px; border-radius:var(--r-ctl); background:var(--warn-bg); color:var(--fg-70); font-size:13px; }
 .ln-vrows { display:flex; flex-direction:column; gap:12px; }
 .ln-vrow { display:grid; grid-template-columns:72px auto 1fr; align-items:center; gap:14px; }
 .ln-vrow-t { font-size:13px; font-weight:500; }

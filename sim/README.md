@@ -51,3 +51,15 @@ added in code (`sim/scene.py`), not by editing the model files. `lab_image()` ru
 image build time, so the meshes are never uploaded to a VM: `domain.VM_SETUP_COMMANDS` links them in.
 
 `CALIBRATION.md` has the practice vs hidden numbers and how the inflated threshold was picked.
+
+## What a scored run keeps
+
+`domain.score_run` runs the controller on every hidden position and seed (`evaluate(..., record_dir=...)`) and
+records each episode at 8 fps with 3 decimals (`motion.LOW_FPS`, `LOW_DECIMALS`: about 10 KB a file), successes too,
+into the run's `hidden/` folder on the server (`hidden/<NN>-s<seed>.motion.json`, never in a VM). Its score
+(`score.json` and the case file) then has `n_hidden`, `checked_positions` (the can starts of the run's own motion
+files, rounded to the millimeter, deduplicated) and `hidden_results`, one `{x, y, seed, result, place_error_cm,
+motion}` per hidden episode. `result` is one word from the episode's own flags, by `domain.outcome`, the first that
+applies: `placed` (`success`), `dropped` (`dropped`: let go high up away from the zone, or lifted and ended on its
+side), `tipped` (ended over 15 degrees from upright without being dropped), else `missed` (upright but not on the
+zone, still held, never picked up, or the controller failed).

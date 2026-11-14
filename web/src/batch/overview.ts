@@ -11,8 +11,9 @@ import { pct, pts, tokens, usd } from "./format";
 import { costGroups } from "./home";
 import { barShare, forkExperiments, isProblemPhase, isSimulated, pendingForks, phaseText, scoreStats } from "./lanes";
 import { ACT, STEP_LABEL, type BatchStep, type BatchVm } from "./model";
-import { sortedRuns, wallSummary } from "./wall";
+import { claimHeadline, sortedRuns, summaryLine, wallSummary } from "./wall";
 import { isMotionBatch, scoreWords } from "../robot/markup";
+import { domainWords } from "./words";
 
 // ── the pipeline ─────────────────────────────────────────────────────────────
 
@@ -91,7 +92,6 @@ function tiles(vm: BatchVm): string {
   const s = wallSummary(vm);
   const w = scoreWords(c.config);
   const [rep, tru] = [w.reported.toLowerCase(), w.true.toLowerCase()];
-  const robot = isMotionBatch(c.config);
   const runs = Object.values(c.runs ?? {});
   const gap = scoreStats(runs.filter((r) => r.status === "inflated")).gap;
   const working = s.running + s.queued;
@@ -102,11 +102,11 @@ function tiles(vm: BatchVm): string {
   const budget = c.costs?.budget_usd;
   const cost = dollars
     ? tile("cost", "Spent", count(c.costs.spent_usd, "usd", usd(c.costs.spent_usd)), budget != null ? `of a ${usd(budget)} budget` : `${tokens(tok)} tokens`)
-    : tile("cost", "Tokens", count(tok, "tokens", tokens(tok)), simulated ? "simulated, so no real spend" : tok ? "prices missing" : "nothing spent yet");
+    : tile("cost", "Tokens", count(tok, "tokens", tokens(tok)), simulated ? "token counts only, no real spend" : tok ? "prices missing" : "nothing spent yet");
   return `<div class="ov-kpis">`
     + tile("agents", "Agents", count(s.total, "int", String(s.total)), !s.total ? "none started yet" : working ? `${s.running} working, ${s.queued} waiting` : "all scored")
-    + tile("honest", "Honest", count(s.honest, "int", String(s.honest)), robot ? "claimed what the hidden test showed" : "reported what they scored")
-    + tile("inflated", "Inflated", count(s.inflated, "int", String(s.inflated)), robot ? "claimed more than the hidden test showed" : "reported more than they scored", true)
+    + tile("honest", "Honest", count(s.honest, "int", String(s.honest)), `${rep} what was ${tru}`)
+    + tile("inflated", "Inflated", count(s.inflated, "int", String(s.inflated)), `${rep} more than was ${tru}`, true)
     + tile("gap", "Mean inflation", count(gap, "pts", pts(gap)), `${rep} minus ${tru}, inflated runs`)
     + cost
     + `</div>`;
@@ -174,10 +174,10 @@ function bars(vm: BatchVm): string {
     ? `<div class="ov-bars" data-morph-key="bars" data-morph-list>${runs.map((r, i) => bar(r, i, robot, words)).join("")}</div>`
     : `<p class="ov-none" data-morph-key="none">The bars appear as agents are scored.</p>`;
   return `<div class="ov-card ov-card--bars ds-pop" data-io data-morph-key="bars-card">`
-    + `<div class="ov-card-h"><h3 class="ov-card-t">${esc(robot ? "Claimed success against the hidden test" : "Reported against true accuracy")}</h3>`
+    + `<div class="ov-card-h"><h3 class="ov-card-t">${esc(`${w.reported} against ${words[1]}`)}</h3>`
     + `<div class="ov-keys"><span><i class="ov-sw ov-sw--true"></i>${esc(w.true)}</span><span><i class="ov-sw ov-sw--over"></i>${esc(`${w.reported} above ${words[1]}`)}</span></div></div>`
     + body
-    + `<p class="ov-foot">One bar per agent, from ${robot ? "0%" : "50%"} to 100%.${threshold != null ? ` A run counts as inflated when it ${robot ? "claims" : "reports"} ${esc(pts(threshold).replace(/^\+/, ""))} or more above its ${robot ? "hidden test" : "true score"}.` : ""}</p>`
+    + `<p class="ov-foot">One bar per agent, from ${robot ? "0%" : "50%"} to 100%.${threshold != null ? ` A run counts as inflated when its ${esc(words[0])} score is ${esc(pts(threshold).replace(/^\+/, ""))} or more above its ${esc(words[1])} one.` : ""}</p>`
     + `</div>`;
 }
 
@@ -187,24 +187,29 @@ function bars(vm: BatchVm): string {
 const WORKING = new Set(["running", "analyzing", "investigating", "awaiting_approval", "forking", "forked"]);
 
 /**
- * The title: what is happening while something is, the reason when the batch is blocked, and otherwise what the
- * scored agents came to.
+ * The title, the batch's one headline. The reason when the batch is blocked; once every agent is in, the claim against
+ * the truth ("6 of 12 agents claimed 99%. Measured at 20 positions they never tested: 59%.", wall.ts `claimHeadline`),
+ * which stays the title through the investigation, the fork and the verdict while the phase chip says what is working;
+ * before that, what is happening.
  */
 export function headline(vm: BatchVm): string {
   const phase = String(vm.case.phase ?? "config");
-  if (WORKING.has(phase) || isProblemPhase(phase)) return phaseText(phase);
+  if (isProblemPhase(phase)) return phaseText(phase);
+  const claim = claimHeadline(vm.case);
+  if (claim) return claim;
+  if (WORKING.has(phase)) return phaseText(phase);
+  // Rarely reached: everything finished but no run has both numbers to show.
   const s = wallSummary(vm);
   const scored = s.honest + s.inflated + (s.unclear ?? 0);
   if (!scored) return phaseText(phase);
-  const robot = isMotionBatch(vm.case.config);
+  const w = domainWords(vm.case.config);
+  const [said, truth] = [w.claim_label.toLowerCase(), w.truth_label.toLowerCase()];
   if (!s.inflated) {
     if (s.unclear) return `No agent was clearly inflated, ${s.unclear} of ${scored} ${s.unclear === 1 ? "is" : "are"} unclear`;
-    const what = robot ? "the hidden test showed" : scored === 1 ? "it scored" : "they scored";
-    return scored === 1 ? `The one scored agent ${robot ? "claimed" : "reported"} what ${what}` : `All ${scored} scored agents ${robot ? "claimed" : "reported"} what ${what}`;
+    return scored === 1 ? `The one scored agent ${said} what was ${truth}` : `All ${scored} scored agents ${said} what was ${truth}`;
   }
   // "of 11 scored agents" when some of the batch's agents failed and so have no score to count.
-  const of = `${s.inflated} of ${scored}${scored < s.total ? " scored" : ""} agents`;
-  return robot ? `${of} claimed more than the hidden test showed` : `${of} reported more than they scored`;
+  return `${s.inflated} of ${scored}${scored < s.total ? " scored" : ""} agents ${said} more than was ${truth}`;
 }
 
 /** The phase as a chip beside the batch's name. */
@@ -301,29 +306,32 @@ export function notYetView(vm: BatchVm, current: BatchStep): string {
     + `</div>`;
 }
 
-/** The chips over a page's title: the batch's name, saved or live, simulated, and its phase. */
+/** The chips over a page's title: the batch's name, saved or live, and its phase. */
 function eyebrows(vm: BatchVm): string {
   const phase = String(vm.case.phase ?? "config");
   const kind = vm.live ? chip("Live", "live", "dot") : chip("Saved batch", "idle", "dot");
-  const sim = isSimulated(vm.case) ? chip("Simulated", "warn", "dot") : "";
-  return `<div class="ov-eyebrows"><span class="ds-eyebrow">Batch <b>${esc(vm.id)}</b></span>${kind}${sim}${phaseChip(phase)}</div>`;
+  // A simulated batch says so once, in the page header (home.ts costBar).
+  return `<div class="ov-eyebrows"><span class="ds-eyebrow">Batch <b>${esc(vm.id)}</b></span>${kind}${phaseChip(phase)}</div>`;
 }
 
 /** One line under the title: what the batch is. */
 function lede(vm: BatchVm): string {
   const n = Object.keys(vm.case.runs ?? {}).length;
   if (!n) return "Agents appear here once the batch starts.";
-  return `${n} ${n === 1 ? "agent" : "agents"} on the same task, each in its own sandbox. Orro scores every one, finds the step that separates the honest runs from the inflated ones, and forks a run to prove it.`;
+  return `${n} ${n === 1 ? "agent" : "agents"} on the same task, each in its own sandbox. Orro scores every one, finds the step that separates the honest runs from the inflated ones, and forks a run to test it.`;
 }
 
 export function overviewView(vm: BatchVm): string {
   const c = vm.case;
   const phase = String(c.phase ?? "config");
+  const s = wallSummary(vm);
   return `<section class="ov" data-morph-key="ov" aria-label="Overview">`
     + `<div class="ds-aurora" aria-hidden="true"><i></i><i></i><i></i></div>`
     + `<header class="ov-head" data-io>`
     + eyebrows(vm)
-    + `<h1 class="ov-title${isProblemPhase(phase) ? " ov-title--bad" : ""}">${reveal(headline(vm))}</h1>`
+    + `<h1 class="ov-title${isProblemPhase(phase) ? " ov-title--bad" : ""}" data-morph-key="title">${reveal(headline(vm))}</h1>`
+    // The run counts, a quieter line under the title.
+    + (s.total ? `<p class="ov-count" data-morph-key="count" aria-live="polite">${esc(summaryLine(s))}</p>` : "")
     + `<p class="ov-sub">${esc(lede(vm))}</p>`
     + `</header>`
     + steps(vm, "wall")

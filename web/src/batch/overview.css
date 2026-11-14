@@ -8,8 +8,11 @@
 /* ── the title ── */
 .ov-head { display:flex; flex-direction:column; align-items:flex-start; gap:14px; padding:26px 0 2px; }
 .ov-eyebrows { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
-.ov-title { margin:0; max-width:24ch; font-size:clamp(32px, 4.5cqi, 54px); line-height:1.12; font-weight:400; letter-spacing:-0.032em; text-wrap:balance; }
+/* The batch's one headline: once every agent is in, the claim against the truth, two sentences long. */
+.ov-title { margin:0; max-width:30ch; font-size:clamp(30px, 4cqi, 48px); line-height:1.12; font-weight:400; letter-spacing:-0.032em; font-variant-numeric:tabular-nums; text-wrap:balance; }
 .ov-title--bad { color:var(--red); font-size:clamp(24px, 3cqi, 34px); max-width:40ch; }
+/* The run counts, quieter, under the title. */
+.ov-count { margin:-4px 0 0; font-size:14px; font-weight:500; color:var(--fg-70); font-variant-numeric:tabular-nums; }
 .ov-sub { margin:0; max-width:64ch; font-size:15px; line-height:1.5; color:var(--fg-55); text-wrap:pretty; }
 
 /* ── the pipeline on a folder line: the steps sit in the raised tab, the line steps down beside them ── */
@@ -155,6 +158,7 @@
   .ov-steps::before, .ov-curve, .ov-folder-r, .ov-step-line { display:none; }
 }
 @container (max-width: 560px) {
+  .ov-title { font-size:26px; }
   .ov-kpis { grid-template-columns:repeat(2, minmax(0, 1fr)); }
   .ov-kpi-v { font-size:32px; }
   .ov-bar-id { font-size:0; }

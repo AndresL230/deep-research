@@ -23,8 +23,8 @@ const EV = { w: 400, h: 128, l: 38, r: 10, t: 14, b: 22 };
 /**
  * The score after each complete pair, as steps on a log scale from 0.01 to 100. It starts at 1 before any pair, so
  * `trace` is the score after pair 1, 2, ... and `agrees[i]` says whether pair i+1 went the predicted way (its dot is
- * --ok, else --bad). A solid rule at 20 is where the evidence counts as supported; the dashed one at 1 is where it
- * started. Values below 0.01 sit on the floor. No trace, no chart: the caller says it is waiting for the first pair.
+ * --ok, else --bad). A solid rule at 20 is the plan's line (MASTER_PLAN 6.4); the dashed one at 1 is where it
+ * started. The score is a measure of how consistently the pairs agree: the evidence level is not read from it. Values below 0.01 sit on the floor. No trace, no chart: the caller says it is waiting for the first pair.
  *
  * `total` is how many pairs the experiment has room for: the x axis runs over all of them, so a new pair adds a step
  * without moving the ones drawn before it. Each step is its own path, keyed by its pair and value, so when a pair
@@ -62,14 +62,14 @@ export function scoreStep(trace: number[], agrees: boolean[], opts: { total?: nu
   const xLabels = Array.from({ length: slots }, (_, i) =>
     `<span class="ln-evc-ax ln-evc-ax--x${i < trace.length ? "" : " ln-evc-ax--todo"}" style="left:${px(xOf(i + 1))}">${i + 1}</span>`).join("");
   const last = trace[trace.length - 1];
-  const label = `Paired score after ${trace.length} ${trace.length === 1 ? "pair" : "pairs"}: ${score2(last)} of the 20 needed for supported. `
+  const label = `Sequential score after ${trace.length} ${trace.length === 1 ? "pair" : "pairs"}: ${score2(last)}, against the line at 20 in MASTER_PLAN 6.4. `
     + `Step by step: ${trace.map(score2).join(", ")}.`;
   const key = `ev-chart:${opts.id ?? ""}:${slots}`;
   return `<div class="ln-ev-chart" data-morph-key="${attr(key)}">`
     + `<svg class="ln-evc-svg" viewBox="0 0 ${EV.w} ${EV.h}" width="100%" role="img" aria-label="${attr(label)}">`
     + rule(20, "ln-evc-rule--hi") + rule(1, "ln-evc-rule--one") + rule(0.01, "ln-evc-rule--edge")
     + `<g data-morph-list>${steps}</g></svg>`
-    + `<span class="ln-evc-ax ln-evc-ax--hi" aria-hidden="true" style="right:${px(EV.r)};top:${py(yOf(20))}">supported</span>`
+    + `<span class="ln-evc-ax ln-evc-ax--hi" aria-hidden="true" style="right:${px(EV.r)};top:${py(yOf(20))}">plan line</span>`
     + yLabel(20, "20", " ln-evc-ax--hi") + yLabel(1, "1") + yLabel(0.01, "0.01")
     + `<div class="ln-evc-xs" aria-hidden="true">${xLabels}</div></div>`;
 }

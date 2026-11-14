@@ -41,6 +41,8 @@ from pydantic import BaseModel, Field
 
 from .. import notebook
 from ..analysis import LABELS
+from ..domains.robot_arm import HIDDEN_DIR
+from ..evidence import ALPHA, NEEDED_PAIRS
 from ..domains import InvestigatorWords
 
 if TYPE_CHECKING:
@@ -68,6 +70,17 @@ The batch's code can also be traced and fixed. After the verdict:
 8. Call `request_fix_test` to test it: copies of the same run from the same moment, one arm with the patch applied
    and one without. A person approves the cost first. Then call `record_fix_verdict` with one plain sentence on
    what the arms' true success rates show. Say if the fix did not help.
+"""
+
+
+VERDICT_WORDING = f"""
+The verdict's words follow the evidence level, which the fork result states (deep_research/evidence.py): `supported`
+needs at least {NEEDED_PAIRS} control and forced pairs and a one-sided Fisher exact p below {ALPHA} for fewer forced
+copies inflated than control copies. Anything less is `open`.
+- While it is `open`, the step only "suggests" why: say "suggests", with the score and the pairs, for example
+  "Skipping <the step> suggests why the claims were inflated: forcing it left 0 of 4 copies inflated, against 4
+  of 4 without (4 pairs)." Never write cause, caused or causes: `record_verdict` refuses it.
+- Only when it is `supported` may the sentence say the step "caused" the inflation, still with the score and pairs.
 """
 
 
@@ -114,6 +127,7 @@ Read `/case/case.json` first. Then:
    inflates like `control` means the forced step did the work rather than the interruption, and a `show` arm that
    comes out honest means the runs could fix the problem once they saw it. When no experiment ran (it was declined
    or cannot run), give no arms and say so.
+{VERDICT_WORDING}
 {DIAGNOSE_STEPS if diagnose else ""}
 Before you finish, a grader checks your verdict against a rubric. If it asks for changes, call `record_verdict` again
 with them (it replaces the verdict) and fix your notebook entry to match.
@@ -225,8 +239,9 @@ the batch's case file holds; check every number against it.
    when the experiment ran them. When no experiment finished, it says so instead.
 4. It says what is uncertain: a small n, runs left out (unclear or failed runs, failed fork copies), and anything the
    experiment could not tell apart. Its confidence (low, medium, high) fits that.
-5. It claims nothing beyond the evidence: every number matches the case file evidence, and it claims a cause only
-   when the fork arms support it."""
+5. It claims nothing beyond the evidence: every number matches the case file evidence, and its words follow the
+   verdict's `evidence.level`: "suggests" with the score and the pairs while it is open, "caused" only when supported."""
+
 
 # One check, then at most two revisions.
 MAX_RUBRIC_ITERATIONS = 3
@@ -277,7 +292,7 @@ def rubric_middleware(batch: "Batch", model) -> RubricMiddleware:
 def build_investigator(batch: "Batch", model: str):
     case = batch.case
     domain = batch.domain
-    labels, words = domain.labels(), domain.words
+    labels, words = domain.labels(), domain.investigator_words
 
     @tool
     def record_step_labels(run_id: str, labels: list[list[str]]) -> str:
@@ -349,7 +364,9 @@ def build_investigator(batch: "Batch", model: str):
         return case.record_fix_verdict(sentence)
 
     # The case file, the runs and the skills are read-only. The notebook is writable by the investigator only.
-    read_only = [FilesystemPermission(operations=["write"], paths=["/case/**", "/runs/**", "/skills/**"], mode="deny")]
+    read_only = [FilesystemPermission(operations=["write"], paths=["/case/**", "/runs/**", "/skills/**"], mode="deny"),
+                 # Every hidden episode of a scored run, recorded where it really happened: the truth per case.
+                 FilesystemPermission(operations=["read"], paths=[f"/runs/*/{HIDDEN_DIR}/**"], mode="deny")]
     no_notebook = [FilesystemPermission(operations=["write"], paths=["/memory/**"], mode="deny")]
 
     subagents: list[SubAgent] = [
@@ -391,7 +408,8 @@ def build_investigator(batch: "Batch", model: str):
     backend = CompositeBackend(
         default=StateBackend(),
         routes={
-            "/case/": FilesystemBackend(root_dir=batch.dir / "case", virtual_mode=True),
+            # The investigator's view of the case file (case_file.investigator_view): no hidden results per case.
+            "/case/": FilesystemBackend(root_dir=batch.case_view.parent, virtual_mode=True),
             "/runs/": FilesystemBackend(root_dir=batch.runs_dir, virtual_mode=True),
             "/skills/": FilesystemBackend(root_dir=domain.skills_dir, virtual_mode=True),
             notebook.MOUNT: notes,

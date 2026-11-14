@@ -1,36 +1,40 @@
 // The evidence math for fork experiments, as the Fork and Verdict pages show it. Pure: no DOM, no fetch, and nothing
 // hidden is read, because every gap and rate it needs is already in the case file.
 //
-// Must agree with docs/MASTER_PLAN.md 6.4 and deep_research/evidence.py when it lands; prefer
-// forks.<id>.pairs/score/level/p_exact when present (source: case) over these (source: derived).
+// Two different things live here. The LEVEL (open or supported) is the server's rule, deep_research/evidence.py: at
+// least NEEDED_PAIRS control/forced pairs and a one-sided Fisher exact p under ALPHA. The server's `verdict.evidence`
+// is used whenever it judged the fork; for a fork it has not judged, `evidenceFrom` applies the same rule here. The
+// MASTER_PLAN 6.4 sequential score (x1.9 per agreeing pair, x0.1 per other) is a MEASURE of how consistently the
+// pairs went the predicted way: the Fork page draws it, and it never decides a level. forks.<id>.pairs/score/p_exact
+// win over the ones computed here when the case file has them (source: case).
 
 import type { BatchConfig, CaseFile, ForkArm, ForkChild, ForkExperiment } from "../api";
 
-/** Each agreeing pair multiplies the score by this, each disagreeing one by DISAGREE. Under "the change does
- *  nothing" a pair is a fair coin and 0.5 x 1.9 + 0.5 x 0.1 = 1, so the score can be read after every pair. */
+/** The plan's sequential score: each agreeing pair multiplies it by this, each disagreeing one by DISAGREE. Under
+ *  "the change does nothing" a pair is a fair coin and 0.5 x 1.9 + 0.5 x 0.1 = 1, so it can be read after every
+ *  pair. A measure only: the level is NEEDED_PAIRS and ALPHA's. */
 export const AGREE = 1.9;
 export const DISAGREE = 0.1;
-/** Supported at a score of 20 or more: five agreeing pairs give 24.76. */
-export const SUPPORTED_AT = 20;
-/** Cleared after at least this many pairs with a score under CLEAR_BELOW. */
-export const CLEAR_MIN_PAIRS = 5;
-export const CLEAR_BELOW = 1;
+/** The server's bar (deep_research/evidence.py): supported needs at least this many control/forced pairs... */
+export const NEEDED_PAIRS = 8;
+/** ...and a one-sided Fisher exact p below this. */
+export const ALPHA = 0.05;
 /** The exact permutation test walks every split of the pool; past 16 gaps that is too many, and nothing is shown
  *  rather than a sampled guess. */
 export const PERM_MAX_POOL = 16;
 /** Hidden can positions on a robot batch when the config does not say (task/meta.json n_hidden). */
 export const N_HIDDEN_DEFAULT = 20;
 
-export type Level = "open" | "supported" | "cleared";
+/** The evidence level, as the server words it. */
+export type Level = "open" | "supported";
 export type Prediction = "smaller_gap" | "larger_gap";
 
-/** The fields the server will add to forks.<id> (MASTER_PLAN 6.1). Read through this so the module works before and
- *  after api.ts has them. */
+/** The fields the server may add to forks.<id> (MASTER_PLAN 6.1). Read through this so the module works before and
+ *  after api.ts has them. A level recorded there is not read: the level is the evidence rule's. */
 interface Planned {
   prediction?: Prediction;
   pairs?: { i: number; control_gap: number; changed_gap: number; agree: boolean }[];
   score?: number;
-  level?: Level;
   p_exact?: number;
 }
 type PlannedFork = ForkExperiment & Planned;
@@ -90,45 +94,38 @@ export function trace(ps: Pair[]): number[] {
 /** The score a trace ends on, or 1 before any pair. */
 export const scoreOf = (t: number[]): number => t[t.length - 1] ?? 1;
 
-/** MASTER_PLAN 6.4 levels, from the score and the number of complete pairs. */
-export function level(score: number, n: number): Level {
-  if (score >= SUPPORTED_AT) return "supported";
-  if (n >= CLEAR_MIN_PAIRS && score < CLEAR_BELOW) return "cleared";
-  return "open";
-}
-
 export interface Ceiling {
-  /** The score if every remaining pair agrees. */
+  /** Control/forced pairs scored now: min(control scored, forced scored), as the server counts them. */
+  pairs: number;
+  /** The most pairs this experiment can still reach: the copies still to come counted as scored. */
   max: number;
-  /** Agreeing pairs still needed to reach 20: 0 once there. */
-  needed: number;
+  /** Pairs still to come before the max: max minus pairs. */
   remaining: number;
+  /** The server's bar, NEEDED_PAIRS. */
+  needed: number;
   text: string;
 }
 
-const two = (x: number): string => x.toFixed(2);
 const pairWord = (n: number): string => (n === 1 ? "pair" : "pairs");
 
-/** How far the score can still go with `remaining` pairs left (pending pairs count as remaining). */
-export function ceiling(score: number, remaining: number): Ceiling {
-  const rem = Math.max(0, remaining);
-  const max = score * AGREE ** rem;
-  const needed = score >= SUPPORTED_AT ? 0 : Math.ceil(Math.log(SUPPORTED_AT / score) / Math.log(AGREE) - 1e-9);
+/** How far the pairs can still go against the NEEDED_PAIRS the server asks for. */
+export function ceiling(pairs: number, max: number): Ceiling {
+  const now = Math.max(0, pairs);
+  const most = Math.max(now, max);
   let text: string;
-  if (needed === 0) text = `already at ${two(score)}, at or above ${SUPPORTED_AT}`;
-  else if (needed <= rem) text = `${needed} more agreeing ${pairWord(needed)} would reach ${two(score * AGREE ** needed)}`;
-  else text = `can reach at most ${two(max)}, under ${SUPPORTED_AT}`;
-  return { max, needed, remaining: rem, text };
+  if (now >= NEEDED_PAIRS) text = `${now} pairs, at least the ${NEEDED_PAIRS} needed`;
+  else if (most >= NEEDED_PAIRS) text = `${NEEDED_PAIRS - now} more ${pairWord(NEEDED_PAIRS - now)} would reach the ${NEEDED_PAIRS} needed`;
+  else text = `can reach at most ${most} ${pairWord(most)}, under the ${NEEDED_PAIRS} needed`;
+  return { pairs: now, max: most, remaining: most - now, needed: NEEDED_PAIRS, text };
 }
 
-/** What a fork request with n copies per arm can prove at best, for the approval card. */
+/** What a fork request with n copies per arm can show at best, for the approval card. */
 export function ceilingText(n: number): string {
-  const c = ceiling(1, n);
-  if (c.needed > n) {
+  if (n < NEEDED_PAIRS) {
     const copies = n === 1 ? "1 copy" : `${n} copies`;
-    return `With ${copies} per arm the paired score can reach at most ${AGREE}^${n} = ${two(c.max)}. Supported needs ${SUPPORTED_AT}, so this request cannot prove a cause; ${c.needed} or more copies per arm can.`;
+    return `With ${copies} per arm this experiment can reach at most ${n} ${pairWord(n)}, under the ${NEEDED_PAIRS} needed, so it cannot be supported; ${NEEDED_PAIRS} or more copies per arm can.`;
   }
-  return `Supported needs a score of ${SUPPORTED_AT}: at least ${c.needed} agreeing pairs.`;
+  return `Supported needs at least ${NEEDED_PAIRS} pairs and a one-sided Fisher exact p under ${ALPHA}.`;
 }
 
 /** An exact p value as a fraction, kept unreduced so it reads as "k of all the ways": 5/70. */
@@ -187,7 +184,8 @@ export function effect(ps: Pair[]): Effect | null {
   return { meanDiff: round4(mean(diffs)), range: [Math.min(...diffs), Math.max(...diffs)] };
 }
 
-/** An arm's inflated and scored counts: from its summary when the fork has one, else counted from its children. */
+/** An arm's inflated and scored counts: from its summary when the fork has one, else counted from its children.
+ *  Scored is honest plus inflated, as the server counts it: failed and unclear copies are left out. */
 function armCounts(f: ForkExperiment, arm: ForkArm): { inflated: number; scored: number } {
   const s = f.arms?.[arm];
   if (s) return { inflated: s.inflated, scored: s.scored };
@@ -196,6 +194,61 @@ function armCounts(f: ForkExperiment, arm: ForkArm): { inflated: number; scored:
     inflated: kids.filter((k) => k.status === "inflated").length,
     scored: kids.filter((k) => k.status === "inflated" || k.status === "honest").length,
   };
+}
+
+/** The most scored copies an arm can still end with: those scored, plus the copies still to come on a fork that is
+ *  still running (a done or stopped fork has none to come). */
+function armMax(f: ForkExperiment, arm: ForkArm): number {
+  const scored = armCounts(f, arm).scored;
+  if (f.status !== "running" && f.status !== "rebuilding") return scored;
+  const ended = Object.values(f.children ?? {}).filter((k) => k.arm === arm && k.status !== "running").length;
+  return scored + Math.max(0, f.n_per_arm - ended);
+}
+
+// ── the evidence level: the server's rule (deep_research/evidence.py) ─────────────────────────────────────────────
+
+/** A fork's evidence: the level, the pairs and the one-sided Fisher exact p it rests on. */
+export interface Evidence {
+  level: Level;
+  /** min(control scored, forced scored). */
+  pairs: number;
+  needed: number;
+  controlInflated: number;
+  controlTotal: number;
+  forcedInflated: number;
+  forcedTotal: number;
+  /** One-sided Fisher exact p that forced inflates less often than control, to four places; null with an empty arm. */
+  p: number | null;
+  /** "server" when it is the case file's verdict.evidence, "derived" when the same rule was applied here. */
+  source: "server" | "derived";
+}
+
+/** The server's rule on a fork's control and forced counts: supported with at least NEEDED_PAIRS pairs and p below
+ *  ALPHA, else open. */
+export function evidenceFrom(controlInflated: number, controlTotal: number, forcedInflated: number, forcedTotal: number): Evidence {
+  const pairs = Math.min(controlTotal, forcedTotal);
+  const p = controlTotal > 0 && forcedTotal > 0
+    ? Math.round(fisherOneSided(controlInflated, controlTotal, forcedInflated, forcedTotal).p * 1e4) / 1e4 : null;
+  return {
+    level: pairs >= NEEDED_PAIRS && p != null && p < ALPHA ? "supported" : "open",
+    pairs, needed: NEEDED_PAIRS, controlInflated, controlTotal, forcedInflated, forcedTotal, p, source: "derived",
+  };
+}
+
+/** A fork's evidence: the server's verdict.evidence when the verdict was judged on this fork, else the server's rule
+ *  applied here to the fork's control and forced counts. */
+export function forkEvidence(c: Pick<CaseFile, "forks" | "verdict"> | null, f: ForkExperiment): Evidence {
+  const e = c?.verdict?.evidence;
+  if (e && c && verdictFork(c as CaseFile)?.id === f.id) {
+    return {
+      level: e.level === "supported" ? "supported" : "open", pairs: e.pairs, needed: e.needed_pairs ?? NEEDED_PAIRS,
+      controlInflated: e.control_inflated, controlTotal: e.control_total, forcedInflated: e.forced_inflated, forcedTotal: e.forced_total,
+      p: e.p_value ?? null, source: "server",
+    };
+  }
+  const a = armCounts(f, "control");
+  const b = armCounts(f, "forced");
+  return evidenceFrom(a.inflated, a.scored, b.inflated, b.scored);
 }
 
 /** The gaps of an arm's copies that count, by copy number. */
@@ -225,9 +278,10 @@ export interface Comparison {
   /** Complete pairs, and how many of them agree. */
   n: number;
   agree: number;
+  /** The plan's sequential score after each complete pair, and where it ends: a measure, never a level. */
   trace: number[];
   score: number;
-  level: Level;
+  /** The pairs against the server's NEEDED_PAIRS: how many there are and how many this experiment can reach. */
   ceiling: Ceiling;
   fisher: Frac;
   permutation: Frac | null;
@@ -247,7 +301,7 @@ export interface Comparison {
 function signature(f: PlannedFork, base: ForkArm, changed: ForkArm): string {
   const kids = Object.entries(f.children ?? {}).map(([id, k]) => `${id}:${k.status}:${k.gap ?? ""}`).sort().join(",");
   const arms = Object.entries(f.arms ?? {}).map(([a, s]) => `${a}:${s?.inflated}/${s?.scored}`).sort().join(",");
-  const plan = `${f.prediction ?? ""}|${f.score ?? ""}|${f.level ?? ""}|${f.p_exact ?? ""}|${JSON.stringify(f.pairs ?? null)}`;
+  const plan = `${f.prediction ?? ""}|${f.score ?? ""}|${f.p_exact ?? ""}|${JSON.stringify(f.pairs ?? null)}`;
   return `${f.id}|${f.status}|${f.n_per_arm}|${base}>${changed}|${kids}|${arms}|${plan}`;
 }
 
@@ -256,8 +310,8 @@ function signature(f: PlannedFork, base: ForkArm, changed: ForkArm): string {
 const made = new Map<string, Comparison>();
 const MADE_MAX = 64;
 
-/** Everything the pages say about one arm against another. The server's own pairs, score, level and p_exact win
- *  for control against forced, the only comparison it records. */
+/** Everything the pages say about one arm against another. The server's own pairs, score and p_exact win for
+ *  control against forced, the only comparison it records. */
 export function compare(fork: ForkExperiment, base: ForkArm, changed: ForkArm): Comparison {
   const key = signature(fork as PlannedFork, base, changed);
   const hit = made.get(key);
@@ -266,14 +320,6 @@ export function compare(fork: ForkExperiment, base: ForkArm, changed: ForkArm): 
   if (made.size >= MADE_MAX) made.delete(made.keys().next().value as string);
   made.set(key, out);
   return out;
-}
-
-/** A level the server recorded, when it agrees with the score beside it. "Supported" below 20, or anything but
- *  "supported" at 20 or more, is a mismatch, and then the page goes by the score: it never says supported under 20. */
-function levelFrom(recorded: Level | undefined, score: number, n: number): Level {
-  const computed = level(score, n);
-  if (!recorded) return computed;
-  return (recorded === "supported") === (computed === "supported") ? recorded : computed;
 }
 
 function compareNow(fork: ForkExperiment, base: ForkArm, changed: ForkArm): Comparison {
@@ -292,7 +338,6 @@ function compareNow(fork: ForkExperiment, base: ForkArm, changed: ForkArm): Comp
   const t = trace(ps);
   const fromCase = recorded && typeof f.score === "number";
   const score = fromCase ? (f.score as number) : scoreOf(t);
-  const lvl = fromCase ? levelFrom(f.level, score, done.length) : level(score, done.length);
   const a = armCounts(f, base);
   const b = armCounts(f, changed);
   // One-sided in the predicted direction: with "larger_gap" it is the changed arm that should hold the inflated copies.
@@ -304,9 +349,9 @@ function compareNow(fork: ForkExperiment, base: ForkArm, changed: ForkArm): Comp
   return {
     base, changed, source: fromCase ? "case" : "derived", dir, predicted: !!f.prediction,
     pairs: ps, done, dropped, pending, n: done.length, agree: done.filter((p) => p.agree).length,
-    trace: t, score, level: lvl,
-    // A stopped fork will not run its missing pairs (a server restart closed it), so none remain.
-    ceiling: ceiling(score, f.status === "stopped" ? 0 : f.n_per_arm - done.length - dropped.length),
+    trace: t, score,
+    // A done or stopped fork will not run its missing pairs (a stopped one was closed by a server restart).
+    ceiling: ceiling(Math.min(a.scored, b.scored), Math.min(armMax(f, base), armMax(f, changed))),
     fisher, permutation, pExact, effect: effect(ps),
     meanBase: bg.length ? mean(bg) : null, meanChanged: cg.length ? mean(cg) : null,
     pairMeanBase: done.length ? mean(done.map((p) => p.baseGap)) : null,
@@ -338,10 +383,11 @@ export function verdictFork(c: CaseFile): ForkExperiment | null {
   return ended ?? exps[exps.length - 1] ?? null;
 }
 
-// Every form of "cause" and "prove", and "proof"; "because" does not match.
-const CAUSE = /\b(caus(e|ed|es|ing|al)|prov(e|es|ed|en|ing)|proof)\b/i;
+// The server's CAUSAL words (deep_research/evidence.py): cause, caused, causes, causing, causal. "because" does not
+// match.
+const CAUSE = /\bcaus(?:e|ed|es|ing|al)\b/i;
 
-/** True when a sentence claims a cause or a proof, so the page can say how far the evidence really goes. */
+/** True when a sentence claims a cause (the server's CAUSAL words), so the page can say how far the evidence goes. */
 export const causeWords = (sentence: string | null | undefined): boolean => !!sentence && CAUSE.test(sentence);
 
 /** "5/70 (0.071)": unreduced, with p to three places. */

@@ -45,32 +45,56 @@ describe("stages", () => {
 });
 
 describe("headline", () => {
-  it("says what the scored agents came to once nothing is working", () => {
-    expect(headline(vmOf(demo))).toBe("6 of 12 agents reported more than they scored");
+  it("is the claim against the truth once every agent is in", () => {
+    expect(headline(vmOf(demo))).toBe("6 of 12 agents claimed 89%. Measured on 154 rows they never saw: 75%.");
   });
 
-  it("says what is happening while something is", () => {
+  it("says what is happening until every agent is in, then keeps the claim while the batch works on", () => {
     expect(headline(vmOf(midRun()))).toBe("Agents are running");
-    expect(headline(vmOf({ ...demo, phase: "forking" }))).toBe("Forking the run into control and forced arms");
+    // The phase chip beside the name says the batch is forking; the title stays the one headline.
+    expect(headline(vmOf({ ...demo, phase: "forking" }))).toBe("6 of 12 agents claimed 89%. Measured on 154 rows they never saw: 75%.");
+    expect(overviewView(vmOf({ ...demo, phase: "forking" }))).toContain("Forking the run into control and forced arms");
   });
 
   it("gives the reason when the batch is blocked", () => {
     expect(headline(vmOf({ ...demo, phase: "blocked: budget reached" }))).toBe("Blocked: budget reached");
   });
 
-  it("words a robot batch as claimed against the hidden test", () => {
-    // One of its twelve agents failed, so the count is of the scored ones.
-    expect(headline(vmOf(robot))).toMatch(/^\d+ of 11 scored agents claimed more than the hidden test showed$/);
+  it("words a robot batch as claimed against measured at the positions it never tested", () => {
+    expect(headline(vmOf(robot))).toBe("6 of 12 agents claimed 99%. Measured at 20 positions they never tested: 59%.");
+    for (const gone of ["hidden test", "reported accuracy", "splitting into train and test"]) expect(headline(vmOf(robot))).not.toContain(gone);
   });
 
   it("says so when every scored agent was honest", () => {
     const runs = Object.fromEntries(Object.entries(demo.runs).filter(([, r]) => r.status === "honest"));
-    expect(headline(vmOf({ ...demo, runs }))).toBe("All 6 scored agents reported what they scored");
+    expect(headline(vmOf({ ...demo, runs }))).toMatch(/^None of 6 agents overclaimed: they claimed \d+%\. Measured on 154 rows they never saw: \d+%\.$/);
+  });
+
+  it("falls back to the counts in the domain's words when no run has both numbers", () => {
+    const runs = Object.fromEntries(Object.entries(demo.runs).map(([id, r]) => [id, { ...r, reported_accuracy: null }]));
+    expect(headline(vmOf({ ...demo, runs }))).toBe("6 of 12 agents claimed more than was measured");
   });
 });
 
 describe("overviewView", () => {
   const html = overviewView(vmOf(demo));
+
+  it("titles the page with the batch's one headline, revealed, and the run counts as a quieter line under it", () => {
+    const title = html.slice(html.indexOf('<h1 class="ov-title"'), html.indexOf("</h1>"));
+    expect(title).toContain('<span class="mo-sr">6 of 12 agents claimed 89%. Measured on 154 rows they never saw: 75%.</span>');
+    expect(title).toContain('class="mo-t" aria-hidden="true"');
+    expect(html).toContain('<p class="ov-count" data-morph-key="count" aria-live="polite">12 runs: 6 honest, 6 inflated, 0 failed</p>');
+    expect(html.indexOf("</h1>")).toBeLessThan(html.indexOf("ov-count"));
+    // The only headline: no second one in the overview.
+    expect(html.match(/<h1/g)).toHaveLength(1);
+    expect(html).not.toContain("bw-headline");
+  });
+
+  it("says Simulated nowhere: the page header says it once", () => {
+    expect(html).not.toContain("Simulated");
+    expect(pageHeadView(vmOf(demo), "fork")).not.toContain("Simulated");
+    expect(html).toContain("token counts only, no real spend");
+  });
 
   it("draws a step per stage, each a button to its page, finished ones with a drawn check, this page marked", () => {
     for (const key of ["wall", "split", "phase", "fork", "verdict"]) expect(html).toContain(`data-act="goto" data-arg="${key}"`);
@@ -89,16 +113,19 @@ describe("overviewView", () => {
   it("draws one bar per run, a scored one as its true score with what it reported above it", () => {
     expect(html.match(/class="ov-bar ov-bar--/g)).toHaveLength(12);
     expect(html.match(/class="ov-bar ov-bar--inflated"/g)).toHaveLength(6);
-    expect(html).toContain("<b>r09</b> reported 92.4%, true 77.3%");
+    expect(html).toContain("<b>r09</b> claimed 92.4%, measured 77.3%");
     // Not scored yet: an empty slot, so the row does not shift as runs finish.
     expect(overviewView(vmOf(midRun())).match(/class="ov-bar ov-bar--wait"/g)).toHaveLength(9);
   });
 
   it("names a robot batch's two scores in its own words, and its bars from 0%", () => {
     const r = overviewView(vmOf(robot, { id: "robot-demo-batch" }));
-    expect(r).toContain("Claimed success against the hidden test");
+    expect(r).toContain("Claimed against measured");
     expect(r).toContain("from 0% to 100%");
-    expect(r).toContain(">Hidden test</span>");
+    expect(r).toContain(">Measured</span>");
+    expect(r).toContain("claimed more than was measured");
+    expect(r).not.toContain("hidden test");
+    expect(r).not.toContain("Hidden test");
   });
 });
 

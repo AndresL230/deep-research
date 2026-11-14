@@ -70,6 +70,50 @@ export interface DomainInfo {
   output_files: string[];
   /** More outputs, as globs relative to the workspace (a robot run's motion files). */
   output_globs: string[];
+  /** How the screens talk about this domain (`Domain.words`). Absent on batches saved before it: the views then use
+   *  the tabular words they always had. */
+  words?: DomainWords;
+}
+
+/** A domain's words for the screens (deep_research/domains/ `Domain.words`), so no robot screen says "test rows" and
+ *  no headline shows a raw step label. Each is a plain phrase; `{n}` is replaced where noted. */
+export interface DomainWords {
+  /** The thing that is judged: "robot" or "model". "the claim moved X pts, the robot moved Y pts". */
+  subject: string;
+  /** Finishes "Measured {judged_on}: 59%", with `{n}` the number of hidden cases: "at {n} positions they never
+   *  tested", "on {n} rows they never saw". */
+  judged_on: string;
+  /** What the agents checked their claim on: "practice spot", "test set". */
+  checked: string;
+  /** Labels for the two numbers: "Claimed" and "Measured". */
+  claim_label: string;
+  truth_label: string;
+  /** When the domain's step happens, after "did this ": "before writing the report", "before splitting into train
+   *  and test". */
+  step_when: string;
+  /** The empty slot on the side that skipped the step: "This run wrote its report from the practice spot alone". */
+  skipped: string;
+  /** Finishes "52% ..." about a run's `overlap_share` when the batch has no trap that says it, or null. */
+  evidence_text: string | null;
+  /** Human words per step label, for headlines: `{name: "testing other can positions", did: "ran the can at other
+   *  positions", missing: "Only the practice spot was run here"}`. A tabular batch's trap step is in `trap_info`. */
+  steps: Record<string, { name: string; did: string; missing: string }>;
+}
+
+/** What happened at one hidden case (robot_arm): placed upright on the zone, tipped over, never picked up or put
+ *  down in the wrong place (missed), or let go of in the air (dropped). */
+export type HiddenOutcome = "placed" | "tipped" | "missed" | "dropped";
+
+/** One hidden episode of a scored robot run: where the can stood, what really happened, and its recording. */
+export interface HiddenResult {
+  x: number;
+  y: number;
+  seed: number;
+  result: HiddenOutcome;
+  /** The final distance of the can from the zone center, cm, whatever the result; null only when the episode never ran. */
+  place_error_cm: number | null;
+  /** The episode's motion file, low frame rate, as a path for `batchFileUrl` (`runs/r02/hidden/07-s0.motion.json`). */
+  motion: string | null;
 }
 
 export interface BatchConfig {
@@ -145,6 +189,16 @@ export interface RunScore {
   /** reported_accuracy minus true_accuracy. */
   gap: number | null;
   reason: string;
+  /** How many hidden cases the true score came from: can positions (robot_arm) or holdout rows (tabular). */
+  n_hidden?: number | null;
+  /** robot_arm: the can positions the run's own episodes used (printed results and saved motion files), [x, y] in
+   *  meters, rounded to the millimeter, deduplicated, in order of first appearance (what it checked). */
+  checked_positions?: [number, number][];
+  /** robot_arm: every hidden episode's real result. Only present once the run is scored. */
+  hidden_results?: HiddenResult[];
+  /** tabular: rows in the run's own test set, and how many of them are copies of training rows. */
+  n_test?: number | null;
+  n_test_copies?: number | null;
 }
 
 export const RUN_STATUSES = ["queued", "starting", "running", "honest", "inflated", "unclear", "failed"] as const;
@@ -310,6 +364,23 @@ export interface Verdict extends SplitFields {
   numbers: Record<string, number>;
   /** Every arm the fork experiment scored: inflated and scored copies. */
   arms?: Partial<Record<ForkArm, { inflated: number; total: number }>>;
+  /** How strong the fork evidence is (deep_research/evidence.py). The words follow it: "suggests" while open,
+   *  "caused" only when supported. Absent on verdicts saved before it: read it as open. */
+  evidence?: VerdictEvidence;
+}
+
+/** "supported": at least `needed_pairs` control and forced pairs, and the forced arm's inflated count is lower than
+ *  the control arm's by a one-sided Fisher exact test at p < 0.05. Anything else is "open". */
+export interface VerdictEvidence {
+  level: "open" | "supported";
+  /** Scored control and forced copies, paired: min(control_total, forced_total). */
+  pairs: number;
+  needed_pairs: number;
+  control_inflated: number;
+  control_total: number;
+  forced_inflated: number;
+  forced_total: number;
+  p_value: number | null;
 }
 
 /** Whether the runs the code-tracer traced fail at the same line with the same symptom. */

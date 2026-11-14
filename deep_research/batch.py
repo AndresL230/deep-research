@@ -29,7 +29,9 @@ from .case_file import CaseFile
 from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
-from .events import EventLog, current_step, events_from_update, read_events
+from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, prefix_events, read_events
+from .evidence import describe as describe_evidence
+from .evidence import verdict_evidence
 from .domains import actions_from_events, build_task, intervention_for, score_run
 from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
 
@@ -189,6 +191,7 @@ class Batch:
         self.dir = root / self.id
         self.runs_dir = self.dir / "runs"
         self.forks_dir = self.dir / "forks"
+        self.case_view = self.dir / "case" / "view" / "case.json"
         fresh = not self.dir.exists()
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         if resume:
@@ -202,7 +205,8 @@ class Batch:
                 if fresh:
                     shutil.rmtree(self.dir, ignore_errors=True)
                 raise
-        self.case = CaseFile(self.dir / "case" / "case.json", labels=self.domain.labels())
+        # The investigator reads the case through `case/view/case.json` (case_file.investigator_view), never case.json.
+        self.case = CaseFile(self.dir / "case" / "case.json", labels=self.domain.labels(), view_path=self.case_view)
         self.tracker = CostTracker(budget_usd=cfg.budget_usd)
         # A reopened batch (Batch.resume, cli forks, cli investigate) has spend on record already.
         self.tracker.restore(self.case.data.get("costs") or {})
@@ -668,9 +672,12 @@ class Batch:
         base_scope = f"fork:{fork_id}:base"
         try:
             msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
-            actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task)
+            src_events = read_events(self.runs_dir / src / "events.jsonl")
+            actions = actions_from_events(src_events, self.task)
             prefix_msgs, n_prefix = cut_history(msgs, fork_at)
             prefix_actions = actions[:n_prefix]
+            # Each copy keeps these next to its own log: the episodes the source ran before the cut are the copy's too.
+            prefix_log = "".join(json.dumps(e) + "\n" for e in prefix_events(src_events, n_prefix))
             self.case.set_phase("forking")
             self.case.update_fork(
                 fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=n_prefix, n_per_arm=n_per_arm,
@@ -702,6 +709,7 @@ class Batch:
             cid, scope = f"{arm}-{i + 1}", f"fork:{fork_id}:{arm}-{i + 1}"
             cdir = self.forks_dir / fork_id / cid
             log = self._log(cdir / "events.jsonl", f"{fork_id}/{cid}")
+            (cdir / PREFIX_EVENTS).write_text(prefix_log)
             watch: MotionWatch | None = None
             async with sem:
                 try:
@@ -800,6 +808,10 @@ class Batch:
                              f"({what}; {a['failed']} failed).")
             else:
                 lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
+        if kind != "fix" and "control" in arms and "forced" in arms:
+            # How strong this is, so the verdict's words can follow it (evidence.py).
+            lines.append(describe_evidence(verdict_evidence(
+                {a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]} for a in ("control", "forced")})))
         if kind == "fix":
             self.case.update_fix(status="tested", fork_id=fork_id,
                                  result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
