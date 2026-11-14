@@ -16,6 +16,8 @@ What a domain adds to the case file (`case.json`), so a fixture or the UI can ma
 - `config.visual`: what the UI draws for a run, `Domain.visual`: "charts" (the PNG charts in `runs[id].charts`)
   or "motion" (the motion files in `runs[id].motion_files`). Absent: "charts".
 - `config.domain_info`: `Domain.public()`, the domain in words. The tabular domain also writes `config.trap_info`.
+  `config.domain_info.words` is `Domain.words`: how the screens talk about the domain (`DomainWords`), with plain
+  words for every step label, so no robot screen says "test rows" and no headline shows a raw label.
 - `runs[id].motion_files` and `forks[id].children[cid].motion_files`: the motion files the run saved, as paths
   relative to the batch folder for the files route, such as `runs/r01/outputs/live/practice.motion.json`, newest
   last. Only set when the run saved any; never set in the tabular domain. A "motion" run's list grows while it runs:
@@ -71,6 +73,56 @@ class InvestigatorWords:
     # Said right after what `honest` and `inflated` mean, for a domain with more run statuses (robot: `unclear`).
     # Starts with a space when it is set.
     other_statuses: str = ""
+
+
+@dataclass(frozen=True)
+class StepWords:
+    """One step label in plain words, for headlines: "testing other can positions", "ran the can at other positions",
+    "Only the practice spot was run here"."""
+
+    name: str
+    did: str
+    missing: str
+
+
+@dataclass(frozen=True)
+class DomainWords:
+    """How the screens talk about the domain (`DomainWords` in web/src/api.ts), in `config.domain_info.words`.
+
+    Each is a plain phrase; `{n}` in `judged_on` is replaced by the number of hidden cases. A robot screen never says
+    "test rows" and no headline shows a raw step label: `steps` has words for every label the domain's steps can give.
+    """
+
+    # The thing that is judged: "the claim moved X pts, the {subject} moved Y pts".
+    subject: str
+    # Finishes "Measured {judged_on}: 59%".
+    judged_on: str
+    # What the agents checked their claim on.
+    checked: str
+    # Labels for the two numbers.
+    claim_label: str
+    truth_label: str
+    # When the domain's step happens, after "did this ".
+    step_when: str
+    # The empty slot on the side that skipped the step.
+    skipped: str
+    # Finishes "52% ..." about a run's `overlap_share`, or None.
+    evidence_text: str | None
+    # Words per step label.
+    steps: dict[str, StepWords]
+
+    def public(self) -> dict:
+        return {
+            "subject": self.subject,
+            "judged_on": self.judged_on,
+            "checked": self.checked,
+            "claim_label": self.claim_label,
+            "truth_label": self.truth_label,
+            "step_when": self.step_when,
+            "skipped": self.skipped,
+            "evidence_text": self.evidence_text,
+            "steps": {label: {"name": w.name, "did": w.did, "missing": w.missing} for label, w in self.steps.items()},
+        }
 
 
 # The analyst's system prompt in the tabular domain (`Domain.analyst_system_prompt`), as it was before domains.
@@ -131,11 +183,15 @@ class Domain:
     placebo: Callable[[], dict]
 
     # ---- the investigator ----
-    # The folder mounted at `/skills/` for the investigator. It holds `words.skill`.
+    # The folder mounted at `/skills/` for the investigator. It holds `investigator_words.skill`.
     skills_dir: Path
-    words: InvestigatorWords
-    # planted(cfg): what `{planted}` in `words.setting` becomes.
+    investigator_words: InvestigatorWords
+    # planted(cfg): what `{planted}` in `investigator_words.setting` becomes.
     planted: Callable[["BatchConfig"], str]
+
+    # ---- the screens ----
+    # How the UI talks about this domain, in `config.domain_info.words`.
+    words: DomainWords
 
     # ---- the sandbox ----
     # lab_image(): the Daytona image a VM is built from when there is no snapshot.
@@ -188,6 +244,7 @@ class Domain:
             "visual": self.visual,
             "output_files": list(self.output_files),
             "output_globs": list(self.output_globs),
+            "words": self.words.public(),
         }
 
 
