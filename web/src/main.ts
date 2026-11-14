@@ -296,7 +296,7 @@ function headerView(vm: BatchVm | null): string {
   const count = needsCount(S.home.batches);
   // The logo, the links (nav.ts), then on a batch's pages its breadcrumb: the batch and the page in it.
   const left = `<div class="ask-hdr-l pg-hdr-l">
-    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${mark(13.4)}<span class="ask-h1 ask-h1-t">${wordmark(13)}</span></button>
+    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${mark(18.7)}<span class="ask-h1 ask-h1-t">${wordmark(13)}</span></button>
     ${navBar(r, count)}
     ${crumbs.length ? `<nav class="pg-crumbs" aria-label="Breadcrumb" data-morph-key="crumbs">${crumbs.join(`<span class="ask-crumb-sep" aria-hidden="true">›</span>`)}</nav>` : ""}
   </div>`;

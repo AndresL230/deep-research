@@ -1,5 +1,5 @@
 /* Orro's logo (brand.ts): the Fault symbol and the wordmark, in the colour of the text around them. The lockup keeps
-   the identity's proportions: symbol as tall as the word, a one-bar gap (0.41 x-height), the word centred on it. */
+   the identity's proportions: symbol 1.4 times the word's height (its bars then match the letters' strokes), a one-bar gap (0.41 x-height), the word centred on it. */
 .brand-word, .brand-mark, .brand-sym { display:block; flex:none; }
 .brand-lock { display:inline-flex; align-items:center; gap:calc(var(--xh) * 0.41); }
 
@@ -15,6 +15,6 @@
 .lp-nav .lp-brand { gap:9px; }
 @media (max-width: 640px) {
   .lp-nav .lp-brand { gap:7px; }
-  .lp-nav .lp-brand .brand-mark { height:16px; width:auto; }
+  .lp-nav .lp-brand .brand-mark { height:22.4px; width:auto; }
   .lp-nav .lp-brand .brand-word { height:16px; width:auto; }
 }

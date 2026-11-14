@@ -6,7 +6,7 @@
  *  below the small cut is used: its gaps are wider so they stay open.
  *  The wordmark: drawn from scratch, x-height 100 units: squarish o's with thinner tops and bottoms, and a small spur
  *  where each r's arm leaves its stem.
- *  In a lockup the symbol is as tall as the word (x-height plus overshoot) and the gap is 0.41 x-height (one bar), the word centred on it.
+ *  In a lockup the symbol is 1.4 times the word's height (its bars then match the letters' strokes) and the gap is 0.41 x-height (one bar), the word centred on it.
  *  Everything takes its colour from `currentColor`. The full kit and guidelines: ~/Desktop/orro-identity-kit. */
 import "./brand.css";
 
@@ -44,7 +44,7 @@ export function symbolTile(size: number, cls = ""): string {
   return `<span class="brand-tile${cls ? ` ${cls}` : ""}" style="--brand-tile:${size}px">${symbol(Math.round(size * 0.78))}</span>`;
 }
 
-/** The horizontal lockup at x-height `xh` px: symbol as tall as the word, a one-bar gap, then the word. */
+/** The horizontal lockup at x-height `xh` px: symbol 1.4 times the word's height, a one-bar gap, then the word. */
 export function logo(xh: number, cls = ""): string {
-  return `<span class="brand-lock${cls ? ` ${cls}` : ""}" style="--xh:${xh}px">${mark(r2(xh * 1.03))}${wordmark(xh)}</span>`;
+  return `<span class="brand-lock${cls ? ` ${cls}` : ""}" style="--xh:${xh}px">${mark(r2(xh * 1.44))}${wordmark(xh)}</span>`;
 }
