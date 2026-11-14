@@ -183,10 +183,12 @@ const head = (title: string, extra = ""): string =>
 const isOpen = (vm: BatchVm, key: string, byDefault = false): boolean =>
   vm.open === "all" ? true : vm.open?.[key] ?? byDefault;
 
-/** A fold's button: "Show the 12 copies" / "Hide the 12 copies". The caller renders the folded part only when open. */
+/** A fold's button: "Show the 12 copies" / "Hide the 12 copies". The caller renders the folded part only when open.
+ *  It is the outlined button the run page's "Show the agent's work" is (run.ts `workStrip`), with the chevron the New
+ *  batch form's Advanced toggle turns (home.ts). */
 const foldButton = (key: string, open: boolean, what: string): string =>
-  `<button type="button" class="ln-fold" data-morph-key="fold-${attr(key)}" data-act="${ACT.fold}" data-arg="${attr(key)}" aria-expanded="${open}">` +
-  `<i class="ln-fold-i" aria-hidden="true"></i>${esc(`${open ? "Hide" : "Show"} ${what}`)}</button>`;
+  `<button type="button" class="ln-fold ask-ghostbtn ask-ghostbtn--outline" data-morph-key="fold-${attr(key)}" data-act="${ACT.fold}" data-arg="${attr(key)}" aria-expanded="${open}">` +
+  `${askIcon("chevRight", 13)}${esc(`${open ? "Hide" : "Show"} ${what}`)}</button>`;
 
 const code = (label: string, text: string | null, tone: Tone): string =>
   `<figure class="ln-code ln-code--${tone}"><figcaption class="ln-code-cap"><i class="ln-pill-dot"></i>${esc(label)}</figcaption>` +

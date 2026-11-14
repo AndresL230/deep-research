@@ -357,20 +357,21 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-fix-raised code { font-family:var(--code); font-size:11.5px; overflow-wrap:anywhere; }
 
 /* ── the key points: what the batch found, one line each ── */
+.ln-kp { container-type:inline-size; }
 .ln-kp-list { display:flex; flex-direction:column; gap:10px; margin:0; }
 .ln-kp-row { display:grid; grid-template-columns:132px minmax(0, 1fr); gap:4px 14px; align-items:baseline; }
-.ln-kp-row--honest { --ln-tone:var(--green); }
-.ln-kp-row--inflated { --ln-tone:var(--red); }
-.ln-kp-k { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:500; color:var(--fg-55); }
-.ln-kp-v { margin:0; font-size:14.5px; line-height:1.4; font-weight:500; color:var(--fg); font-variant-numeric:tabular-nums; text-wrap:pretty; }
-@container (max-width: 560px) { .ln-kp-row { grid-template-columns:minmax(0, 1fr); } }
+.ln-kp-row--honest { --ln-tone:var(--ok); }
+.ln-kp-row--inflated { --ln-tone:var(--bad); }
+.ln-kp-k { display:flex; align-items:center; gap:7px; font-size:12.5px; font-weight:400; color:var(--fg-55); }
+.ln-kp-v { margin:0; font-size:14.5px; line-height:1.45; font-weight:500; color:var(--fg); font-variant-numeric:tabular-nums; text-wrap:pretty; }
+@container (max-width: 560px) { .ln-kp-list { gap:14px; } .ln-kp-row { grid-template-columns:minmax(0, 1fr); } }
 
-/* ── a fold: a section's detail, shown when asked for ── */
-.ln-fold { align-self:flex-start; display:inline-flex; align-items:center; gap:7px; padding:4px 9px; border:1px solid var(--border); border-radius:6px; background:transparent; color:var(--fg-70); font:inherit; font-size:12px; cursor:pointer; }
-.ln-fold:hover { background:var(--hover); color:var(--fg); }
-.ln-fold:focus-visible { outline:2px solid var(--fg-40); outline-offset:1px; }
-.ln-fold-i { width:5px; height:5px; margin-top:-2px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(-45deg); transition:transform var(--fx-base) var(--fx-ease); }
-.ln-fold[aria-expanded="true"] .ln-fold-i { margin-top:-3px; transform:rotate(45deg); }
+/* ── a fold: a section's detail, shown when asked for (the button is system.css's outlined ghost button) ── */
+.ln-fold { align-self:flex-start; }
+.ln-fold:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+.ln-fold svg { margin-left:-3px; transition:transform var(--fx-fast) var(--fx-ease); }
+.ln-fold[aria-expanded="true"] svg { transform:rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .ln-fold svg { transition:none; } }
 
 /* ── phone width ── */
 @media (max-width: 640px) {
