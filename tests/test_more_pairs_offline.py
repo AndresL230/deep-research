@@ -71,7 +71,7 @@ def _fake_copies(monkeypatch, outcomes: dict[str, str]) -> list:
     async def release(self, key, scope):
         return self.vms.pop(key, None) is not None
 
-    async def run_children(self, fork_id, plan, jobs, base, point, model):
+    async def run_children(self, fork_id, plan, jobs, base, point, model, *, kind="method"):
         rounds.append(list(jobs))
         out = {}
         for arm, number in jobs:
@@ -279,7 +279,7 @@ async def test_a_stopped_round_keeps_its_scored_copies(tmp_path, monkeypatch):
     _fake_copies(monkeypatch, {"control": "inflated", "forced": "honest"})
     started = asyncio.Event()
 
-    async def hangs(self, fork_id, plan, jobs, base, point, model):
+    async def hangs(self, fork_id, plan, jobs, base, point, model, *, kind="method"):
         self._set_child(fork_id, "control-5", arm="control", status="inflated")
         self._set_child(fork_id, "forced-5", arm="forced", status="honest")
         self._set_child(fork_id, "control-6", arm="control", status="running")
