@@ -1753,12 +1753,10 @@ const RECENT = 8;
  *  says, the evidence for it, what it predicts, what would falsify it, and what tested it. The state is computed from
  *  the experiment's counts, never the model's. */
 function competingCard(h: Hypothesis, words: DomainWords, trap: TrapInfo | null): string {
-  const what = h.kind === "code" ? (h.run_id ? `<span class="ln-tag">${esc(h.run_id)}</span>` : "")
-    : h.step_label ? `<b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b>` : "";
   const row = (k: string, v: string): string => `<div class="ln-q-row"><span class="ln-q-k">${k}</span><span class="ln-q-x">${v}</span></div>`;
   const by = h.tested_by === "fix" ? "the measured fix" : h.tested_by ? `fork ${h.tested_by}` : "";
   return `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis ${esc(h.id ?? "")}</span>` +
-    `<span class="ln-hyp-kind">${esc(capital(h.kind ?? "method"))}</span>${what}<span class="ln-hyp-st">${hypPill(h.status)}</span></div>` +
+    `<span class="ln-hyp-kind">${esc(capital(h.kind ?? "method"))}</span>${hypTitle(h, words, trap)}<span class="ln-hyp-st">${hypPill(h.status)}</span></div>` +
     (h.sentence ? `<p class="ln-hyp-s">${esc(h.sentence)}</p>` : "") +
     `<div class="ln-hyp-rows">` +
     row("Evidence", esc(h.evidence)) +
@@ -1767,6 +1765,17 @@ function competingCard(h: Hypothesis, words: DomainWords, trap: TrapInfo | null)
     (by ? row("Tested by", `<span class="ln-q-line">${esc(capital(by))}${whoTag("py", "computed from the counts")}</span>`) : "") +
     `</div>`;
 }
+
+/** A hypothesis's title: its step in plain words, or, for a code hypothesis (no step label), the run whose code it
+ *  blames. */
+function hypTitle(h: Hypothesis, words: DomainWords, trap: TrapInfo | null): string {
+  if (h.step_label) {
+    return `<b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b>`;
+  }
+  const what = h.kind === "code" ? (h.run_id ? `A defect in run ${h.run_id}'s code` : "A defect in the code") : "No step named";
+  return `<b class="ln-lit-word">${esc(what)}</b>`;
+}
+
 /** The investigator: what it is doing (its events, hypotheses) and the live-only Investigate / Stop actions. */
 export function investigatorView(vm: BatchVm): string {
   const c = vm.case;
@@ -1806,9 +1815,12 @@ export function investigatorView(vm: BatchVm): string {
     ? `<div class="ln-hyps" data-morph-list>${hyps.map((h, i) =>
       `<div class="ln-card ln-hyp" data-morph-key="hyp-${attr(String(h.at ?? i))}">` +
       (h.id ? competingCard(h, words, trap) :
-        `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis</span>${h.step_label ? `<b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b>` : ""}</div>` +
+        `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis</span>${hypTitle(h, words, trap)}</div>` +
         `<p class="ln-hyp-e">${esc(h.evidence)}</p>` +
-        `<div class="ln-cmp ln-cmp--sm">${code("Honest", h.honest_action, "honest")}${code("Inflated", h.inflated_action, "inflated")}</div>`) +
+        // Older single hypotheses quote one honest and one inflated action.
+        (h.honest_action || h.inflated_action
+          ? `<div class="ln-cmp ln-cmp--sm">${code("Honest", h.honest_action ?? null, "honest")}${code("Inflated", h.inflated_action ?? null, "inflated")}</div>`
+          : "")) +
       `</div>`).join("")}</div>`
     : "";
 

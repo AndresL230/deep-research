@@ -87,3 +87,20 @@ describe("the live recording's forced arm", () => {
     expect(html).not.toContain("can change the report more than the controller");
   });
 });
+
+describe("the live recording's Investigator page", () => {
+  // It threw on h3, a code hypothesis with no step label and no quoted actions, so the page never rendered.
+  it("renders every competing hypothesis, the code one included", () => {
+    const hs = live.hypotheses;
+    expect(hs.map((h) => h.id)).toEqual(["h1", "h2", "h3"]);
+    expect(hs[2].step_label).toBeNull();
+    let html = "";
+    expect(() => { html = investigatorView(vm); }).not.toThrow();
+    for (const id of ["h1", "h2", "h3"]) expect(html).toContain(`Hypothesis ${id}`);
+    expect(html).toContain("A defect in run r06&#39;s code");
+    expect(html).toContain('<span class="ln-q-k">Predicts</span>');
+    expect(html).toContain('<span class="ln-q-k">Falsified if</span>');
+    // No empty "No example" boxes for hypotheses that never quoted actions.
+    expect(html).not.toContain("No example");
+  });
+});
