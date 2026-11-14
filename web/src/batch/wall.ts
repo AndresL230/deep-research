@@ -138,14 +138,15 @@ function strip(run: RunRecord, todos: AgentTodo[] | null, cells: NbCell[]): stri
 /** A bar from 50% to 100% accuracy, so a 13 point gap is a visible length. */
 const barWidth = (x: number | null | undefined): number => (x == null || Number.isNaN(x) ? 0 : Math.max(0, Math.min(1, (x - 0.5) / 0.5)) * 100);
 
-function reveal(run: RunRecord, trap: TrapInfo | null): string {
+function reveal(run: RunRecord, trap: TrapInfo | null, motion = false): string {
   if (run.status === "failed") {
     const reason = run.reason?.trim() || "The run failed before it was scored.";
     return `<div class="bw-rev bw-rev--failed" title="${attr(reason)}">${esc(truncate(reason, 140))}</div>`;
   }
   if (run.status !== "honest" && run.status !== "inflated") return "";
   // The trap's evidence sentence. Left out when the run has no number or the trap has none to give.
-  const ev = evidenceParts(run.overlap_share, trap, "of test rows were in training");
+  // A robot run's overlap share is the share of the can positions it tried that were the practice spot.
+  const ev = evidenceParts(run.overlap_share, trap, motion ? "of tested can positions were the practice spot" : "of test rows were in training");
   const bar = (label: string, x: number | null | undefined, cls: string): string =>
     `<div class="bw-acc"><span class="bw-k">${label}</span><span class="bw-track" aria-hidden="true"><span class="bw-fill ${cls}" style="width:${barWidth(x).toFixed(1)}%"></span></span><span class="bw-v">${pct(x)}</span></div>`;
   return `<div class="bw-rev">`
@@ -180,7 +181,7 @@ function tile(vm: BatchVm, run: RunRecord): string {
     + picture(vm, run, step, cells)
     + `<div class="bw-step${run.status === "failed" ? " bw-step--failed" : ""}" title="${attr(step)}">${esc(truncate(step, 120))}</div>`
     + strip(run, todos, cells)
-    + reveal(run, trapOf(vm.case))
+    + reveal(run, trapOf(vm.case), (vm.case.config as { visual?: string }).visual === "motion")
     + (cost ? `<div class="bw-cost">${esc(cost)}</div>` : "")
     + `</div>`;
 }
