@@ -125,8 +125,18 @@ def _batch_dir(batch_id: str) -> Path:
     raise HTTPException(404, f"no batch {batch_id}")
 
 
-def _live(batch_id: str) -> Batch:
+# Phases after which nothing more happens: the batch is a saved replay from then on, even in the server that ran it.
+OVER = {"done", "no_split", "stopped"}
+
+
+def _running(batch_id: str) -> Batch | None:
+    """The batch, while it is still live in this server: started here and not over yet."""
     b = BATCHES.get(batch_id)
+    return b if b is not None and b.case.data.get("phase") not in OVER else None
+
+
+def _live(batch_id: str) -> Batch:
+    b = _running(batch_id)
     if b is None:
         raise HTTPException(409, "this batch is not live (replays are read-only)")
     return b
@@ -193,7 +203,7 @@ def list_batches():
         if root.exists():
             for d in sorted(root.iterdir()):
                 if (d / "case" / "case.json").exists():
-                    out.append({"id": d.name, "kind": "live" if d.name in BATCHES else "replay"})
+                    out.append({"id": d.name, "kind": "live" if _running(d.name) else "replay"})
     return out
 
 
@@ -349,7 +359,7 @@ async def stop(batch_id: str):
 @app.websocket("/api/batches/{batch_id}/ws")
 async def ws(websocket: WebSocket, batch_id: str):
     await websocket.accept()
-    b = BATCHES.get(batch_id)
+    b = _running(batch_id)
     if b is None:
         try:
             case = get_case(batch_id)

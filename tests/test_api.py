@@ -280,3 +280,40 @@ async def test_vms_stop_when_no_step_separates_the_runs(tmp_path, monkeypatch):
     await b.run_all()
     assert b.case.read()["phase"] == "no_split"
     assert sorted(stopped) == ["vm-r01", "vm-r02"]
+
+
+# ---- a finished batch is a replay ----
+
+class _FakeCase:
+    def __init__(self, phase):
+        self.data = {"phase": phase}
+
+    def read(self):
+        return {"phase": self.data["phase"], "runs": {}}
+
+
+class _FakeLiveBatch:
+    def __init__(self, phase):
+        self.case = _FakeCase(phase)
+
+    async def close(self):  # the server closes open batches on shutdown
+        pass
+
+
+def test_a_batch_stops_being_live_once_it_is_over(client, tmp_path, monkeypatch):
+    for bid, phase in (("b-run", "running"), ("b-done", "done"), ("b-nosplit", "no_split"), ("b-wait", "awaiting_approval")):
+        d = tmp_path / "batches" / bid / "case"
+        d.mkdir(parents=True)
+        (d / "case.json").write_text(json.dumps({"phase": phase, "runs": {}, "forks": {}}))
+    monkeypatch.setattr(api, "BATCHES", {
+        "b-run": _FakeLiveBatch("running"), "b-done": _FakeLiveBatch("done"),
+        "b-nosplit": _FakeLiveBatch("no_split"), "b-wait": _FakeLiveBatch("awaiting_approval"),
+    })
+    kinds = {b["id"]: b["kind"] for b in client.get("/api/batches").json()}
+    assert kinds["b-run"] == "live" and kinds["b-wait"] == "live"
+    assert kinds["b-done"] == "replay" and kinds["b-nosplit"] == "replay"
+    # Live-only actions are refused, and the websocket hands over the saved case and closes.
+    assert client.post("/api/batches/b-done/investigate").status_code == 409
+    with client.websocket_connect("/api/batches/b-done/ws") as ws:
+        msg = ws.receive_json()
+    assert msg["kind"] == "snapshot" and msg["live"] is False and msg["case"]["phase"] == "done"
