@@ -54,6 +54,9 @@ cp .env.example .env                       # add ANTHROPIC_API_KEY and DAYTONA_A
 uv run python -m deep_research.snapshot    # once: bakes pandas, scikit-learn, matplotlib into a snapshot
 ```
 
+On macOS, if Daytona calls fail with `CERTIFICATE_VERIFY_FAILED`, Python has no default CA bundle. Add this to `.env`:
+`SSL_CERT_FILE=<output of: uv run python -c "import certifi; print(certifi.where())">`.
+
 `prices.json` was filled from Anthropic's and Daytona's pricing pages on 2026-11-14. A null price turns the dollar
 budget guard off and the UI shows token counts only.
 
@@ -73,7 +76,12 @@ Without the UI:
 uv run python -m deep_research.cli runs --n 1        # milestone 1: one real run end to end
 uv run python -m deep_research.cli runs --n 12       # milestone 2: a batch and the split finding
 uv run python -m deep_research.cli forks <batch_id> --n 4
+uv run python -m deep_research.cli vms               # how many VMs are running on the Daytona key
+uv run python -m deep_research.cli cleanup           # stop every running deep-research VM, from any machine
 ```
+
+Credits are shared: the Daytona key is used from more than one machine. Run `vms` after a batch, and `cleanup` when
+nothing should be running. `cleanup` also stops a teammate's live batch, so check first.
 
 ## Test
 

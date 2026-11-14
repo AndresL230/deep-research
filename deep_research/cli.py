@@ -3,6 +3,8 @@
     python -m deep_research.cli runs --n 1          # one real run end to end
     python -m deep_research.cli runs --n 12         # a full batch, then the split finding
     python -m deep_research.cli forks <batch_id> --n 4
+    python -m deep_research.cli vms                 # count the running VMs on the Daytona key
+    python -m deep_research.cli cleanup             # stop every running deep-research VM (any machine)
 """
 
 from __future__ import annotations
@@ -43,8 +45,27 @@ async def forks(batch_id: str, n: int) -> None:
     cfg = BatchConfig(**json.loads((BATCHES_DIR / batch_id / "case" / "case.json").read_text())["config"])
     # Reopens the batch. The task is rebuilt from the same seed, so the files are identical.
     b = Batch(cfg, batch_id=batch_id)
-    print(await b.run_forks(n))
+    try:
+        print(await b.run_forks(n))
+    finally:
+        await b.close()  # the fork base and children would otherwise run until auto-stop
     _print_case(b)
+
+
+def vms() -> None:
+    from . import sandboxes
+
+    running = sandboxes.running_vms()
+    print(f"{len(running)} running deep-research VMs")
+    for sb in running:
+        print(f"  {sb.id}  {(sb.labels or {}).get('run', '?')}  since {sb.created_at}")
+
+
+def cleanup() -> None:
+    from . import sandboxes
+
+    stopped, failed = sandboxes.stop_all_vms()
+    print(f"stopped {stopped} VMs" + (f", {failed} failed (see warnings)" if failed else ""))
 
 
 def main() -> None:
@@ -57,8 +78,14 @@ def main() -> None:
     f = sub.add_parser("forks")
     f.add_argument("batch_id")
     f.add_argument("--n", type=int, default=4)
+    sub.add_parser("vms", help="count the running VMs on the Daytona key")
+    sub.add_parser("cleanup", help="stop every running deep-research VM, from any machine sharing the key")
     a = p.parse_args()
-    if a.cmd == "runs":
+    if a.cmd == "vms":
+        vms()
+    elif a.cmd == "cleanup":
+        cleanup()
+    elif a.cmd == "runs":
         asyncio.run(runs(a.n, a.strength, a.hint))
     else:
         asyncio.run(forks(a.batch_id, a.n))
