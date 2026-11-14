@@ -81,8 +81,6 @@ interface AppState {
   cvKey: string;
   /** A run's page: its notebook, or the same log as conversation steps. */
   runView: "notebook" | "steps";
-  /** The landing page: which item of the list under the hero is open. */
-  landingItem: number;
   /** The cost screen's report (GET /api/costs), loaded again on every visit. */
   costs: Loadable<CostReport>;
   /** Where the cost screen was opened from, for its back button. */
@@ -104,7 +102,6 @@ const S: AppState = {
   cv: initialConversationUi(),
   cvKey: "",
   runView: "notebook",
-  landingItem: 0,
   costs: { state: "loading" },
   costsBack: { name: "home" },
   lastStep: null,
@@ -121,9 +118,11 @@ const app = document.getElementById("app")!;
 const params = new URLSearchParams(location.search);
 const themeQ = matchMedia("(prefers-color-scheme: dark)");
 // Black mode unless asked: the switch in the header (kept in this browser), or `?theme=light|dark|system`
-// (theme.ts). The landing page follows the same setting.
+// (theme.ts). The landing page follows the same setting once one is made; until then it opens in white mode, the
+// look of the site it is modelled on.
 let themePick: ThemeChoice = themeChoice(params.get("theme"), readStoredTheme());
-const theme = (): Theme => resolveTheme(themePick, themeQ.matches);
+let themeChosen = themePick !== themeChoice(null, null) || params.get("theme") !== null || readStoredTheme() !== null;
+const theme = (): Theme => (!themeChosen && S.route.name === "landing" ? "light" : resolveTheme(themePick, themeQ.matches));
 const syncPageTheme = (): void => { document.documentElement.style.colorScheme = theme(); document.body.style.background = PAGE_BACKGROUND[theme()]; };
 syncPageTheme();
 app.innerHTML = `<div class="app-root" data-cnpy-theme="${theme()}">
@@ -143,6 +142,7 @@ themeQ.addEventListener("change", () => { if (themePick === "system") applyTheme
 function pickTheme(t: Theme): void {
   if (t === theme() && themePick !== "system") return;
   themePick = t;
+  themeChosen = true;
   storeTheme(t);
   applyTheme();
 }
@@ -304,13 +304,14 @@ function render(): void {
   const landingTone = theme();
   headerEl.hidden = landing;
   root.dataset.cnpyTheme = theme();
+  syncPageTheme();
   morphInner(headerEl, headerView(vm));
   const showReplay = !!(vm && vm.replay);
   subEl.hidden = !showReplay;
   if (showReplay && vm?.replay) morphInner(subEl, replayBar(vm.replay));
 
   let body: string;
-  if (landing) body = landingView(landingTone, S.landingItem);
+  if (landing) body = landingView(landingTone);
   else if (r.name === "home") body = homeView(S.home, { html: inputsView(S.ds, S.home.starting), label: inputsLabel(S.ds) });
   else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
@@ -693,9 +694,13 @@ window.addEventListener("hashchange", onRoute);
 // ── events ───────────────────────────────────────────────────────────────────
 
 root.addEventListener("click", (e) => {
-  // The landing page's list: pressing an item's title opens it.
-  const item = (e.target as Element | null)?.closest<HTMLElement>("[data-lp-item]");
-  if (item) { S.landingItem = Number(item.dataset.lpItem) || 0; paint(); return; }
+  // The landing page's section buttons: glide down to the section.
+  const section = (e.target as Element | null)?.closest<HTMLElement>("[data-lp-go]")?.dataset.lpGo;
+  if (section) {
+    const to = scrollEl.querySelector<HTMLElement>(`[data-lp-at="${CSS.escape(section)}"]`);
+    if (to) smooth.to(to, { offset: section === "intro" ? 0 : -24 });
+    return;
+  }
   // The white / black switch, in the header and on the landing page.
   const pick = (e.target as Element | null)?.closest<HTMLElement>("[data-theme-pick]")?.dataset.themePick;
   if (pick === "light" || pick === "dark") { pickTheme(pick); return; }

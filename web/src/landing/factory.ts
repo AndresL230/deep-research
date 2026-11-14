@@ -8,7 +8,8 @@
 
 import { PerspectiveCamera, Scene, Vector3, type Mesh } from "three";
 import { createContour, FLOOR_INK, tintColors } from "./contour";
-import { Trail, VIEW, cardAt, lookAt, progressAt, standOff, stopFor } from "./floorplan";
+import { smooth } from "./ease";
+import { STATIONS, Trail, VIEW, cardAt, lookAt, progressAt, standOff, stopFor } from "./floorplan";
 import { createKit, loopWhileSeen, type Loop, type SceneTone } from "./kit";
 import { buildStations, type Stage } from "./stations";
 
@@ -22,6 +23,9 @@ export interface FactoryOptions {
   scroller: Element | null;
   /** The chapter's card: its `data-chapter` and each bar's `--lp-fill` are kept up to date. */
   card: HTMLElement | null;
+  /** Tour the floor on its own clock instead of the page's: rest at a station, glide to the next, and back the
+   *  other way, for a card that does not pin. */
+  tour?: boolean;
 }
 
 export interface Factory {
@@ -72,7 +76,23 @@ export function mountFactory(host: HTMLElement, options: FactoryOptions): Factor
   camera.lookAt(0, 0, 0);
 
   const { pin, scroller, card } = options;
+  /** On tour: how long the camera rests at a station, and how long it takes to glide to the next. */
+  const REST = 5.2;
+  const GLIDE = 1.8;
+  const toured = (): number => {
+    const legs = STATIONS - 1;
+    const cycle = (REST + GLIDE) * legs * 2;
+    const at = time % cycle;
+    const leg = Math.floor(at / (REST + GLIDE));
+    const into = at - leg * (REST + GLIDE);
+    const u = into < REST ? 0 : smooth((into - REST) / GLIDE);
+    // Out along the stations and back: 0, 1, 2, 3, 2, 1.
+    const from = leg < legs ? leg : 2 * legs - leg;
+    const to = leg < legs ? leg + 1 : from - 1;
+    return stopFor(from) + (stopFor(to) - stopFor(from)) * u;
+  };
   const readProgress = (): number => {
+    if (options.tour) return toured();
     if (!pin) return 0;
     const box = pin.getBoundingClientRect();
     const portTop = scroller ? scroller.getBoundingClientRect().top : 0;
@@ -144,7 +164,7 @@ export function mountFactory(host: HTMLElement, options: FactoryOptions): Factor
     distance = standOff(camera.aspect);
     // A tenth of the screen's height, as a length on the floor.
     const tall = 2 * Math.tan((VIEW.fov * Math.PI) / 360) * distance;
-    nearer = width < NARROW ? (RAISE * tall) / VIEW.back[1] / Math.SQRT2 : 0;
+    nearer = width < NARROW && !options.tour ? (RAISE * tall) / VIEW.back[1] / Math.SQRT2 : 0;
     contour.resize(width, height);
     runner?.redraw();
   };

@@ -8,21 +8,15 @@ import { parseRoute, routeHash, type Route } from "../src/batch/model";
 import { BENCH_LOOP, BENCH_RESET, HELD, ROWS, SHEET, TWINS, benchAt, benchDone } from "../src/landing/bench";
 import { CHAPTER, REVEAL_SOFT, chapterAt, chapterPoster, clockAt } from "../src/landing/chapter";
 import { clamp01, easeInOutCubic, easeOutCubic, easeOutQuad, smooth } from "../src/landing/ease";
-import { fitScene, type FitInput } from "../src/landing/fit";
 import { themeSwitch } from "../src/theme";
 import {
   LEAST_WIDTH, STATIONS, TILE, TRAIL_CELLS, TRAIL_FADE, Trail, VIEW, WAYPOINTS, cardAt, lookAt, progressAt, standOff, stopFor,
 } from "../src/landing/floorplan";
-import { STEP_GLYPHS, TASK_GLYPHS, VERDICT_GLYPHS } from "../src/landing/glyphs";
-import { LANDING, demoRuns, landingView } from "../src/landing/landing";
+import { DEMO_SPLIT, LANDING, demoRuns, landingView } from "../src/landing/landing";
 import { linksWithin, nearest, orders, pickSpread, spherePoints, turn, walk } from "../src/landing/net";
 import { SCREEN } from "../src/landing/screens";
 import { band, circle, flanks, loop, prism, roundedPath, roundedRect, roundedSquare, tag, type Solid } from "../src/landing/shapes";
 import { SCRIPTS, STAGES, TERMINAL_HOLD, scriptSeconds, terminalAt, type Line, type Mode } from "../src/landing/terminal";
-import {
-  HOP, LOOP, NODES, PATHS, PRESS_LEAD, TOSS_HEIGHT, TOSS_TIME, WAVE_LIFE,
-  bannerLetter, bannerUp, frameAt, nodeClock, pathAt, posterFrame, press, swap, toss, wave,
-} from "../src/landing/timeline";
 
 const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 const steps = (from: number, to: number, by: number): number[] => {
@@ -51,183 +45,125 @@ describe("routes", () => {
   });
 });
 
-describe("landingView", () => {
+describe("the landing page", () => {
   const html = landingView();
+  const order = ['class="lp-nav"', 'class="lp-hero"', 'class="lp-intro"', 'data-lp-at="how"', 'data-lp-at="robots"', 'data-lp-at="why"', 'class="lp-close"', 'class="lp-foot"'];
 
-  it("says what the product is, in one heading and one paragraph", () => {
+  it("says what the product is, in one heading and one sentence", () => {
     expect(html.match(/<h1\b/g)).toHaveLength(1);
-    expect(text(html)).toContain(LANDING.title);
+    expect(html).toContain(`aria-label="${LANDING.title}"`);
     expect(text(html)).toContain(LANDING.lede);
-    expect(text(html)).toContain(LANDING.brand);
+    expect(html).toContain(`aria-label="${LANDING.brand}"`);
+  });
+
+  it("has the reference's sections, in its order", () => {
+    const at = order.map((s) => html.indexOf(s));
+    expect(at.every((i) => i >= 0)).toBe(true);
+    expect([...at].sort((x, y) => x - y)).toEqual(at);
   });
 
   it("links to the start panel and to the demo replay with real links", () => {
     expect(html).toContain('<a class="lp-cta" href="#/start">Start a batch</a>');
     expect(html).toContain('href="#/b/demo-batch"');
     expect(html).toContain('<a class="lp-brand" href="#/">');
-    // Plain links: the app's click handler has nothing to do for them.
     expect(html).not.toContain("data-act=");
   });
 
-  it("gives the scene an element that the patcher leaves alone and screen readers skip", () => {
-    const host = html.match(/<div class="lp-scene"[^>]*>/)![0];
-    expect(host).toContain("data-lp-scene");
-    expect(host).toContain("data-keep");
-    expect(host).toContain('aria-hidden="true"');
-    expect(html).toContain("data-lp-copy");
-    expect(html).toContain("data-lp-nav");
+  it("sends every section button to a section that is there", () => {
+    const targets = [...html.matchAll(/data-lp-go="([a-z]+)"/g)].map((m) => m[1]);
+    expect(targets.length).toBeGreaterThan(3);
+    for (const t of targets) expect(html).toContain(`data-lp-at="${t}"`);
   });
 
-  it("is in black mode unless white mode is asked for", () => {
-    expect(html).toContain('<div class="lp" data-lp-tone="dark"');
-    expect(landingView("light")).toContain('<div class="lp" data-lp-tone="light"');
+  it("is in white mode unless black mode is asked for", () => {
+    expect(html).toContain('<div class="lp" data-lp-tone="light"');
+    const dark = landingView("dark");
+    expect(dark).toContain('<div class="lp" data-lp-tone="dark"');
     // Only the tone differs (and which side of the switch is pressed): the words and the links are the same page.
-    expect(landingView("light").replace('data-lp-tone="light"', 'data-lp-tone="dark"').replace(themeSwitch("light"), themeSwitch("dark"))).toBe(html);
+    expect(dark.replace('data-lp-tone="dark"', 'data-lp-tone="light"').replace(themeSwitch("dark"), themeSwitch("light"))).toBe(html);
   });
 
-  it("has one label for each line of the scene and one icon for each step", () => {
-    expect(LANDING.labels).toHaveLength(PATHS);
-    expect(STEP_GLYPHS).toHaveLength(NODES - 2);
-    expect(TASK_GLYPHS.length).toBeGreaterThan(1);
-    expect(VERDICT_GLYPHS.length).toBeGreaterThan(1);
-    for (const glyph of [...STEP_GLYPHS, ...TASK_GLYPHS, ...VERDICT_GLYPHS]) {
-      expect(glyph.length).toBeGreaterThan(0);
-      for (const op of glyph) {
-        expect(op.d).toMatch(/^M/);
-        expect(op.fill ?? op.stroke).toBeTruthy();
-      }
-    }
+  it("leaves the scripted sections to the script, and keeps the scenes from screen readers or names them", () => {
+    for (const s of ['<section class="lp-hero" data-keep', '<section class="lp-intro" data-keep', '<section class="lp-sec" data-keep data-lp-at="how"']) expect(html).toContain(s);
+    expect(html).toMatch(/<div class="lp-ribbon" data-lp-ribbon aria-hidden="true">/);
+    expect(html).toMatch(/data-lp-devices aria-hidden="true"/);
+    expect(html).toMatch(/data-lp-net aria-hidden="true"/);
+    const floor = html.match(/<div class="lp-art lp-art--floor"[^>]*>/)![0];
+    expect(floor).toContain("data-lp-floor");
+    expect(floor).toContain('role="img"');
+    expect(floor).toContain(`aria-label="${LANDING.robots.floorAlt}"`);
   });
 });
 
-describe("the list under the hero", () => {
+describe("the folder", () => {
   const html = landingView();
-  const items = LANDING.more.items;
-  const expanded = (page: string) => [...page.matchAll(/aria-expanded="(true|false)"/g)].map((m) => m[1] === "true");
+  const tabs = LANDING.tabs;
 
-  it("has one heading, and a button and a paragraph for each item", () => {
-    expect(html.match(/<h2 class="lp-more-title"/g)).toHaveLength(1);
-    expect(text(html)).toContain(LANDING.more.title);
-    expect(html.match(/data-lp-item="/g)).toHaveLength(items.length);
-    items.forEach((item, i) => {
-      // A real button, which names the paragraph it opens.
-      expect(html).toContain(`<button type="button" class="lp-item-t" data-lp-item="${i}"`);
-      expect(html).toMatch(new RegExp(`data-lp-item="${i}"[^>]*aria-controls="lp-item-${i}"`));
-      expect(html).toContain(`<div class="lp-item-b" id="lp-item-${i}">`);
-      expect(text(html)).toContain(item.title);
-      for (const words of item.words) expect(text(html)).toContain(typeof words === "string" ? words.trim() : words.chip);
+  it("has a real tab for each panel, the first one open", () => {
+    expect(html.match(/role="tab"/g)).toHaveLength(tabs.length);
+    expect(html.match(/role="tabpanel"/g)).toHaveLength(tabs.length);
+    tabs.forEach((t, i) => {
+      expect(html).toMatch(new RegExp(`id="lp-tab-${i}" data-lp-tab="${i}" aria-selected="${i === 0}" aria-controls="lp-stat-${i}"`));
+      expect(html).toContain(`aria-label="${t.num}"`);
+      expect(text(html)).toContain(t.note);
     });
+    expect(html).toContain('data-lp-folder data-tab="0"');
+    expect(html.match(/role="tabpanel"[^>]*hidden/g)).toHaveLength(tabs.length - 1);
   });
 
-  it("opens one item at a time, and the first unless told otherwise", () => {
-    expect(expanded(html)).toEqual([true, false]);
-    expect(html).toContain('data-lp-open="0"');
-    const second = landingView("dark", 1);
-    expect(expanded(second)).toEqual([false, true]);
-    expect(second).toContain('data-lp-open="1"');
-    for (const page of [html, second]) expect(page.match(/class="lp-item is-open"/g)).toHaveLength(1);
-    // Anything that is not one of the items opens the first.
-    for (const stray of [-1, items.length, 7, NaN]) expect(landingView("dark", stray)).toBe(html);
-  });
-
-  it("draws a path on a chip", () => {
-    expect(html).toContain('<span class="lp-chip">/api/batches</span>');
-  });
-
-  it("gives the devices an element that the patcher leaves alone and screen readers skip", () => {
-    const host = html.match(/<div class="lp-device"[^>]*>/)![0];
-    expect(host).toContain("data-lp-devices");
-    expect(host).toContain("data-keep");
-    expect(host).toContain('aria-hidden="true"');
-    // mount.ts reads which item is open from the section the devices are in.
-    expect(html.indexOf("data-lp-open=")).toBeLessThan(html.indexOf("data-lp-devices"));
-  });
-});
-
-describe("the split finder's chapter on the page", () => {
-  const html = landingView();
-  const f = LANDING.finder;
-
-  it("comes after the list, with a heading and a paragraph of its own", () => {
-    // The list's heading, this chapter's, and the robot floor's.
-    expect(html.match(/<h2\b/g)).toHaveLength(3);
-    expect(html).toContain(`<h2 class="lp-finder-title" id="lp-finder-title">${f.title}</h2>`);
-    expect(html).toContain('aria-labelledby="lp-finder-title"');
-    expect(text(html)).toContain(f.words.replace("'", "&#39;"));
-    expect(html.indexOf('class="lp-more"')).toBeLessThan(html.indexOf('class="lp-pin"'));
-    // Only the robot floor comes after it, and that is the last thing on the page.
-    expect(html.indexOf('class="lp-pin"')).toBeLessThan(html.indexOf('class="lp-floor"'));
-    expect(html.trimEnd().endsWith("</section>\n  </div>")).toBe(true);
-  });
-
-  it("pins one screen inside a tall section, and gives the scene an element that says what it shows", () => {
-    // finder.ts reads its clock from the tall section and draws in the element inside the pinned screen.
-    expect(html).toMatch(/<section class="lp-pin" data-lp-pin[^>]*>\s*<div class="lp-finder">/);
-    const host = html.match(/<div class="lp-net"[^>]*>/)![0];
-    expect(host).toContain("data-lp-net");
-    expect(host).toContain("data-keep");
-    expect(host).toContain('role="img"');
-    expect(host).toContain(`aria-label="${f.alt}"`);
-    expect(host).not.toContain("aria-hidden");
-    expect(html.indexOf("data-lp-pin")).toBeLessThan(html.indexOf("data-lp-net"));
-    // What the tag will say is in the label too, for someone who cannot see the scene.
-    for (const said of [f.split.step, f.split.honest, f.split.inflated]) expect(f.alt).toContain(said);
-  });
-
-  it("has a coin for each of the demo batch's runs, and a tag that agrees with them", () => {
+  it("shows the demo batch's own numbers", () => {
     const runs = demoRuns();
-    expect(runs).toHaveLength(f.runs);
-    expect(runs.map((r) => r.id)).toEqual(["r01", "r02", "r03", "r04", "r05", "r06", "r07", "r08", "r09", "r10", "r11", "r12"]);
-    const honest = runs.filter((r) => r.honest).length;
-    expect(runs.filter((r) => r.honest).map((r) => r.id)).toEqual(["r01", "r04", "r05", "r07", "r11", "r12"]);
-    // Every honest run took the step and no inflated one did.
-    expect(f.split.honest).toBe(`${honest} of ${honest}`);
-    expect(f.split.inflated).toBe(`0 of ${runs.length - honest}`);
-    expect(f.split.code).toContain("drop_duplicates");
+    const honest = runs.filter((r) => r.honest);
+    expect(runs).toHaveLength(12);
+    expect(honest.map((r) => r.id)).toEqual(["r01", "r04", "r05", "r07", "r11", "r12"]);
+    expect(tabs[0].num).toBe(`${runs.length - honest.length} of ${runs.length}`);
+    expect(tabs[1].num).toBe(DEMO_SPLIT.honest);
+    expect(DEMO_SPLIT.honest).toBe(`${honest.length} of ${honest.length}`);
+    expect(DEMO_SPLIT.inflated).toBe(`0 of ${runs.length - honest.length}`);
+    expect(DEMO_SPLIT.code).toContain("drop_duplicates");
+    // case.json's holdout_fraction is 0.2.
+    expect(tabs[2].num).toBe("20%");
   });
 });
 
-describe("the robot floor on the page", () => {
+describe("the sections under it", () => {
   const html = landingView();
-  const f = LANDING.floor;
 
-  it("pins one screen inside a tall section, with the scene behind a heading and a card", () => {
-    expect(html).toMatch(/<section class="lp-floor" data-lp-floor-pin[^>]*>\s*<div class="lp-floor-stage">/);
-    const host = html.match(/<div class="lp-floor-scene"[^>]*>/)![0];
-    expect(host).toContain("data-lp-floor");
-    expect(host).toContain("data-keep");
-    expect(host).toContain('role="img"');
-    expect(host).toContain(`aria-label="${f.alt}"`);
-    expect(html).toContain('aria-labelledby="lp-floor-title"');
-    // The heading is two pills, the second led by a round one.
-    const heading = html.slice(html.indexOf('<h2 class="lp-floor-title"'), html.indexOf("</h2>", html.indexOf('<h2 class="lp-floor-title"')));
-    expect(text(heading).replace(/\s+/g, " ").trim()).toBe(f.title.join(" "));
-    expect(heading.match(/class="lp-floor-pill/g)).toHaveLength(2);
-    expect(heading.match(/class="lp-floor-dot"/g)).toHaveLength(1);
+  it("has three steps and four reasons, each a card", () => {
+    expect(LANDING.how.cards.map((c) => c.title)).toEqual(["Run", "Split", "Prove"]);
+    expect(html.match(/<article class="lp-card"/g)).toHaveLength(LANDING.how.cards.length + 2);
+    expect(html.match(/<article class="lp-feat"/g)).toHaveLength(LANDING.why.cards.length);
+    for (const c of [...LANDING.how.cards, ...LANDING.why.cards]) expect(html).toContain(c.title);
   });
 
-  it("has a chapter for each station, all in the markup, and a bar to press for each", () => {
-    expect(f.chapters).toHaveLength(STATIONS);
-    f.chapters.forEach((c, i) => {
+  it("says what the fork experiment found, as the batch's verdict does", () => {
+    // case.json's verdict: forcing the step left 0 of 4 runs inflated, against 3 of 4 without it.
+    expect(LANDING.how.cards[2].words).toContain("3 of 4");
+    expect(LANDING.how.cards[2].words).toContain("0 of 4");
+    expect(text(html)).toContain("Left alone · 3 of 4");
+    expect(text(html)).toContain("Made to deduplicate · 0 of 4");
+  });
+
+  it("has a chapter for each station of the robot floor, all in the markup", () => {
+    const r = LANDING.robots;
+    expect(r.chapters).toHaveLength(STATIONS);
+    r.chapters.forEach((c, i) => {
       expect(html).toContain(`data-lp-floor-text="${i}"`);
-      expect(html).toContain(`<h3 class="lp-floor-h">${c.title}</h3>`);
       expect(text(html)).toContain(c.words);
-      expect(html).toMatch(new RegExp(`<button type="button" class="lp-floor-step" data-lp-floor-step="${i}" aria-label="${c.title}"`));
     });
-    // The card starts on the first chapter and is left to the scene after that.
-    const card = html.match(/<div class="lp-floor-card"[^>]*>/)![0];
-    expect(card).toContain('data-chapter="0"');
-    expect(card).toContain("data-keep");
-    expect(html.match(/aria-current="step"/g)).toHaveLength(1);
+    expect(html).toMatch(/data-lp-floor-card data-chapter="0"/);
+    // sim/CALIBRATION.md: the controller is scored on 20 positions the agent never saw; the fork forces 10.
+    expect(r.positions.words).toContain("20 positions");
+    expect(r.chapters[3].words).toContain("10 random positions");
   });
 
-  it("says what the robot domain does, in its own numbers", () => {
-    // sim/CALIBRATION.md: the controller is scored on 20 positions the agent never saw; the fork forces 10.
-    expect(f.chapters[1].words).toContain("20 positions");
-    expect(f.chapters[3].words).toContain("10 random positions");
-    expect(f.chapters[0].title).toBe("Pick and place");
+  it("names what Orro is built on in plain words, with no one's logo", () => {
+    const row = html.slice(html.indexOf('<ul class="lp-stack"'), html.indexOf("</ul>", html.indexOf('<ul class="lp-stack"')));
+    expect(row).not.toMatch(/<img|<svg/);
+    for (const name of LANDING.why.stack) expect(row).toContain(name);
   });
 });
+
 
 describe("the robot floor's camera and card", () => {
   it("rests on a station at each third of the way, and is exactly there at the ends", () => {
@@ -850,162 +786,6 @@ describe("the data bench", () => {
   });
 });
 
-describe("the loop's timing", () => {
-  it("fires the pads in order, a hop apart, and again every loop", () => {
-    for (let k = 0; k < NODES; k++) {
-      expect(nodeClock(k * HOP - PRESS_LEAD - 0.01, k)).toEqual({ tau: -Infinity, fired: 0 });
-      expect(nodeClock(k * HOP - 0.2, k).tau).toBeCloseTo(-0.2);
-      expect(nodeClock(k * HOP - 0.2, k).fired).toBe(0);
-      expect(nodeClock(k * HOP + 0.2, k)).toMatchObject({ fired: 1 });
-      expect(nodeClock(k * HOP + 0.2 + 3 * LOOP, k).tau).toBeCloseTo(0.2);
-      expect(nodeClock(k * HOP + 0.2 + 3 * LOOP, k).fired).toBe(4);
-    }
-  });
-
-  it("presses a pad down before it fires, holds it, and lets it spring back", () => {
-    expect(press(-Infinity)).toBe(0);
-    expect(press(-PRESS_LEAD)).toBe(0);
-    expect(press(0)).toBeCloseTo(1);
-    expect(press(0.3)).toBe(1);
-    expect(press(1.2)).toBe(0);
-    const down = steps(-PRESS_LEAD, 0, 0.05).map(press);
-    for (let i = 1; i < down.length; i++) expect(down[i]).toBeGreaterThanOrEqual(down[i - 1]);
-    const up = steps(0.45, 1, 0.05).map(press);
-    for (let i = 1; i < up.length; i++) expect(up[i]).toBeLessThanOrEqual(up[i - 1]);
-  });
-
-  it("tosses a step's disc once: up to its peak and back, one full turn", () => {
-    expect(toss(0)).toEqual({ lift: 0, turn: 0 });
-    expect(toss(TOSS_TIME)).toEqual({ lift: 0, turn: 0 });
-    expect(toss(TOSS_TIME / 2).lift).toBeCloseTo(TOSS_HEIGHT);
-    expect(toss(TOSS_TIME / 2).turn).toBeCloseTo(Math.PI);
-    expect(toss(TOSS_TIME * 0.999).turn).toBeCloseTo(2 * Math.PI, 1);
-    for (const tau of steps(0.02, TOSS_TIME - 0.02, 0.04)) expect(toss(tau).lift).toBeGreaterThan(0);
-  });
-
-  it("starts a pad's ripple when it fires and ends it later", () => {
-    expect(wave(-0.1)).toBe(-1);
-    expect(wave(0)).toBe(0);
-    expect(wave(1)).toBe(1);
-    expect(wave(WAVE_LIFE)).toBe(-1);
-    expect(wave(-Infinity)).toBe(-1);
-  });
-
-  it("hides the task's and verdict's icon at the moment it is swapped", () => {
-    expect(swap(-Infinity)).toBe(1);
-    expect(swap(-1)).toBe(1);
-    expect(swap(0)).toBe(0);
-    expect(swap(0.3)).toBe(0);
-    expect(swap(2)).toBe(1);
-  });
-
-  it("draws a line dark from its pad, then fades it out", () => {
-    for (let k = 0; k < PATHS; k++) {
-      expect(pathAt(-0.2, k)).toEqual({ draw: 0, glow: 0 });
-      expect(pathAt(0.5, k).draw).toBeGreaterThan(0);
-      expect(pathAt(0.5, k).draw).toBeLessThan(1);
-      // The whole line is drawn, at full strength, well before the next pad fires, and still reads as dark when it does.
-      expect(pathAt(0.9, k)).toEqual({ draw: 1, glow: 1 });
-      expect(pathAt(HOP, k).draw).toBe(1);
-      expect(pathAt(HOP, k).glow).toBeGreaterThan(0.5);
-      // Gone before its own pad presses again.
-      expect(pathAt(LOOP - PRESS_LEAD, k).glow).toBe(0);
-      const glow = steps(0.2, LOOP - PRESS_LEAD, 0.1).map((tau) => pathAt(tau, k).glow);
-      for (let i = 1; i < glow.length; i++) expect(glow[i]).toBeLessThanOrEqual(glow[i - 1]);
-    }
-  });
-
-  it("stands a label up, shows its letters left to right, and takes it down before the pad fires again", () => {
-    expect(bannerUp(0)).toBe(0);
-    expect(bannerUp(1.2)).toBeCloseTo(1);
-    expect(bannerUp(2.6)).toBe(0);
-    const n = 9;
-    // On the way in the first letter leads the last.
-    expect(bannerLetter(0.7, 0, n)).toBeGreaterThan(bannerLetter(0.7, n - 1, n));
-    for (let i = 0; i < n; i++) {
-      expect(bannerLetter(0.4, i, n)).toBe(0);
-      expect(bannerLetter(1.4, i, n)).toBe(1);
-      // Every letter is gone while the label is still partly up, so it never drops with words on it.
-      expect(bannerLetter(2.31, i, n)).toBe(0);
-      for (const tau of steps(0, 3, 0.05)) {
-        expect(bannerLetter(tau, i, n)).toBeGreaterThanOrEqual(0);
-        expect(bannerLetter(tau, i, n)).toBeLessThanOrEqual(1);
-      }
-    }
-    expect(bannerUp(2.31)).toBeGreaterThan(0);
-    expect(bannerLetter(1.4, 0, 1)).toBe(1);
-  });
-
-  it("starts clean: nothing from a pass that never happened", () => {
-    const f = frameAt(0.5);
-    expect(f.nodes[0].wave).toBeCloseTo(0.5);
-    for (let k = 1; k < NODES; k++) {
-      expect(f.nodes[k].wave).toBe(-1);
-      expect(f.nodes[k].press).toBe(0);
-      expect(f.nodes[k].fired).toBe(0);
-    }
-    for (let k = 1; k < PATHS; k++) {
-      expect(f.paths[k].glow).toBe(0);
-      expect(f.banners[k].up).toBe(0);
-    }
-    // Before anything has fired the scene is at rest.
-    const rest = frameAt(-0.9);
-    expect(rest.nodes.every((n) => n.press === 0 && n.wave === -1 && n.lift === 0 && n.icon === 1)).toBe(true);
-    expect(rest.paths.every((p) => p.glow === 0)).toBe(true);
-  });
-
-  it("repeats every loop once the first pass is through", () => {
-    for (const t of steps(2 * LOOP, 3 * LOOP, 0.37)) {
-      const a = frameAt(t);
-      const b = frameAt(t + LOOP);
-      for (let k = 0; k < NODES; k++) {
-        expect(b.nodes[k].press).toBeCloseTo(a.nodes[k].press);
-        expect(b.nodes[k].lift).toBeCloseTo(a.nodes[k].lift);
-        expect(b.nodes[k].wave).toBeCloseTo(a.nodes[k].wave);
-        expect(b.nodes[k].icon).toBeCloseTo(a.nodes[k].icon);
-        expect(b.nodes[k].fired).toBe(a.nodes[k].fired + 1);
-      }
-      for (let k = 0; k < PATHS; k++) {
-        expect(b.paths[k].draw).toBeCloseTo(a.paths[k].draw);
-        expect(b.paths[k].glow).toBeCloseTo(a.paths[k].glow);
-        expect(b.banners[k].up).toBeCloseTo(a.banners[k].up);
-      }
-    }
-  });
-
-  it("only tosses the steps' discs, and only swaps the task's and verdict's icons", () => {
-    for (const t of steps(0, 3 * LOOP, 0.11)) {
-      const f = frameAt(t);
-      expect(f.nodes[0].lift).toBe(0);
-      expect(f.nodes[NODES - 1].lift).toBe(0);
-      for (let k = 1; k < NODES - 1; k++) expect(f.nodes[k].icon).toBe(1);
-      for (const n of f.nodes) {
-        expect(n.press).toBeGreaterThanOrEqual(0);
-        expect(n.press).toBeLessThanOrEqual(1);
-        expect(n.icon).toBeGreaterThanOrEqual(0);
-        expect(n.icon).toBeLessThanOrEqual(1);
-      }
-    }
-  });
-
-  it("writes into the frame it is given", () => {
-    const frame = frameAt(1);
-    expect(frameAt(4, frame)).toBe(frame);
-    expect(frame.nodes[2].wave).toBeCloseTo(4 - 2 * HOP);
-  });
-
-  it("shows the whole diagram, still, for reduced motion", () => {
-    const f = posterFrame();
-    expect(f.nodes.every((n) => n.press === 0 && n.lift === 0 && n.wave === -1 && n.icon === 1)).toBe(true);
-    expect(f.paths.every((p) => p.draw === 1 && p.glow === 1)).toBe(true);
-    for (const b of f.banners) {
-      expect(b.up).toBe(1);
-      expect(bannerLetter(b.tau, 0, 8)).toBe(1);
-      expect(bannerLetter(b.tau, 7, 8)).toBe(1);
-    }
-  });
-});
-
 describe("the solids", () => {
   /** Every triangle's own facing agrees with the normals at its corners, so nothing is drawn inside out. */
   function expectFacesOutward(s: Solid): void {
@@ -1160,63 +940,5 @@ describe("the solids", () => {
     // A straight line stays straight.
     const straight = roundedPath([[0, 0], [0, 3]], 0.3, 0, 3);
     expect(Array.from(straight)).toEqual([0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 0, 3]);
-  });
-});
-
-describe("placing the scene", () => {
-  // The scene's shape in its own box: the task at the top middle, the steps across, the verdict at the bottom.
-  const points: [number, number][] = [[0.5, 0], [0.05, 0.3], [0.25, 0.18], [0.5, 0.42], [0.95, 0.3], [0.5, 1]];
-  const base: FitInput = {
-    width: 1470, height: 864, top: 96, right: 28, bottom: 16, left: 12,
-    copyRight: 690, copyBottom: 380, gap: 22, aspect: 1.66, points, maxHeight: 674,
-  };
-  /** The scene's points on the page. */
-  const placed = (input: FitInput) => {
-    const box = fitScene(input);
-    return { box, at: input.points.map(([x, y]) => [box.x + x * box.width, box.y + y * box.height]) };
-  };
-  const clearOfCopy = (input: FitInput) =>
-    placed(input).at.every(([x, y]) => x > input.copyRight + input.gap - 0.5 || y > input.copyBottom + input.gap - 0.5);
-
-  it("keeps the scene's shape and stays inside the hero's margins", () => {
-    for (const input of [base, { ...base, width: 1920, height: 1080, maxHeight: 842 }, { ...base, width: 1280, height: 720, maxHeight: 562 }]) {
-      const { box } = placed(input);
-      expect(box.width / box.height).toBeCloseTo(input.aspect);
-      expect(box.x).toBeGreaterThanOrEqual(input.left - 0.5);
-      expect(box.x + box.width).toBeCloseTo(input.width - input.right);
-      expect(box.y).toBeGreaterThanOrEqual(input.top - 0.5);
-      expect(box.y + box.height).toBeLessThanOrEqual(input.height - input.bottom + 0.5);
-      expect(box.height).toBeLessThanOrEqual(input.maxHeight! + 0.5);
-    }
-  });
-
-  it("takes all the room it is allowed when the copy is out of the way", () => {
-    const { box } = placed({ ...base, copyRight: 0, copyBottom: 0 });
-    expect(box.height).toBeCloseTo(674);
-  });
-
-  it("never lets the scene sit over the copy", () => {
-    expect(clearOfCopy(base)).toBe(true);
-    expect(clearOfCopy({ ...base, copyBottom: 480 })).toBe(true);
-    expect(clearOfCopy({ ...base, width: 1280, height: 720, maxHeight: 562 })).toBe(true);
-    expect(clearOfCopy({ ...base, width: 1024, height: 768, copyRight: 650, copyBottom: 215, maxHeight: 600 })).toBe(true);
-    // A taller copy leaves less room, so the scene is smaller.
-    expect(fitScene({ ...base, copyBottom: 480 }).height).toBeLessThan(fitScene(base).height);
-  });
-
-  it("puts the scene under the copy on a narrow page", () => {
-    const phone: FitInput = { ...base, width: 390, height: 844, top: 80, right: 12, copyRight: 370, copyBottom: 250, maxHeight: 658 };
-    const { box } = placed(phone);
-    expect(box.y).toBeGreaterThanOrEqual(phone.copyBottom + phone.gap - 0.5);
-    expect(box.width).toBeCloseTo(390 - 12 - 12);
-    expect(box.y + box.height).toBeLessThanOrEqual(844 - 16 + 0.5);
-  });
-
-  it("gives up shrinking at a least size rather than vanish, and copes with no room at all", () => {
-    const cramped = fitScene({ ...base, height: 300, copyBottom: 280, maxHeight: 234 });
-    expect(cramped.height).toBeGreaterThanOrEqual(160);
-    const none = fitScene({ ...base, width: 0, height: 0 });
-    expect(none.width).toBe(0);
-    expect(none.height).toBe(0);
   });
 });
