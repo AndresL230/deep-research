@@ -28,7 +28,7 @@ from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
-from . import datasets, domains, hub, robot_view, traps, user_scripts  # noqa: E402
+from . import datasets, domains, hub, notebook, robot_view, traps, user_scripts  # noqa: E402
 from .batch import Batch, resume_problem  # noqa: E402 - needs the environment loaded first
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
@@ -566,6 +566,20 @@ def batch_file(batch_id: str, path: str):
     if root not in full.parents or not full.is_file() or any(s in full.name for s in secret):
         raise HTTPException(404, "no such file")
     return FileResponse(full, headers=FILE_HEADERS)
+
+
+@app.get("/api/memory/{domain}")
+def memory_notebook(domain: str):
+    """The investigator's notebook for `domain` (notebook.py), as plain text, read-only. Only a registered domain's
+    `_memory/<domain>/AGENTS.md` under the batches folder, never any other file."""
+    if domain not in domains.names():
+        raise HTTPException(404, f"no domain {domain}")
+    base = notebook.memory_dir(BATCHES_DIR).resolve()
+    full = notebook.notebook_path(BATCHES_DIR, domain).resolve()
+    if base not in full.parents or not full.is_file():
+        raise HTTPException(404, f"no notebook for {domain} yet")
+    return Response(full.read_text(), media_type="text/plain; charset=utf-8",
+                    headers={**FILE_HEADERS, "Cache-Control": "no-cache"})
 
 
 # ---- the robot viewer (robot_view.py): the 3D scene and each motion file's poses ----

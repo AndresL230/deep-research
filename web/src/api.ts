@@ -7,7 +7,9 @@
 // ── the case file ────────────────────────────────────────────────────────────
 
 /** The case file's sections, in order. */
-export const CASE_SECTIONS = ["config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "costs"] as const;
+export const CASE_SECTIONS = [
+  "config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "trace_comparison", "rubric", "costs",
+] as const;
 export type CaseSection = (typeof CASE_SECTIONS)[number];
 
 /** Phases in the order a batch moves through them. Also `stopped`, `blocked: <why>` and `error: <why>`. */
@@ -258,19 +260,59 @@ export interface PendingForks {
   estimate_usd: number | null;
 }
 
-export interface Hypothesis {
+export type Confidence = "low" | "medium" | "high";
+
+/** The split a hypothesis or verdict rests on, as fields. Absent on case files saved before they existed. */
+export interface SplitFields {
+  /** The step, the same as `step_label`. */
+  step?: StepLabel;
+  /** Shares 0 to 1 of the honest and inflated runs that did the step, and how many runs each is over. */
+  honest_rate?: number;
+  inflated_rate?: number;
+  n_honest?: number;
+  n_inflated?: number;
+  confidence?: Confidence;
+}
+
+export interface Hypothesis extends SplitFields {
   /** Unix seconds. */
   at: number;
   step_label: StepLabel;
   honest_action: string;
   inflated_action: string;
   evidence: string;
+  /** The hypothesis in one sentence. */
+  sentence?: string;
 }
 
-export interface Verdict {
+export interface Verdict extends SplitFields {
   sentence: string;
   step_label: StepLabel;
+  /** `{arm}_inflated` and `{arm}_total` per arm (the old form; derived from `arms` when that is set). */
   numbers: Record<string, number>;
+  /** Every arm the fork experiment scored: inflated and scored copies. */
+  arms?: Partial<Record<ForkArm, { inflated: number; total: number }>>;
+}
+
+/** Whether the runs the code-tracer traced fail at the same line with the same symptom. */
+export interface TraceComparison {
+  at: number;
+  same: "same" | "different" | "mixed";
+  sentence: string;
+  run_ids: string[];
+}
+
+/** One grader check of the verdict against the investigator's rubric. */
+export interface RubricCheck {
+  at: number;
+  /** 0 for the first check; each revision adds one. */
+  iteration: number;
+  /** "satisfied", "needs_revision", "max_iterations_reached", "failed" or "grader_error". */
+  result: string;
+  explanation: string;
+  /** How many criteria the grader checked, and the ones that failed. */
+  criteria: number;
+  failing: { name: string; gap: string }[];
 }
 
 /** One finding of the investigator's `code-tracer` subagent: a symptom read from a recording of a failing run, and
@@ -355,6 +397,10 @@ export interface CaseFile {
   trace?: TraceEntry[];
   /** Null until the investigator proposes a fix. Absent on case files saved before it existed: read as null. */
   fix?: ProposedFix | null;
+  /** Null until the investigator compares its traces. Absent on older case files. */
+  trace_comparison?: TraceComparison | null;
+  /** The grader's checks of the verdict, oldest first. Absent on older case files. */
+  rubric?: RubricCheck[];
   costs: Costs;
 }
 
@@ -564,6 +610,9 @@ export function labPageUrl(batchId: string, key: string): string {
 }
 
 /** The URL of a file saved with a batch, such as a run's `charts` entry. Holdout labels are never served. */
+/** The investigator's notebook for a domain, as plain text (GET /api/memory/<domain>). */
+export const notebookUrl = (domain: string): string => `/api/memory/${encodeURIComponent(domain)}`;
+
 export const batchFileUrl = (batchId: string, path: string): string =>
   `${batchPath(batchId)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
 

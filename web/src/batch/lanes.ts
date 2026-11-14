@@ -6,8 +6,9 @@
 // notebook.ts cells and wear its `nb-` classes.
 import "./lanes.css";
 import {
-  batchFileUrl, isPendingForks, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
-  type ForkExperiment, type PendingForks, type ProposedFix, type RunRecord, type SplitFinding, type TrapInfo,
+  batchFileUrl, isPendingForks, notebookUrl, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
+  type ForkExperiment, type PendingForks, type ProposedFix, type RubricCheck, type RunRecord, type SplitFinding, type TrapInfo,
+  type Verdict,
 } from "../api";
 import { askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
@@ -763,16 +764,45 @@ export function verdictView(vm: BatchVm): string {
       `<span class="ln-vrow-n">${a.inflated} of ${a.total} inflated</span></div>`;
   };
   const nums = Object.entries(v.numbers ?? {});
+  const check = selfCheckText(c.rubric);
   return `<section class="ln-sec ln-verdict" data-morph-key="ln-verdict" aria-label="Verdict">` +
-    head("Verdict", c) +
+    head("Verdict", c, v.confidence ? `<span class="ln-tag ln-conf ln-conf--${attr(v.confidence)}" title="The investigator's confidence in this verdict">${esc(v.confidence)} confidence</span>` : "") +
     `<p class="ln-sentence">${esc(v.sentence)}</p>` +
+    verdictSplit(v) +
     `<div class="ln-vrows">${(Object.keys(arms ?? {}) as ForkArm[]).map(row).join("")}</div>` +
     `<div class="ln-legend" aria-hidden="true"><span><i class="ln-dot ln-dot--honest"></i>honest</span><span><i class="ln-dot ln-dot--inflated"></i>inflated</span>` +
     (Object.values(arms ?? {}).some((a) => a?.statuses.includes("unclear")) ? `<span><i class="ln-dot ln-dot--unclear"></i>unclear</span>` : "") +
     `<span><i class="ln-dot ln-dot--failed"></i>failed</span></div>` +
     (nums.length ? `<dl class="ln-stats">${nums.map(([k, n]) => `<div class="ln-stat"><dt>${esc(numberLabel(k))}</dt><dd>${esc(numberValue(n))}</dd></div>`).join("")}</dl>` : "") +
+    (check ? `<p class="ln-note ln-selfcheck">${esc(check)}</p>` : "") +
     (isSimulated(c) ? `<p class="ln-note ln-note--sim">Simulated batch: the agents' choices were scripted to show the method. These are not real agent runs.</p>` : "") +
     `</section>`;
+}
+
+/** The split the verdict rests on, from its structured fields: "Honest runs 80.0% of 10", ... Empty on older verdicts. */
+export function verdictSplit(v: Verdict): string {
+  const stats: [string, string][] = [];
+  if (v.honest_rate != null) stats.push(["Honest runs that did it", `${pct(v.honest_rate)}${v.n_honest != null ? ` of ${v.n_honest}` : ""}`]);
+  if (v.inflated_rate != null) stats.push(["Inflated runs that did it", `${pct(v.inflated_rate)}${v.n_inflated != null ? ` of ${v.n_inflated}` : ""}`]);
+  if (!stats.length) return "";
+  return `<dl class="ln-stats ln-vsplit" data-morph-key="v-split">${stats.map(([k, x]) => `<div class="ln-stat"><dt>${esc(k)}</dt><dd>${esc(x)}</dd></div>`).join("")}</dl>`;
+}
+
+/** How the grader's check of the verdict went: "Checked against the rubric: passed after 1 revision." Null when it
+ *  never ran. */
+export function selfCheckText(checks: RubricCheck[] | undefined): string | null {
+  if (!checks?.length) return null;
+  const last = checks[checks.length - 1];
+  const revisions = checks.filter((r) => r.result === "needs_revision" || r.result === "max_iterations_reached").length
+    - (last.result === "max_iterations_reached" ? 1 : 0);
+  const after = revisions ? ` after ${revisions} revision${revisions === 1 ? "" : "s"}` : "";
+  if (last.result === "satisfied") return `Checked against the rubric: passed${after}.`;
+  if (last.result === "max_iterations_reached") {
+    const open = last.failing.map((f) => f.name).join("; ");
+    return `Checked against the rubric: still short${after}${open ? `: ${open}` : ""}.`;
+  }
+  if (last.result === "needs_revision") return "Checked against the rubric: being revised.";
+  return `The rubric check did not finish (${last.result}).`;
 }
 
 // ── 4. the investigator ──────────────────────────────────────────────────────
@@ -822,8 +852,10 @@ export function investigatorView(vm: BatchVm): string {
       `</div>`).join("")}</div>`
     : "";
 
+  const domain = (c.config as Partial<BatchConfig>).domain || "tabular";
+  const nb = `<a class="ln-nb-link" href="${attr(notebookUrl(domain))}" target="_blank" rel="noopener" title="What the investigator noted from earlier ${attr(domain)} batches (read-only)">Notebook</a>`;
   return `<section class="ln-sec ln-inv" data-morph-key="ln-inv" aria-label="Investigator">` +
-    `<div class="ln-head"><h2 class="ln-h">Investigator</h2>${simTag(c)}</div>` +
+    `<div class="ln-head"><h2 class="ln-h">Investigator</h2>${simTag(c)}${nb}</div>` +
     `<div class="ln-inv-status">` +
     (problem ? `<p class="ln-err" role="alert">${esc(phaseText(phase))}</p>`
       : `<p class="ln-phase">${working ? askSpinner(12) : `<i class="ln-phase-dot"></i>`}<span>${esc(phaseText(phase))}</span></p>`) +
@@ -842,6 +874,8 @@ export function investigatorView(vm: BatchVm): string {
  * The diagnosis: one card per trace entry, each a symptom the code-tracer read from a recording of a failing run,
  * the line of the run's controller.py behind it, why, and the recording itself as a link.
  */
+const SAME_WORDS: Record<string, string> = { same: "Same cause in every traced run.", different: "Different causes.", mixed: "Partly the same cause." };
+
 export function diagnosisView(vm: BatchVm): string {
   const c = vm.case;
   const trace = c.trace ?? [];
@@ -861,6 +895,7 @@ export function diagnosisView(vm: BatchVm): string {
   return `<section class="ln-sec ln-dx" data-morph-key="ln-dx" aria-label="Diagnosis">` +
     head("Diagnosis", c) +
     `<p class="ln-sub">What the code-tracer saw in the recordings of the failing run, and the line behind each symptom.</p>` +
+    (c.trace_comparison ? `<p class="ln-note ln-dx-cmp"><b>${esc(SAME_WORDS[c.trace_comparison.same] ?? c.trace_comparison.same)}</b> ${esc(c.trace_comparison.sentence)}</p>` : "") +
     `<div class="ln-stack" data-morph-list>${trace.map(card).join("")}</div>` +
     `</section>`;
 }
