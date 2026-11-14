@@ -52,8 +52,8 @@ controller raises or returns a bad action, or the simulation blows up.
 Scoring (sim/humanoid/outcome.py has the rule in one place)
 -----------------------------------------------------------
     fell               the pelvis went below 0.45 m, or a part of the robot other than the feet touched the floor
-    stumbled           did not fall, but a foot moved more than 3 cm (horizontally, from where it stood when the push
-                       began) or the torso tilted more than 10 degrees from vertical at some moment
+    stumbled           did not fall, but a foot moved more than 3 cm (horizontally, from its place when the push began)
+                       or the torso tilted more than 10 degrees from vertical at some moment
     outcome            "upright", "stumbled", "fell" or "error" (an exception)
     success            not fell and no exception: the robot is still on its feet at the end (upright or stumbled)
 plus fall_time, touched (the first body other than a foot that touched the floor), max_tilt_deg, final_tilt_deg,

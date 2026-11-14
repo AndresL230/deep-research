@@ -13,11 +13,11 @@ names them, and `sim.humanoid.domain` and the screens read the word.
 from __future__ import annotations
 
 FALL_HEIGHT_M = 0.45  # pelvis height (standing: 0.79 m); below it the robot is down
-# A balance controller that keeps the robot up tilts the torso at most 5 degrees and lets the feet slide at most 4 cm
-# under the hidden pushes; one that falls tilts it past 80. A stumble is a survivor that rocked hard: a foot slid or
-# stepped 3 cm or more, or the torso went past 10 degrees (sim/humanoid/CALIBRATION.md).
+# A stumble is a robot that stayed up but rocked hard: a foot slid or stepped more than 3 cm, or the torso went past
+# 10 degrees. A plain balance controller that keeps the robot up under a 0.2 s shove of up to 50 N tilts the torso a
+# few degrees and lets the feet slide a few centimeters; a robot that goes down tilts past 80.
 STUMBLE_TILT_DEG = 10.0  # torso tilt from vertical, degrees, at any moment
-STUMBLE_FOOT_SHIFT_M = 0.03  # horizontal distance a foot moved from where it stood when the push began
+STUMBLE_FOOT_SHIFT_M = 0.03  # horizontal distance a foot moved from its place when the push began
 
 OUTCOMES = ("upright", "stumbled", "fell", "error")
 

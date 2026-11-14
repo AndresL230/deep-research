@@ -20,7 +20,7 @@ PARAMS = {
     "com_target_y": 0.0,
     # How much the center of mass velocity counts (1: position + velocity / sqrt(g / height)).
     "velocity_weight": 1.0,
-    # Joint offset in radians per meter of error: ankles and hips, front-back (pitch) and sideways (roll).
+    # Joint offset in radians per meter of error: ankles and hips, pitch (x error) and roll (y error).
     "k_ankle_pitch": 6.0,
     "k_hip_pitch": 0.0,
     "k_ankle_roll": 0.0,
