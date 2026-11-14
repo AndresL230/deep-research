@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 37,
+  "notes": "Phase-based controller: approach above the can, descend to mid-height, close, lift, carry, lower, release, retreat, with minimum-jerk Cartesian paths and warm-started IK (gripper kept vertical). 37/37 episodes succeeded: 21 at the practice layout over seeds 0-20 (place error 1.2-1.6 cm), and 12 random can/zone layouts (0.6-1.9 cm)."
+}

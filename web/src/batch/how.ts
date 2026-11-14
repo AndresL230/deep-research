@@ -200,13 +200,15 @@ const PARTS: readonly [string, string][] = [
     + "A fork is a copy on write of the VM, cut at a step with the model's history replayed up to it. "
     + "If a VM cannot be forked, the run's actions are replayed on a fresh one."],
   ["The investigator", "A Deep Agent on Sonnet 5.5 with three helpers: a step tagger that labels every run's steps, a hypothesis "
-    + "helper that compares honest and inflated runs, and a code tracer that reruns failing code and points at a line. "
+    + "helper that can draft explanations, and a code tracer that reruns failing code and points at a line. "
     + "It reads the case, the runs and its skills through read-only views, with a notebook kept for each kind of task, "
-    + "and it can never read the hidden results. "
+    + "and it can never read the hidden results or which flaw a batch was built with. "
+    + "Before any experiment it records at least two competing hypotheses, each with a prediction and the result that "
+    + "would falsify it; the outcome of each test is computed from the counts, not judged by the model. "
     + "It records what it finds through typed tools, a grader checks its verdict and can send it back twice, and a fork "
     + "request waits until you approve it."],
   ["The live commentary", "A small model, Claude Haiku, captions each run every 20 to 30 seconds from only what that agent did. "
-    + "Notable moments go into a feed beside the runs."],
+    + "Notable moments go into the live feed in the page header."],
 ];
 
 function underTheHood(): string {

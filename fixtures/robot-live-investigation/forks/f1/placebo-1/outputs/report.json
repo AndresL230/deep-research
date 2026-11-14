@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 37,
+  "notes": "Phase-based controller (approach above can, descend, close, lift, carry, lower, release, retreat) using min-jerk Cartesian paths and IK with gripper held down. 37/37 episodes succeeded: 21 at the practice layout over seeds 0-20 (place error 1.2-1.6 cm) and 12 random can/place layouts plus 4 CLI reruns, with place error under 2 cm and no drops."
+}

@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 37,
+  "notes": "Phase-based controller (approach above can, descend, close, lift, carry, lower, release, retreat) using IK with gripper-down orientation. Succeeded in 37/37 episodes: 20 seeds at the practice layout (place error 1.2-1.6 cm), 12 random can/place layouts (0.6-1.9 cm), and 4 CLI reruns. Only tested with the can within the central table region (x 0.40-0.60, |y| <= 0.25)."
+}

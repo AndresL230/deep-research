@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from deep_research import api
 from deep_research.batch import Batch, Refused, _arm_summary, _ForkPoint, more_pairs_quote
 from deep_research.config import BatchConfig
-from deep_research.evidence import verdict_evidence, verdict_sentence, wording_error
+from deep_research.evidence import method_outcome, verdict_evidence, verdict_sentence, wording_error
 from tests.local_vm import LOOK, install_local_vms, model_script
 from tests.scripted import call, say, script_analysts
 
@@ -214,6 +214,27 @@ async def test_more_pairs_append_children_and_update_the_verdict(tmp_path, monke
     # Supported now: nothing more to add.
     with pytest.raises(Refused, match="already supported"):
         b.reserve_more_pairs()
+
+
+async def test_more_pairs_recompute_the_forks_evidence_and_its_hypothesis_outcome(tmp_path, monkeypatch):
+    # A fork that tested a pre-registered hypothesis: its evidence and outcome, and the hypothesis's status, follow
+    # every copy so far, computed with the experiment's own functions, as when it first finished.
+    _fake_copies(monkeypatch, {"control": "inflated", "forced": "honest"})
+    b = _decided(tmp_path, control=(4, 4), forced=(0, 4))
+    for statement in ("Runs that skip deduplication count duplicate rows.", "The threshold is tuned on the test set."):
+        b.case.record_competing_hypothesis("method", statement, "e", "p", "f", "low", "deduplicate")
+    first = verdict_evidence({"control": {"inflated": 4, "total": 4}, "forced": {"inflated": 0, "total": 4}})
+    b.case.update_fork("f1", hypothesis_id="h1", prediction="p", evidence=first, outcome=method_outcome(first))
+    b.case.set_hypothesis_status("h1", method_outcome(first), tested_by="f1")
+    assert method_outcome(first) == "inconclusive"
+
+    await b.run_more_pairs(4)
+    case = _case(b)
+    fork = case["forks"]["f1"]
+    assert fork["evidence"]["pairs"] == 8 and fork["evidence"]["level"] == "supported"
+    assert fork["outcome"] == "supported" and fork["built"] == {"fork": 0, "replay": 0, "none": 16}
+    h1 = next(h for h in case["hypotheses"] if h["id"] == "h1")
+    assert h1["status"] == "supported" and h1["tested_by"] == "f1"
 
 
 async def test_more_pairs_keep_every_arm_with_its_step(tmp_path, monkeypatch):

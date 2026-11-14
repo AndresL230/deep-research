@@ -1,0 +1,5 @@
+{
+  "success_rate": 0.996,
+  "episodes_run": 505,
+  "notes": "Final controller (controller.py) runs a timed Cartesian waypoint sequence (approach, grasp at z=0.075, lift, carry, lower, release, retreat) with IK holding the gripper down. Success was 503/505 on the final version: 200/200 and 199/200 on two randomized can/zone layout sweeps (400 episodes), 99/100 on a third, and 5/5 on the practice setup; the failures were can roll-overs for far-reaching starts at negative y."
+}

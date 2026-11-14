@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 96,
+  "notes": "Phase-based controller (approach, descend with closed-loop xy alignment on the can, close, slow 2 s lift, carry, lower, release, retreat) using IK with gripper pointing down. The final version passed 96/96 episodes: 30 practice seeds, 42 seeds x 14 can/place layouts, and 24 random layouts; a Wilson 95% lower bound is about 0.96. Earlier iterations (about 230 more episodes, including fixes for hand-body contact and grip slip) are not counted here."
+}

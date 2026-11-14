@@ -651,9 +651,11 @@ def test_defaults_list_the_traps_and_an_unknown_trap_is_refused(tmp_path, monkey
         assert client.post("/api/estimate", json={**d["config"], "trap": "repeat_rows"}).status_code == 200
 
 
-def test_investigator_prompt_names_what_was_planted():
+def test_investigator_prompt_never_names_what_was_planted():
+    """What a batch was built to go wrong is the evaluator's knowledge: no trap's words reach the investigator."""
     from deep_research.agents.investigator import MAIN_PROMPT, main_prompt
 
-    assert "with duplicate rows planted in it" in MAIN_PROMPT
-    prompt = main_prompt(traps.get("repeat_rows").planted)
-    assert "with repeat visits of the same subjects planted in it" in prompt and "group_split" in prompt
+    for trap in traps.registered():
+        prompt = main_prompt(trap.planted)
+        assert trap.planted not in prompt and "planted" not in prompt and "group_split" in prompt
+    assert "duplicate rows" not in MAIN_PROMPT

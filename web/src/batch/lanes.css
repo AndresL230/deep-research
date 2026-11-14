@@ -168,6 +168,14 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-q-x { display:flex; flex-direction:column; align-items:flex-start; gap:8px; min-width:0; text-wrap:pretty; }
 .ln-q-quote { color:var(--fg); }
 .ln-q-stop { display:inline-flex; }
+/* Things that sit side by side in a row's value, as a pill and who computed it. */
+.ln-q-line { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+/* The competing hypotheses under a fork's question: id, sentence, state; the one this fork tested in full colour. */
+.ln-rivals { width:100%; margin:0; padding:0; list-style:none; }
+.ln-rival { display:grid; grid-template-columns:auto minmax(0, 1fr) auto; align-items:baseline; gap:10px; width:100%; color:var(--fg-55); }
+.ln-rival > .ln-pill { align-self:center; }
+.ln-rival--tested { color:var(--fg); }
+.ln-rival-x { min-width:0; text-wrap:pretty; }
 .ln-src { display:flex; flex-direction:column; gap:10px; max-width:880px; }
 .ln-src-how { display:flex; align-items:baseline; flex-wrap:wrap; gap:6px 10px; margin:0; font-size:13.5px; color:var(--fg-70); }
 .ln-src-how > span:last-child { flex:1 1 320px; min-width:0; }
@@ -317,9 +325,15 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-ev--call .ln-ev-x, .ln-ev--result .ln-ev-x, .ln-ev--forced .ln-ev-x { font-family:var(--code); font-size:11.5px; }
 .ln-ev--thought .ln-ev-x { color:var(--fg); }
 .ln-hyps { display:flex; flex-direction:column; gap:10px; }
-.ln-hyp-h { display:flex; align-items:baseline; gap:8px; }
+.ln-hyp-h { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
 .ln-hyp-k { font-size:12px; color:var(--fg-55); }
 .ln-hyp-e { margin:0; font-size:13px; }
+/* A competing hypothesis (record_hypothesis): id, kind and what it names, its computed state at the end of the line,
+   then its sentence and the rows of the fork question (.ln-q-row) for evidence, prediction and falsifier. */
+.ln-hyp-kind { font-size:12px; color:var(--fg-70); }
+.ln-hyp-st { display:inline-flex; margin-left:auto; align-self:center; }
+.ln-hyp-s { margin:0; max-width:72ch; font-size:15px; line-height:1.45; color:var(--fg); text-wrap:pretty; }
+.ln-hyp-rows { display:flex; flex-direction:column; gap:8px; }
 @media (prefers-reduced-motion: no-preference) {
   /* A new line in the investigator's log comes up from below. */
   .ln-ev { animation:ds-swap .35s var(--ease-swap) both; }
@@ -495,6 +509,10 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
   .ln-v-arm .ov-kpi-v, .ln-out-n { font-size:30px; }
   .ln-approval { padding:18px 16px; }
   .ln-q-row { grid-template-columns:minmax(0, 1fr); }
+  /* A competing hypothesis's state goes under its sentence, so the sentence keeps the width. */
+  .ln-rival { grid-template-columns:auto minmax(0, 1fr); row-gap:6px; }
+  .ln-rival > .ln-pill { grid-column:2; justify-self:start; }
+  .ln-hyp-st { margin-left:0; }
   .ln-prov-i { grid-template-columns:minmax(0, 1fr); }
   .ln-prov-src { white-space:normal; overflow-wrap:anywhere; }
   .ln-vread { margin-left:0; }
