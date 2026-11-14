@@ -177,9 +177,10 @@ class CostTracker:
                 f"{what} would cost about ${estimate_usd:.2f}; spent ${spent:.2f} of ${self.budget_usd:.2f}"
             )
 
-    def average_run_usd(self, prefix: str = "run:") -> float | None:
+    def average_run_usd(self, prefix: str = "run:", keys: set[str] | None = None) -> float | None:
+        """Average total of the scopes starting with `prefix`; with `keys`, of those scopes only."""
         with self._lock:
-            vals = [s.total_usd for k, s in self.scopes.items() if k.startswith(prefix)]
+            vals = [s.total_usd for k, s in self.scopes.items() if k.startswith(prefix) and (keys is None or k in keys)]
         if not vals or any(v is None for v in vals):
             return None
         return sum(vals) / len(vals)  # type: ignore[arg-type]
@@ -199,6 +200,21 @@ class CostTracker:
 
 def estimate_batch_usd(n_runs: int, avg_run_usd: float | None) -> float | None:
     return None if avg_run_usd is None else n_runs * avg_run_usd
+
+
+# A typical analyst run's tokens, per prompt token: most of each prompt is a cache read, and output is small
+# (measured on Haiku runs: about 40k prompt tokens, 30k of them cached, and 3k output per run).
+_RUN_MIX = {"input_per_mtok": 0.25, "cache_read_per_mtok": 0.75, "output_per_mtok": 0.07}
+
+
+def run_rate(prices: dict, model: str) -> float | None:
+    """What a typical run's tokens cost on `model`, in arbitrary units: only the ratio between two models means
+    anything. None when a needed price is unknown."""
+    p = (prices.get("models") or {}).get(model) or {}
+    rates = [p.get(k) for k in _RUN_MIX]
+    if any(r is None for r in rates):
+        return None
+    return sum(share * p[k] for k, share in _RUN_MIX.items())
 
 
 class UsageCallback(BaseCallbackHandler):

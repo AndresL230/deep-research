@@ -47,7 +47,7 @@ def test_one_batch_is_split_by_group_and_by_kind():
     b = report["batches"][0]
     assert b["usd"] == {
         "total": pytest.approx(0.815), "runs": pytest.approx(0.33), "forks": pytest.approx(0.085),
-        "investigator": pytest.approx(0.40), "other": 0.0, "model": pytest.approx(0.75), "vm": pytest.approx(0.065),
+        "investigator": pytest.approx(0.40), "commentary": 0.0, "other": 0.0, "model": pytest.approx(0.75), "vm": pytest.approx(0.065),
     }
     assert b["tokens"] == {"input": 7500, "output": 750, "cache_read": 1200, "cache_write": 150}
     assert b["vm_seconds"] == 3900.0
@@ -76,7 +76,7 @@ def test_totals_add_up_across_batches_and_models():
     report = cost_report([entry("1114-093012-a1b2", case(FULL)), entry("1113-080000-ffff", other, kind="live")])
     t = report["totals"]
     assert t["usd"]["total"] == pytest.approx(0.815 + 3.1)
-    assert t["usd"]["runs"] + t["usd"]["forks"] + t["usd"]["investigator"] + t["usd"]["other"] == pytest.approx(t["usd"]["total"])
+    assert t["usd"]["runs"] + t["usd"]["forks"] + t["usd"]["investigator"] + t["usd"]["commentary"] + t["usd"]["other"] == pytest.approx(t["usd"]["total"])
     assert t["usd"]["model"] + t["usd"]["vm"] == pytest.approx(t["usd"]["total"])
     assert (t["batches"], t["runs"]) == (2, 4)
     # Runs and forks are the analyst's model, the investigator scope the investigator's. Model spend only.
@@ -217,3 +217,14 @@ def test_costs_endpoint_with_only_the_demo_batch(client):  # noqa: F811
     report = client.get("/api/costs").json()
     assert [b["id"] for b in report["batches"]] == ["demo-batch", "robot-demo-batch"]
     assert report["totals"]["batches"] == 0 and report["totals"]["usd"]["total"] == 0 and report["by_model"] == []
+
+
+def test_commentary_is_its_own_group_on_its_own_model():
+    c = case({"run:r01": scope(0.1, 0, 0, (10, 1, 0, 0)), "commentary": scope(0.02, 0, 0, (300, 20, 0, 0))},
+             runs=("honest",), commentary_model=SONNET)
+    report = cost_report([entry("1114-093012-a1b2", c)])
+    b = report["batches"][0]
+    assert b["usd"]["commentary"] == pytest.approx(0.02) and b["usd"]["other"] == 0.0
+    models = {m["model"]: m for m in report["by_model"]}
+    assert models[SONNET]["roles"] == ["commentary"] and models[SONNET]["usd_by_group"]["commentary"] == pytest.approx(0.02)
+    assert models[HAIKU]["roles"] == ["analyst"]

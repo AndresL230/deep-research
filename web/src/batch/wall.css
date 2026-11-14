@@ -14,6 +14,7 @@
 .bw-mix-s--unclear { background:color-mix(in srgb, var(--fg) 26%, transparent); }
 .bw-mix-s--running { background:var(--accent); }
 .bw-mix-s--queued { background:var(--border-strong); }
+.bw-sum-models { margin:0; font-size:12.5px; color:var(--fg-70); font-variant-numeric:tabular-nums; }
 .bw-explain { margin:0; font-size:12.5px; line-height:1.45; color:var(--fg-55); }
 .bw-sim { margin:0; align-self:flex-start; max-width:100%; padding:3px 8px; border:1px solid color-mix(in srgb, var(--amber) 35%, var(--border)); border-radius:6px; background:color-mix(in srgb, var(--amber) 8%, transparent); font-size:12px; line-height:1.45; color:var(--fg-70); }
 .bw-sim strong { font-weight:600; color:var(--amber); }
@@ -32,6 +33,8 @@
 
 .bw-hd { display:flex; align-items:center; justify-content:space-between; gap:6px; min-width:0; }
 .bw-id { font-family:var(--code); font-size:12.5px; font-weight:600; color:var(--fg); }
+/* The run's analyst model, only in a batch on more than one: quiet, right after the id. */
+.bw-model { margin-right:auto; padding:0 5px; border:1px solid var(--border); border-radius:4px; font-size:10.5px; font-weight:500; line-height:16px; color:var(--fg-55); white-space:nowrap; }
 
 /* status pill */
 .bw-pill { display:inline-flex; align-items:center; gap:5px; padding:1px 7px; border-radius:999px; font-size:11.5px; font-weight:500; line-height:18px; white-space:nowrap; color:var(--fg-55); background:var(--hover); }

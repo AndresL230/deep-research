@@ -333,7 +333,7 @@ def _fake_vms(monkeypatch, batch_mod, deleted, load_task=lambda sb, task: None):
     monkeypatch.setattr(batch_mod.vms, "download_outputs", lambda sb, dest: None)
     monkeypatch.setattr(batch_mod.vms, "download_charts", lambda sb, dest: ["01_counts.png"])
     monkeypatch.setattr(batch_mod.vms, "delete_vm", deleted.append)
-    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model: object())
+    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt: object())
     monkeypatch.setattr(batch_mod, "DaytonaSandbox", lambda sandbox: object())
 
 
@@ -699,3 +699,13 @@ def test_upload_a_controller_and_start_checks_it(client, tmp_path, monkeypatch):
     res = client.post("/api/batches", json={**body, "robot_controller": "ct-00000000"})
     assert res.status_code == 422 and "unknown controller" in res.json()["detail"]
     assert client.post("/api/batches", json={**body, "robot_controller": "nope"}).status_code == 422
+
+
+def test_api_root_and_missing_assets_are_404_not_the_page(client):  # noqa: F811
+    from deep_research import api
+
+    if not (api.WEB_DIST / "index.html").is_file():
+        pytest.skip("the web UI is not built")
+    assert client.get("/api").status_code == 404
+    assert client.get("/assets/viewer-old-hash.js").status_code == 404
+    assert client.get("/b/demo-batch").status_code == 200  # client routes still get the page

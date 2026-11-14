@@ -27,6 +27,7 @@ import ast
 import importlib
 import json
 import math
+import os
 import re
 import shutil
 from collections import Counter
@@ -509,6 +510,9 @@ def score_run(
 FIX_FILE = f"{VM_WORKSPACE}/controller.py"
 FIX_OUTPUT = "controller.py"
 TRACE_DIR = "trace"
+# Worker processes one trace re-runs its controller in (sim.evaluate.run_jobs). The server runs at most
+# deep_research.batch.MAX_PARALLEL_TRACES traces at once, so this many times that in all.
+TRACE_WORKERS = max(1, min(4, (os.cpu_count() or 1) // 3))
 
 
 def numbered(source: str) -> str:
@@ -530,7 +534,7 @@ def _symptoms_of(motion: dict) -> list[dict]:
         return [{"t": None, "kind": "ok" if r.get("success") else "failed", "text": text, "data": {}}]
 
 
-def trace_run(task: RobotTaskFiles, run_dir: Path, max_episodes: int = 3) -> dict:
+def trace_run(task: RobotTaskFiles, run_dir: Path, max_episodes: int = 3, workers: int | None = None) -> dict:
     """Re-run one run's controller on the evaluation positions with recording on, and describe where it fails.
 
     The run's own recordings only cover what the agent chose to try (an inflated run: the practice spot), so the
@@ -538,8 +542,8 @@ def trace_run(task: RobotTaskFiles, run_dir: Path, max_episodes: int = 3) -> dic
     of up to `max_episodes` failures under `run_dir/trace/`, and turns each into timestamped symptoms. The agent's
     practice recording, when there is one, is described too, for the contrast with where it works.
     """
-    from sim.episode import run_episode
-    from sim.motion import read_motion, write_motion
+    from sim.evaluate import run_jobs
+    from sim.motion import read_motion
 
     controller = run_dir / "outputs" / FIX_OUTPUT
     if not controller.is_file():
@@ -552,14 +556,25 @@ def trace_run(task: RobotTaskFiles, run_dir: Path, max_episodes: int = 3) -> dic
     out = run_dir / TRACE_DIR
     out.mkdir(parents=True, exist_ok=True)
     rel = run_dir.name  # runs/<id>
+    # Every episode runs in a worker process (sim.evaluate), never in this one: the controller is the agent's code,
+    # and the server may trace several runs at once. A failing episode's recording is written by its worker.
+    jobs = [
+        {"controller_path": str(controller.resolve()), "can_xy": [float(xy[0]), float(xy[1])],
+         "place_xy": [float(v) for v in place_xy], "seed": seed,
+         "record_to": str(out / f"hidden_{i:02d}.motion.json")}
+        for i, xy in enumerate(positions)
+    ]
+    results = run_jobs(jobs, workers=workers or TRACE_WORKERS)
     episodes, successes = [], 0
-    for i, xy in enumerate(positions):
-        r, mo = run_episode(str(controller), xy, place_xy, seed=seed, record=True)
+    for i, (xy, r) in enumerate(zip(positions, results)):
         successes += bool(r["success"])
-        if r["success"] or len(episodes) >= max_episodes or mo is None:
+        path = Path(r["motion_path"]) if r.get("motion_path") else None
+        if r["success"] or path is None or not path.is_file():
             continue
-        path = out / f"hidden_{i:02d}.motion.json"
-        write_motion(mo, path)
+        if len(episodes) >= max_episodes:
+            path.unlink(missing_ok=True)  # more failures than asked for: only the first ones are kept
+            continue
+        mo = read_motion(path)
         d = math.hypot(float(xy[0]) - float(place_xy[0]), float(xy[1]) - float(place_xy[1]))
         episodes.append(
             {
