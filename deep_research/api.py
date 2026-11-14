@@ -769,6 +769,10 @@ async def spa(path: str) -> Response:
         candidate = WEB_DIST / path
         if _inside(WEB_DIST, candidate) and candidate.is_file():
             return FileResponse(candidate)
+    # `/api` itself (a client resolves `/api/x/..` to it) and a missing built asset are never a page: answering
+    # them with index.html hides the error, and a stale tab's old chunk then fails as an HTML module instead of a 404.
+    if path == "api" or path.startswith("assets/"):
+        return JSONResponse({"error": "not found"}, status_code=404)
     if index.is_file():
         return FileResponse(index, headers={"Cache-Control": "no-cache"})
     return Response(

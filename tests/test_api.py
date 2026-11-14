@@ -649,3 +649,13 @@ async def test_two_resumes_at_once_build_one_batch_and_one_investigator(tmp_path
     assert len(built) == 1 and len(started) == 1
     for t in api.TASKS.values():
         t.cancel()
+
+
+def test_api_root_and_missing_assets_are_404_not_the_page(client):  # noqa: F811
+    from deep_research import api
+
+    if not (api.WEB_DIST / "index.html").is_file():
+        pytest.skip("the web UI is not built")
+    assert client.get("/api").status_code == 404
+    assert client.get("/assets/viewer-old-hash.js").status_code == 404
+    assert client.get("/b/demo-batch").status_code == 200  # client routes still get the page
