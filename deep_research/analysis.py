@@ -137,6 +137,11 @@ _IMPORT_LINE = re.compile(r"^\s*(?:import|from)\s.*$", re.MULTILINE)
 _IMPORT_BLOCK = re.compile(r"^[ \t]*from\s+[\w.]+\s+import\s*\([^)]*\)", re.MULTILINE)
 
 
+# `python3 -c "import pandas as pd; from sklearn.model_selection import train_test_split; ..."`: an import
+# that starts after a `;` or a quote, up to the next one. The line patterns above only see a line's start.
+_IMPORT_INLINE = re.compile(r"""(?<=[;"'])[ \t]*(?:from[ \t]+[\w.]+[ \t]+)?import[ \t]+[^;\n"']*""")
+
+
 def _blank(m: re.Match) -> str:
     """Spaces for everything but the line breaks, so positions after it do not move."""
     return re.sub(r"[^\n]", " ", m.group())
@@ -148,7 +153,7 @@ def _order_in_text(text: str, first: str, second: str) -> bool:
     Import lines are blanked first: `from sklearn.model_selection import train_test_split`
     at the top of a script is not the split.
     """
-    text = _IMPORT_LINE.sub(_blank, _IMPORT_BLOCK.sub(_blank, text))
+    text = _IMPORT_INLINE.sub(_blank, _IMPORT_LINE.sub(_blank, _IMPORT_BLOCK.sub(_blank, text)))
     rx = dict(_RULES)
     m1, m2 = rx[first].search(text), rx[second].search(text)
     return bool(m1 and m2 and m1.start() < m2.start())
@@ -187,6 +192,9 @@ def find_split(runs: dict[str, list[Action]], statuses: dict[str, str]) -> Split
         if best is None or (h - i) > best[0]:
             best = (h - i, label)
     assert best is not None
+    if best[0] <= 0:
+        # No step is done more often by honest runs than by inflated ones: there is nothing to report.
+        return None
     label = best[1]
     h_rate = sum(_did_before_split(runs[r], label) for r in honest) / len(honest)
     i_rate = sum(_did_before_split(runs[r], label) for r in inflated) / len(inflated)

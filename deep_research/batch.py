@@ -5,6 +5,7 @@ runs the fork experiment, drives the investigator, and tracks cost.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import shutil
@@ -29,10 +30,14 @@ from .forks import cut_history, forced_turn, intervention_for
 from .scoring import score_run
 from .task import TaskFiles, build_task, task_prompt
 
-log = logging.getLogger("deep_research.batch")
+logger = logging.getLogger(__name__)
 
 RUN_TIMEOUT_S = 900
 RECURSION_LIMIT = 200
+# One investigator turn is four graph steps, and reading the case file a hundred lines at a time is a
+# turn per read, so the analysts' limit would end an investigation after about 48 turns, with the fork
+# money already spent. The budget check is what limits the investigator's spend.
+INVESTIGATOR_RECURSION_LIMIT = 1000
 MAX_PARALLEL_VMS = 12
 
 # Run statuses that mean the run is over.
@@ -89,16 +94,17 @@ class Batch:
                 raise
         self.case = CaseFile(self.dir / "case" / "case.json")
         self.tracker = CostTracker(budget_usd=cfg.budget_usd)
+        # A reopened batch (Batch.resume, cli forks, cli investigate) has spend on record already.
+        self.tracker.restore(self.case.data.get("costs") or {})
         self.vms: dict[str, Any] = {}
         self._queues: set[asyncio.Queue] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._last_cost_push = 0.0
         self._investigator = None
         self._inv_config: dict | None = None
+        self._pending_requests = 1
         self.case.subscribe(lambda section, value: self._emit({"kind": "case", "section": section, "value": value}))
-        if resume:
-            self.tracker.restore(self.case.data.get("costs") or {})
-        else:
+        if not resume:
             self.case.set_config(cfg.model_dump())
 
     @classmethod
@@ -156,6 +162,16 @@ class Batch:
             self._last_cost_push = now
             self.case.set_costs(self.tracker.snapshot())
 
+    def _check_budget(self) -> None:
+        """Stop work in flight once the batch has spent its budget.
+
+        The checks before a batch of runs or a fork experiment only see estimates, and a first
+        batch has no estimate at all. This one sees what was actually spent.
+        """
+        spent = self.tracker.total_usd()
+        if spent is not None and spent > self.cfg.budget_usd:
+            raise OverBudget(f"spent ${spent:.2f} of the ${self.cfg.budget_usd:.2f} budget")
+
     # ---- driving one agent ----
     async def _drive(self, agent, inp, thread_id: str, scope: str, model: str, log: EventLog, on_event) -> list:
         config = {
@@ -167,6 +183,7 @@ class Batch:
             for ev in events_from_update(chunk):
                 on_event(log.write(ev))
             self.push_costs()
+            self._check_budget()
         state = await agent.aget_state(config)
         return state.values.get("messages", [])
 
@@ -280,14 +297,22 @@ class Batch:
         # Forks start partway through a run, so this overestimates a little.
         return None if avg is None else avg * 2 * n_per_arm
 
-    async def run_forks(self, n_per_arm: int) -> str:
-        self._loop = asyncio.get_running_loop()
+    def fork_blocker(self) -> str | None:
+        """Why the fork experiment cannot run on this batch, or None when it can."""
         split = self.case.data.get("split")
         if not split or split.get("fork_run_id") is None:
-            return "error: no split finding with a run to fork from"
+            return "no split finding with a run to fork from"
+        if intervention_for(split["label"]) is None:
+            return f"no intervention is defined for '{split['label']}' yet"
+        return None
+
+    async def run_forks(self, n_per_arm: int) -> str:
+        self._loop = asyncio.get_running_loop()
+        why_not = self.fork_blocker()
+        if why_not:
+            return f"error: {why_not}"
+        split = self.case.data["split"]
         iv = intervention_for(split["label"])
-        if iv is None:
-            return f"error: no intervention is defined for '{split['label']}' yet"
         n_per_arm = max(1, min(int(n_per_arm), 8))
         try:
             self.tracker.check(self.estimate_forks_usd(n_per_arm), f"{2 * n_per_arm} fork runs")
@@ -296,23 +321,30 @@ class Batch:
 
         fork_id = f"f{sum(k.startswith('f') for k in self.case.data['forks']) + 1}"
         src = split["fork_run_id"]
-        msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
-        actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task.given_files())
-        prefix_msgs, n_prefix = cut_history(msgs, split["fork_at"])
-        prefix_actions = actions[:n_prefix]
-        self.case.set_phase("forking")
-        self.case.update_fork(
-            fork_id, status="rebuilding", source_run=src, fork_at=n_prefix, label=split["label"],
-            intervention=iv["description"], n_per_arm=n_per_arm, children={},
-        )
-
+        phase_before = self.case.data.get("phase")
         base_scope = f"fork:{fork_id}:base"
-        base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base")
-        self.vms[f"{fork_id}-base"] = base
-        self.tracker.vm_started(base_scope)
         try:
+            msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
+            actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task.given_files())
+            prefix_msgs, n_prefix = cut_history(msgs, split["fork_at"])
+            prefix_actions = actions[:n_prefix]
+            self.case.set_phase("forking")
+            self.case.update_fork(
+                fork_id, status="rebuilding", source_run=src, fork_at=n_prefix, label=split["label"],
+                intervention=iv["description"], n_per_arm=n_per_arm, children={},
+            )
+            base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base")
+            self.vms[f"{fork_id}-base"] = base
+            self.tracker.vm_started(base_scope)
             await asyncio.to_thread(vms.load_task, base, self.task)
             await asyncio.to_thread(vms.replay_actions, base, prefix_actions)
+        except Exception as e:  # noqa: BLE001 - returned, so an agent calling this as a tool reads it instead of dying
+            logger.warning("fork %s: could not build the base VM: %s: %s", fork_id, type(e).__name__, e)
+            await self._release(f"{fork_id}-base", base_scope)
+            # No copy ran, so there is no experiment to show, and the batch is back where it was.
+            self.case.remove_fork(fork_id)
+            self.case.set_phase(phase_before)
+            return f"error: could not build the fork's base VM ({type(e).__name__}: {e})"[:400]
         except BaseException:
             await self._release(f"{fork_id}-base", base_scope)
             raise
@@ -332,7 +364,8 @@ class Batch:
                         self.vms[f"{fork_id}-{cid}"] = vm
                         how = "fork"
                     except Exception as e:  # noqa: BLE001 - fall back to rebuilding by replay
-                        log.warning("fork of the base VM failed for %s/%s, rebuilding by replay: %r", fork_id, cid, e)
+                        logger.warning("fork %s %s: could not fork the base VM (%s: %s); rebuilding it by replay",
+                                       fork_id, cid, type(e).__name__, e)
                         vm = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-{cid}")
                         self.vms[f"{fork_id}-{cid}"] = vm
                         await asyncio.to_thread(vms.load_task, vm, self.task)
@@ -346,6 +379,9 @@ class Batch:
                     if arm == "forced":
                         backend = DaytonaSandbox(sandbox=vm)
                         res = await asyncio.to_thread(backend.execute, iv["command"])
+                        if res.exit_code not in (0, None):
+                            # Nothing was forced in this copy, so it must not be scored as a forced result.
+                            raise RuntimeError(f"forced step failed with exit code {res.exit_code}: {res.output[:200]}")
                         history += forced_turn(iv["command"], res.output)
                         log.write({"type": "forced", "command": iv["command"], "output": res.output[:2000]})
 
@@ -374,8 +410,14 @@ class Batch:
                     if await self._release(f"{fork_id}-{cid}", scope):
                         self._set_child(fork_id, cid, lab_url=None)
 
+        # Each copy is its own run, so each starts in an empty context. When the investigator's tool calls
+        # this experiment, the copies would otherwise inherit the investigator's callbacks, and every fork
+        # token would be counted a second time under "investigator", at the investigator's price.
         try:
-            await asyncio.gather(*(child(arm, i) for arm in ("control", "forced") for i in range(n_per_arm)))
+            await asyncio.gather(*(
+                asyncio.create_task(child(arm, i), context=contextvars.Context())
+                for arm in ("control", "forced") for i in range(n_per_arm)
+            ))
         finally:
             await self._release(f"{fork_id}-base", base_scope)
 
@@ -402,7 +444,7 @@ class Batch:
         self._inv_config = {
             "configurable": {"thread_id": f"{self.id}-investigator"},
             "callbacks": [UsageCallback(self.tracker, "investigator", self.cfg.investigator_model)],
-            "recursion_limit": RECURSION_LIMIT,
+            "recursion_limit": INVESTIGATOR_RECURSION_LIMIT,
         }
         self.case.set_phase("investigating")
         await self._stream_investigator({"messages": [{"role": "user", "content": "Investigate this batch."}]})
@@ -410,13 +452,18 @@ class Batch:
     async def decide(self, approve: bool) -> None:
         """Answer the investigator's pending request_forks approval."""
         decision = {"type": "approve"} if approve else {"type": "reject", "message": "The person declined the cost."}
+        # One answer covers one experiment. If the investigator asked for several in one turn, the rest are declined.
+        rest = {"type": "reject", "message": "Only one experiment is approved at a time. Ask again if you still need it."}
+        decisions = [decision] + [rest] * (self._pending_requests - 1)
+        self._pending_requests = 1
         self.case.remove_fork("pending")
         self.case.set_phase("investigating")
-        await self._stream_investigator(Command(resume={"decisions": [decision]}))
+        await self._stream_investigator(Command(resume={"decisions": decisions}))
 
     async def _stream_investigator(self, inp) -> None:
         log = EventLog(self.dir / "investigator" / "events.jsonl")
         try:
+            self._check_budget()
             async for chunk in self._investigator.astream(inp, self._inv_config, stream_mode="updates", subgraphs=True):
                 ns, update = chunk if isinstance(chunk, tuple) else ((), chunk)
                 if "__interrupt__" in update:
@@ -426,18 +473,29 @@ class Batch:
                     ev = log.write({**ev, "agent": ns[-1].split(":")[0] if ns else "investigator"})
                     self._emit({"kind": "investigator", "event": ev})
                 self.push_costs()
+                self._check_budget()
             self.case.set_phase("done")
             # The investigator has finished and the verdict is in: the batch is over, so stop paying for its VMs.
             await self.close()
+        except OverBudget as e:
+            # The budget stops the investigator too. Nothing more will run, so the VMs can go.
+            self.case.set_phase(f"blocked: {e}")
+            await self.close()
+        except Exception:
+            # A crash ends the investigation as well: stop paying for the VMs, then let the error surface.
+            await self.close()
+            raise
         finally:
             log.close()
             self.push_costs(force=True)
 
     def _on_interrupt(self, interrupts) -> None:
         n = 4
+        self._pending_requests = 1
         try:
-            req = interrupts[0].value["action_requests"][0]
-            n = int(req["args"].get("n_per_arm", 4))
+            requests = interrupts[0].value["action_requests"]
+            self._pending_requests = max(1, len(requests))
+            n = int(requests[0]["args"].get("n_per_arm", 4))
         except Exception:  # noqa: BLE001
             pass
         est = self.estimate_forks_usd(n)
