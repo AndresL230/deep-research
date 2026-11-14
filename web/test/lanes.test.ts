@@ -9,7 +9,7 @@ import r02Raw from "../../fixtures/demo-batch/runs/r02/events.jsonl?raw";
 import robotCaseRaw from "../../fixtures/robot-demo-batch/case/case.json?raw";
 import type { AgentEvent, CaseFile, ForkExperiment, PendingForks, ProposedFix, RunRecord, SplitFinding, StepLabel, TraceEntry } from "../src/api";
 import {
-  armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, diagnosisView, eventLine, fixSummaryText, fixTestedText, fixView,
+  armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, diagnosisView, eventLine, fixSummaryText, fixTestedText, fixMeasuredText, fixView,
   forkView, investigatorView, isProblemPhase, lineWindows,
   phaseText, pickRuns, planCells, scoreStats, selfCheckText, shortArgs, sortedChildren, splitCounts, splitHeadline,
   splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictSplit, verdictView,
@@ -711,6 +711,30 @@ describe("fixView", () => {
     expect(fixView(vmOf({ fix: { ...proposedFix, status: "rejected" } }))).toContain("Rejected</span>");
     // No line: the file alone.
     expect(fixView(vmOf({ fix: { ...proposedFix, line: null } }))).toContain("run r02 · controller.py</p>");
+  });
+
+  it("shows a fix measured on the code itself as two rates, the change, and what moved", () => {
+    const measured = { before: { true_accuracy: 0.7, successes: 14, n: 20 }, after: { true_accuracy: 0.8, successes: 16, n: 20 }, gained: 2, lost: 0, exceptions: [] };
+    const text = "Measured on the code itself, no agent in between: 70.0% (14 of 20) without the fix, 80.0% (16 of 20) with it. 2 that failed now succeed, 0 that succeeded now fail.";
+    expect(fixMeasuredText(measured)).toBe(text);
+    const html = fixView(vmOf({ fix: { ...proposedFix, status: "tested", measured, patched_file: "fix/controller.py" } }));
+    expect(html).toContain('class="ln-fix-measured ln-fix-measured--up"');
+    expect(html).toContain(`aria-label="${text}"`);
+    expect(html).toContain('<i class="ln-fill ln-fill--true" style="width:70.0%"></i>');
+    expect(html).toContain('<i class="ln-fill " style="width:80.0%"></i>');
+    expect(html).toContain('<b class="ln-gap-n">+10.0 pts</b><span class="ln-gap-w">with the fix</span>');
+    expect(html).not.toContain("Tested in fork");
+    expect(html).not.toContain("ln-fix-raised");
+
+    // A fix that lowers the rate, or whose code raises, reads as a failure and says what was raised, escaped.
+    const broken = { before: measured.before, after: { true_accuracy: 0, successes: 0, n: 20 }, gained: 0, lost: 14, exceptions: ["NameError: name '<lifted>' is not defined"] };
+    const bad = fixView(vmOf({ fix: { ...proposedFix, status: "tested", measured: broken } }));
+    expect(bad).toContain("ln-fix-measured--down");
+    expect(bad).toContain("The patched code raised: <code>NameError: name &#39;&lt;lifted&gt;&#39; is not defined</code>");
+    // No change either way, and counts the evaluation did not give.
+    const same = { before: { true_accuracy: 0.7, successes: null, n: null }, after: { true_accuracy: 0.7, successes: null, n: null }, gained: null, lost: null, exceptions: [] };
+    expect(fixView(vmOf({ fix: { ...proposedFix, status: "tested", measured: same } }))).toContain('ln-fix-measured--same');
+    expect(fixMeasuredText(same)).toBe("Measured on the code itself, no agent in between: 70.0% without the fix, 70.0% with it.");
   });
 
   it("reads what the fix experiment showed from its fork's control and fixed arms", () => {

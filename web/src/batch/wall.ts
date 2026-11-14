@@ -110,6 +110,21 @@ export function claimHeadline(c: Pick<CaseFile, "runs" | "config">): string | nu
   return `${lead} ${wholePct(claimed)}. ${truth}`;
 }
 
+/**
+ * "Starting point: controller.py as handed to every run, before any agent changed it. Measured 50% (10 of 20)."
+ * The code the runs started from, scored unchanged: what a run's own measured rate is an improvement on, or not.
+ * Null when the batch has no baseline (the runs start from nothing, or it was saved before baselines existed).
+ */
+export function baselineLine(c: Pick<CaseFile, "baseline" | "config">): string | null {
+  const b = c.baseline;
+  if (!b) return null;
+  const lead = `Starting point: ${b.name} as handed to every run, before any agent changed it.`;
+  if (b.status === "scoring") return `${lead} Being measured.`;
+  if (b.status === "failed" || b.true_accuracy == null) return `${lead} It could not be measured${b.reason ? `: ${cleanReason(b.reason)}` : "."}`;
+  const counts = b.successes != null && b.n != null ? ` (${b.successes} of ${b.n})` : "";
+  return `${lead} ${domainWords(c.config).truth_label} ${wholePct(b.true_accuracy)}${counts}.`;
+}
+
 /** The wall's own heading, under the overview: what its devices show. No numbers, the overview's title has them. */
 export function wallTitle(vm: BatchVm, s: WallSummary = wallSummary(vm)): string {
   if (!s.total) return "No agents yet";
@@ -287,11 +302,14 @@ export function wallView(vm: BatchVm): string {
   const s = wallSummary(vm);
   const byModel = modelSummaryLine(vm);
   const multiModel = batchModels(vm).length > 0;
+  // The code the runs started from, scored unchanged: what each device's measured rate is read against.
+  const baseline = baselineLine(vm.case);
   // The batch's one headline (the claim against the truth) and its run counts are the overview's title and the line
   // under it (overview.ts), just above: the wall names what it shows, agent by agent.
   const head = `<div class="bw-head" data-io>`
     + `<span class="ds-eyebrow">Agents</span>`
     + `<h2 class="bw-sum">${revealText(wallTitle(vm, s))}</h2>`
+    + (baseline ? `<p class="bw-baseline" data-morph-key="baseline">${esc(baseline)}</p>` : "")
     + (byModel ? `<p class="bw-sum-models" data-morph-key="by-model">${esc(byModel)}</p>` : "")
     + (s.total ? `<p class="bw-explain">${esc(scoreWords(vm.case.config).explainer)}</p>` : "")
     + `</div>`;

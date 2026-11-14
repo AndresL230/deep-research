@@ -7,7 +7,7 @@
 import "./lanes.css";
 import {
   batchFileUrl, isPendingForks, notebookUrl, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
-  type ForkExperiment, type PendingForks, type ProposedFix, type RubricCheck, type RunRecord, type SplitFinding, type TrapInfo,
+  type FixMeasured, type ForkExperiment, type MeasuredRate, type PendingForks, type ProposedFix, type RubricCheck, type RunRecord, type SplitFinding, type TrapInfo,
   type Verdict,
 } from "../api";
 import { askIcon } from "../ask-icons";
@@ -1797,9 +1797,39 @@ export function fixTestedText(f: ForkExperiment): string | null {
     `against control ${control.honest} of ${control.scored} (${pct(control.mean_true)}).`;
 }
 
+const rateText = (m: MeasuredRate): string => `${pct(m.true_accuracy)}${m.successes != null && m.n != null ? ` (${m.successes} of ${m.n})` : ""}`;
+
+/** "Measured on the code itself, no agent in between: 70.0% (14 of 20) without the fix, 80.0% (16 of 20) with it.
+ *  2 that failed now succeed, 0 that succeeded now fail." */
+export function fixMeasuredText(m: FixMeasured): string {
+  const changed = m.gained != null && m.lost != null ? ` ${m.gained} that failed now succeed, ${m.lost} that succeeded now fail.` : "";
+  return `Measured on the code itself, no agent in between: ${rateText(m.before)} without the fix, ${rateText(m.after)} with it.${changed}`;
+}
+
+/** The measured fix as two bars on one 0% to 100% axis, with the change in points beside them: green when the fix
+ *  raised the rate, red when it lowered it or the patched code raised an error. */
+function fixMeasuredView(m: FixMeasured): string {
+  const delta = m.after.true_accuracy - m.before.true_accuracy;
+  const tone = m.exceptions.length || delta < -0.0005 ? "down" : delta > 0.0005 ? "up" : "same";
+  const share = (x: number): string => (Math.max(0, Math.min(1, x)) * 100).toFixed(1);
+  const row = (label: string, r: MeasuredRate, cls: string): string =>
+    `<span class="ln-bar-k">${esc(label)}</span><span class="ln-track" title="${attr(`${label}: ${rateText(r)}`)}">` +
+    `<i class="ln-fill ${cls}" style="width:${share(r.true_accuracy)}%"></i></span><span class="ln-bar-v">${esc(pct(r.true_accuracy))}</span>`;
+  const word = tone === "same" ? "no change" : "with the fix";
+  return `<div class="ln-fix-measured ln-fix-measured--${tone}">` +
+    `<div class="ln-score"><div class="ln-bars" role="img" aria-label="${attr(fixMeasuredText(m))}">` +
+    row("Without the fix", m.before, "ln-fill--true") + row("With the fix", m.after, "") +
+    `<span class="ln-axis" aria-hidden="true"><span>0%</span><span>100%</span></span></div>` +
+    `<p class="ln-gap"><b class="ln-gap-n">${esc(pts(delta))}</b><span class="ln-gap-w">${word}</span></p></div>` +
+    `<p class="ln-note">${esc(fixMeasuredText(m))}</p>` +
+    (m.exceptions.length ? `<p class="ln-note ln-fix-raised">The patched code raised: ${m.exceptions.map((e) => `<code>${esc(e)}</code>`).join(" ")}</p>` : "") +
+    `</div>`;
+}
+
 /**
  * The proposed fix: what it does, its status, the patched file and line, the text it replaces beside the text it
- * puts there, why, what its fork experiment showed, and the investigator's sentence on it.
+ * puts there, why, what its test showed (the code measured by itself, or a fork experiment on older batches), and
+ * the investigator's sentence on it.
  */
 export function fixView(vm: BatchVm): string {
   const c = vm.case;
@@ -1821,7 +1851,7 @@ export function fixView(vm: BatchVm): string {
     block("Before", "ln-fix-old", fix.old_string) + block("After", "ln-fix-new", fix.new_string) +
     `</div>` +
     `<p class="ln-fix-why">${esc(fix.why)}</p>` +
-    (tested ? `<p class="ln-note ln-fix-tested">${esc(tested)}</p>` : "") +
+    (fix.measured ? fixMeasuredView(fix.measured) : tested ? `<p class="ln-note ln-fix-tested">${esc(tested)}</p>` : "") +
     (fix.verdict ? `<p class="ln-sentence">${reveal(fix.verdict, "word")}</p>` : "") +
     `</section>`;
 }

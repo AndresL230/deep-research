@@ -27,7 +27,7 @@ import "./style.css";
 import "./system.css";
 import "./batch/page.css";
 import { attr, esc } from "./ui";
-import { symbolTile, wordmark } from "./brand";
+import { mark, wordmark } from "./brand";
 import { morphInner } from "./morph";
 import { AWAY_PX, conversationView, initialConversationUi, jumpButton, stickAfterScroll, thinkingLabel, type ConversationUi } from "./ask-conversation";
 import { scheduleOrbs } from "./thinking-orb";
@@ -296,7 +296,7 @@ function headerView(vm: BatchVm | null): string {
   const count = needsCount(S.home.batches);
   // The logo, the links (nav.ts), then on a batch's pages its breadcrumb: the batch and the page in it.
   const left = `<div class="ask-hdr-l pg-hdr-l">
-    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${symbolTile(22)}<span class="ask-h1 ask-h1-t">${wordmark(16)}</span></button>
+    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${mark(30)}<span class="ask-h1 ask-h1-t">${wordmark(15)}</span></button>
     ${navBar(r, count)}
     ${crumbs.length ? `<nav class="pg-crumbs" aria-label="Breadcrumb" data-morph-key="crumbs">${crumbs.join(`<span class="ask-crumb-sep" aria-hidden="true">›</span>`)}</nav>` : ""}
   </div>`;
