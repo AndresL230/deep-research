@@ -61,6 +61,11 @@ def _fake_forks(monkeypatch):
     async def run_forks(self, n_per_arm):
         calls.append(n_per_arm)
         self.vms["f1-control-1"] = "vm-child"
+        # What a finished experiment leaves in the case file: the verdict's arms are checked against it.
+        self.case.update_fork("f1", kind="method", status="done", label="deduplicate", arms={
+            "control": {"total": 2, "scored": 2, "inflated": 2, "honest": 0, "failed": 0},
+            "forced": {"total": 2, "scored": 2, "inflated": 0, "honest": 2, "failed": 0},
+        })
         return "Fork f1 from run r02. Control: 2 of 2 inflated. Forced: 0 of 2 inflated."
 
     monkeypatch.setattr(Batch, "run_forks", run_forks)
@@ -68,7 +73,8 @@ def _fake_forks(monkeypatch):
 
 
 VERDICT = {"sentence": "Skipping the duplicate check caused it.", "step_label": "deduplicate",
-           "control_inflated": 2, "control_total": 2, "forced_inflated": 0, "forced_total": 2}
+           "honest_rate": 1.0, "inflated_rate": 0.0, "n_honest": 1, "n_inflated": 1, "confidence": "low",
+           "arms": {"control": {"inflated": 2, "total": 2}, "forced": {"inflated": 0, "total": 2}}}
 
 
 # ---- reopening a saved batch ----

@@ -10,8 +10,9 @@ import { activityOf, chartUrl, logOf, notebookCells, notebookTail, stagesOf, typ
 import { evidenceParts, trapOf } from "./trap";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
-import { pct, pts, tokens, usd } from "./format";
+import { modelShort, pct, pts, tokens, usd } from "./format";
 import { ACT, type BatchVm } from "./model";
+import { tileCaption } from "./commentary";
 import { isMotionBatch, robotThumb, scoreWords } from "../robot/markup";
 import "../robot/mount";
 
@@ -67,6 +68,26 @@ export function summaryLine(s: WallSummary): string {
     return `${s.total} ${s.total === 1 ? "run" : "runs"}: ${s.honest} honest, ${s.inflated} inflated${unclear}, ${s.failed} failed`;
   }
   return `${s.running} of ${s.total} running, ${s.honest + s.inflated + (s.unclear ?? 0) + s.failed} scored`;
+}
+
+/** The analyst models the batch's runs use, in run order, or [] when it used one (or names none). */
+export function batchModels(vm: BatchVm): string[] {
+  const models = [...new Set(sortedRuns(vm).map((r) => r.model).filter((m): m is string => !!m))];
+  return models.length > 1 ? models : [];
+}
+
+/** "Haiku: 5 honest, 2 unclear, 11 inflated · Sonnet: ..." for a batch on more than one model, once a run is scored;
+ *  else null. Unclear counts only in robot batches, where a run can be. */
+export function modelSummaryLine(vm: BatchVm): string | null {
+  const models = batchModels(vm);
+  const runs = sortedRuns(vm);
+  if (!models.length || !runs.some((r) => r.status === "honest" || r.status === "inflated" || r.status === "unclear")) return null;
+  const unclear = isMotionBatch(vm.case.config) || runs.some((r) => r.status === "unclear");
+  return models.map((m) => {
+    const of = runs.filter((r) => r.model === m);
+    const n = (st: Status) => of.filter((r) => r.status === st).length;
+    return `${modelShort(m)}: ${n("honest")} honest, ${unclear ? `${n("unclear")} unclear, ` : ""}${n("inflated")} inflated`;
+  }).join(" · ");
 }
 
 /** The run's todos: its own, else the latest `todos` event in its loaded log. */
@@ -182,7 +203,7 @@ export function tileCost(vm: BatchVm, run: RunRecord): string | null {
   return null;
 }
 
-function tile(vm: BatchVm, run: RunRecord): string {
+function tile(vm: BatchVm, run: RunRecord, multiModel = false): string {
   const todos = runTodos(vm, run);
   const log = logOf(vm, run.id);
   const cells = log ? notebookCells(log) : [];
@@ -192,8 +213,9 @@ function tile(vm: BatchVm, run: RunRecord): string {
   const cost = tileCost(vm, run);
   const label = `Run ${run.id}, ${STATUS_LABEL[run.status].toLowerCase()}. Open the run.`;
   return `<div class="bw-tile bw-tile--${run.status}" data-morph-key="tile:${attr(run.id)}" role="button" tabindex="0" data-act="${ACT.openRun}" data-arg="${attr(run.id)}" aria-label="${attr(label)}">`
-    + `<div class="bw-hd"><span class="bw-id">${esc(run.id)}</span>${pill(run.status)}</div>`
+    + `<div class="bw-hd"><span class="bw-id">${esc(run.id)}</span>${multiModel && run.model ? `<span class="bw-model" title="${attr(run.model)}">${esc(modelShort(run.model))}</span>` : ""}${pill(run.status)}</div>`
     + picture(vm, run, step, cells)
+    + tileCaption(vm, run)
     + `<div class="bw-step${run.status === "failed" ? " bw-step--failed" : ""}" title="${attr(step)}">${esc(truncate(step, 120))}</div>`
     + strip(run, todos, cells)
     + reveal(run, trapOf(vm.case), vm.case.config)
@@ -205,16 +227,19 @@ function tile(vm: BatchVm, run: RunRecord): string {
 export function wallView(vm: BatchVm): string {
   const runs = sortedRuns(vm);
   const s = wallSummary(vm);
+  const byModel = modelSummaryLine(vm);
+  const multiModel = batchModels(vm).length > 0;
   const simulated = (vm.case.config as { simulated?: boolean }).simulated === true || vm.case.costs?.simulated === true;
   const head = `<div class="bw-head">`
     + `<p class="bw-sum" aria-live="polite">${esc(summaryLine(s))}</p>`
+    + (byModel ? `<p class="bw-sum-models" data-morph-key="by-model">${esc(byModel)}</p>` : "")
     + (s.total ? `<div class="bw-mix" aria-hidden="true">${(["honest", "inflated", "unclear", "failed", "running", "queued"] as const)
       .filter((k) => (s[k] ?? 0) > 0).map((k) => `<span class="bw-mix-s bw-mix-s--${k}" data-morph-key="${k}" style="flex-grow:${s[k]}"></span>`).join("")}</div>` : "")
     + (s.total ? `<p class="bw-explain">${esc(scoreWords(vm.case.config).explainer)}</p>` : "")
     + (simulated ? `<p class="bw-sim"><strong>Simulated batch:</strong> the agents' choices are scripted, the scores and charts are real</p>` : "")
     + `</div>`;
   const grid = runs.length
-    ? `<div class="bw-grid" data-morph-key="grid" data-morph-list>${runs.map((r) => tile(vm, r)).join("")}</div>`
+    ? `<div class="bw-grid" data-morph-key="grid" data-morph-list>${runs.map((r) => tile(vm, r, multiModel)).join("")}</div>`
     : `<div class="bw-empty" data-morph-key="empty">Runs appear here once the batch starts.</div>`;
   return `<section class="bw" data-morph-key="wall" aria-label="Runs">${head}${grid}</section>`;
 }

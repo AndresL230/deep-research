@@ -45,7 +45,7 @@
 /* fields: a label over a 32px control, so every control in a row sits on one line */
 .hm-main { display:grid; grid-template-columns:88px minmax(0, 1fr) auto 112px; gap:16px 24px; align-items:end; }
 /* no planted flaw, so no strength slider: runs, hint and budget */
-.hm-main--3 { grid-template-columns:88px auto 112px; justify-content:start; }
+.hm-main--models { grid-template-columns:88px auto auto 112px; justify-content:start; }
 .hm-field { display:flex; flex-direction:column; gap:6px; min-width:0; }
 .hm-lbl-row { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
 .hm-lbl { min-width:0; overflow:hidden; text-overflow:ellipsis; font-size:12.5px; font-weight:500; line-height:18px; color:var(--fg-70); white-space:nowrap; }
@@ -68,6 +68,13 @@
 .hm-seg-o:hover span { color:var(--fg); }
 .hm-seg-o input:checked + span { color:var(--fg); background:var(--surface); box-shadow:0 0 0 1px var(--border-strong); }
 .hm-seg-o input:focus-visible + span { outline:2px solid var(--accent); outline-offset:1px; }
+/* The analyst models: a multi-choice row in the same frame as .hm-seg, each chip on or off. */
+.hm-chips { display:flex; height:32px; padding:2px; gap:2px; box-sizing:border-box; border:1px solid var(--border-strong); border-radius:8px; background:var(--bg); }
+.hm-chip { flex:1 1 0; min-width:0; padding:0 12px; border-radius:6px; font-size:12.5px; font-weight:500; color:var(--fg-55); white-space:nowrap; transition:color var(--fx-fast) var(--fx-ease), background var(--fx-fast) var(--fx-ease); }
+.hm-chip:hover:not(:disabled) { color:var(--fg); }
+.hm-chip[aria-pressed="true"] { color:var(--fg); background:var(--surface); box-shadow:0 0 0 1px var(--border-strong); }
+.hm-chip:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.hm-chip:disabled { cursor:default; }
 
 /* the placeholders while the defaults load */
 .hm-skel { display:block; border-radius:5px; background:var(--hover); animation:hm-pulse 1.4s var(--fx-ease) infinite alternate; }
@@ -131,13 +138,14 @@
   .hm-main > [data-f="budget_usd"] { grid-area:budget; }
   .hm-main > [data-f="trap_strength"] { grid-area:dup; }
   .hm-main > [data-f="hint_level"] { grid-area:hint; width:auto; }
-  .hm-main--3 { grid-template-areas:"runs budget" "hint hint"; }
+  .hm-main--models { grid-template-areas:"runs budget" "models models" "hint hint"; }
+  .hm-main > [data-f="analyst_models"] { grid-area:models; }
   .hm-dom-seg { height:42px; }
   .hm-adv-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px 16px; }
   .hm-adv-grid > .hm-field, .hm-adv-grid > .hm-field[data-w="wide"] { grid-column:span 2; }
   .hm-adv-grid > [data-f="forks_per_choice"], .hm-adv-grid > [data-f="seed"] { grid-column:span 1; }
   /* 40px controls for touch, and 16px text so iOS does not zoom the page on focus */
-  .hm-ctl, .hm-seg, .hm-skel--box { height:40px; }
+  .hm-ctl, .hm-seg, .hm-chips, .hm-skel--box { height:40px; }
   .hm-input { font-size:16px; }
   .hm-input--code { font-size:13px; }
   .hm-foot-r { flex:1 1 100%; flex-direction:column; align-items:stretch; gap:8px; }
@@ -153,7 +161,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .hm, .hm-skel, .hm-adv-grid { animation:none !important; }
-  .hm-batch, .hm-input, .hm-seg-o span, .hm-dom-o, .hm-adv-t, .hm-adv-t svg, .hm-go, .hm-cb-fill { transition:none !important; }
+  .hm-batch, .hm-input, .hm-seg-o span, .hm-dom-o, .hm-chip, .hm-adv-t, .hm-adv-t svg, .hm-go, .hm-cb-fill { transition:none !important; }
 }
 
 /* A teammate's batch, from the hub: whose machine ran it. */

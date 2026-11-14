@@ -7,16 +7,25 @@ import runEventsRaw from "../../fixtures/demo-batch/runs/r02/events.jsonl?raw";
 import forcedEventsRaw from "../../fixtures/demo-batch/forks/f1/forced-1/events.jsonl?raw";
 import {
   ApiError, CASE_SECTIONS, PHASES, RUN_STATUSES, STEP_LABELS, applyMessage, batchFileUrl, batchSocketUrl, fetchBatches,
-  fetchCase, isPendingForks, labPageUrl, postDecision, type AgentEvent, type CaseFile, type ForkExperiment,
+  fetchCase, isPendingForks, labPageUrl, notebookUrl, postDecision, type AgentEvent, type CaseFile, type ForkExperiment,
 } from "../src/api";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
 const jsonl = (raw: string): AgentEvent[] => raw.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as AgentEvent);
 
+describe("notebookUrl", () => {
+  it("names the domain's notebook route, escaped", () => {
+    expect(notebookUrl("robot_arm")).toBe("/api/memory/robot_arm");
+    expect(notebookUrl("../x")).toBe("/api/memory/..%2Fx");
+  });
+});
+
 describe("the demo case file matches the types", () => {
   it("has every section and a known phase", () => {
-    // The demo was saved before the diagnosis existed: `trace` and `fix` are absent and read as empty.
-    const saved = CASE_SECTIONS.filter((s) => s !== "trace" && s !== "fix");
+    // The demo was saved before the diagnosis, the trace comparison, the rubric and the commentary existed: those are absent and read
+    // as empty.
+    const later = ["trace", "fix", "trace_comparison", "rubric", "feed"];
+    const saved = CASE_SECTIONS.filter((s) => !later.includes(s));
     expect(Object.keys(demo).sort()).toEqual([...saved].sort());
     for (const k of Object.keys(demo)) expect(CASE_SECTIONS).toContain(k);
     expect(CASE_SECTIONS).toContain("trace");

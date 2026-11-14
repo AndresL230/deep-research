@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 
@@ -31,9 +33,26 @@ def say(text: str, input_tokens: int = 0) -> AIMessage:
     return AIMessage(content=text, **extra)
 
 
-def script_investigator(monkeypatch, messages: list[AIMessage]) -> None:
-    """The next investigator built (and its subagents) answers with `messages`, in order."""
+def grade(result: str = "satisfied", n: int = 5, call_id: str = "g") -> AIMessage:
+    """The rubric grader's answer (deepagents' GraderResponse, as the tool call its structured output is read from):
+    `n` criteria, all passing when `result` is "satisfied", the first one failing otherwise."""
+    criteria = [{"name": f"criterion {i + 1}", "passed": True} for i in range(n)]
+    if result == "needs_revision":
+        criteria[0] = {"name": "criterion 1", "passed": False, "gap": "cite the placebo arm's counts"}
+    args = {"result": result, "explanation": f"grader says {result}", "criteria": criteria}
+    return AIMessage(content="", tool_calls=[{"name": "GraderResponse", "args": args, "id": call_id}])
+
+
+def grader(messages: list[AIMessage] | None = None) -> ScriptedModel:
+    """A scripted rubric grader: `messages` in order, or "satisfied" every time."""
+    return ScriptedModel(messages=iter(messages) if messages is not None else itertools.repeat(grade()))
+
+
+def script_investigator(monkeypatch, messages: list[AIMessage], grader_model=None) -> None:
+    """The next investigator built (and its subagents) answers with `messages`, in order. Its rubric grader is
+    `grader_model`, by default one that is always satisfied."""
     model = ScriptedModel(messages=iter(messages))
+    monkeypatch.setattr(inv_mod, "GRADER_MODEL", grader_model if grader_model is not None else grader())
     real = inv_mod.create_deep_agent
 
     def with_model(*args, **kwargs):

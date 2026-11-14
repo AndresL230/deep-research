@@ -9,6 +9,7 @@ import contextvars
 import json
 import logging
 import shutil
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -22,9 +23,10 @@ from langgraph.types import Command
 from . import domains, hub
 from . import sandboxes as vms
 from .agents.analyst import build_analyst
-from .agents.investigator import build_investigator
+from .agents.investigator import RUBRIC, build_investigator
 from .analysis import find_split
 from .case_file import CaseFile
+from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
 from .events import EventLog, current_step, events_from_update, read_events
@@ -34,12 +36,20 @@ from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
 logger = logging.getLogger(__name__)
 
 RUN_TIMEOUT_S = 900
-RECURSION_LIMIT = 200
 # One investigator turn is four graph steps, and reading the case file a hundred lines at a time is a
 # turn per read, so the analysts' limit would end an investigation after about 48 turns, with the fork
 # money already spent. The budget check is what limits the investigator's spend.
 INVESTIGATOR_RECURSION_LIMIT = 1000
+# Fork children at once, at most (and never more than the batch's `max_concurrent_runs`).
 MAX_PARALLEL_VMS = 12
+# Traces (`Batch.trace_failures`) that run at once in this server, across all batches. Each re-runs a controller in
+# `sim.domain.TRACE_WORKERS` worker processes, so at most MAX_PARALLEL_TRACES x TRACE_WORKERS of them run together.
+# More traces wait for a slot.
+MAX_PARALLEL_TRACES = 3
+_TRACE_SLOTS = threading.BoundedSemaphore(MAX_PARALLEL_TRACES)
+# One trace of a run at a time: a trace writes its recordings under the run's `trace/` folder.
+_TRACE_RUN_LOCKS: dict[Path, threading.Lock] = {}
+_TRACE_RUN_LOCKS_LOCK = threading.Lock()
 # A robot run's motion files are pulled from its VM this often while it runs, so its tile shows it practicing.
 MOTION_POLL_S = 15.0
 # How long the end of a run waits for a pull in flight before it gives up on it.
@@ -174,6 +184,8 @@ class Batch:
         # The VM calls name the domain only when it is not the default one, so a tabular batch calls them as before.
         self._vm_domain = {} if cfg.domain == domains.DEFAULT else {"domain": cfg.domain}
         self.id = batch_id or time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
+        # The batches folder. The investigator's notebooks live under it, in `_memory/` (notebook.py).
+        self.root = root
         self.dir = root / self.id
         self.runs_dir = self.dir / "runs"
         self.forks_dir = self.dir / "forks"
@@ -194,6 +206,8 @@ class Batch:
         self.tracker = CostTracker(budget_usd=cfg.budget_usd)
         # A reopened batch (Batch.resume, cli forks, cli investigate) has spend on record already.
         self.tracker.restore(self.case.data.get("costs") or {})
+        # Live captions of the runs and a feed of notable moments (commentary.py); None when the config has them off.
+        self.commentary = commentary_for(self)
         self.vms: dict[str, Any] = {}
         self._queues: set[asyncio.Queue] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -201,6 +215,8 @@ class Batch:
         self._investigator = None
         self._inv_config: dict | None = None
         self._pending_requests = 1
+        # VM creations cancelled midway (a stop): their VMs are deleted once they exist (`_create_vm`).
+        self._orphans: set[asyncio.Future] = set()
         self.case.subscribe(lambda section, value: self._emit({"kind": "case", "section": section, "value": value}))
         # The team hub (hub.py), when it is set up: every change to the case file and every agent event goes there.
         self._hub = hub.pusher()
@@ -307,12 +323,43 @@ class Batch:
         if spent is not None and spent > self.cfg.budget_usd:
             raise OverBudget(f"spent ${spent:.2f} of the ${self.cfg.budget_usd:.2f} budget")
 
+    def _budget_spent(self) -> str | None:
+        """Why no new run may start, once the batch has spent its whole budget, or None."""
+        spent = self.tracker.total_usd()
+        if spent is not None and spent >= self.cfg.budget_usd:
+            return f"not started: spent ${spent:.2f} of the ${self.cfg.budget_usd:.2f} budget"
+        return None
+
+    def run_model(self, run_id: str) -> str:
+        """The analyst model of a run: the one in its case file record, else the batch's `analyst_model`
+        (batches saved before lineups)."""
+        return (self.case.data["runs"].get(run_id) or {}).get("model") or self.cfg.analyst_model
+
+    async def _create_vm(self, key: str, label: str) -> Any:
+        """Create a VM and keep it under `key`. If this is cancelled while Daytona is still creating it (the batch was
+        stopped), the VM is deleted as soon as it exists instead of being left running."""
+        fut = asyncio.ensure_future(asyncio.to_thread(vms.create_vm, label, **self._vm_domain))
+        try:
+            sb = await asyncio.shield(fut)
+        except asyncio.CancelledError:
+            def orphaned(f: asyncio.Future) -> None:
+                if f.cancelled() or f.exception() is not None:
+                    return
+                task = asyncio.ensure_future(asyncio.to_thread(vms.delete_vm, f.result()))
+                self._orphans.add(task)
+                task.add_done_callback(self._orphans.discard)
+
+            fut.add_done_callback(orphaned)
+            raise
+        self.vms[key] = sb
+        return sb
+
     # ---- driving one agent ----
     async def _drive(self, agent, inp, thread_id: str, scope: str, model: str, log: EventLog, on_event) -> list:
         config = {
             "configurable": {"thread_id": thread_id},
             "callbacks": [UsageCallback(self.tracker, scope, model)],
-            "recursion_limit": RECURSION_LIMIT,
+            "recursion_limit": self.cfg.max_agent_steps,
         }
         async for chunk in agent.astream(inp, config, stream_mode="updates"):
             for ev in events_from_update(chunk):
@@ -329,6 +376,8 @@ class Batch:
                 self.case.update_run(run_id, todos=ev["todos"], step=current_step(ev["todos"]))
             elif ev["type"] == "tool_call":
                 self.case.update_run(run_id, last_tool=ev["name"])
+            if self.commentary is not None:
+                self.commentary.observe(run_id, ev)
 
         return on_event
 
@@ -338,16 +387,27 @@ class Batch:
         est = self.tracker.average_run_usd()
         self.tracker.check(None if est is None else est * self.cfg.n_runs, f"{self.cfg.n_runs} runs")
         self.case.set_phase("running")
-        sem = asyncio.Semaphore(MAX_PARALLEL_VMS)
+        # Each run's whole VM life (create, agent, download, delete) holds a slot, so at most this many VMs are up.
+        sem = asyncio.Semaphore(self.cfg.max_concurrent_runs)
         run_ids = [f"r{i + 1:02d}" for i in range(self.cfg.n_runs)]
-        for r in run_ids:
-            self.case.update_run(r, status="queued")
+        for i, r in enumerate(run_ids):
+            self.case.update_run(r, status="queued", model=self.cfg.model_for_run(i))
 
         async def guarded(r: str) -> None:
             async with sem:
+                why_not = self._budget_spent()
+                if why_not:
+                    self.case.update_run(r, status="failed", reason=why_not)
+                    return
                 await self.run_one(r)
 
-        await asyncio.gather(*(guarded(r) for r in run_ids))
+        if self.commentary is not None:
+            self.commentary.start()
+        try:
+            await asyncio.gather(*(guarded(r) for r in run_ids))
+        finally:
+            if self.commentary is not None:
+                await self.commentary.stop()
         self.push_costs(force=True)
         self.analyze()
         if self.case.data.get("phase") == "no_split":
@@ -357,23 +417,26 @@ class Batch:
     async def run_one(self, run_id: str) -> None:
         scope, rdir = f"run:{run_id}", self.runs_dir / run_id
         log = self._log(rdir / "events.jsonl", run_id)
-        self.case.update_run(run_id, status="starting")
+        model = self.run_model(run_id)
+        self.case.update_run(run_id, status="starting", model=model)
+        (rdir / "meta.json").write_text(json.dumps({"model": model}))
         watch: MotionWatch | None = None
         try:
-            sb = await asyncio.to_thread(vms.create_vm, f"{self.id}-{run_id}", **self._vm_domain)
-            self.vms[run_id] = sb
+            sb = await self._create_vm(run_id, f"{self.id}-{run_id}")
             self.tracker.vm_started(scope)
             await asyncio.to_thread(vms.load_task, sb, self.task)
             url = await _try(asyncio.to_thread(vms.start_lab_page, sb))
             self.case.update_run(run_id, status="running", vm_id=sb.id, lab_url=url)
 
             on_event = self._run_event(run_id)
+            if self.commentary is not None:
+                self.commentary.attach(run_id, log, on_event)
             watch = _watch_motion(self.domain, sb, rdir / "outputs", f"runs/{run_id}/outputs", log, on_event,
                                   lambda files: self.case.update_run(run_id, motion_files=files))
-            agent = build_analyst(DaytonaSandbox(sandbox=sb), self.cfg.analyst_model)
+            agent = build_analyst(DaytonaSandbox(sandbox=sb), model, self.domain.analyst_system_prompt)
             inp = {"messages": [{"role": "user", "content": self.domain.task_prompt(self.cfg)}]}
             msgs = await asyncio.wait_for(
-                self._drive(agent, inp, f"{self.id}-{run_id}", scope, self.cfg.analyst_model, log, on_event),
+                self._drive(agent, inp, f"{self.id}-{run_id}", scope, model, log, on_event),
                 RUN_TIMEOUT_S,
             )
             (rdir / "messages.json").write_text(json.dumps(messages_to_dict(msgs)))
@@ -395,6 +458,8 @@ class Batch:
         finally:
             if watch is not None:
                 await watch.stop()
+            if self.commentary is not None:
+                self.commentary.finish(run_id)  # its last caption, before the log closes
             log.close()
             # The VM is used once: delete it now, so it stops costing anything. Its lab page goes with it.
             if await self._release(run_id, scope):
@@ -458,7 +523,10 @@ class Batch:
         return fix_plan(fix, self.domain.placebo(), self.cfg.placebo_arm)
 
     def estimate_forks_usd(self, n_per_arm: int, n_arms: int | None = None) -> float | None:
-        avg = self.tracker.average_run_usd()
+        # The copies run on the model of the run they fork: priced from that model's runs when there are some.
+        src = (self.case.data.get("split") or {}).get("fork_run_id")
+        same = {f"run:{r}" for r in self.case.data["runs"] if src and self.run_model(r) == self.run_model(src)}
+        avg = (same and self.tracker.average_run_usd(keys=same)) or self.tracker.average_run_usd()
         # Forks start partway through a run, so this overestimates a little.
         arms = max(2, len(self.arm_plan()) if n_arms is None else n_arms)
         return None if avg is None else avg * arms * n_per_arm
@@ -492,10 +560,23 @@ class Batch:
         if run_id not in self.case.data["runs"]:
             return {"error": f"unknown run {run_id}"}
         try:
-            return await asyncio.to_thread(self.domain.trace_run, self.task, self.runs_dir / run_id, int(max_episodes))
+            return await asyncio.to_thread(self._trace, run_id, int(max_episodes))
         except Exception as e:  # noqa: BLE001 - the tool reports it instead of ending the investigation
             logger.warning("trace of %s failed: %s: %s", run_id, type(e).__name__, e)
             return {"error": f"could not trace {run_id}: {type(e).__name__}: {e}"[:400]}
+
+    def _trace(self, run_id: str, max_episodes: int) -> dict:
+        """One trace, in a worker thread: waits for its run's lock, then for one of the server's trace slots.
+
+        Several traces (the investigator's code-tracer subagents, one per run) run at once this way. They share
+        nothing but the case file, which has its own lock: each re-runs its own run's controller in its own worker
+        processes and writes under its own run's folder.
+        """
+        run_dir = self.runs_dir / run_id
+        with _TRACE_RUN_LOCKS_LOCK:
+            lock = _TRACE_RUN_LOCKS.setdefault(run_dir.resolve(), threading.Lock())
+        with lock, _TRACE_SLOTS:
+            return self.domain.trace_run(self.task, run_dir, max_episodes)
 
     def propose_fix(self, run_id: str, old_string: str, new_string: str, description: str, why: str,
                     line: int | None = None) -> str:
@@ -612,8 +693,10 @@ class Batch:
             raise
         self.case.update_fork(fork_id, status="running")
 
-        sem = asyncio.Semaphore(MAX_PARALLEL_VMS)
+        sem = asyncio.Semaphore(min(MAX_PARALLEL_VMS, self.cfg.max_concurrent_runs))
         results: dict[str, dict] = {}
+        # Every copy continues the source run, on that run's model.
+        model = self.run_model(src)
 
         async def child(arm: str, i: int) -> None:
             cid, scope = f"{arm}-{i + 1}", f"fork:{fork_id}:{arm}-{i + 1}"
@@ -638,7 +721,8 @@ class Batch:
                         await asyncio.to_thread(vms.replay_actions, vm, prefix_actions)
                         how = "replay"
                     url = await _try(asyncio.to_thread(vms.start_lab_page, vm))
-                    self._set_child(fork_id, cid, arm=arm, status="running", lab_url=url, how=how)
+                    self._set_child(fork_id, cid, arm=arm, status="running", lab_url=url, how=how, model=model)
+                    (cdir / "meta.json").write_text(json.dumps({"model": model}))
 
                     history = list(prefix_msgs)
                     step = plan[arm]
@@ -652,7 +736,7 @@ class Batch:
                         history += forced_turn(step, output)
                         log.write({"type": "forced", "command": step_text(step), "output": output[:2000]})
 
-                    agent = build_analyst(DaytonaSandbox(sandbox=vm), self.cfg.analyst_model)
+                    agent = build_analyst(DaytonaSandbox(sandbox=vm), model, self.domain.analyst_system_prompt)
 
                     def on_event(ev: dict) -> None:
                         self._emit({"kind": "fork_event", "fork": fork_id, "child": cid, "event": ev})
@@ -661,7 +745,7 @@ class Batch:
                                           on_event, lambda files: self._set_child(fork_id, cid, motion_files=files))
                     await asyncio.wait_for(
                         self._drive(agent, {"messages": history}, f"{self.id}-{fork_id}-{cid}", scope,
-                                    self.cfg.analyst_model, log, on_event),
+                                    model, log, on_event),
                         RUN_TIMEOUT_S,
                     )
                     if watch is not None:
@@ -736,7 +820,10 @@ class Batch:
             "recursion_limit": INVESTIGATOR_RECURSION_LIMIT,
         }
         self.case.set_phase("investigating")
-        await self._stream_investigator({"messages": [{"role": "user", "content": "Investigate this batch."}]})
+        # The rubric turns on the grader (RubricMiddleware) that checks the verdict before the investigator finishes.
+        await self._stream_investigator(
+            {"messages": [{"role": "user", "content": "Investigate this batch."}], "rubric": RUBRIC}
+        )
 
     async def decide(self, approve: bool) -> None:
         """Answer the investigator's pending request_forks approval."""

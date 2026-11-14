@@ -189,11 +189,13 @@ async def test_runs_stop_spending_once_the_batch_is_over_budget(local_vms, tmp_p
 
 
 VERDICT = {"sentence": "Skipping the duplicate check caused it.", "step_label": "deduplicate",
-           "control_inflated": 1, "control_total": 1, "forced_inflated": 0, "forced_total": 1}
+           "honest_rate": 1.0, "inflated_rate": 0.0, "n_honest": 1, "n_inflated": 1, "confidence": "low",
+           "arms": {"control": {"inflated": 1, "total": 1}, "forced": {"inflated": 0, "total": 1}}}
 
 
 async def test_fork_tokens_are_charged_to_the_fork_and_never_also_to_the_investigator(local_vms, tmp_path, monkeypatch):
-    b = await _run_batch(tmp_path)
+    # Control and forced only: the verdict must give every arm the experiment scored, and VERDICT gives those two.
+    b = await _run_batch(tmp_path, placebo_arm=False, show_arm=False)
     script_investigator(monkeypatch, [
         call("request_forks", {"n_per_arm": 1}, "i1", 500),
         call("record_verdict", VERDICT, "i2", 500),

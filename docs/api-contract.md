@@ -108,6 +108,11 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
 - `split`: where honest and inflated runs part ways (`label`, `honest_rate`, `inflated_rate`, `fork_run_id`,
   `fork_at`, examples, `intervention`), or null.
 - `hypotheses`: the investigator's, in order.
+- `feed`: the live commentary's notable moments across runs, oldest first, at most 200:
+  `{t, run, model, kind, text}`, `t` on the run's clock like its events, `model` short ("Sonnet"), `kind` one of
+  `first_success`, `drop`, `label`, `finish`, `failed`. Empty when the batch has no commentary
+  (`config.commentary`, on by default for robot_arm only); absent in case files saved before it existed. Its
+  spend is the cost scope `commentary`, capped by `config.commentary_budget_usd`.
 - `forks`: by id (`f1`...): `status` (`rebuilding`, `running`, `done`), `source_run`, `fork_at`, `label`,
   `intervention`, `n_per_arm`, `arm_steps`, `children` (each with `arm`, `status`, scores, `how`), and `arms`
   summaries when done. While the investigator waits for approval there is also `forks.pending` with `n_per_arm`,
@@ -195,7 +200,12 @@ Usd { total, runs, forks, investigator, other, model, vm }
 { t, type: "tool_result", id, name, content }     // content cut to 4000 characters
 { t, type: "todos", todos: [{ content, status: "pending" | "in_progress" | "completed" }] }
 { t, type: "forced", command, output }            // forced fork children only, first line
+{ t, type: "caption", text, final? }              // live commentary (deep_research/commentary.py), runs only
 ```
+
+`caption` events are written by the commentator, not the agent: one line of at most 90 characters on what the run is
+doing, every 20 to 30 s while it has new events, and one with `final: true` (its claim and its result) once it is
+scored. Step labels, the split finder and the forks read `tool_call` events only, so captions change none of them.
 
 The conversation view will show one log: `thought` maps onto thinking, `tool_call` and `tool_result` onto an
 activity step's run and done, and `todos` onto the plan step.

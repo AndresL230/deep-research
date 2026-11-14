@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import type { BatchConfig, CaseFile, Costs, Defaults, Estimate } from "../src/api";
 import {
-  FORM_DOMAIN, HM_ACT, costBar, costGroups, domainDraft, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startBlocked,
-  startPayload,
+  FORM_DOMAIN, HM_ACT, MODEL_CHOICES, costBar, costGroups, domainDraft, draftModels, homeView, initialDraft, pickDomain,
+  recallDomain, rememberDomain, resetDraft, startBlocked, startPayload, toggleModel,
 } from "../src/batch/home";
 import type { HomeVm } from "../src/batch/model";
 
@@ -74,7 +74,7 @@ describe("homeView", () => {
   it("shows the four main settings with the draft's values, and the dataset and trap as one fixed line", () => {
     const html = homeView(vm());
     for (const f of MAIN) expect(html).toContain(`data-cfg="${f}"`);
-    expect(html).toMatch(/type="number"[^>]*min="1" max="24"[^>]*value="12" data-cfg="n_runs"/);
+    expect(html).toMatch(/type="number"[^>]*min="1" max="48"[^>]*value="12" data-cfg="n_runs"/);
     expect(html).toMatch(/type="range" min="0" max="1" step="0.05" value="0.5"[^>]*data-cfg="trap_strength"/);
     expect(html).toContain(">50%</output>");
     expect(html).toContain('<input type="radio" name="hint_level" data-cfg="hint_level" value="none" checked>');
@@ -251,10 +251,13 @@ describe("the domain picker (FORM_DOMAIN null)", () => {
     expect(html).not.toContain("Pima diabetes");
     expect(html).not.toContain("hm-trap");
     for (const f of ["trap_strength", "trap_noise", "holdout_fraction", "model_hint", "dataset", "trap"]) expect(html).not.toContain(`data-cfg="${f}"`);
-    for (const f of ["n_runs", "hint_level", "budget_usd", "inflation_threshold", "forks_per_choice", "seed", "analyst_model", "investigator_model"]) {
+    for (const f of ["n_runs", "hint_level", "budget_usd", "inflation_threshold", "forks_per_choice", "seed", "investigator_model"]) {
       expect(html).toContain(`data-cfg="${f}"`);
     }
-    expect(html).toContain("hm-main--3");
+    // The analysts' models are chips in the main row, in place of the single model's text field.
+    expect(html).not.toContain(`data-cfg="analyst_model"`);
+    expect(html).toContain(`data-f="analyst_models"`);
+    expect(html).toContain("hm-main--models");
     expect(html).toMatch(/min="0.05" max="0.5" step="0.025" value="0.275"[^>]*data-cfg="inflation_threshold"/);
     expect(html).toContain(">27.5 pts</output>");
     expect(text(html)).toContain("About $2.40 for 12 runs and 8 forks");
@@ -322,6 +325,51 @@ describe("the domain picker (FORM_DOMAIN null)", () => {
     vi.stubGlobal("localStorage", { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) });
     rememberDomain("robot_arm");
     expect(recallDomain()).toBe("robot_arm");
+  });
+});
+
+describe("the Models control", () => {
+  const HAIKU = "anthropic:claude-haiku-5-5";
+  const SONNET = "anthropic:claude-sonnet-5-5";
+  const lineupCfg: BatchConfig = { ...robotCfg, n_runs: 36, analyst_models: [HAIKU, SONNET] };
+  const chips = (html: string) => html.match(/<button[^>]*data-act="hm-model"[^>]*>[^<]*<\/button>/g) ?? [];
+
+  it("offers Haiku 5.5 and Sonnet 5.5 as chips in the robot main row, the draft's lineup pressed", () => {
+    const html = homeView(vm({ defaults: withDomains, draft: lineupCfg }));
+    const c = chips(html);
+    expect(c).toHaveLength(2);
+    expect(c[0]).toContain(`data-arg="${HAIKU}"`);
+    expect(c[0]).toContain('aria-pressed="true"');
+    expect(c[0]).toContain(">Haiku 5.5<");
+    expect(c[1]).toContain(">Sonnet 5.5<");
+    expect(c.every((b) => !b.includes("disabled"))).toBe(true);
+    expect(html).toMatch(/max="48"[^>]*value="36" data-cfg="n_runs"/);
+    expect(HM_ACT.model).toBe("hm-model");
+    expect(MODEL_CHOICES.map(([id]) => id)).toEqual([HAIKU, SONNET]);
+    // The tabular form keeps its text field and has no chips.
+    const tab = homeView(vm({ advanced: true }));
+    expect(chips(tab)).toHaveLength(0);
+    expect(tab).toContain(`data-cfg="analyst_model"`);
+  });
+
+  it("keeps at least one model on, and locks while starting", () => {
+    const one: BatchConfig = { ...lineupCfg, analyst_models: [SONNET] };
+    const c = chips(homeView(vm({ defaults: withDomains, draft: one })));
+    expect(c[0]).toContain('aria-pressed="false"');
+    expect(c[0]).not.toContain("disabled");
+    expect(c[1]).toContain('aria-pressed="true"');
+    expect(c[1]).toContain("disabled");
+    expect(toggleModel(one, SONNET)).toBe(one);
+    expect(chips(homeView(vm({ defaults: withDomains, draft: lineupCfg, starting: true }))).every((b) => b.includes("disabled"))).toBe(true);
+  });
+
+  it("toggles models in the control's order", () => {
+    expect(toggleModel(lineupCfg, HAIKU).analyst_models).toEqual([SONNET]);
+    expect(toggleModel({ ...lineupCfg, analyst_models: [SONNET] }, HAIKU).analyst_models).toEqual([HAIKU, SONNET]);
+    // A draft with no lineup starts from its single analyst model.
+    const single: BatchConfig = { ...robotCfg, analyst_model: HAIKU, analyst_models: null };
+    expect(draftModels(single)).toEqual([HAIKU]);
+    expect(toggleModel(single, SONNET).analyst_models).toEqual([HAIKU, SONNET]);
   });
 });
 

@@ -5,7 +5,8 @@ import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import r01Raw from "../../fixtures/demo-batch/runs/r01/events.jsonl?raw";
 import type { AgentEvent, CaseFile, RunRecord } from "../src/api";
 import type { BatchVm } from "../src/batch/model";
-import { runTodos, stepLabel, summaryLine, tileCost, wallSummary, wallView } from "../src/batch/wall";
+import { batchModels, modelSummaryLine, runTodos, stepLabel, summaryLine, tileCost, wallSummary, wallView } from "../src/batch/wall";
+import { modelShort } from "../src/batch/format";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
 const jsonl = (raw: string): AgentEvent[] => raw.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as AgentEvent);
@@ -221,5 +222,54 @@ describe("tile parts", () => {
     const tab = wallView(vmOf(demo));
     expect(tab).toContain("Each agent trains a model and reports its test accuracy.");
     expect(tileOf(tab, "r02")).toContain(">Reported<");
+  });
+});
+
+describe("a batch on more than one analyst model", () => {
+  const HAIKU = "anthropic:claude-haiku-5-5";
+  const SONNET = "anthropic:claude-sonnet-5-5";
+  /** The demo batch with its runs taking Haiku and Sonnet in turn, as a robot batch (so unclear counts). */
+  const mixed = (runs: CaseFile["runs"] = demo.runs, visual = "motion"): CaseFile => ({
+    ...demo,
+    config: { ...demo.config, visual, analyst_models: [HAIKU, SONNET] } as CaseFile["config"],
+    runs: Object.fromEntries(Object.entries(runs).map(([id, r]) => [id, { ...r, model: Number(id.slice(1)) % 2 ? HAIKU : SONNET }])),
+  });
+
+  it("names models shortly", () => {
+    expect(modelShort(HAIKU)).toBe("Haiku");
+    expect(modelShort(SONNET)).toBe("Sonnet");
+    expect(modelShort("gpt-x")).toBe("Gpt");
+    expect(modelShort(undefined)).toBe("-");
+  });
+
+  it("badges each tile with its run's model, right after the id", () => {
+    const html = wallView(vmOf(mixed()));
+    expect(batchModels(vmOf(mixed()))).toEqual([HAIKU, SONNET]);
+    expect(tileOf(html, "r01")).toContain(`<span class="bw-id">r01</span><span class="bw-model" title="${HAIKU}">Haiku</span><span class="bw-pill`);
+    expect(tileOf(html, "r02")).toContain(">Sonnet</span>");
+    // One model, or runs saved before lineups: no badge.
+    expect(wallView(vmOf(demo))).not.toContain("bw-model");
+    const single = { ...demo, runs: Object.fromEntries(Object.entries(demo.runs).map(([id, r]) => [id, { ...r, model: HAIKU }])) };
+    expect(wallView(vmOf(single))).not.toContain("bw-model");
+  });
+
+  it("counts honest, unclear and inflated runs per model under the summary", () => {
+    const runs = { ...demo.runs, r01: { ...demo.runs.r01, status: "unclear" as const } };
+    const c = mixed(runs);
+    const odd = Object.values(c.runs).filter((r) => r.model === HAIKU);
+    const n = (st: string) => odd.filter((r) => r.status === st).length;
+    const line = modelSummaryLine(vmOf(c))!;
+    expect(line.startsWith(`Haiku: ${n("honest")} honest, ${n("unclear")} unclear, ${n("inflated")} inflated · Sonnet: `)).toBe(true);
+    expect(n("unclear")).toBe(1);
+    const html = wallView(vmOf(c));
+    expect(html).toContain(`<p class="bw-sum-models" data-morph-key="by-model">${line}</p>`);
+    // A tabular batch has no unclear runs to count.
+    expect(modelSummaryLine(vmOf(mixed(demo.runs, "charts")))).toMatch(/^Haiku: \d+ honest, \d+ inflated · Sonnet: \d+ honest, \d+ inflated$/);
+    // Nothing scored yet, or one model: no line.
+    expect(modelSummaryLine(vmOf(mixed(midReplay().runs)))).not.toBeNull();
+    const queued = Object.fromEntries(Object.keys(demo.runs).map((id) => [id, { id, status: "queued" as const }]));
+    expect(modelSummaryLine(vmOf(mixed(queued)))).toBeNull();
+    expect(modelSummaryLine(vmOf(demo))).toBeNull();
+    expect(wallView(vmOf(demo))).not.toContain("bw-sum-models");
   });
 });

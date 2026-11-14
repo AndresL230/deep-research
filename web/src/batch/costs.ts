@@ -59,11 +59,13 @@ const exact = (n: number): string => `${n.toLocaleString("en-US")} tokens`;
 
 export interface Part { key: string; label: string; usd: number; note?: string }
 
-const GROUP_LABEL: Record<string, string> = { runs: "Runs", forks: "Forks", investigator: "Investigator", other: "Other" };
+const GROUP_LABEL: Record<string, string> = { runs: "Runs", forks: "Forks", investigator: "Investigator", commentary: "Commentary", other: "Other" };
 
-/** The spend groups of one dollar split, in their fixed order. `Other` shows only when it holds something. */
-export function groupParts(u: { runs: number; forks: number; investigator: number; other?: number }): Part[] {
+/** The spend groups of one dollar split, in their fixed order. `Commentary` and `Other` show only when they hold
+ *  something. */
+export function groupParts(u: { runs: number; forks: number; investigator: number; commentary?: number; other?: number }): Part[] {
   const parts: Part[] = (["runs", "forks", "investigator"] as const).map((key) => ({ key, label: GROUP_LABEL[key], usd: u[key] }));
+  if ((u.commentary ?? 0) > 0) parts.push({ key: "commentary", label: GROUP_LABEL.commentary, usd: u.commentary! });
   if ((u.other ?? 0) > 0) parts.push({ key: "other", label: GROUP_LABEL.other, usd: u.other! });
   return parts;
 }
@@ -135,7 +137,7 @@ function tokenStrip(t: CostTokens, vmSeconds: number): string {
   </section>`;
 }
 
-const ROLE: Record<string, string> = { analyst: "Analyst", investigator: "Investigator" };
+const ROLE: Record<string, string> = { analyst: "Analyst", investigator: "Investigator", commentary: "Commentary" };
 
 function modelRows(models: ModelCost[]): string {
   if (!models.length) return "";

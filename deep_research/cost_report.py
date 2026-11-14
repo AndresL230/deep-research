@@ -11,8 +11,9 @@ from datetime import datetime, timedelta
 from typing import Any
 
 # Where the money went. A scope is `run:r01`, `fork:f1:base`, `fork:f1:control-1` or `investigator`;
-# fixtures use the bare `runs` and `forks`. Anything else lands in `other`.
-GROUPS = ("runs", "forks", "investigator", "other")
+# fixtures use the bare `runs` and `forks`. `commentary` is the live captions (commentary.py). Anything else lands in
+# `other`.
+GROUPS = ("runs", "forks", "investigator", "commentary", "other")
 TOKENS = ("input", "output", "cache_read", "cache_write")
 SCORED = ("honest", "inflated", "failed")
 
@@ -56,6 +57,8 @@ def _group(scope: str) -> str:
         return "forks"
     if scope.startswith("investigator"):
         return "investigator"
+    if scope == "commentary":
+        return "commentary"
     return "other"
 
 
@@ -82,12 +85,26 @@ def _zero_usd() -> dict[str, float]:
 
 
 def _model_row() -> dict:
-    groups = {g: 0.0 for g in GROUPS if g != "other"}
+    # A model gets a `commentary` key only when it wrote captions: the analyst and investigator rows keep their shape.
+    groups = {g: 0.0 for g in GROUPS if g not in ("other", "commentary")}
     return {"usd": 0.0, "groups": groups, "usd_partial": False, "tokens": {k: 0 for k in TOKENS}, "roles": set(), "batches": 0}
 
 
 def _round_usd(usd: dict[str, float]) -> dict[str, float]:
     return {k: round(v, 4) for k, v in usd.items()}
+
+
+def _scope_model(scope: str, case: dict) -> str | None:
+    """The `model` a run (`run:r01`) or fork copy (`fork:f1:control-1`) recorded in the case file, or None."""
+    parts = scope.split(":")
+    if len(parts) == 2 and parts[0] == "run":
+        rec = _dict(_dict(case.get("runs")).get(parts[1]))
+    elif len(parts) == 3 and parts[0] == "fork":
+        rec = _dict(_dict(_dict(_dict(case.get("forks")).get(parts[1])).get("children")).get(parts[2]))
+    else:
+        return None
+    model = rec.get("model")
+    return model if isinstance(model, str) and model else None
 
 
 def _batch(entry: dict) -> tuple[dict, dict[str, dict]]:
@@ -124,12 +141,14 @@ def _batch(entry: dict) -> tuple[dict, dict[str, dict]]:
         usd["vm"] += _num(vm_usd)
         usd["total"] += known
 
-        role = "investigator" if group == "investigator" else "analyst"
-        model = config.get(f"{role}_model")
+        # The commentary's tokens are its own model's (`commentary_model`).
+        role = group if group in ("investigator", "commentary") else "analyst"
+        # A run or fork copy names its own model when the batch had a lineup of analyst models.
+        model = _scope_model(name, case) or config.get(f"{role}_model")
         if model and group != "other" and any(tok.values()):
             m = models.setdefault(model, _model_row())
             m["usd"] += _num(model_usd)
-            m["groups"][group] += _num(model_usd)
+            m["groups"][group] = m["groups"].get(group, 0.0) + _num(model_usd)
             m["usd_partial"] = m["usd_partial"] or not model_known
             m["roles"].add(role)
             _add(m["tokens"], tok)
@@ -142,7 +161,9 @@ def _batch(entry: dict) -> tuple[dict, dict[str, dict]]:
         "phase": case.get("phase"),
         "dataset": config.get("dataset"),
         "trap": config.get("trap"),
-        "analyst_model": config.get("analyst_model"),
+        # A lineup of analyst models (runs took them in turn) reads as the models joined.
+        "analyst_model": ", ".join(lineup) if isinstance(lineup := config.get("analyst_models"), list) and lineup
+        else config.get("analyst_model"),
         "investigator_model": config.get("investigator_model"),
         "simulated": simulated,
         "prices_missing": bool(costs.get("prices_missing")),

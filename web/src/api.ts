@@ -7,7 +7,9 @@
 // ── the case file ────────────────────────────────────────────────────────────
 
 /** The case file's sections, in order. */
-export const CASE_SECTIONS = ["config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "costs"] as const;
+export const CASE_SECTIONS = [
+  "config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "trace_comparison", "rubric", "feed", "costs",
+] as const;
 export type CaseSection = (typeof CASE_SECTIONS)[number];
 
 /** Phases in the order a batch moves through them. Also `stopped`, `blocked: <why>` and `error: <why>`. */
@@ -104,6 +106,13 @@ export interface BatchConfig {
   placebo_arm?: boolean;
   show_arm?: boolean;
   analyst_model: string;
+  /** A lineup of analyst models the runs take in turn (r01 the first, r02 the second, ...). Null or absent: every run
+   *  uses `analyst_model`. The robot domain defaults to Haiku 5.5 and Sonnet 5.5. */
+  analyst_models?: string[] | null;
+  /** How many runs have a VM at once; the rest wait as "queued". */
+  max_concurrent_runs?: number;
+  /** The analysts' step limit (LangGraph recursion limit). */
+  max_agent_steps?: number;
   investigator_model: string;
   budget_usd: number;
   inflation_threshold: number;
@@ -113,6 +122,12 @@ export interface BatchConfig {
   robot_hidden_positions?: number | null;
   /** robot_arm only: the seeds each hidden position is run with (one to five). */
   robot_eval_seeds?: number[];
+  /** Live commentary (deep_research/commentary.py): captions of each run and a feed of notable moments. The server
+   *  turns it on for robot_arm and off for tabular when it is left out. */
+  commentary?: boolean | null;
+  commentary_model?: string;
+  /** The most the captions may spend in one batch; counted under the cost scope `commentary`. */
+  commentary_budget_usd?: number;
   /** Only on fixtures made by scripts/make_fixture.py: the agents' choices are scripted. */
   simulated?: boolean;
 }
@@ -141,6 +156,8 @@ export interface AgentTodo { content: string; status: "pending" | "in_progress" 
 export interface RunRecord extends Partial<Omit<RunScore, "status">> {
   id: string;
   status: RunStatus;
+  /** The analyst model this run uses (from the batch's lineup). Absent on batches saved before lineups. */
+  model?: string;
   vm_id?: string;
   /** Signed preview URL of the lab page inside the VM. Null when it could not start, in replays, and once the run
    *  has ended (the VM is deleted then; see `charts`). */
@@ -201,6 +218,8 @@ export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   motion_files?: string[];
   /** "fork": a copy-on-write VM fork. "replay": rebuilt by replaying the actions when forking failed. */
   how?: "fork" | "replay";
+  /** The analyst model the copy continues on: its source run's. */
+  model?: string;
 }
 
 export interface ArmSummary {
@@ -247,19 +266,59 @@ export interface PendingForks {
   estimate_usd: number | null;
 }
 
-export interface Hypothesis {
+export type Confidence = "low" | "medium" | "high";
+
+/** The split a hypothesis or verdict rests on, as fields. Absent on case files saved before they existed. */
+export interface SplitFields {
+  /** The step, the same as `step_label`. */
+  step?: StepLabel;
+  /** Shares 0 to 1 of the honest and inflated runs that did the step, and how many runs each is over. */
+  honest_rate?: number;
+  inflated_rate?: number;
+  n_honest?: number;
+  n_inflated?: number;
+  confidence?: Confidence;
+}
+
+export interface Hypothesis extends SplitFields {
   /** Unix seconds. */
   at: number;
   step_label: StepLabel;
   honest_action: string;
   inflated_action: string;
   evidence: string;
+  /** The hypothesis in one sentence. */
+  sentence?: string;
 }
 
-export interface Verdict {
+export interface Verdict extends SplitFields {
   sentence: string;
   step_label: StepLabel;
+  /** `{arm}_inflated` and `{arm}_total` per arm (the old form; derived from `arms` when that is set). */
   numbers: Record<string, number>;
+  /** Every arm the fork experiment scored: inflated and scored copies. */
+  arms?: Partial<Record<ForkArm, { inflated: number; total: number }>>;
+}
+
+/** Whether the runs the code-tracer traced fail at the same line with the same symptom. */
+export interface TraceComparison {
+  at: number;
+  same: "same" | "different" | "mixed";
+  sentence: string;
+  run_ids: string[];
+}
+
+/** One grader check of the verdict against the investigator's rubric. */
+export interface RubricCheck {
+  at: number;
+  /** 0 for the first check; each revision adds one. */
+  iteration: number;
+  /** "satisfied", "needs_revision", "max_iterations_reached", "failed" or "grader_error". */
+  result: string;
+  explanation: string;
+  /** How many criteria the grader checked, and the ones that failed. */
+  criteria: number;
+  failing: { name: string; gap: string }[];
 }
 
 /** One finding of the investigator's `code-tracer` subagent: a symptom read from a recording of a failing run, and
@@ -344,7 +403,26 @@ export interface CaseFile {
   trace?: TraceEntry[];
   /** Null until the investigator proposes a fix. Absent on case files saved before it existed: read as null. */
   fix?: ProposedFix | null;
+  /** Null until the investigator compares its traces. Absent on older case files. */
+  trace_comparison?: TraceComparison | null;
+  /** The grader's checks of the verdict, oldest first. Absent on older case files. */
+  rubric?: RubricCheck[];
+  /** The live commentary's notable moments, oldest first (at most 200). Absent on case files saved before it existed,
+   *  and empty in a batch without commentary. */
+  feed?: FeedItem[];
   costs: Costs;
+}
+
+/** One item of the commentary feed (deep_research/commentary.py). */
+export interface FeedItem {
+  /** Seconds on the run's own clock, like its events' `t`. */
+  t: number;
+  run: string;
+  /** The run's model, short: "Sonnet". May be empty. */
+  model: string;
+  /** What made it notable: "first_success", "drop", "label" (a step such as moving the can), "finish", "failed". */
+  kind: string;
+  text: string;
 }
 
 export const isPendingForks = (f: ForkExperiment | PendingForks): f is PendingForks => f.id === "pending";
@@ -362,6 +440,9 @@ export type AgentEvent = { t: number; /** Investigator only: which agent or suba
   /** Robot runs and fork children only: a motion file arrived from the VM (new, or changed since it last did), at
    *  `path`, batch-relative as in `motion_files`. Batches saved before these existed have none. */
   | { type: "motion"; path: string }
+  /** Runs with live commentary only: a short caption of what the run is doing. `final`: written once the run was
+   *  scored, with its claim and its result. */
+  | { type: "caption"; text: string; final?: boolean }
 );
 
 // ── the websocket ────────────────────────────────────────────────────────────
@@ -480,12 +561,14 @@ export interface Estimate {
   basis: string;
   /** The domain the estimate is for: each domain has its own average run cost. */
   domain?: string;
+  /** With a lineup of models: how many runs each model gets and its average run cost (null when unknown). */
+  by_model?: Record<string, { runs: number; avg_run_usd: number | null }>;
 }
 
 // The cost report (deep_research/cost_report.py, `GET /api/costs`): spend across every batch.
 export interface CostTokens { input: number; output: number; cache_read: number; cache_write: number }
 /** One total split two ways: by group (runs + forks + investigator + other) and by kind (model + vm). */
-export interface CostUsd { total: number; runs: number; forks: number; investigator: number; other: number; model: number; vm: number }
+export interface CostUsd { total: number; runs: number; forks: number; investigator: number; /** The live commentary; absent in reports from before it. */ commentary?: number; other: number; model: number; vm: number }
 export interface BatchCost {
   id: string;
   kind: "live" | "replay";
@@ -512,7 +595,7 @@ export interface ModelCost {
   batches: number;
   /** Model spend only: VM time belongs to no model. */
   usd: number;
-  usd_by_group: { runs: number; forks: number; investigator: number };
+  usd_by_group: { runs: number; forks: number; investigator: number; commentary?: number };
   usd_partial: boolean;
   tokens: CostTokens;
 }
@@ -551,6 +634,9 @@ export function labPageUrl(batchId: string, key: string): string {
 }
 
 /** The URL of a file saved with a batch, such as a run's `charts` entry. Holdout labels are never served. */
+/** The investigator's notebook for a domain, as plain text (GET /api/memory/<domain>). */
+export const notebookUrl = (domain: string): string => `/api/memory/${encodeURIComponent(domain)}`;
+
 export const batchFileUrl = (batchId: string, path: string): string =>
   `${batchPath(batchId)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
 
