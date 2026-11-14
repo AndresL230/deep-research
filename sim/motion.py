@@ -4,6 +4,7 @@ The format is documented in `sim/MOTION_FORMAT.md`. In short:
 
     {"format": "panda-motion/1",
      "header": {"model_id", "joint_names", "actuator_names", "can_start", "place_target", "fps", "nq"},
+     (fps is 30 by default; LOW_FPS for small recordings kept in bulk)
      "frames": [{"t", "qpos", "ctrl", "hand", "can_pos", "can_quat"}, ...],
      "result": {...}}
 """
@@ -18,6 +19,10 @@ FORMAT = "panda-motion/1"
 MOTION_FPS = 30
 MAX_BYTES = 200_000
 DECIMALS = 4
+# Small recordings, for keeping many episodes (`run_episode(motion_fps=LOW_FPS, motion_decimals=LOW_DECIMALS)`):
+# 8 frames a second and 3 decimals (1 mm, 0.001 rad) give 10 to 20 KB per episode.
+LOW_FPS = 8
+LOW_DECIMALS = 3
 
 HEADER_KEYS = ("model_id", "joint_names", "actuator_names", "can_start", "place_target", "fps", "nq")
 FRAME_KEYS = ("t", "qpos", "ctrl", "hand", "can_pos", "can_quat")
@@ -90,8 +95,9 @@ def validate_motion(motion) -> list[str]:
             problems.append("header.actuator_names should be a list of strings")
         else:
             nu = len(acts)
-        if header.get("fps") != MOTION_FPS:
-            problems.append(f"header.fps should be {MOTION_FPS}, got {header.get('fps')!r}")
+        fps = header.get("fps")
+        if not isinstance(fps, int) or isinstance(fps, bool) or not 1 <= fps <= MOTION_FPS:
+            problems.append(f"header.fps should be a whole number from 1 to {MOTION_FPS}, got {fps!r}")
         for key in ("can_start", "place_target"):
             if key in header and not _is_num_list(header[key], 2):
                 problems.append(f"header.{key} should be 2 numbers")

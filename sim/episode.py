@@ -74,7 +74,7 @@ import mujoco
 import numpy as np
 
 from sim.control import CONTROL_DT, CONTROL_HZ, GRASP_OFFSET
-from sim.motion import FORMAT, MOTION_FPS, round_list
+from sim.motion import DECIMALS, FORMAT, MOTION_FPS, round_list
 from sim.scene import CAN_HALF_HEIGHT, MODEL_ID, build_model
 
 MAX_TIME = 10.0
@@ -211,8 +211,13 @@ def run_episode(
     can_yaw: float = 0.0,
     max_time: float = MAX_TIME,
     record: bool = True,
+    motion_fps: int = MOTION_FPS,
+    motion_decimals: int = DECIMALS,
 ) -> tuple[dict, dict | None]:
     """Run one episode and return (result, motion). motion is None when record is False.
+
+    `motion_fps` and `motion_decimals` set the recording's frame rate and rounding (sim/MOTION_FORMAT.md); they never
+    change the episode itself.
 
     Never raises because of the controller: load errors, exceptions in reset/act, bad actions and
     physics blow-ups all end the episode as a failure with result["exception"] set.
@@ -236,11 +241,11 @@ def run_episode(
         frames.append(
             {
                 "t": round(float(d.time), 4),
-                "qpos": round_list(d.qpos),
-                "ctrl": round_list(d.ctrl),
-                "hand": round_list(sim.hand_pos()),
-                "can_pos": round_list(sim.can_pos()),
-                "can_quat": round_list(sim.can_quat()),
+                "qpos": round_list(d.qpos, motion_decimals),
+                "ctrl": round_list(d.ctrl, motion_decimals),
+                "hand": round_list(sim.hand_pos(), motion_decimals),
+                "can_pos": round_list(sim.can_pos(), motion_decimals),
+                "can_quat": round_list(sim.can_quat(), motion_decimals),
             }
         )
 
@@ -248,7 +253,7 @@ def run_episode(
         nonlocal next_frame_t
         if record and d.time + 1e-9 >= next_frame_t:
             capture()
-            next_frame_t += 1.0 / MOTION_FPS
+            next_frame_t += 1.0 / motion_fps
 
     exception: str | None = None
     end_reason = "max_time"
@@ -411,12 +416,12 @@ def run_episode(
                 "actuator_names": [m.actuator(a).name for a in range(m.nu)],
                 "can_start": list(can_xy),
                 "place_target": list(place_xy),
-                "fps": MOTION_FPS,
+                "fps": int(motion_fps),
                 "nq": int(m.nq),
                 "nu": int(m.nu),
                 "qpos_layout": "7 arm joints, 2 finger joints, can freejoint xyz + quat wxyz",
                 "seed": seed,
-                "dt": round(1.0 / MOTION_FPS, 6),
+                "dt": round(1.0 / motion_fps, 6),
             },
             "frames": frames,
             "result": result,
