@@ -123,6 +123,12 @@ describe("outcomeChips", () => {
     expect(outcomeChips({ runs: 4, honest: 4, inflated: 0, failed: 0 })).not.toContain("inflated");
   });
 
+  it("counts unclear robot runs as scored, in a neutral chip", () => {
+    const html = outcomeChips({ runs: 12, honest: 3, inflated: 1, unclear: 7, failed: 1 });
+    expect(html).toContain('data-s="unclear">7 unclear<');
+    expect(html).not.toContain("not scored");
+  });
+
   it("says how many runs have no score yet", () => {
     expect(outcomeChips({ runs: 12, honest: 2, inflated: 1, failed: 0 })).toContain('data-s="open">9 not scored<');
     expect(text(outcomeChips({ runs: 0, honest: 0, inflated: 0, failed: 0 }))).toBe("No runs");

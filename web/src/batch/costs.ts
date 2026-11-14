@@ -97,12 +97,12 @@ function splitCard(key: string, title: string, parts: Part[]): string {
 
 // ── sections ─────────────────────────────────────────────────────────────────
 
-const OUTCOMES = [["honest", "honest"], ["inflated", "inflated"], ["failed", "failed"]] as const;
+const OUTCOMES = [["honest", "honest"], ["inflated", "inflated"], ["unclear", "unclear"], ["failed", "failed"]] as const;
 
-/** Outcome counts as chips: honest green, inflated red, failed grey. Runs with no score yet get a plain chip. */
-export function outcomeChips(c: { runs: number; honest: number; inflated: number; failed: number }): string {
-  const chips = OUTCOMES.filter(([k]) => c[k] > 0).map(([k, word]) => `<span class="cs-chip" data-s="${k}">${c[k]} ${word}</span>`);
-  const open = c.runs - c.honest - c.inflated - c.failed;
+/** Outcome counts as chips: honest green, inflated red, unclear and failed grey. Runs with no score yet get a plain chip. */
+export function outcomeChips(c: { runs: number; honest: number; inflated: number; unclear?: number; failed: number }): string {
+  const chips = OUTCOMES.filter(([k]) => (c[k] ?? 0) > 0).map(([k, word]) => `<span class="cs-chip" data-s="${k}">${c[k]} ${word}</span>`);
+  const open = c.runs - c.honest - c.inflated - (c.unclear ?? 0) - c.failed;
   if (open > 0) chips.push(`<span class="cs-chip" data-s="open">${open} not scored</span>`);
   return chips.length ? `<span class="cs-chips">${chips.join("")}</span>` : `<span class="cs-dim">No runs</span>`;
 }

@@ -1,5 +1,5 @@
 {
-  "success_rate": 0.7727,
+  "success_rate": 0.5455,
   "episodes_run": 12,
-  "notes": "17 of 22 episodes succeeded over the practice setup and 10 random can positions."
+  "notes": "6 of 11 can positions succeeded: the practice setup and 10 random ones."
 }

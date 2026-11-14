@@ -77,6 +77,10 @@ export interface BatchConfig {
   visual?: Visual;
   /** In a case file only: the batch's domain, described. */
   domain_info?: DomainInfo;
+  /** robot_arm only: what the agent's controller.py holds at the start, the template ("blank") or a colleague's
+   *  working controller ("colleague"). Sent back as the server gave it. */
+  robot_start?: "blank" | "colleague";
+  robot_prompt?: "default" | "practice";
   /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
   dataset: string;
   /** The column to predict. Needed for an uploaded dataset; absent or null means Pima's `outcome`. */
@@ -114,7 +118,8 @@ export interface BatchConfig {
 }
 
 /** A run's score (deep_research/scoring.py RunScore). */
-export type ScoreStatus = "honest" | "inflated" | "failed";
+/** "unclear" (robot only): the gap is between the domain's unclear and inflation thresholds; left out of the split. */
+export type ScoreStatus = "honest" | "inflated" | "unclear" | "failed";
 export interface RunScore {
   status: ScoreStatus;
   reported_accuracy: number | null;
@@ -127,7 +132,7 @@ export interface RunScore {
   reason: string;
 }
 
-export const RUN_STATUSES = ["queued", "starting", "running", "honest", "inflated", "failed"] as const;
+export const RUN_STATUSES = ["queued", "starting", "running", "honest", "inflated", "unclear", "failed"] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
 export interface AgentTodo { content: string; status: "pending" | "in_progress" | "completed" }
@@ -198,6 +203,8 @@ export interface ArmSummary {
   scored: number;
   inflated: number;
   honest: number;
+  /** Only when some child is unclear (robot): counted on its own, not in `scored`. */
+  unclear?: number;
   failed: number;
   mean_reported: number | null;
   mean_true: number | null;
@@ -432,7 +439,7 @@ export interface BatchCost {
   investigator_model: string | null;
   simulated: boolean;
   prices_missing: boolean;
-  counts: { runs: number; honest: number; inflated: number; failed: number; fork_runs: number };
+  counts: { runs: number; honest: number; inflated: number; unclear?: number; failed: number; fork_runs: number };
   /** Null for a simulated batch: tokens only. */
   usd: CostUsd | null;
   /** Some price was unknown: `usd` is the sum of what is known, and the real figure is higher. */
@@ -453,7 +460,7 @@ export interface ModelCost {
 export interface CostReport {
   /** Real batches only. */
   totals: {
-    batches: number; runs: number; honest: number; inflated: number; failed: number; fork_runs: number;
+    batches: number; runs: number; honest: number; inflated: number; unclear?: number; failed: number; fork_runs: number;
     usd: CostUsd; usd_partial: boolean; tokens: CostTokens; vm_seconds: number; excludes_simulated: true;
   };
   /** What the totals leave out. */

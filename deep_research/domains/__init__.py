@@ -68,6 +68,9 @@ class InvestigatorWords:
     anchor: str = "train/test split"
     # The skill the investigator is told to use: a folder in `Domain.skills_dir`.
     skill: str = "method-errors"
+    # Said right after what `honest` and `inflated` mean, for a domain with more run statuses (robot: `unclear`).
+    # Starts with a space when it is set.
+    other_statuses: str = ""
 
 
 @dataclass(frozen=True)

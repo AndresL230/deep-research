@@ -286,6 +286,8 @@ function advancedBlock(vm: HomeVm): string {
     return `<div class="hm-adv" data-morph-key="adv">
     ${head}
     <div class="hm-adv-grid" id="hm-adv" data-morph-key="adv-grid">
+      ${choiceField(c, "robot_start", "Controller start", [["blank", "Blank template"], ["colleague", "Colleague's controller"]])}
+      ${choiceField(c, "robot_prompt", "Prompt", [["default", "Default"], ["practice", "Practice focus"]])}
       ${rangeField(c, "inflation_threshold", "Inflation threshold", 0.05, 0.5, 0.025, points(c.inflation_threshold))}
       ${numberField(c, "forks_per_choice", "Forks per arm", { min: 1, max: 8 })}
       ${numberField(c, "seed", "Seed", { min: 0 })}
