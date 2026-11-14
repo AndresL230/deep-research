@@ -1,0 +1,184 @@
+// The wall of run tiles against the committed demo batch, plus mid-replay and live variants of it.
+
+import { describe, expect, it } from "vitest";
+import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
+import r01Raw from "../../fixtures/demo-batch/runs/r01/events.jsonl?raw";
+import type { AgentEvent, CaseFile, RunRecord } from "../src/api";
+import type { BatchVm } from "../src/batch/model";
+import { runTodos, stepLabel, summaryLine, tileChart, tileCost, wallSummary, wallView } from "../src/batch/wall";
+
+const demo = JSON.parse(caseRaw) as CaseFile;
+const jsonl = (raw: string): AgentEvent[] => raw.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as AgentEvent);
+const r01Events = jsonl(r01Raw);
+
+const vmOf = (c: CaseFile, over: Partial<BatchVm> = {}): BatchVm => ({
+  id: "demo-batch", live: false, case: c, events: {}, replay: null, busy: null, error: null, now: 0, ...over,
+});
+const replay = { t: 30, duration: 300, playing: true, speed: 4 };
+
+/** The demo case mid-replay: r01..r03 scored, r04..r07 running, the rest queued. */
+function midReplay(): CaseFile {
+  const runs: Record<string, RunRecord> = {};
+  for (const [id, r] of Object.entries(demo.runs)) {
+    const n = Number(id.slice(1));
+    if (n <= 3) runs[id] = r;
+    else if (n <= 7) runs[id] = { id, status: n === 4 ? "starting" : "running", charts: r.charts, step: n === 5 ? "Split into train and test" : null };
+    else runs[id] = { id, status: "queued", charts: r.charts };
+  }
+  return { ...demo, phase: "running", runs };
+}
+
+const tileOf = (html: string, id: string): string => {
+  const key = html.indexOf(`data-morph-key="tile:${id}"`);
+  const start = html.lastIndexOf(`<div class="bw-tile`, key);
+  const next = html.indexOf(`<div class="bw-tile`, key);
+  return html.slice(start, next < 0 ? undefined : next);
+};
+
+describe("wallSummary", () => {
+  it("counts the finished demo batch", () => {
+    expect(wallSummary(vmOf(demo))).toEqual({ total: 12, honest: 6, inflated: 6, failed: 0, running: 0, queued: 0 });
+    expect(summaryLine(wallSummary(vmOf(demo)))).toBe("12 runs: 6 honest, 6 inflated, 0 failed");
+  });
+
+  it("counts a batch mid-replay", () => {
+    const s = wallSummary(vmOf(midReplay(), { replay }));
+    expect(s).toEqual({ total: 12, honest: 1, inflated: 2, failed: 0, running: 4, queued: 5 });
+    expect(summaryLine(s)).toBe("4 of 12 running, 3 scored");
+  });
+
+  it("says so when there are no runs", () => {
+    expect(summaryLine(wallSummary(vmOf({ ...demo, runs: {} })))).toBe("No runs yet");
+  });
+});
+
+describe("wallView on the finished demo batch", () => {
+  const html = wallView(vmOf(demo));
+
+  it("renders one clickable keyed tile per run, in id order, in a keyed list", () => {
+    expect(html).toContain("data-morph-list");
+    const ids = [...html.matchAll(/data-morph-key="tile:(r\d+)"/g)].map((m) => m[1]);
+    expect(ids).toEqual(Object.keys(demo.runs).sort());
+    expect(html.match(/data-act="open-run"/g)).toHaveLength(12);
+    expect(html).toContain(`data-arg="r07"`);
+    expect(html.match(/role="button" tabindex="0"/g)).toHaveLength(12);
+  });
+
+  it("shows the summary and the simulated note", () => {
+    expect(html).toContain("12 runs: 6 honest, 6 inflated, 0 failed");
+    expect(html).toContain("Simulated batch:");
+    expect(html).toContain("choices are scripted, the scores and charts are real");
+  });
+
+  it("reveals reported vs true, the gap and the overlap", () => {
+    const r02 = tileOf(html, "r02");
+    expect(r02).toContain("bw-tile--inflated");
+    expect(r02).toContain("89.2%");
+    expect(r02).toContain("76.0%");
+    expect(r02).toContain("+13.2 pts");
+    expect(r02).toContain("52% of test rows were in training");
+    expect(r02).toContain("width:52.4%");
+    const r01 = tileOf(html, "r01");
+    expect(r01).toContain("bw-tile--honest");
+    expect(r01).toContain("-0.4 pts");
+    expect(r01).toContain("0% of test rows were in training");
+    expect(r01).toContain(">Done<");
+  });
+
+  it("shows the last chart and the fixture tokens", () => {
+    const r01 = tileOf(html, "r01");
+    expect(r01).toContain(`src="/api/batches/demo-batch/files/runs/r01/live/02_confusion.png"`);
+    expect(r01).toContain("37k tokens");
+    expect(html).not.toContain("<iframe");
+  });
+
+  it("never writes an em dash", () => {
+    expect(html).not.toContain("\u2014");
+  });
+});
+
+describe("wallView mid-replay", () => {
+  it("moves statuses and hides charts that had not happened yet", () => {
+    const c = midReplay();
+    const vm = vmOf(c, { replay, events: { r06: r01Events.slice(0, 7) } });
+    const html = wallView(vm);
+    expect(html).toContain("4 of 12 running, 3 scored");
+    const r04 = tileOf(html, "r04");
+    expect(r04).toContain("bw-pill--starting");
+    expect(r04).toContain("Starting the VM");
+    expect(r04).toContain("ask-spin");
+    expect(r04).not.toContain("<img");
+    const r05 = tileOf(html, "r05");
+    expect(r05).toContain("Split into train and test");
+    const r06 = tileOf(html, "r06");
+    // The first todo is completed by the 7th event: progress, so the first chart and the todo in progress.
+    expect(r06).toContain("01_outcome_counts.png");
+    expect(r06).toContain("Check for and remove duplicate rows");
+    expect(r06.match(/bw-seg--completed/g)).toHaveLength(1);
+    expect(r06.match(/bw-seg--in_progress/g)).toHaveLength(1);
+    expect(r06.match(/bw-seg--pending/g)).toHaveLength(4);
+    const r09 = tileOf(html, "r09");
+    expect(r09).toContain("bw-pill--queued");
+    expect(r09).toContain("Waiting to start");
+    expect(r09).not.toContain("bw-rev");
+    const r02 = tileOf(html, "r02");
+    expect(r02).toContain("02_confusion.png");
+  });
+
+  it("picks charts by progress", () => {
+    const run = midReplay().runs.r07;
+    const vm = vmOf(midReplay(), { replay });
+    expect(tileChart(vm, run, null)).toBeNull();
+    expect(tileChart(vm, run, [{ content: "a", status: "completed" }])).toBe("runs/r07/live/01_outcome_counts.png");
+    expect(tileChart(vmOf(midReplay()), run, null)).toBe("runs/r07/live/02_confusion.png");
+  });
+});
+
+describe("tile parts", () => {
+  it("reads todos from the run first, else the latest todos event", () => {
+    const vm = vmOf(demo, { events: { r01: r01Events } });
+    const todos = runTodos(vm, demo.runs.r01);
+    expect(todos?.every((t) => t.status === "completed")).toBe(true);
+    expect(runTodos(vm, { id: "r01", status: "running", todos: [{ content: "x", status: "pending" }] })).toEqual([{ content: "x", status: "pending" }]);
+    expect(runTodos(vmOf(demo), demo.runs.r01)).toBeNull();
+  });
+
+  it("labels every status", () => {
+    expect(stepLabel({ id: "a", status: "queued" }, null)).toBe("Queued");
+    expect(stepLabel({ id: "a", status: "running", step: null }, null)).toBe("Working");
+    expect(stepLabel({ id: "a", status: "failed", reason: "no report.json" }, null)).toBe("no report.json");
+    expect(stepLabel({ id: "a", status: "honest" }, null)).toBe("Done");
+  });
+
+  it("prefers the run's cost scope: dollars, else tokens", () => {
+    const withUsd: CaseFile = { ...demo, costs: { scopes: { "run:r01": { input_tokens: 1000, output_tokens: 200, total_usd: 0.4213 } } } };
+    expect(tileCost(vmOf(withUsd), demo.runs.r01)).toBe("$0.42");
+    const noUsd: CaseFile = { ...demo, costs: { scopes: { "run:r01": { input_tokens: 120000, output_tokens: 5000, total_usd: null } } } };
+    expect(tileCost(vmOf(noUsd), demo.runs.r01)).toBe("125k tokens");
+    expect(tileCost(vmOf(demo), { id: "x", status: "queued" })).toBeNull();
+  });
+
+  it("embeds a live lab page in a sandboxed iframe", () => {
+    const c: CaseFile = { ...demo, config: { ...demo.config, simulated: false } as CaseFile["config"], costs: {},
+      runs: { r01: { id: "r01", status: "running", lab_url: "https://lab.example/p?a=1&b=2", step: "Train a random forest" } } };
+    const html = wallView(vmOf(c, { live: true }));
+    expect(html).toContain(`<iframe`);
+    expect(html).toContain(`src="https://lab.example/p?a=1&amp;b=2"`);
+    expect(html).toContain(`sandbox="allow-scripts"`);
+    expect(html).toContain(`loading="lazy"`);
+    expect(html).toContain(`referrerpolicy="no-referrer"`);
+    expect(html).toContain(`title="Lab page of run r01"`);
+    expect(html).not.toContain("Simulated batch");
+    expect(html).toContain("1 of 1 running, 0 scored");
+  });
+
+  it("shows a failed run's reason, truncated and escaped", () => {
+    const reason = `<b>boom</b> ${"x".repeat(300)}`;
+    const c: CaseFile = { ...demo, runs: { r01: { id: "r01", status: "failed", reason } } };
+    const html = wallView(vmOf(c));
+    expect(html).not.toContain("<b>boom");
+    expect(html).toContain("&lt;b&gt;boom");
+    expect(html).toContain("bw-rev--failed");
+    expect(html).toContain("1 run: 0 honest, 0 inflated, 1 failed");
+  });
+});
