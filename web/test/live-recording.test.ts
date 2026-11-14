@@ -3,8 +3,9 @@
 import { describe, expect, it } from "vitest";
 import caseRaw from "../../fixtures/robot-live-investigation/case/case.json?raw";
 import type { AgentEvent, CaseFile } from "../src/api";
-import { fixView, forkView, verdictView } from "../src/batch/lanes";
+import { fixView, forkView, investigatorView, verdictView } from "../src/batch/lanes";
 import type { BatchVm } from "../src/batch/model";
+import { caseAt, replaySchedule } from "../src/batch/replay";
 
 const live = JSON.parse(caseRaw) as CaseFile & { config: { recording?: { kind: string } } };
 const logs = import.meta.glob("../../fixtures/robot-live-investigation/forks/f1/*/events.jsonl", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
@@ -24,12 +25,39 @@ describe("the live robot recording", () => {
     expect(f1.hypothesis_id).toBe("h1");
     expect(html).toContain("Hypothesis h1");
     expect(html).toContain("Saved before any copy ran:");
-    for (const id of ["h1", "h2", "h3"]) expect(html).toContain(`<b>${id}</b>`);
+    for (const id of ["h1", "h2", "h3"]) expect(html).toContain(`<span class="ln-tag">${id}</span>`);
     expect(html).toContain("Inconclusive");
     // All 16 copies were rebuilt by replay (Daytona refused to fork): the page must not call them forks.
     expect(html).toContain("Each copy is a fresh VM that replayed the run");
     expect(html).toContain("0 of 16 forked, 16 rebuilt by replay");
     expect(html).not.toContain("Each copy is a copy-on-write fork");
+  });
+
+  it("lists every competing hypothesis on the investigator's page, the code one too, with what tested it", () => {
+    // h3 is a code hypothesis: it names a run and no step label.
+    const h3 = live.hypotheses.find((h) => h.id === "h3")!;
+    expect([h3.kind, h3.step_label, h3.run_id]).toEqual(["code", null, "r06"]);
+    const html = investigatorView(vm);
+    for (const id of ["h1", "h2", "h3"]) expect(html).toContain(`Hypothesis ${id}`);
+    for (const s of ["Predicts", "Falsified if", "Inconclusive", "Untested", "Contradicted", "Fork f1", "The measured fix"]) expect(html).toContain(s);
+    // Competing hypotheses have no example commands: no empty code boxes.
+    expect(html).not.toContain("No example");
+  });
+
+  it("replays each hypothesis's state and the fork's outcome in time, never ahead of the fork", () => {
+    const s = replaySchedule(live, events);
+    const slot = s.forks[0];
+    const at = (t: number) => caseAt(live, events, t);
+    const h = (t: number, id: string) => at(t).hypotheses.find((x) => x.id === id);
+    expect(h(slot.approvalStart, "h1")?.status).toBe("untested");
+    expect(h(slot.approvalStart, "h1")?.tested_by).toBeUndefined();
+    expect(h(slot.runningAt, "h1")?.status).toBe("testing");
+    expect((at(slot.runningAt).forks.f1 as { outcome?: string }).outcome).toBeUndefined();
+    expect(h(slot.doneAt, "h1")?.status).toBe("inconclusive");
+    expect((at(slot.doneAt).forks.f1 as { outcome?: string }).outcome).toBe("inconclusive");
+    // h3 was tested by the fix, which the replay shows at its end.
+    expect(h(slot.doneAt, "h3")?.status).toBe("untested");
+    expect(h(s.duration, "h3")?.status).toBe("contradicted");
   });
 
   it("shows the measured fix as worse, with its sign test, and the investigator's sentence", () => {

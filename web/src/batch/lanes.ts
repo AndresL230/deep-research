@@ -869,8 +869,8 @@ function question(f: ForkExperiment, vm: BatchVm): string {
   const falsified = f.falsified_if ?? hyp?.falsified_if;
   const falsifiedRow = falsified ? `<div class="ln-q-row"><span class="ln-q-k">Falsified if</span><span class="ln-q-x">${esc(falsified)}</span></div>` : "";
   const outcomeRow = f.outcome
-    ? `<div class="ln-q-row"><span class="ln-q-k">Outcome</span><span class="ln-q-x">${pill(f.outcome, OUTCOME_WORDS[f.outcome] ?? f.outcome, f.outcome === "supported" ? "honest" : "muted")} ` +
-      `${whoTag("py", "computed from the counts")}</span></div>` : "";
+    ? `<div class="ln-q-row"><span class="ln-q-k">Outcome</span><span class="ln-q-x"><span class="ln-q-line">${hypPill(f.outcome)}` +
+      `${whoTag("py", "computed from the counts")}</span></span></div>` : "";
   const prediction = f.prediction;
   const planned = prediction === "smaller_gap" || prediction === "larger_gap";
   const expect = prediction
@@ -901,14 +901,22 @@ const OUTCOME_WORDS: Record<string, string> = {
   inconclusive: "inconclusive", no_data: "no data",
 };
 
+/** A hypothesis's state as a pill: supported in the honest green, under test in the running accent, the rest grey.
+ *  The state is computed from the counts (evidence.py), so no other state gets a colour of its own. */
+const hypPill = (status: string | undefined): string => {
+  const s = status ?? "untested";
+  return pill(s, OUTCOME_WORDS[s] ?? s, s === "supported" ? "honest" : s === "testing" ? "running" : "muted");
+};
+
 /** Every competing hypothesis the investigator recorded before testing, with its state; the tested one marked. */
 export function competingRow(hs: Hypothesis[], tested?: string): string {
   const listed = hs.filter((h) => h.id);
   if (listed.length < 2) return "";
   const li = (h: Hypothesis): string =>
-    `<li${h.id === tested ? ' class="ln-hyp-tested"' : ""}><b>${esc(h.id ?? "")}</b> ${esc(h.kind ?? "")} · ${esc(h.sentence ?? h.evidence)} ` +
-    `${pill(h.status ?? "untested", OUTCOME_WORDS[h.status ?? "untested"] ?? String(h.status), h.status === "supported" ? "honest" : "muted")}</li>`;
-  return `<div class="ln-q-row"><span class="ln-q-k">Competing</span><ul class="ln-q-x ln-hyps">${listed.map(li).join("")}</ul></div>`;
+    `<li class="ln-rival${h.id === tested ? " ln-rival--tested" : ""}"><span class="ln-tag">${esc(h.id ?? "")}</span>` +
+    `<span class="ln-rival-x">${h.kind ? `<span class="ln-muted">${esc(capital(h.kind))} · </span>` : ""}${esc(h.sentence ?? h.evidence)}</span>` +
+    `${hypPill(h.status)}</li>`;
+  return `<div class="ln-q-row"><span class="ln-q-k">Competing</span><ul class="ln-q-x ln-rivals">${listed.map(li).join("")}</ul></div>`;
 }
 
 /** F3: where the copies were cut from the source run, and how they were made. */
@@ -1206,8 +1214,18 @@ function provenance(f: ForkExperiment, vm: BatchVm): string {
     const k = runs.reduce((n, r) => n + (r.labels ?? []).filter((l) => l.length).length, 0);
     lines.push({ who: "py", src: "runs.*.labels", text: `Rule-based step labels used (${k} labelled actions)` });
   }
-  const hyp = [...(c.hypotheses ?? [])].filter((h) => h.step_label === f.label).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).pop();
-  if (hyp) {
+  const hyp = (f.hypothesis_id ? (c.hypotheses ?? []).find((h) => h.id === f.hypothesis_id) : undefined) ??
+    [...(c.hypotheses ?? [])].filter((h) => h.step_label === f.label).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).pop();
+  if (hyp?.id) {
+    // Competing hypotheses, recorded before any experiment by the investigator (or the hypothesis subagent it may ask
+    // to draft them); the tested one's prediction is copied onto the fork before its copies run.
+    const n = (c.hypotheses ?? []).filter((h) => h.id).length;
+    lines.push({
+      who: "llm", src: "hypotheses[].at",
+      text: `${n} competing ${n === 1 ? "hypothesis" : "hypotheses"} recorded before any experiment (record_hypothesis); this fork tests ` +
+        `${hyp.id}, ${stepName(c, hyp.step_label)}${inv.length && hyp.at ? `, at ${clock(hyp.at)}` : ""}${times(asked?.subagents.hypothesis, "hypothesis subagent asked")}`,
+    });
+  } else if (hyp) {
     lines.push({
       who: "llm", src: "hypotheses[].at",
       text: `Hypothesis subagent (record_hypothesis): ${stepName(c, hyp.step_label)}${inv.length && hyp.at ? `, at ${clock(hyp.at)}` : ""}${times(asked?.subagents.hypothesis, "asked")}`,
@@ -1731,6 +1749,24 @@ export function selfCheckText(checks: RubricCheck[] | undefined): string | null 
 const STOPPABLE = new Set(["running", "investigating", "forking"]);
 const RECENT = 8;
 
+/** One competing hypothesis, as the investigator recorded it before any experiment: its id, kind and state, what it
+ *  says, the evidence for it, what it predicts, what would falsify it, and what tested it. The state is computed from
+ *  the experiment's counts, never the model's. */
+function competingCard(h: Hypothesis, words: DomainWords, trap: TrapInfo | null): string {
+  const what = h.kind === "code" ? (h.run_id ? `<span class="ln-tag">${esc(h.run_id)}</span>` : "")
+    : h.step_label ? `<b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b>` : "";
+  const row = (k: string, v: string): string => `<div class="ln-q-row"><span class="ln-q-k">${k}</span><span class="ln-q-x">${v}</span></div>`;
+  const by = h.tested_by === "fix" ? "the measured fix" : h.tested_by ? `fork ${h.tested_by}` : "";
+  return `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis ${esc(h.id ?? "")}</span>` +
+    `<span class="ln-hyp-kind">${esc(capital(h.kind ?? "method"))}</span>${what}<span class="ln-hyp-st">${hypPill(h.status)}</span></div>` +
+    (h.sentence ? `<p class="ln-hyp-s">${esc(h.sentence)}</p>` : "") +
+    `<div class="ln-hyp-rows">` +
+    row("Evidence", esc(h.evidence)) +
+    (h.prediction ? row("Predicts", esc(h.prediction)) : "") +
+    (h.falsified_if ? row("Falsified if", esc(h.falsified_if)) : "") +
+    (by ? row("Tested by", `<span class="ln-q-line">${esc(capital(by))}${whoTag("py", "computed from the counts")}</span>`) : "") +
+    `</div>`;
+}
 /** The investigator: what it is doing (its events, hypotheses) and the live-only Investigate / Stop actions. */
 export function investigatorView(vm: BatchVm): string {
   const c = vm.case;
@@ -1769,9 +1805,10 @@ export function investigatorView(vm: BatchVm): string {
   const hypHtml = hyps.length
     ? `<div class="ln-hyps" data-morph-list>${hyps.map((h, i) =>
       `<div class="ln-card ln-hyp" data-morph-key="hyp-${attr(String(h.at ?? i))}">` +
-      `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis</span><b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b></div>` +
-      `<p class="ln-hyp-e">${esc(h.evidence)}</p>` +
-      `<div class="ln-cmp ln-cmp--sm">${code("Honest", h.honest_action, "honest")}${code("Inflated", h.inflated_action, "inflated")}</div>` +
+      (h.id ? competingCard(h, words, trap) :
+        `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis</span>${h.step_label ? `<b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b>` : ""}</div>` +
+        `<p class="ln-hyp-e">${esc(h.evidence)}</p>` +
+        `<div class="ln-cmp ln-cmp--sm">${code("Honest", h.honest_action, "honest")}${code("Inflated", h.inflated_action, "inflated")}</div>`) +
       `</div>`).join("")}</div>`
     : "";
 
