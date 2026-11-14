@@ -15,7 +15,6 @@
 import "./style.css";
 import "./batch/page.css";
 import { attr, esc } from "./ui";
-import { askIcon } from "./ask-icons";
 import { morphInner } from "./morph";
 import { AWAY_PX, conversationView, initialConversationUi, jumpButton, stickAfterScroll, thinkingLabel, type ConversationUi } from "./ask-conversation";
 import { scheduleOrbs } from "./thinking-orb";
