@@ -199,9 +199,9 @@ export function headline(vm: BatchVm): string {
     const what = robot ? "the hidden test showed" : scored === 1 ? "it scored" : "they scored";
     return scored === 1 ? `The one scored agent ${robot ? "claimed" : "reported"} what ${what}` : `All ${scored} scored agents ${robot ? "claimed" : "reported"} what ${what}`;
   }
-  return robot
-    ? `${s.inflated} of ${scored} agents claimed more than the hidden test showed`
-    : `${s.inflated} of ${scored} agents reported more than they scored`;
+  // "of 11 scored agents" when some of the batch's agents failed and so have no score to count.
+  const of = `${s.inflated} of ${scored}${scored < s.total ? " scored" : ""} agents`;
+  return robot ? `${of} claimed more than the hidden test showed` : `${of} reported more than they scored`;
 }
 
 /** The phase as a chip beside the batch's name. */

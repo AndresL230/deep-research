@@ -122,6 +122,9 @@ body { background:#15171b; }
   .ds-swap { animation:ds-swap .35s var(--ease-swap) both; }
 
   .mo-c { animation:mo-rise var(--t-char) var(--ease-rise) both, mo-fade .35s linear both, mo-tint .5s ease-out both; animation-delay:calc(var(--c, 0) * var(--char-gap) + var(--io-d, 0ms) + var(--mo-d, 0ms)); }
+  /* Large type also starts a little out of focus. Small labels do not: a filter on every letter of every chip is a
+     lot of work for something too small to see. */
+  :is(h1, h2, .ln-headline, .ln-sentence, .ln-fix-t, .ln-phase) .mo-c { animation-name:mo-rise, mo-fade, mo-tint, mo-soft; animation-duration:var(--t-char), .35s, .5s, .5s; animation-timing-function:var(--ease-rise), linear, ease-out, ease-out; }
 
   .ds-badge-c { animation:ds-badge var(--t-draw) var(--ease-out) both; }
   .ds-badge-p { animation:ds-draw var(--t-draw) ease-out var(--t-draw) both; }
@@ -134,7 +137,8 @@ body { background:#15171b; }
 @keyframes ds-swap { from { opacity:0; transform:translateY(70%); } to { opacity:1; transform:none; } }
 @keyframes mo-rise { from { transform:translateY(65%); } }
 @keyframes mo-fade { from { opacity:0; } }
-@keyframes mo-tint { from { color:var(--pu-hi); filter:blur(2px); } 60% { color:var(--pu); filter:blur(0); } }
+@keyframes mo-tint { from { color:var(--pu-hi); } 60% { color:var(--pu); } }
+@keyframes mo-soft { from { filter:blur(2px); } }
 @keyframes ds-badge { from { transform:scale(.38); } }
 @keyframes ds-draw { from { stroke-dashoffset:1; } }
 @keyframes ds-grow-x { from { transform:scaleX(0); } }

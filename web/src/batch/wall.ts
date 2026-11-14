@@ -237,5 +237,6 @@ export function wallView(vm: BatchVm): string {
   const grid = runs.length
     ? `<div class="bw-grid" data-morph-key="grid" data-morph-list>${runs.map((r) => tile(vm, r)).join("")}</div>`
     : `<div class="bw-empty" data-morph-key="empty">Runs appear here once the batch starts.</div>`;
-  return `<section class="bw" data-morph-key="wall" aria-label="Runs">${head}${grid}</section>`;
+  // A robot batch's result line is longer ("of tested can positions were the practice spot"): its panels are taller.
+  return `<section class="bw${isMotionBatch(vm.case.config) ? " bw--robot" : ""}" data-morph-key="wall" aria-label="Runs">${head}${grid}</section>`;
 }
