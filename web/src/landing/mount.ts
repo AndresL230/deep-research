@@ -51,7 +51,11 @@ function scene<T extends { dispose(): void }>(selector: string, load: (host: HTM
             entry.near.disconnect();
             // The first screen goes first, and its intro plays before anything further down is built: building a
             // scene holds the page up for a moment, and the intro would lose that moment.
-            entry.scene = (now ? Promise.resolve() : introPlayed(root)).then(() => load(host, root)).catch(() => null);
+            // A scene that could not make a canvas (no WebGL, or the context was refused) leaves its host empty: the
+            // host gets `data-still` and the page shows a picture of the scene there instead (landing.css, stills/).
+            const still = (): void => { if (!host.querySelector("canvas")) host.dataset.still = "1"; };
+            entry.scene = (now ? Promise.resolve() : introPlayed(root)).then(() => load(host, root))
+              .then((s) => { still(); return s; }, () => { still(); return null; });
           }, { root: root instanceof Element ? root : null, rootMargin: NEAR }),
         };
         entry.near.observe(host);

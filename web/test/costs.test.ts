@@ -284,11 +284,9 @@ describe("costsView", () => {
     expect(empty).not.toContain("cs-total");
   });
 
-  it("has a way back, to the batch it was opened from or home", () => {
-    expect(text(costsView({ report: { state: "loading" }, back: null }))).toContain("Back to batches");
-    const from = costsView({ report: { state: "loading" }, back: "1114-<b>" });
-    expect(from).toContain('data-act="back"');
-    expect(from).toContain("Back to 1114-&lt;b&gt;");
+  it("has no back button: the navbar has Batches", () => {
+    expect(text(costsView({ report: { state: "loading" }, back: null }))).not.toContain("Back to");
+    expect(costsView({ report: { state: "loading" }, back: "1114-x" })).not.toContain('data-act="back"');
   });
 
   it("uses no em dashes", () => {
