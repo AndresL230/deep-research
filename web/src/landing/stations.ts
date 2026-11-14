@@ -6,12 +6,12 @@
 // On the screen +x runs down and to the left, +z up and to the left, and y is up.
 
 import { Group, Mesh, Quaternion, Shape, Vector3, type Color, type Object3D, type Scene } from "three";
-import { buildRobot, type ArmPose, type Robot, type V3 } from "./arms";
+import { REACH, buildRobot, type ArmPose, type Robot, type V3 } from "./arms";
 import { LAYER, type Contour, type Tint } from "./contour";
 import { clamp01, smooth } from "./ease";
 import type { Trail } from "./floorplan";
 import {
-  CART, CARTON, GEAR_THICK, PLATE, TRUCK, barrel, bolt, cable, cablePoints, cart, carton, controls, conveyor,
+  BLOCK, CART, CARTON, DRIVER_TIP, GEAR_THICK, PLATE, TRUCK, barrel, bolt, cable, cablePoints, cart, carton, controls, conveyor,
   curtain, dash, dice, driver, frame, gate, gear, gearShape, lampBar, lampDisc, motor, panel, plate, portal, shelves, truck,
   tub, wiredBlock,
 } from "./props";
@@ -102,7 +102,8 @@ function pickAndPlace(stage: Stage): Station {
   const work: V3 = [0.05, beltTop, -0.1];
   const step = 1.02;
   const parked: V3 = [1.64, 0, -0.25];
-  const inCart: V3 = [parked[0], CART.lift + CART.h - 0.28 + 0.03, parked[2]];
+  // In the cart the motor sits a little toward -x, so the gear on its +x end is clear of the cart's wall.
+  const inCart: V3 = [parked[0] - 0.04, CART.lift + CART.h - 0.28 + 0.03, parked[2]];
   const seat: V3 = [work[0] + 0.43, work[1] + 0.3, work[2]];
   const pick: V3 = [1.4, 0.86, 1.25];
 
@@ -154,28 +155,35 @@ function pickAndPlace(stage: Stage): Station {
   const cargo = mover(stage, (s) => s.at(0, 0, 0, -Math.PI / 2, () => motor(s, true)));
   scene.remove(cargo);
   wagon.add(cargo);
-  cargo.position.set(0, inCart[1], 0);
+  cargo.position.set(inCart[0] - parked[0], inCart[1], 0);
 
   const bot = robot(stage, 5);
 
-  // The body leans toward whatever the hands are doing: the belt, the cart, the tub.
+  // The body leans toward whatever the hands are doing: the belt, the cart, the tub. Over the cart it stands far
+  // enough along +x that the left hand reaches the cart without its arm crossing the right one.
   const BODY: Key[] = [
-    [0.0, 0.24, 1.67, 0.85], [0.3, 0.45, 1.7, 0.72], [0.6, 1.08, 1.74, 0.42], [0.9, 1.08, 1.74, 0.46],
+    [0.0, 0.24, 1.67, 0.85], [0.3, 0.5, 1.75, 0.72], [0.6, 1.6, 2.0, 0.55], [0.9, 1.55, 1.9, 0.55],
     [1.25, 0.82, 1.7, 0.95], [1.55, 0.8, 1.7, 0.95], [2.05, 0.26, 1.67, 0.85], [4.2, 0.24, 1.67, 0.85],
   ];
-  // The hand that carries the motor (x, y, z, grip).
+  // The hand that carries the motor (x, y, z, grip), its fingers on the block on top. It lifts the motor clear
+  // of the cart's walls, over the cart's middle, and lowers it straight in.
+  const LIFT = 0.94;
   const CARRY: Key[] = [
-    [0.0, 0.05, 1.8, -0.08, 0.8], [0.28, 0.3, 2.0, -0.1, 0.8], [0.56, 1.4, 2.05, -0.2, 0.8], [0.78, parked[0], inCart[1] + 0.88, parked[2], 0.8],
-    [1.05, 1.3, 1.9, -0.15, 0.2], [1.5, 0.4, 1.8, -0.02, 0.2], [2.05, 0.05, 1.8, -0.08, 0.7], [4.2, 0.05, 1.8, -0.08, 0.8],
+    [0.0, 0.05, work[1] + LIFT, -0.08, 0.8], [0.28, 0.3, 2.05, -0.1, 0.8], [0.56, inCart[0], 2.3, inCart[2], 0.8],
+    [0.78, inCart[0], inCart[1] + LIFT, inCart[2], 0.8],
+    [1.05, 1.3, 1.95, -0.15, 0.2], [1.5, 0.4, 1.88, -0.02, 0.2], [2.05, 0.05, work[1] + LIFT, -0.08, 0.7], [4.2, 0.05, work[1] + LIFT, -0.08, 0.8],
   ];
-  // The hand that fetches the gear.
-  const at = [seat[0] + 0.2, seat[1] + 0.14, seat[2] + 0.04];
+  // The hand that fetches the gear. Its palm faces -x throughout and the gear is held flat against it (`GEAR_OFF`
+  // out from where the hand holds things), so on the shaft the wrist is just off the gear's outer face.
+  const GEAR_OFF = 0.05;
+  const at = [seat[0] + 0.06 + GEAR_OFF, seat[1] + REACH, seat[2]];
   const FETCH: Key[] = [
-    [0.0, 0.55, 1.45, 0.1, 0.3], [0.3, 0.75, 1.5, 0.15, 0.3], [0.62, 1.3, 1.5, 0.2, 0.3], [0.85, 1.35, 1.45, 0.3, 0.3],
-    [1.12, 1.4, 1.4, 1.0, 0.1], [1.38, pick[0], pick[1] + 0.26, pick[2], 0.1], [1.48, pick[0], pick[1] + 0.26, pick[2], 0.95],
-    [1.72, 1.2, 1.5, 0.7, 0.95], [2.08, at[0], at[1], at[2], 0.95], [3.8, at[0], at[1], at[2], 0.95],
+    [0.0, 0.55, 1.45, 0.1, 0.3], [0.3, 0.9, 1.5, 0.2, 0.3], [0.62, 2.25, 1.5, 0.45, 0.3], [0.85, 2.25, 1.5, 0.5, 0.3],
+    [1.12, 1.4, 1.5, 1.0, 0.1], [1.38, pick[0], pick[1] + 0.36, pick[2], 0.1], [1.48, pick[0], pick[1] + 0.36, pick[2], 0.2],
+    [1.72, 1.2, 1.6, 0.7, 0.2], [2.08, at[0], at[1], at[2], 0.2], [3.8, at[0], at[1], at[2], 0.2],
     [4.2, 0.55, 1.45, 0.1, 0.3],
   ];
+  const palmOut = new Vector3();
 
   const update = (t: number): void => {
     const working = t >= 2.08 && t < 4.1;
@@ -184,6 +192,7 @@ function pickAndPlace(stage: Stage): Station {
 
     const body = along(BODY, t);
     const carry = along(CARRY, t);
+    const aside = ramp(t, 0.3, 0.55) * (1 - ramp(t, 0.9, 1.15));
     const fetch = along(FETCH, t);
     // While it fits the gear the fetching hand works it round a little.
     const fit = ramp(t, 2.1, 2.3) * (1 - ramp(t, 3.6, 3.85));
@@ -195,7 +204,9 @@ function pickAndPlace(stage: Stage): Station {
       body: [body[0], body[1], body[2]],
       facing: Math.PI / 2,
       left: arm(carry, { point: [0.1, -1, 0.05], palm: [1, 0, 0.3] }),
-      right: arm(fetch, t > 1.6 && t < 3.95 ? { point: [-0.85, -0.5, -0.1], palm: [0, -0.3, -1] } : { point: [0.25, -1, 0.1] }),
+      // While the left hand puts the motor in the cart, the right waits out to the side with its elbow out, not
+      // folded back over the gears' tub.
+      right: arm(fetch, { point: [0.05, -1, 0.05], palm: [-1, 0, 0], elbow: [mix(0.55, 1, aside), mix(-0.45, -0.2, aside), mix(0.75, 0.1, aside)] }),
       show: 1,
     });
     stage.trail.visit(body[0], body[2]);
@@ -217,8 +228,9 @@ function pickAndPlace(stage: Stage): Station {
       // In the hand: from the belt, up and over, down into the cart.
       const take = ramp(t, 0, 0.12);
       const put = ramp(t, 0.66, 0.78);
+      // The motor hangs from the hand by its top block, which is where the hand holds things.
       const hx = grasp.x;
-      const hy = grasp.y - 0.7;
+      const hy = grasp.y - (LIFT - REACH * 0.99);
       const hz = grasp.z;
       const x = work[0] + (hx - work[0]) * take;
       const y = work[1] + (hy - work[1]) * take;
@@ -232,7 +244,7 @@ function pickAndPlace(stage: Stage): Station {
       fitted.visible = t >= 2.08;
     }
     fitted.position.set(piece.position.x + 0.43, piece.position.y + 0.3, piece.position.z);
-    fitted.rotation.x = fit > 0 ? t * 2.2 : 0;
+    fitted.rotation.x = fit > 0 ? (t - 2.1) * 2.2 : 0;
     const shift = t < 1.3 ? move : 0;
     next.position.set(work[0] - step + step * shift, work[1], work[2]);
     after.position.set(work[0] - step * 2 + step * shift, work[1], work[2]);
@@ -241,10 +253,12 @@ function pickAndPlace(stage: Stage): Station {
     const fetching = t >= 1.44 && t < 2.08;
     held.visible = fetching;
     if (fetching) {
-      const g = bot.hold("right").at;
+      // Flat against the palm, not through the fingers; it does not turn until it is on the shaft.
+      const hand = bot.hold("right");
+      const g = palmOut.set(0, 0, -1).applyQuaternion(hand.turn).multiplyScalar(GEAR_OFF).add(hand.at);
       const land = ramp(t, 1.92, 2.08);
       held.position.set(g.x + (seat[0] - g.x) * land, g.y + (seat[1] - g.y) * land, g.z + (seat[2] - g.z) * land);
-      held.rotation.x = t * 2.2;
+      held.rotation.x = 0;
     }
   };
 
@@ -257,11 +271,13 @@ function sorting(stage: Stage): Station {
   const period = 5;
   const scene = stage.scene;
 
-  // The pallet's stack: two cartons along x, three along z, three high. The robot takes from one place on top.
+  // The pallet's stack: two cartons along x, three along z, three high. The robot takes from one place on top,
+  // and the carton beside that place has gone already, so the hand on that side has room.
   const columns = [4.68, 5.5];
   const rows = [-7.12, -6.6, -6.08];
   const layers = [0.1, 0.1 + CARTON.h, 0.1 + CARTON.h * 2];
   const slot: V3 = [columns[1], layers[2], rows[2]];
+  const gone: V3 = [columns[1], layers[2], rows[1]];
   // Where the second truck stops, and where the carton goes on it: on top of the two it came with.
   const stop: V3 = [7.5, 0, -5.26];
   const load = TRUCK.deckFrom + TRUCK.deckLength / 2;
@@ -277,7 +293,7 @@ function sorting(stage: Stage): Station {
     // The pallet.
     s.box(1.78, 0.1, 1.7, 5.09, 0, -6.6, "white");
     for (const y of layers) for (const x of columns) for (const z of rows) {
-      if (y === slot[1] && x === slot[0] && z === slot[2]) continue;
+      if (y === slot[1] && x === slot[0] && (z === slot[2] || z === gone[2])) continue;
       carton(s, x, y, z);
     }
     carton(s, 5.2, 0, -8.3, 0.35);
@@ -305,21 +321,27 @@ function sorting(stage: Stage): Station {
   const bot = robot(stage, 11);
 
   // Where the body is and which way it faces (x, y, z, facing): at the pallet, over to the truck, and back with
-  // its arms hanging.
+  // its arms hanging. It faces -x the whole way there, so the carton stays square to its hands, and it carries
+  // the carton high enough to pass over the truck's load, coming at it from the far side of the mast. It backs
+  // off before the truck leaves, and only crosses the truck's way once it has gone.
   const HOLD = 0.74;
-  const atPallet = [slot[0] + HOLD + 0.02, 1.74, slot[2], Math.PI];
-  const toward = 3.84;
-  const atTruck = [onTruck[0] + Math.cos(toward) * -HOLD, 1.83, onTruck[2] + Math.sin(toward) * -HOLD * -1, toward];
+  // The hands hold the carton this far under the body: the carton's middle.
+  const UNDER = 0.4;
+  const atPallet = [slot[0] + HOLD + 0.02, slot[1] + CARTON.h / 2 + UNDER, slot[2], Math.PI];
+  const atTruck = [onTruck[0] + HOLD, onTruck[1] + CARTON.h / 2 + UNDER, onTruck[2], Math.PI];
+  const high = onTruck[1] + 0.27 + UNDER + CARTON.h / 2;
   const BODY: Key[] = [
-    [0, ...atPallet], [0.22, atPallet[0] + 0.1, 1.86, atPallet[2] - 0.05, Math.PI], [1.2, atTruck[0], 1.93, atTruck[2], toward],
-    [1.45, ...atTruck], [1.8, atTruck[0] + 0.1, 1.8, atTruck[2] - 0.12, toward], [2.5, 7.75, 1.62, -6.6, 3.6],
-    [3.3, 7.0, 1.62, -6.4, Math.PI], [4.0, atPallet[0] + 0.25, 1.7, atPallet[2] - 0.06, Math.PI], [4.6, ...atPallet], [5, ...atPallet],
+    [0, ...atPallet], [0.22, atPallet[0] + 0.1, 1.95, atPallet[2] - 0.05, Math.PI], [0.75, 7.6, high, -6.55, Math.PI],
+    [1.2, atTruck[0], high, atTruck[2], Math.PI], [1.45, ...atTruck], [1.8, atTruck[0] + 0.65, 1.85, atTruck[2], Math.PI],
+    [2.6, 8.6, 1.65, -6.5, 3.4], [3.3, 7.0, 1.62, -6.4, Math.PI], [4.0, atPallet[0] + 0.25, 1.75, atPallet[2] - 0.06, Math.PI],
+    [4.6, ...atPallet], [5, ...atPallet],
   ];
-  // The hands, in the body's own terms (ahead, above, out to the side, grip): on the carton, or hanging.
+  // The hands, in the body's own terms (ahead, above, out to the side, grip): on the carton, or hanging. On the way
+  // back they come up in front of the stack before they reach in on either side of the carton.
   const HANDS: Key[] = [
-    [0, HOLD - 0.08, -0.4, 0.31, 0.5], [1.5, HOLD - 0.08, -0.4, 0.31, 0.5], [1.85, 0.5, -0.5, 0.42, 0.15],
-    [2.5, 0.08, -1.07, 0.32, 0.3], [3.9, 0.08, -1.07, 0.32, 0.3], [4.55, HOLD - 0.08, -0.4, 0.4, 0.1], [4.75, HOLD - 0.08, -0.4, 0.31, 0.5],
-    [5, HOLD - 0.08, -0.4, 0.31, 0.5],
+    [0, HOLD - 0.08, -UNDER, 0.31, 0.5], [1.5, HOLD - 0.08, -UNDER, 0.31, 0.5], [1.85, 0.35, -0.5, 0.42, 0.15],
+    [2.5, 0.08, -1.07, 0.32, 0.3], [3.9, 0.08, -1.07, 0.32, 0.3], [4.25, 0.3, -UNDER + 0.02, 0.42, 0.15],
+    [4.55, HOLD - 0.08, -UNDER, 0.42, 0.1], [4.75, HOLD - 0.08, -UNDER, 0.31, 0.5], [5, HOLD - 0.08, -UNDER, 0.31, 0.5],
   ];
 
   const update = (t: number): void => {
@@ -352,7 +374,7 @@ function sorting(stage: Stage): Station {
     third.visible = t >= 1.45 && t < 2.75;
 
     // The carton: taken off the pallet, carried over tilted, set down on the truck's stack.
-    const held = from(b, facing, HOLD, -0.4 - CARTON.h / 2, 0);
+    const held = from(b, facing, HOLD, -UNDER - CARTON.h / 2, 0);
     const take = ramp(t, 0.0, 0.2);
     const put = ramp(t, 1.25, 1.45);
     carried.visible = t < 1.45;
@@ -361,7 +383,7 @@ function sorting(stage: Stage): Station {
     const z = mix(mix(slot[2], held[2], take), onTruck[2], put);
     carried.position.set(x, y, z);
     const way = clamp01((t - 0.15) / 1.2);
-    carried.rotation.set(0, 0, Math.sin(way * Math.PI) * 0.4);
+    carried.rotation.set(0, 0, Math.sin(way * Math.PI) * 0.25);
     // The next carton is on the pallet by the time the robot is back.
     const back = ramp(t, 3.45, 3.6);
     waiting.visible = back > 0;
@@ -381,19 +403,21 @@ function fastening(stage: Stage): Station {
   const z = -8.27;
   // Where a plate waits out of sight, comes out, is worked on, and where it has left the belt.
   const spots = [11.51, 12.98, 14.45, 15.92];
-  const beltEnd = 15.2;
   const seat: V3 = [spots[2], beltTop + PLATE.h, z];
+  // The crate the finished plates drop into: right at the belt's end and lower than the belt, so a plate slides
+  // out over its near wall before it drops. A plate (with the drum on its trailing side, 0.4 out) is clear of
+  // that wall once its middle is past `clear`, and lands at `drop`.
+  const crate = { x: 15.6, z: -8.37, w: 0.76, d: 0.88, h: 0.78, wall: 0.035 };
   const landed = 0.07;
+  const clear = crate.x - crate.w / 2 + crate.wall + 0.4 + 0.005;
+  const drop = clear + 0.015;
 
   solid(stage, scene, (s) => {
     s.at(12.85, 0, -8.19, 0, () => conveyor(s, 4.68, 1.06, beltTop, { ends: "both" }));
     s.at(12.27, 0, -8.267, 0, () => portal(s, 0.9, 2.01, 2.24, { near: 0.3, far: 0.28, beam: 0.41 }));
     s.at(12.225, 0.985, -9.274, 0, () => panel(s, 0.63, 1.03, "red"));
-    // The crate the finished plates drop into, with one in it already.
-    s.at(15.93, 0, -8.37, 0, () => {
-      tub(s, 0.76, 0.88, 0.96, { wall: 0.035, r: 0.012, deep: 0.92 });
-      s.at(0.04, landed, 0.1, 0, () => plate(s, true));
-    });
+    // The crate the finished plates drop into.
+    s.at(crate.x, 0, crate.z, 0, () => tub(s, crate.w, crate.d, crate.h, { wall: crate.wall, r: 0.012, deep: crate.h - landed + 0.03 }));
     // The bolts' tub, heaped.
     s.at(15.04, 0, -5.9, 0, () => {
       tub(s, 1.77, 0.96, 1.12, { handle: "z", deep: 0.3, r: 0.1 });
@@ -458,17 +482,25 @@ function fastening(stage: Stage): Station {
   const bot = robot(stage, 17);
 
   const BODY: Key[] = [
-    [0, 14.52, 1.67, -7.55], [0.5, 14.72, 1.67, -7.25], [1.0, 14.72, 1.67, -7.25], [1.6, 14.52, 1.67, -7.6], [5.2, 14.52, 1.67, -7.55],
+    [0, 14.52, 1.67, -7.55], [0.5, 14.72, 1.67, -6.95], [1.0, 14.72, 1.67, -6.95], [1.6, 14.52, 1.67, -7.6], [5.2, 14.52, 1.67, -7.55],
   ];
-  // The hand that fetches the bolt and then steadies the plate (x, y, z, grip).
+  // The hand that fetches the bolt and then steadies the plate (x, y, z, grip). It goes in over the bolts' tub's
+  // front wall (z -6.38, 1.12 high) and picks from the heap inside, not through the wall.
   const over: V3 = [seat[0], seat[1] + 0.3, seat[2] + 0.04];
   const FETCH: Key[] = [
-    [0, 14.86, 1.36, -8.0, 0.3], [0.55, 14.96, 1.4, -6.62, 0.1], [0.85, 14.96, 1.22, -6.42, 0.1], [0.95, 14.96, 1.22, -6.42, 0.9],
-    [1.25, 14.9, 1.52, -7.2, 0.9], [1.7, over[0], over[1], over[2], 0.9], [1.85, over[0], over[1], over[2], 0.9],
-    [2.1, 14.8, 1.27, -8.08, 0.45], [4.6, 14.8, 1.27, -8.08, 0.45], [5.2, 14.86, 1.36, -8.0, 0.3],
+    [0, 14.86, 1.36, -8.0, 0.3], [0.55, 14.96, 1.62, -6.45, 0.1], [0.85, 14.96, 1.3, -6.1, 0.1], [0.95, 14.96, 1.3, -6.1, 0.9],
+    [1.25, 14.9, 1.62, -6.75, 0.9], [1.7, over[0], over[1], over[2], 0.9], [1.85, over[0], over[1], over[2], 0.9],
+    [2.1, 14.8, 1.32, -8.08, 0.45], [4.6, 14.8, 1.32, -8.08, 0.45], [5.2, 14.86, 1.36, -8.0, 0.3],
   ];
-  // The hand with the tool: held off to one side, then down on the bolt.
-  const down: V3 = [seat[0], seat[1] + 0.06 + 0.53, seat[2]];
+  // The hand with the tool: held off to one side, then down on the bolt. On the bolt the tool stands upright
+  // with its socket over the head, down to `ENGAGE` above the plate (the head is 0.06 tall), and turns about the
+  // bolt's own axis. The wrist is where it must be for the hand to hold the tool there: the tool hangs `HANG`
+  // below the wrist and `SIDE` toward the palm.
+  const ENGAGE = 0.025;
+  const HANG = REACH - 0.12;
+  const SIDE = 0.06;
+  const onBolt = new Vector3(seat[0], seat[1] + ENGAGE + DRIVER_TIP, seat[2]);
+  const down: V3 = [onBolt.x - SIDE, onBolt.y + HANG, onBolt.z];
   const TOOL: Key[] = [
     [0, 14.02, 1.72, -7.98, 1], [1.9, 14.02, 1.72, -7.98, 1], [2.3, down[0], down[1] + 0.03, down[2], 1],
     [4.3, down[0], down[1], down[2], 1], [4.7, 14.02, 1.72, -7.98, 1], [5.2, 14.02, 1.72, -7.98, 1],
@@ -478,9 +510,16 @@ function fastening(stage: Stage): Station {
   const spin = new Quaternion();
   const upright = new Vector3(0, 1, 0);
   const fingers = new Vector3();
+  const inHandAt = new Vector3();
+  const inHandTurn = new Quaternion();
+  // It drives the bolt a whole number of sixths of a turn, so the hex head ends as it began.
+  const DRIVE_FROM = 2.3;
+  const DRIVE_TO = 4.45;
+  const TURNS = (29 * Math.PI) / 3;
+  const driven = (t: number): number => (clamp01((t - DRIVE_FROM) / (DRIVE_TO - DRIVE_FROM)) * TURNS);
 
   const update = (t: number): void => {
-    const driving = t >= 2.3 && t < 4.45;
+    const driving = t >= DRIVE_FROM && t < DRIVE_TO;
     lamps[0].visible = !driving;
     lamps[1].visible = driving;
 
@@ -488,30 +527,42 @@ function fastening(stage: Stage): Station {
     const fetch = along(FETCH, t);
     const hold = along(TOOL, t);
     const press = ramp(t, 1.9, 2.3) * (1 - ramp(t, 4.3, 4.7));
+    const lifted = ramp(t, 0.15, 0.5) * (1 - ramp(t, 1.15, 1.55));
     if (driving) hold[1] += Math.sin(t * 16) * 0.008;
     bot.pose({
       body: [body[0], body[1], body[2]],
       facing: Math.PI / 2,
       left: arm(hold, { point: [mix(-0.55, 0, press), mix(-0.3, -1, press), mix(-0.78, 0, press)], palm: [1, 0, 0] }),
-      right: arm(fetch, { point: [0.05, -1, t > 1.9 && t < 4.8 ? -0.25 : 0.05] }),
+      // Over the bolts' tub the elbow is lifted up and out, so the forearm reaches down into the heap from above
+      // instead of lying in it. The usual lean (out, back and down) is blended in and out of that.
+      right: arm(fetch, {
+        point: [0.05, -1, t > 1.9 && t < 4.8 ? -0.25 : 0.05],
+        elbow: [0.55, mix(-0.45, 0.85, lifted), mix(0.75, 0.25, lifted)],
+      }),
       show: 1,
     });
     stage.trail.visit(body[0], body[2]);
 
-    // The tool rides in the hand, turned the way the fingers point, and turns while it drives.
+    // The tool rides in the hand, turned the way the fingers point. As the hand comes down on the bolt it is
+    // settled upright onto the bolt's axis, socket over the head, and there it turns with the bolt.
     const grasp = bot.hold("left");
     fingers.set(0, 1, 0).applyQuaternion(grasp.turn);
-    tool.position.copy(grasp.at).addScaledVector(fingers, -0.12);
-    tool.quaternion.copy(grasp.turn).multiply(flip);
-    if (driving) tool.quaternion.multiply(spin.setFromAxisAngle(upright, t * 14));
+    inHandAt.copy(grasp.at).addScaledVector(fingers, -0.12);
+    inHandTurn.copy(grasp.turn).multiply(flip);
+    tool.position.lerpVectors(inHandAt, onBolt, press);
+    spin.setFromAxisAngle(upright, driven(t));
+    tool.quaternion.slerpQuaternions(inHandTurn, spin, press);
 
-    // The belt steps the plates along: the finished one runs off the end and drops into the crate.
+    // The belt steps the plates along: the finished one runs off the end, out over the crate's wall, and drops
+    // in. It lies in the crate until the next is nearly done, and goes before the belt brings that one.
     const move = ramp(t, 0.05, 0.9);
     const x = mix(spots[2], spots[3], move);
-    const off = clamp01((x - beltEnd) / (spots[3] - beltEnd));
-    leaving.visible = t < 0.9;
-    leaving.position.set(x, mix(beltTop, landed, off * off), z - off * 0.0);
-    leaving.rotation.z = -Math.sin(off * Math.PI) * 0.5;
+    const fall = clamp01((x - clear) / (spots[3] - clear));
+    leaving.position.set(Math.min(x, clear) + (drop - clear) * smooth(fall), mix(beltTop, landed, fall * fall), z);
+    leaving.rotation.z = -Math.sin(fall * Math.PI) * 0.15;
+    const goes = 1 - ramp(t, 4.6, 4.9);
+    leaving.visible = goes > 0;
+    leaving.scale.setScalar(Math.max(0.001, goes));
     working.position.set(t < 0.9 ? mix(spots[1], spots[2], move) : spots[2], beltTop, z);
     coming.position.set(t < 0.9 ? mix(spots[0], spots[1], move) : spots[1], beltTop, z);
 
@@ -519,12 +570,16 @@ function fastening(stage: Stage): Station {
     const inHand = t >= 0.95 && t < 1.8;
     head.visible = t >= 0.95;
     if (inHand) {
-      const g = bot.hold("right").at;
+      // Pinched at the fingertips, on the palm's side of them.
+      const hand = bot.hold("right");
+      const g = fingers.set(0, 0.06, -0.05).applyQuaternion(hand.turn).add(hand.at);
       const land = ramp(t, 1.62, 1.8);
       head.position.set(mix(g.x, seat[0], land), mix(g.y - 0.03, seat[1], land), mix(g.z, seat[2], land));
     } else {
       head.position.set(seat[0], seat[1], seat[2]);
     }
+    // The head turns with the tool while it is driven.
+    head.rotation.y = inHand ? 0 : driven(t);
   };
 
   return { period, update };
@@ -573,9 +628,15 @@ function connectors(stage: Stage): Station {
   const beltTop = 0.85;
   // Along the belt, 1.665 apart: behind the machine, out of it, where the robot works, and past the belt's end.
   const stops = [0.295, 1.96, 3.625, 5.29];
-  const beltEnd = 14.0;
-  const wagonAt: V3 = [13.34, 0, -17.62];
-  const landed = CART.lift + CART.h - 0.5 + 0.03;
+  // The cart at the belt's end is a low one, its walls under the belt's top, so a block slides out over its near
+  // wall and drops in. The block is clear of that wall once its middle is past `clear`, and lands at `drop`.
+  // The cart then rolls off with it and comes back empty.
+  const wagonAt: V3 = [13.4, 0, -17.62];
+  const walls = 0.55;
+  const inner = 0.3;
+  const landed = CART.lift + walls - inner + 0.03;
+  const clear = wagonAt[0] + CART.w / 2 - CART.wall - BLOCK.w / 2 - 0.01;
+  const drop = clear - 0.03;
   const place = onBelt(stops[2]);
 
   solid(stage, scene, (s) => {
@@ -594,11 +655,7 @@ function connectors(stage: Stage): Station {
     s.at(16.21, 0, -15.675, Math.PI / 2, () => portal(s, 0.81, 1.96, 2.0, { near: 0.285, far: 0.3, beam: 0.53, rNear: 0.05, rFar: 0.3 }));
     s.at(16.2, 1.47, -16.08, 0, () => curtain(s, 1.37));
     s.at(17.19, 1.08, -15.64, 0, () => controls(s));
-    // A cart at the belt's end, cartons, a barrier and two drums.
-    s.at(wagonAt[0], 0, wagonAt[2], 0, () => {
-      cart(s, 0.5);
-      s.at(0.05, landed, 0.08, 0.5, () => { wiredBlock(s); cable(s, 1); });
-    });
+    // Cartons, a barrier and two drums.
     carton(s, 17.41, 0, -14.01);
     carton(s, 17.41, CARTON.h, -14.01);
     carton(s, 16.16, 0, -13.69);
@@ -616,6 +673,7 @@ function connectors(stage: Stage): Station {
     return g;
   });
 
+  const wagon = mover(stage, (s) => cart(s, inner, walls));
   // The blocks on the belt: the one leaving (plugged), the one being worked on, the one coming (loose).
   const leaving = mover(stage, (s) => { wiredBlock(s); cable(s, 1); });
   const coming = mover(stage, (s) => { wiredBlock(s); cable(s, 0); });
@@ -638,7 +696,7 @@ function connectors(stage: Stage): Station {
   const grab = (u: number): [number, number, number] => {
     const pts = cablePoints(u);
     const e = pts[pts.length - 1];
-    return [place.x + e[0] + 0.03, beltTop + e[1] + 0.3, place.z + e[2] + 0.08];
+    return [place.x + e[0], beltTop + e[1] + 0.3, place.z + e[2] + 0.08];
   };
 
   const update = (t: number): void => {
@@ -646,13 +704,20 @@ function connectors(stage: Stage): Station {
     lamps[0].visible = !plugging;
     lamps[1].visible = plugging;
 
-    // The belt steps the blocks along: the finished one goes off the end into the cart.
+    // The cart waits at the belt's end, rolls off along -x with the finished block, and comes back empty.
+    // (Far enough that it is off the screen wherever the camera is on its way to this station.)
+    const FAR = 8.5;
+    const away = t < 1.2 ? 0 : t < 2.4 ? ramp(t, 1.2, 2.4) ** 2 * FAR : t < 2.6 ? FAR : (1 - ramp(t, 2.6, 3.8)) ** 2 * FAR;
+    wagon.position.set(wagonAt[0] - away, 0, wagonAt[2]);
+
+    // The belt steps the blocks along: the finished one goes off the end, out over the cart's wall, and drops in.
     const move = ramp(t, 0.02, 0.8);
     const out = onBelt(mix(stops[2], stops[3], move));
-    const off = clamp01((beltEnd - out.x) / (beltEnd - wagonAt[0]));
-    leaving.visible = t < 0.8;
-    leaving.position.set(out.x, mix(beltTop, landed, off * off), out.z);
-    leaving.rotation.set(0, out.turn, Math.sin(off * Math.PI) * 0.45);
+    const end = onBelt(stops[3]).x;
+    const fall = clamp01((clear - out.x) / (clear - end));
+    leaving.visible = t < 2.4;
+    leaving.position.set(Math.max(out.x, clear) - (clear - drop) * smooth(fall) - away, mix(beltTop, landed, fall * fall), out.z);
+    leaving.rotation.set(0, out.turn, Math.sin(fall * Math.PI) * 0.15);
     const here = onBelt(t < 0.8 ? mix(stops[1], stops[2], move) : stops[2]);
     working.position.set(here.x, beltTop, here.z);
     working.rotation.y = here.turn;
@@ -688,7 +753,8 @@ function connectors(stage: Stage): Station {
       body: [body[0], body[1], body[2]],
       facing: Math.PI / 2,
       left: arm(steady, { point: [0.15, -1, -0.2], palm: [1, 0, 0] }),
-      right: arm(plug, { point: [-0.1, -1, -0.25], palm: [-1, 0, 0] }),
+      // Its palm faces away from the body, so the hand's narrow side is what goes down between the fixed loops.
+      right: arm(plug, { point: [-0.05, -1, -0.25], palm: [0, -0.2, -1] }),
       show: 1,
     });
     stage.trail.visit(body[0], body[2]);

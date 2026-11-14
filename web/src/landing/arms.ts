@@ -195,6 +195,11 @@ export function buildRobot(contour: Contour, tints: Record<Tint, Color>, seed: n
     else a.subVectors(wrist, elbow).normalize();
     if (p.palm) palm.set(p.palm[0], p.palm[1], p.palm[2]);
     else palm.set(0, -1, 0);
+    // A palm that faces nearly the way the fingers point leaves the hand's roll to chance: it would flip from
+    // frame to frame. As the two line up, the palm is turned in toward the body's middle instead, smoothly.
+    palm.normalize();
+    const across = Math.sqrt(Math.max(0, 1 - palm.dot(a) ** 2));
+    if (across < 0.6) palm.addScaledVector(c.copy(right).multiplyScalar(-sign), (0.6 - across) / 0.6 * 1.5);
     arm.hand.position.copy(wrist);
     // The hand's -z is its palm.
     aim(arm.hand, a, c.copy(palm).multiplyScalar(-1));
