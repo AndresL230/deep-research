@@ -14,9 +14,10 @@
 .bw-explain { margin:0; max-width:72ch; font-size:13.5px; line-height:1.5; color:var(--fg-55); text-wrap:pretty; }
 .bw-empty { padding:28px 12px; border:1px dashed var(--border-strong); border-radius:var(--r-card); font-size:13px; color:var(--fg-55); text-align:center; }
 
-/* ── the grid: 3 across, then 2, 1. A device is never narrower than about 300px, so its screen holds the readout. ── */
+/* ── the grid: 3 across, then 2, 1. A device is never narrower than about 300px, so its screen holds the readout.
+   3 across holds down to 880px, so a wide page keeps three a row with the live feed beside the wall (916px). ── */
 .bw-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:14px; }
-@container (max-width: 1000px) { .bw-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; } }
+@container (max-width: 880px) { .bw-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; } }
 @container (max-width: 640px) { .bw-grid { grid-template-columns:minmax(0, 1fr); } }
 
 /* ── a device ── */
