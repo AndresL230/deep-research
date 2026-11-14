@@ -77,7 +77,9 @@ def jitter_visits(visits: pd.DataFrame, work: pd.DataFrame, columns: list[str], 
                     continue
                 used = {r[j] for r in rows}
                 step = 10.0 ** -decimals[c]
-                near = (round(before[i, j] + sign * k * step, decimals[c]) for k in range(1, 2 * MAX_EXTRA + 2) for sign in (1, -1))
+                # One step up, one down, two up, two down: more tries than a subject has rows.
+                tries = [sign * k * step for k in range(1, 2 * MAX_EXTRA + 2) for sign in (1, -1)]
+                near = (round(float(before[i, j] + t), decimals[c]) for t in tries)
                 free = next((v for v in near if low[j] <= v <= high[j] and v not in used), None)
                 if free is not None:
                     after[i, j] = free

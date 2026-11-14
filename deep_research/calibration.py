@@ -24,7 +24,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
-from . import traps
+from . import datasets, traps
 from .config import VM_WORKSPACE, BatchConfig
 from .task import TaskFiles, build_task
 
@@ -54,8 +54,9 @@ def _numbers(train: pd.DataFrame, test: pd.DataFrame, holdout: pd.DataFrame) -> 
 
 def naive_run(workspace: Path, task: TaskFiles, target: str, seed: int, n_estimators: int) -> dict:
     """What an agent that checks nothing does: split the rows at random, use every column, report test accuracy."""
-    data = pd.read_csv(workspace / "data.csv")
-    holdout = pd.read_csv(workspace / "holdout_features.csv")
+    # Read the way the task was: a class or a value spelled NA is a word, not a gap.
+    data = datasets.read_table(workspace / "data.csv")
+    holdout = datasets.read_table(workspace / "holdout_features.csv")
     labels = pd.read_csv(task.holdout_labels, keep_default_na=False, na_values=[""]).iloc[:, 0]
     train, test = train_test_split(data, test_size=0.2, random_state=seed)
     features = [c for c in data.columns if c != target]
