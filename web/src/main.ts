@@ -25,7 +25,7 @@ import {
 } from "./api";
 import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
 import { costBar, homeView } from "./batch/home";
-import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, type DatasetUi, type UploadKind } from "./dataset-input";
+import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { wallView } from "./batch/wall";
 import { forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { eventsToConvo, runSummaryView, taskText } from "./batch/run";
@@ -460,6 +460,7 @@ async function loadInputs(): Promise<void> {
 const refusal = (e: unknown, lead: string, fallback: string): string =>
   message(e, fallback).replace(/^The server answered HTTP 422: /, `${lead}: `);
 
+let uploadSeq = 0;
 /** Upload a CSV (a dataset) or a .py file (the training script). `expected` is what the picker was opened for. */
 async function upload(file: File, expected?: UploadKind): Promise<void> {
   if (S.ds.upload.state === "busy" || S.home.starting) return;
@@ -468,17 +469,18 @@ async function upload(file: File, expected?: UploadKind): Promise<void> {
     : expected && k.kind !== expected ? (expected === "dataset" ? "Choose a CSV file for the dataset." : "Choose a Python file (.py) for the training script.")
     : null;
   if (problem !== null || "problem" in k) { S.ds = { ...S.ds, upload: { state: "error", message: problem ?? "" } }; paint(); return; }
+  const ticket: UploadTicket = { seq: ++uploadSeq, selected: S.ds.selected };
   S.ds = { ...S.ds, upload: { state: "busy", kind: k.kind } };
   S.home = { ...S.home, error: null };
   paint();
   try {
-    if (k.kind === "dataset") {
-      const info = await uploadDataset(file);
-      S.ds = { ...S.ds, datasets: [...(S.ds.datasets ?? []), info], selected: info.id, upload: { state: "idle" } };
-    } else {
-      S.ds = { ...S.ds, script: await uploadScript(file), upload: { state: "idle" } };
-    }
+    // Wait first, then merge into the state as it is by then: the person may have changed it meanwhile.
+    const done: Uploaded = k.kind === "dataset"
+      ? { kind: "dataset", info: await uploadDataset(file) }
+      : { kind: "script", info: await uploadScript(file) };
+    S.ds = withUpload(S.ds, ticket, uploadSeq, done);
   } catch (e) {
+    if (ticket.seq !== uploadSeq) return;
     S.ds = { ...S.ds, upload: { state: "error", message: refusal(e, "That file can't be used", "The upload failed.") } };
   }
   paint();
@@ -592,13 +594,13 @@ root.addEventListener("click", (e) => {
     case ACT.home: go({ name: "home" }); if (S.home.batches.state === "error") void loadHome(true); return;
     case ACT.openBatch: go({ name: "batch", id: arg }); return;
     case ACT.start: void start(); return;
-    case DI_ACT.dataset: S.ds = { ...S.ds, selected: arg, upload: { state: "idle" } }; S.home = { ...S.home, error: null }; paint(); return;
+    case DI_ACT.dataset: S.ds = { ...S.ds, selected: arg, upload: uploadAfterEdit(S.ds.upload) }; S.home = { ...S.home, error: null }; paint(); return;
     case DI_ACT.upload: {
       const kind: UploadKind = arg === "script" ? "script" : "dataset";
       void pickFile(kind).then((f) => { if (f) void upload(f, kind); });
       return;
     }
-    case DI_ACT.scriptRemove: S.ds = { ...S.ds, script: null, upload: { state: "idle" } }; paint(); return;
+    case DI_ACT.scriptRemove: S.ds = { ...S.ds, script: null, upload: uploadAfterEdit(S.ds.upload) }; paint(); return;
     case ACT.toggleAdvanced: S.home = { ...S.home, advanced: !S.home.advanced }; paint(); return;
     case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
     case ACT.resetConfig:

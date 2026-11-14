@@ -370,6 +370,35 @@ def test_a_run_that_fixes_the_given_script_counts_as_doing_the_step():
     assert f.fork_run_id == "r3"
 
 
+def test_an_edit_the_sandbox_refuses_leaves_the_script_as_it_was():
+    from deep_research.analysis import actions_from_events
+
+    script = "a = load()\nb = load()\ntrain, test = train_test_split(a)\n"
+
+    def source_after(**edit) -> str:
+        events = [
+            {"type": "tool_call", "name": "edit_file", "args": {"file_path": "/w/train.py", **edit}},
+            {"type": "tool_call", "name": "execute", "args": {"command": "python3 train.py"}},
+        ]
+        return actions_from_events(events, {"train.py": script})[-1].source
+
+    # The old text is there twice: refused unless every occurrence is to be replaced.
+    assert source_after(old_string="load()", new_string="load().drop_duplicates()") == script
+    assert source_after(old_string="load()", new_string="read()", replace_all=True) == script.replace("load()", "read()")
+    # The old text is not there at all: refused either way.
+    assert source_after(old_string="fetch()", new_string="read()") == script
+    assert source_after(old_string="fetch()", new_string="read()", replace_all=True) == script
+    # Exactly once: applied.
+    assert source_after(old_string="a = load()", new_string="a = read()") == script.replace("a = load()", "a = read()")
+    # A refused edit must not make the run look as if it removed the duplicates.
+    refused = actions_from_events([
+        {"type": "tool_call", "name": "edit_file", "args": {
+            "file_path": "/w/train.py", "old_string": "load()", "new_string": "load().drop_duplicates()"}},
+        {"type": "tool_call", "name": "execute", "args": {"command": "python3 train.py"}},
+    ], {"train.py": script})
+    assert "deduplicate" not in refused[-1].labels
+
+
 def test_a_step_after_the_last_split_does_not_count():
     late = _run("pd.read_csv('data.csv').head()", "train_test_split(df)", "m.fit(X,y)", "print(df.duplicated().sum())")
     from deep_research.analysis import _did_before_split

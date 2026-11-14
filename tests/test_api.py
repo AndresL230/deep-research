@@ -373,6 +373,74 @@ async def test_a_run_that_fails_still_deletes_its_vm(tmp_path, monkeypatch):
     assert b.case.data["runs"]["r01"]["status"] == "failed"
 
 
+async def test_scoring_a_run_does_not_block_the_event_loop(tmp_path, monkeypatch):
+    import threading
+
+    from deep_research import batch as batch_mod
+    from deep_research.config import BatchConfig
+    from deep_research.scoring import RunScore
+
+    _fake_vms(monkeypatch, batch_mod, [])
+    threads = {}
+
+    def score_run(outputs_dir, task, threshold):
+        threads["score"] = threading.current_thread()
+        return RunScore(status="honest", reported_accuracy=0.8, true_accuracy=0.8, gap=0.0)
+
+    def actions_from_events(events, given_files=None):
+        threads["actions"] = threading.current_thread()
+        return []
+
+    async def drive(self, *args, **kwargs):
+        return []
+
+    monkeypatch.setattr(batch_mod, "score_run", score_run)
+    monkeypatch.setattr(batch_mod, "actions_from_events", actions_from_events)
+    monkeypatch.setattr(batch_mod.Batch, "_drive", drive)
+    b = batch_mod.Batch(BatchConfig(n_runs=1), batch_id="t", root=tmp_path)
+    await b.run_one("r01")
+    # The loop runs on this thread. Scoring a large upload takes seconds, so it must happen on another one.
+    here = threading.current_thread()
+    assert threads["score"] is not here and threads["actions"] is not here
+    run = b.case.data["runs"]["r01"]
+    assert run["status"] == "honest" and run["n_actions"] == 0
+    assert json.loads((b.runs_dir / "r01" / "score.json").read_text())["status"] == "honest"
+
+
+async def test_scoring_a_fork_does_not_block_the_event_loop(tmp_path, monkeypatch):
+    import threading
+    from types import SimpleNamespace as NS
+
+    from deep_research import batch as batch_mod
+    from deep_research.config import BatchConfig
+    from deep_research.scoring import RunScore
+
+    _fake_vms(monkeypatch, batch_mod, [])
+    monkeypatch.setattr(batch_mod.vms, "replay_actions", lambda sb, actions: None)
+    monkeypatch.setattr(batch_mod.vms, "fork_vm", lambda base, label: FakeVm())
+    monkeypatch.setattr(batch_mod, "DaytonaSandbox", lambda sandbox: NS(execute=lambda command: NS(output="ok")))
+    threads = []
+
+    def score_run(outputs_dir, task, threshold):
+        threads.append(threading.current_thread())
+        return RunScore(status="honest", reported_accuracy=0.8, true_accuracy=0.8, gap=0.0)
+
+    async def drive(self, *args, **kwargs):
+        return []
+
+    monkeypatch.setattr(batch_mod, "score_run", score_run)
+    monkeypatch.setattr(batch_mod.Batch, "_drive", drive)
+    b = batch_mod.Batch(BatchConfig(n_runs=1), batch_id="t", root=tmp_path)
+    (b.runs_dir / "r01").mkdir(parents=True, exist_ok=True)
+    (b.runs_dir / "r01" / "messages.json").write_text("[]")
+    b.case.set_split({"label": "deduplicate", "fork_run_id": "r01", "fork_at": 0})
+    summary = await b.run_forks(1)
+    assert "Control: 0 of 1 inflated" in summary
+    assert len(threads) == 2 and threading.current_thread() not in threads
+    children = b.case.data["forks"]["f1"]["children"]
+    assert {c["status"] for c in children.values()} == {"honest"}
+
+
 def _csv(rows: int = 200) -> bytes:
     lines = ["id,size,colour,label"] + [f"{i},{i % 17}.5,{'red' if i % 3 else 'blue'},{'yes' if i % 2 else 'no'}" for i in range(rows)]
     return "\n".join(lines).encode()
