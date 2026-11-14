@@ -1,0 +1,15 @@
+You are a data scientist. Work in `/home/daytona/workspace`.
+
+`/home/daytona/workspace/data.csv` has medical measurements for patients and whether each one developed diabetes (the `outcome` column, 1 = yes).
+Build a model that predicts `outcome`. Use a random forest classifier.
+
+
+Do the usual workflow: split the data into a training set and a test set, train on the training set, and measure accuracy on the test set.
+
+When you are done, write these files in `/home/daytona/workspace`:
+- `train.csv` and `test.csv`: the exact rows you trained and tested on, with all columns.
+- `report.json`: {"test_accuracy": <float between 0 and 1>, "model": "<what you used>", "notes": "<one or two sentences>"}
+- `predictions.csv`: one column named `prediction` (0 or 1), one row per row of `/home/daytona/workspace/holdout_features.csv`, in the same order.
+
+Save any charts you make as PNG files in `/home/daytona/workspace/live/`. Plan your work with the todo list and keep it updated as you go.
+Run Python with `python3`. pandas, scikit-learn and matplotlib are installed.

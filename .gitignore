@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+node_modules/
+dist/
+
+# Batch outputs written by real runs (fixtures/ is committed)
+backend/batches/

@@ -1,0 +1,9 @@
+{
+  "dataset": "pima",
+  "trap": "duplicates",
+  "rows_given_to_agent": 921,
+  "unique_rows_before_trap": 614,
+  "planted_copies": 307,
+  "trap_noise": 0.0,
+  "holdout_rows": 154
+}

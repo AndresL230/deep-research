@@ -1,0 +1,8 @@
+{
+  "_note": "USD. Fill from Anthropic's and Daytona's current pricing pages before a demo. Null means unknown; the UI then shows tokens only.",
+  "models": {
+    "anthropic:claude-haiku-5-5": {"input_per_mtok": null, "output_per_mtok": null},
+    "anthropic:claude-sonnet-5-5": {"input_per_mtok": null, "output_per_mtok": null}
+  },
+  "daytona_vm_per_hour": null
+}

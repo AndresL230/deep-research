@@ -1,0 +1,68 @@
+"""Command line for the first milestones, before the UI exists.
+
+    python -m deep_research.cli runs --n 1          # one real run end to end
+    python -m deep_research.cli runs --n 12         # a full batch, then the split finding
+    python -m deep_research.cli forks <batch_id> --n 4
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from .batch import Batch  # noqa: E402
+from .config import BATCHES_DIR, BatchConfig  # noqa: E402
+
+
+def _print_case(b: Batch) -> None:
+    c = b.case.read()
+    for rid, r in sorted(c["runs"].items()):
+        print(f"{rid}  {r.get('status', '?'):9}  reported={r.get('reported_accuracy')}  true={r.get('true_accuracy')}  "
+              f"overlap={r.get('overlap_share')}  {r.get('reason', '')}")
+    print("split:", json.dumps(c["split"], indent=2) if c["split"] else None)
+    print("costs:", json.dumps(c["costs"].get("scopes", {}), indent=2))
+    print("batch dir:", b.dir)
+
+
+async def runs(n: int, strength: float, hint: str) -> None:
+    b = Batch(BatchConfig(n_runs=n, trap_strength=strength, hint_level=hint))
+    print("batch", b.id)
+    try:
+        await b.run_all()
+    finally:
+        await b.close()
+    _print_case(b)
+
+
+async def forks(batch_id: str, n: int) -> None:
+    cfg = BatchConfig(**json.loads((BATCHES_DIR / batch_id / "case" / "case.json").read_text())["config"])
+    # Reopens the batch. The task is rebuilt from the same seed, so the files are identical.
+    b = Batch(cfg, batch_id=batch_id)
+    print(await b.run_forks(n))
+    _print_case(b)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser()
+    sub = p.add_subparsers(dest="cmd", required=True)
+    r = sub.add_parser("runs")
+    r.add_argument("--n", type=int, default=1)
+    r.add_argument("--strength", type=float, default=0.5)
+    r.add_argument("--hint", choices=["none", "light"], default="none")
+    f = sub.add_parser("forks")
+    f.add_argument("batch_id")
+    f.add_argument("--n", type=int, default=4)
+    a = p.parse_args()
+    if a.cmd == "runs":
+        asyncio.run(runs(a.n, a.strength, a.hint))
+    else:
+        asyncio.run(forks(a.batch_id, a.n))
+
+
+if __name__ == "__main__":
+    main()
