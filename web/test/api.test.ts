@@ -15,7 +15,12 @@ const jsonl = (raw: string): AgentEvent[] => raw.split("\n").filter((l) => l.tri
 
 describe("the demo case file matches the types", () => {
   it("has every section and a known phase", () => {
-    expect(Object.keys(demo).sort()).toEqual([...CASE_SECTIONS].sort());
+    // The demo was saved before the diagnosis existed: `trace` and `fix` are absent and read as empty.
+    const saved = CASE_SECTIONS.filter((s) => s !== "trace" && s !== "fix");
+    expect(Object.keys(demo).sort()).toEqual([...saved].sort());
+    for (const k of Object.keys(demo)) expect(CASE_SECTIONS).toContain(k);
+    expect(CASE_SECTIONS).toContain("trace");
+    expect(CASE_SECTIONS).toContain("fix");
     expect(PHASES).toContain(demo.phase);
     expect(demo.config).toMatchObject({ dataset: "pima", n_runs: 12, simulated: true });
   });

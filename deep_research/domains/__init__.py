@@ -152,6 +152,17 @@ class Domain:
     # check_config(cfg): raise before a batch is started when its settings cannot work (an unreadable dataset).
     check_config: Callable[["BatchConfig"], None] = lambda cfg: None
 
+    # ---- the diagnosis: traceback and fix ----
+    # trace_run(task, run_dir, max_episodes): re-run one run's code where it fails, recording it, and turn each
+    # recording into timestamped symptoms (sim/symptoms.py). Returns a dict for the investigator's `trace_failures`
+    # tool: the numbered source of `fix_output`, a tally, and per failing episode its symptoms and the motion file
+    # saved under `run_dir/trace/`. None: the domain has nothing to replay (tabular).
+    trace_run: Callable[[Any, Path, int], dict] | None = None
+    # The file a proposed fix patches: its path in the VM (`fix_file`) and its name in a run's downloaded outputs
+    # (`fix_output`), where the patch is checked before it is accepted. None: no fix step in this domain.
+    fix_file: str | None = None
+    fix_output: str | None = None
+
     def arm_plan(self, label: str, cfg: "BatchConfig") -> dict[str, dict | None]:
         """The fork experiment's arms for a finding's `label`, in order (forks.arm_plan)."""
         return arms(self.intervention_for(label, cfg), self.show_for(label), self.placebo(), cfg.placebo_arm, cfg.show_arm)

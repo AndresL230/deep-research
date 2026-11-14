@@ -29,7 +29,7 @@ from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
 from .events import EventLog, current_step, events_from_update, read_events
 from .domains import actions_from_events, build_task, intervention_for, score_run
-from .forks import cut_history, forced_turn
+from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
 
 logger = logging.getLogger(__name__)
 
@@ -448,10 +448,18 @@ class Batch:
         split = self.case.data.get("split") or {}
         return self.domain.arm_plan(split.get("label") or "", self.cfg)
 
-    def estimate_forks_usd(self, n_per_arm: int) -> float | None:
+    def fix_arm_plan(self) -> dict[str, dict | None]:
+        """The arms of the fix experiment, once a fix is proposed (forks.fix_plan): control, placebo, fixed."""
+        fix = self.case.data.get("fix")
+        if not fix or self.domain.fix_file is None:
+            return {}
+        return fix_plan(fix, self.domain.placebo(), self.cfg.placebo_arm)
+
+    def estimate_forks_usd(self, n_per_arm: int, n_arms: int | None = None) -> float | None:
         avg = self.tracker.average_run_usd()
         # Forks start partway through a run, so this overestimates a little.
-        return None if avg is None else avg * max(2, len(self.arm_plan())) * n_per_arm
+        arms = max(2, len(self.arm_plan()) if n_arms is None else n_arms)
+        return None if avg is None else avg * arms * n_per_arm
 
     def fork_blocker(self) -> str | None:
         """Why the fork experiment cannot run on this batch, or None when it can."""
@@ -463,33 +471,127 @@ class Batch:
         return None
 
     async def run_forks(self, n_per_arm: int) -> str:
-        self._loop = asyncio.get_running_loop()
+        """The method experiment: from the moment before the suspect step, does doing that step change the result?"""
         why_not = self.fork_blocker()
         if why_not:
             return f"error: {why_not}"
         split = self.case.data["split"]
         iv = intervention_for(split["label"], self.cfg)
-        plan = self.arm_plan()
+        return await self._experiment(
+            self.arm_plan(), n_per_arm, kind="method", src=split["fork_run_id"], fork_at=split["fork_at"],
+            record={"label": split["label"], "intervention": iv["description"]}, headline=f"({split['label']})",
+        )
+
+    # ---- the diagnosis: traceback and fix ----
+    async def trace_failures(self, run_id: str, max_episodes: int = 3) -> dict:
+        """Re-run one run's code where it fails, recording it, and describe each failure (`Domain.trace_run`)."""
+        if self.domain.trace_run is None:
+            return {"error": f"the {self.domain.name} domain has no recordings to trace"}
+        if run_id not in self.case.data["runs"]:
+            return {"error": f"unknown run {run_id}"}
+        try:
+            return await asyncio.to_thread(self.domain.trace_run, self.task, self.runs_dir / run_id, int(max_episodes))
+        except Exception as e:  # noqa: BLE001 - the tool reports it instead of ending the investigation
+            logger.warning("trace of %s failed: %s: %s", run_id, type(e).__name__, e)
+            return {"error": f"could not trace {run_id}: {type(e).__name__}: {e}"[:400]}
+
+    def propose_fix(self, run_id: str, old_string: str, new_string: str, description: str, why: str,
+                    line: int | None = None) -> str:
+        """Record a one-place patch to a run's code, checked against that run's file before it is accepted.
+
+        The same rule as the agents' `edit_file`: `old_string` must occur exactly once. The patch is applied to the
+        `fixed` arm's copy in `run_fix_forks`.
+        """
+        if self.domain.fix_file is None or self.domain.fix_output is None:
+            return f"error: the {self.domain.name} domain has no code to fix"
+        if run_id not in self.case.data["runs"]:
+            return f"error: unknown run {run_id}"
+        if not old_string or old_string == new_string:
+            return "error: old_string must be non-empty and differ from new_string"
+        path = self.runs_dir / run_id / "outputs" / self.domain.fix_output
+        if not path.is_file():
+            return f"error: {run_id} has no {self.domain.fix_output} in its outputs"
+        source = path.read_text()
+        n = source.count(old_string)
+        if n != 1:
+            return f"error: old_string occurs {n} times in {run_id}'s {self.domain.fix_output}; it must occur exactly once"
+        if line is None:
+            line = source[: source.index(old_string)].count("\n") + 1
+        self.case.set_fix(
+            {
+                "run_id": run_id,
+                "file_path": self.domain.fix_file,
+                "line": int(line),
+                "old_string": old_string,
+                "new_string": new_string,
+                "description": (description or "").strip()[:200],
+                "why": (why or "").strip()[:1000],
+                "status": "proposed",
+                "proposed_at": time.time(),
+            }
+        )
+        return f"fix proposed for {run_id} at line {line}: call request_fix_test to test it"
+
+    def fix_blocker(self) -> str | None:
+        """Why the fix experiment cannot run, or None when it can."""
+        fix = self.case.data.get("fix")
+        if not fix:
+            return "no fix has been proposed: call propose_fix first"
+        if self.domain.fix_file is None:
+            return f"the {self.domain.name} domain has no code to fix"
+        split = self.case.data.get("split") or {}
+        if not split.get("fork_run_id") and not (self.runs_dir / fix["run_id"] / "messages.json").is_file():
+            return "no run to fork from"
+        return None
+
+    async def run_fix_forks(self, n_per_arm: int) -> str:
+        """The fix experiment: from the same moment of the same run, does the proposed patch make the code work?"""
+        why_not = self.fix_blocker()
+        if why_not:
+            return f"error: {why_not}"
+        fix = self.case.data["fix"]
+        split = self.case.data.get("split") or {}
+        # The same fork point as the method experiment when the fix targets that run: the code exists there.
+        src = fix["run_id"]
+        if split.get("fork_run_id") == src:
+            fork_at = split["fork_at"]
+        else:
+            actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task)
+            fork_at = len(actions)
+        self.case.update_fix(status="testing")
+        out = await self._experiment(
+            self.fix_arm_plan(), n_per_arm, kind="fix", src=src, fork_at=fork_at,
+            record={"label": split.get("label"), "intervention": fix.get("description"), "fix": dict(fix)},
+            headline=f"with the proposed fix applied in the fixed arm: {fix.get('description')}",
+        )
+        if out.startswith("error:"):
+            self.case.update_fix(status="proposed")
+        return out
+
+    async def _experiment(self, plan: dict[str, dict | None], n_per_arm: int, *, kind: str, src: str, fork_at: int,
+                          record: dict, headline: str) -> str:
+        """Fork a run at `fork_at` and continue `n_per_arm` copies in each arm of `plan`. The result as words."""
+        self._loop = asyncio.get_running_loop()
+        if not plan:
+            return "error: there is no experiment to run"
         n_per_arm = max(1, min(int(n_per_arm), 8))
         try:
-            self.tracker.check(self.estimate_forks_usd(n_per_arm), f"{2 * n_per_arm} fork runs")
+            self.tracker.check(self.estimate_forks_usd(n_per_arm, len(plan)), f"{len(plan) * n_per_arm} fork runs")
         except OverBudget as e:
             return f"error: {e}"
 
         fork_id = f"f{sum(k.startswith('f') for k in self.case.data['forks']) + 1}"
-        src = split["fork_run_id"]
         phase_before = self.case.data.get("phase")
         base_scope = f"fork:{fork_id}:base"
         try:
             msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
             actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task)
-            prefix_msgs, n_prefix = cut_history(msgs, split["fork_at"])
+            prefix_msgs, n_prefix = cut_history(msgs, fork_at)
             prefix_actions = actions[:n_prefix]
             self.case.set_phase("forking")
             self.case.update_fork(
-                fork_id, status="rebuilding", source_run=src, fork_at=n_prefix, label=split["label"],
-                intervention=iv["description"], n_per_arm=n_per_arm, children={},
-                arm_steps={a: (step or {}).get("description") for a, step in plan.items()},
+                fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=n_prefix, n_per_arm=n_per_arm,
+                children={}, arm_steps={a: (step or {}).get("description") for a, step in plan.items()}, **record,
             )
             base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base", **self._vm_domain)
             self.vms[f"{fork_id}-base"] = base
@@ -540,14 +642,13 @@ class Batch:
                     step = plan[arm]
                     if step is not None:
                         backend = DaytonaSandbox(sandbox=vm)
-                        res = await asyncio.to_thread(backend.execute, step["command"])
-                        # A sandbox result without an exit code (an older SDK) counts as having succeeded.
-                        exit_code = getattr(res, "exit_code", None)
-                        if exit_code not in (0, None):
+                        try:
+                            output = await asyncio.to_thread(apply_step, backend, step)
+                        except RuntimeError as e:
                             # Nothing was forced here, so this copy must not be scored as a result of its arm.
-                            raise RuntimeError(f"the {arm} step failed with exit code {exit_code}: {res.output[:200]}")
-                        history += forced_turn(step["command"], res.output)
-                        log.write({"type": "forced", "command": step["command"], "output": res.output[:2000]})
+                            raise RuntimeError(f"the {arm} step failed: {e}") from e
+                        history += forced_turn(step, output)
+                        log.write({"type": "forced", "command": step_text(step), "output": output[:2000]})
 
                     agent = build_analyst(DaytonaSandbox(sandbox=vm), self.cfg.analyst_model)
 
@@ -601,13 +702,21 @@ class Batch:
         self.case.update_fork(fork_id, status="done", arms=arms)
         self.case.set_phase("forked")
         lines = [
-            f"Fork {fork_id} from run {src} before action {n_prefix} ({split['label']}). "
+            f"Fork {fork_id} from run {src} before action {n_prefix} {headline}. "
             f"Every arm starts from the same moment of the same run. Failed copies are not counted."
         ]
         for arm, step in plan.items():
             a = arms[arm]
             what = "continues unchanged" if step is None else step["description"]
-            lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
+            if kind == "fix":
+                rate = "unknown" if a["mean_true"] is None else f"{a['mean_true']:.0%}"
+                lines.append(f"{arm.capitalize()}: mean true success rate {rate} over {a['scored']} copies "
+                             f"({what}; {a['failed']} failed).")
+            else:
+                lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
+        if kind == "fix":
+            self.case.update_fix(status="tested", fork_id=fork_id,
+                                 result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
         return " ".join(lines)
 
     def _set_child(self, fork_id: str, cid: str, **fields: Any) -> None:
@@ -668,17 +777,20 @@ class Batch:
             self.push_costs(force=True)
 
     def _on_interrupt(self, interrupts) -> None:
-        n = 4
+        n, kind = 4, "method"
         self._pending_requests = 1
         try:
             requests = interrupts[0].value["action_requests"]
             self._pending_requests = max(1, len(requests))
             n = int(requests[0]["args"].get("n_per_arm", 4))
+            if requests[0].get("name") == "request_fix_test":
+                kind = "fix"
         except Exception:  # noqa: BLE001
             pass
-        est = self.estimate_forks_usd(n)
+        n_arms = max(2, len(self.fix_arm_plan() if kind == "fix" else self.arm_plan()))
+        est = self.estimate_forks_usd(n, n_arms)
         self.case.update_fork(
-            "pending", status="awaiting_approval", n_per_arm=n, vm_count=max(2, len(self.arm_plan())) * n + 1,
+            "pending", status="awaiting_approval", kind=kind, n_per_arm=n, vm_count=n_arms * n + 1,
             estimate_usd=None if est is None else round(est, 2),
         )
         self.case.set_phase("awaiting_approval")

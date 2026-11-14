@@ -140,7 +140,7 @@ button.ln-col-h:focus-visible { outline:2px solid var(--accent); outline-offset:
 .ln-exp-t b { color:var(--fg); font-weight:600; }
 .ln-arms { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:10px; }
 .ln-arm { display:flex; flex-direction:column; gap:8px; min-width:0; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
-.ln-arm--forced { border-color:color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.ln-arm--forced, .ln-arm--fixed { border-color:color-mix(in srgb, var(--accent) 35%, var(--border)); }
 /* The two arms between control and forced: present, but not the ones the verdict rests on. */
 .ln-arm--placebo, .ln-arm--show { border-style:dashed; }
 .ln-arm-h { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
@@ -198,10 +198,33 @@ button.ln-col-h:focus-visible { outline:2px solid var(--accent); outline-offset:
 .ln-hyp-k { font-size:11.5px; color:var(--fg-55); }
 .ln-hyp-e { margin:0; font-size:12.5px; }
 
+/* ── 5. the diagnosis: one card per symptom, the line behind it as code ── */
+.ln-dx-h { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; }
+.ln-dx-link { margin-left:auto; font-size:11.5px; color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.ln-dx-link:hover { border-bottom-color:var(--accent); }
+.ln-dx-link:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:2px; }
+.ln-dx-symptom { margin:0; font-size:15px; line-height:1.4; font-weight:500; letter-spacing:-0.01em; text-wrap:pretty; }
+.ln-dx-code { display:flex; align-items:baseline; gap:12px; margin:0; padding:8px 10px; border:1px solid var(--border); border-left:2px solid var(--accent); border-radius:8px; background:var(--surface); font-family:var(--code); font-size:12px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; overflow-x:auto; color:var(--fg); }
+.ln-dx-ln { flex:none; color:var(--fg-40); font-variant-numeric:tabular-nums; user-select:none; }
+.ln-dx-why { margin:0; font-size:12.5px; }
+
+/* ── 6. the fix: the text replaced beside its replacement, red and green like honest and inflated ── */
+.ln-fix-t { margin:0; font-size:16px; line-height:1.35; font-weight:600; letter-spacing:-0.01em; text-wrap:balance; }
+.ln-fix-where { margin:-6px 0 0; font-family:var(--code); font-size:11.5px; }
+.ln-fix-diff { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+.ln-fix-block { margin:0; min-width:0; display:flex; flex-direction:column; border:1px solid var(--border); border-left:2px solid var(--ln-tone, var(--border-strong)); border-radius:8px; background:color-mix(in srgb, var(--ln-tone) 6%, var(--bg)); overflow:hidden; }
+.ln-fix-old { --ln-tone:var(--red); }
+.ln-fix-new { --ln-tone:var(--green); }
+.ln-fix-cap { padding:6px 10px; border-bottom:1px solid var(--border); font-size:11.5px; font-weight:500; color:var(--ln-tone); }
+.ln-fix-pre { margin:0; padding:8px 10px; max-height:260px; overflow:auto; font-family:var(--code); font-size:11.5px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; tab-size:4; color:var(--fg); }
+.ln-fix-why { margin:0; font-size:12.5px; color:var(--fg-70); }
+.ln-fix-tested { padding:7px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--fg); }
+
 /* ── phone width ── */
 @media (max-width: 640px) {
   .ln-sec { padding:12px; }
-  .ln-cmp, .ln-arms, .ln-cons { grid-template-columns:minmax(0, 1fr); }
+  .ln-cmp, .ln-arms, .ln-cons, .ln-fix-diff { grid-template-columns:minmax(0, 1fr); }
+  .ln-dx-symptom { font-size:14px; }
   .ln-sentence { font-size:16px; }
   .ln-headline { font-size:18px; }
   .ln-run { width:34px; }

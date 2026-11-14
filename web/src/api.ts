@@ -7,7 +7,7 @@
 // ── the case file ────────────────────────────────────────────────────────────
 
 /** The case file's sections, in order. */
-export const CASE_SECTIONS = ["config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "costs"] as const;
+export const CASE_SECTIONS = ["config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "costs"] as const;
 export type CaseSection = (typeof CASE_SECTIONS)[number];
 
 /** Phases in the order a batch moves through them. Also `stopped`, `blocked: <why>` and `error: <why>`. */
@@ -182,8 +182,13 @@ export interface SplitFinding {
 
 /** The experiment's arms (deep_research/forks.py `arm_plan`), in the order they are run.
  *  `placebo` runs a harmless command so `forced` is not the only arm with an extra tool call in its history;
- *  `show` is told what `forced` fixes and left to decide. Both are optional per batch. */
-export type ForkArm = "control" | "placebo" | "show" | "forced";
+ *  `show` is told what `forced` fixes and left to decide. Both are optional per batch. A fix experiment
+ *  (`ForkExperiment.kind` "fix") runs `fixed`, the run with the proposed fix applied, in place of `forced`. */
+export type ForkArm = "control" | "placebo" | "show" | "forced" | "fixed";
+
+/** What a fork experiment tests: `method`, which step caused the inflation (the default), or `fix`, whether the
+ *  investigator's proposed patch makes the code better. */
+export type ForkKind = "method" | "fix";
 
 export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   arm: ForkArm;
@@ -212,6 +217,9 @@ export interface ArmSummary {
 
 export interface ForkExperiment {
   id: string;
+  /** Absent means "method": the experiment that tests which step. A "fix" experiment's `arm_steps` has `control`,
+   *  optionally `placebo`, and `fixed` (never `forced`). */
+  kind?: ForkKind;
   status: "rebuilding" | "running" | "done" | "stopped";
   source_run: string;
   fork_at: number;
@@ -232,6 +240,8 @@ export interface ForkExperiment {
 export interface PendingForks {
   id: "pending";
   status: "awaiting_approval";
+  /** Absent means "method". "fix": the investigator wants to test its proposed fix (`CaseFile.fix`). */
+  kind?: ForkKind;
   n_per_arm: number;
   vm_count: number;
   estimate_usd: number | null;
@@ -250,6 +260,50 @@ export interface Verdict {
   sentence: string;
   step_label: StepLabel;
   numbers: Record<string, number>;
+}
+
+/** One finding of the investigator's `code-tracer` subagent: a symptom read from a recording of a failing run, and
+ *  the line of that run's controller.py behind it. */
+export interface TraceEntry {
+  /** Unix seconds. */
+  at: number;
+  /** The run whose code was traced ("r02"). */
+  run_id: string;
+  /** One sentence from the recording: "The can slipped out of the grip at 2.14 s, 0.31 m into a 0.60 m carry, ..." */
+  symptom: string;
+  /** 1-based line in the run's controller.py. */
+  line: number;
+  /** That line's text; may be empty. */
+  excerpt: string;
+  /** Why that line causes the symptom. */
+  why: string;
+  /** Batch-relative path of the recording it was read from (`runs/r02/trace/hidden_07.motion.json`), for
+   *  `batchFileUrl`. Null when unknown. */
+  motion_file: string | null;
+}
+
+/** The investigator's proposed patch to a run's controller, and how its fix experiment went. */
+export interface ProposedFix {
+  /** The run whose controller is patched. */
+  run_id: string;
+  /** The file's path in the VM: "/home/daytona/workspace/controller.py". */
+  file_path: string;
+  /** The line the fix targets, or null. */
+  line: number | null;
+  /** The exact text replaced, and its replacement. */
+  old_string: string;
+  new_string: string;
+  /** One line: "Scale the carry time with the carry distance". */
+  description: string;
+  /** The reasoning. */
+  why: string;
+  status: "proposed" | "testing" | "tested" | "rejected";
+  /** Unix seconds. */
+  proposed_at: number;
+  /** The fix experiment's fork id ("f2") once it runs. */
+  fork_id?: string;
+  /** The investigator's one sentence on what the fix experiment showed, once recorded. */
+  verdict?: string;
 }
 
 export interface ScopeCost {
@@ -285,6 +339,11 @@ export interface CaseFile {
   hypotheses: Hypothesis[];
   forks: Record<string, ForkExperiment | PendingForks>;
   verdict: Verdict | null;
+  /** `[]` until the code-tracer subagent records something. Absent on case files saved before it existed (and in
+   *  a replay's rebuilt snapshots): read as `[]`. */
+  trace?: TraceEntry[];
+  /** Null until the investigator proposes a fix. Absent on case files saved before it existed: read as null. */
+  fix?: ProposedFix | null;
   costs: Costs;
 }
 
