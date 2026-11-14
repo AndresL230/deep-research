@@ -41,6 +41,9 @@ def test_holdout_labels_are_never_served(client):
     assert client.get(f"/api/batches/{DEMO}/files/task/holdout_labels.csv").status_code == 404
     assert client.get(f"/api/batches/{DEMO}/files/../{DEMO}/task/holdout_labels.csv").status_code == 404
     assert "holdout_labels" not in client.get(f"/api/batches/{DEMO}/case").text
+    # macOS file systems ignore case: another spelling of the name opens the same secret file.
+    for spelling in ("HOLDOUT_LABELS.csv", "Holdout_Labels.csv"):
+        assert client.get(f"/api/batches/{DEMO}/files/task/{spelling}").status_code == 404
 
 
 def test_batch_files_are_served_with_a_locked_down_csp(client):

@@ -589,10 +589,11 @@ def batch_file(batch_id: str, path: str):
     root = _batch_dir(batch_id).resolve()
     full = (root / path).resolve()
     secret = ("holdout_labels", *domains.secret_files())
-    if root not in full.parents or not full.is_file() or any(s in full.name for s in secret):
+    # Compared in lower case: macOS file systems are case-insensitive, so `HIDDEN_POSITIONS.json` opens the secret file.
+    if root not in full.parents or not full.is_file() or any(s.lower() in full.name.lower() for s in secret):
         raise HTTPException(404, "no such file")
     rel = full.relative_to(root).as_posix()
-    if _in_hidden_folder(rel) and not _hidden_listed(batch_id, rel):
+    if _in_hidden_folder(rel.lower()) and not _hidden_listed(batch_id, rel):
         raise HTTPException(404, "no such file")
     return FileResponse(full, headers=FILE_HEADERS)
 
