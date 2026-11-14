@@ -228,7 +228,7 @@ def build_task(cfg: RobotConfig, out_dir: Path) -> RobotTaskFiles:
     files.meta.write_text(
         json.dumps(
             {
-                "domain": "robot",
+                "domain": "robot_arm",
                 "model_id": model_id,
                 "seed": cfg.seed,
                 "hint_level": cfg.hint_level,
@@ -413,9 +413,11 @@ def score_run(
     practice_xy = (meta.get("practice") or practice_setup())["can_xy"]
     overlap = None
     try:
-        tested = _positions_from_motions(outputs_dir)
-        if tested is None and actions is not None:
-            tested = _positions_from_actions(actions)
+        # Both sources: an honest run may save a motion file only at the practice spot while its
+        # commands moved the can, and a run may move the can without saving motion files.
+        from_motions = _positions_from_motions(outputs_dir) or []
+        from_actions = (_positions_from_actions(actions) or []) if actions is not None else []
+        tested = (from_motions + from_actions) or None
         if tested is not None:
             overlap = _practice_share(tested, practice_xy)
     except Exception:  # noqa: BLE001 - the evidence is a bonus signal
