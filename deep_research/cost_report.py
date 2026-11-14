@@ -149,6 +149,8 @@ def _batch(entry: dict) -> tuple[dict, dict[str, dict]]:
         "counts": {
             "runs": len(statuses),
             **{s: statuses.count(s) for s in SCORED},
+            # Robot runs between the two thresholds, only when there are some: tabular rows keep their shape.
+            **({"unclear": statuses.count("unclear")} if "unclear" in statuses else {}),
             "fork_runs": fork_runs,
         },
         # A simulated batch has no real dollars: tokens only.

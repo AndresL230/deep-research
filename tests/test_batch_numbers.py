@@ -83,6 +83,15 @@ def test_summarize_says_unknown_instead_of_inventing_a_number(tmp_path):
     assert "unknown" in render(s)
 
 
+def test_unclear_runs_are_finished_but_left_out_of_the_inflated_share(tmp_path):
+    runs = {f"r{i:02d}": {"id": f"r{i:02d}", "status": st} for i, st in enumerate(["honest", "inflated", "unclear", "unclear", "failed"], 1)}
+    case = {"config": {}, "phase": "ready", "runs": runs, "forks": {}, "verdict": None, "costs": {}}
+    s = summarize(_batch(tmp_path, case))
+    assert s["runs"] == {"total": 5, "honest": 1, "inflated": 1, "failed": 1, "unclear": 2, "other": 0}
+    assert s["inflated_share"] == 0.5
+    assert "2 unclear (left out of the share)" in render(s) and "not finished" not in render(s)
+
+
 def test_a_missing_price_makes_the_average_unknown(tmp_path):
     case = json.loads(json.dumps(CASE))
     case["costs"]["scopes"]["run:r02"]["total_usd"] = None

@@ -448,6 +448,18 @@ describe("forkView", () => {
     expect(forkView(vmOf({ forks: {} }))).toBe("");
   });
 
+  it("gives a robot batch's fork children a looping 3D thumbnail of their last episode", () => {
+    const f = demo.forks.f1 as ForkExperiment;
+    const files = ["forks/f1/forced-1/outputs/live/practice.motion.json", "forks/f1/forced-1/outputs/live/check_far.motion.json"];
+    const children = { ...f.children, "forced-1": { ...f.children["forced-1"], motion_files: files }, "control-1": { ...f.children["control-1"], status: "running" as const, motion_files: [] } };
+    const robot = forkView(vmOf({ config: { ...demo.config, visual: "motion" } as CaseFile["config"], forks: { f1: { ...f, children } as ForkExperiment } }));
+    expect(robot).toContain(`<span class="rb-thumb" data-keep data-robot-thumb data-batch="demo" data-file="${files[1]}"`);
+    expect(robot).toContain("ln-kid-pic--none");
+    expect(robot).not.toContain("<div class=\"rb-thumb\"");
+    // A tabular batch keeps its text tiles.
+    expect(forkView(vmOf({ forks: { f1: { ...f, children } as ForkExperiment } }))).not.toContain("ln-kid-pic");
+  });
+
   it("renders the approval card, enabled only when live and idle", () => {
     const replay = forkView(vmOf({ forks: { pending }, phase: "awaiting_approval" }));
     // 9 VMs for 4 runs an arm is one base plus two arms.
