@@ -1,11 +1,7 @@
 /* The page frame around the batch views (main.ts): header, the replay bar under it, the scrolling body. The views
    themselves style their own content (home.css, wall.css, lanes.css, run.css, replay.css). */
 
-/* The light canvas is a shade brighter than Trov's, so the white devices on the wall sit on it without a hard edge. */
-[data-cnpy-theme="light"] { --bg:#fbfbfc; }
-/* Dark is the default, on a cool near-black rather than Trov's warm one. Only the neutrals change; the accent and the
-   status colours are Trov's. */
-[data-cnpy-theme="dark"] { --bg:#15171b; --surface:#1c1f24; --fg:#f2f3f3; --fg-70:rgba(242,243,243,0.72); --fg-55:rgba(242,243,243,0.56); --fg-40:rgba(242,243,243,0.5); --border:rgba(242,243,243,0.09); --border-strong:rgba(242,243,243,0.17); --border-input:rgba(242,243,243,0.36); --hover:rgba(242,243,243,0.06); --red-fg:#15171b; --shadow:0 1px 2px rgba(0,0,0,0.45); }
+/* The colours of both themes are in system.css. Black mode is the default, on the landing page's cool near-black. */
 
 /* The header and the replay bar sit on the same column as the content under them (its width varies by screen). */
 .app-root { --pg-w:1240px; --pg-pad:24px; }
@@ -19,7 +15,7 @@
 .pg-home { display:inline-flex; align-items:center; gap:10px; padding:0; min-width:0; color:inherit; }
 .pg-home .ask-h1 { overflow:hidden; text-overflow:ellipsis; }
 .pg-home:hover .ask-h1-t.is-parent { color:var(--fg-70); }
-.pg-crumb { padding:2px 4px; margin:0 -4px; border-radius:6px; font-size:15px; font-weight:600; letter-spacing:-0.01em; color:var(--fg-55); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.pg-crumb { padding:2px 4px; margin:0 -4px; border-radius:var(--r-ctl); font-size:15px; font-weight:500; letter-spacing:-0.01em; color:var(--fg-55); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
 button.pg-crumb:hover { color:var(--fg); background:var(--hover); }
 .pg-crumb.is-cur { color:var(--fg); }
 button.pg-crumb.is-cur:hover { background:none; cursor:default; }
@@ -29,15 +25,16 @@ button.pg-crumb.is-cur:hover { background:none; cursor:default; }
 
 /* A gutter on both edges keeps the centred column under the header whether or not a scrollbar shows. */
 .pg-scroll { flex:1; min-height:0; overflow-y:auto; overflow-anchor:none; scrollbar-gutter:stable both-edges; display:flex; flex-direction:column; }
-.pg-batch { width:100%; max-width:1240px; margin:0 auto; padding:20px 24px 64px; display:flex; flex-direction:column; gap:28px; }
+.pg-batch { width:100%; max-width:1240px; margin:0 auto; padding:20px 24px 96px; display:flex; flex-direction:column; gap:36px; }
+.pg-hdr .ask-h1 { font-weight:500; }
 .pg-sec { min-width:0; scroll-margin-top:16px; animation:ask-fade-in var(--fx-base) var(--fx-ease) both; }
 
 /* A run: the summary strip, then the conversation column (ask-conversation.ts). */
 .pg-runsum { width:100%; max-width:960px; margin:0 auto; padding:16px 24px 0; box-sizing:border-box; }
 .pg-scroll[data-view="run"] .ask-col, .pg-scroll[data-view="child"] .ask-col { max-width:960px; padding-inline:24px; }
 
-.pg-tabs { display:inline-flex; gap:2px; margin-top:12px; padding:2px; border:1px solid var(--border); border-radius:8px; }
-.pg-tab { padding:3px 10px; border-radius:6px; font-size:12px; font-weight:500; color:var(--fg-55); }
+.pg-tabs { display:inline-flex; gap:2px; margin-top:12px; padding:2px; border:1px solid var(--border); border-radius:var(--r-ctl); }
+.pg-tab { padding:3px 10px; border-radius:2px; font-size:12px; font-weight:500; color:var(--fg-55); transition:color var(--t-hover) ease, background var(--t-hover) ease; }
 .pg-tab:hover { color:var(--fg); }
 .pg-tab[aria-pressed="true"] { background:var(--hover); color:var(--fg); }
 .pg-nb { width:100%; max-width:960px; margin:0 auto; padding:18px 24px 64px; box-sizing:border-box; }
@@ -45,7 +42,7 @@ button.pg-crumb.is-cur:hover { background:none; cursor:default; }
 
 .pg-note { max-width:720px; margin:24px auto; padding:0 28px; color:var(--fg-55); font-size:13px; }
 .pg-msg { margin:auto; padding:40px 28px; max-width:520px; text-align:center; }
-.pg-msg h2 { margin:0 0 6px; font-size:20px; font-weight:600; letter-spacing:-0.02em; }
+.pg-msg h2 { margin:0 0 6px; font-size:24px; font-weight:400; letter-spacing:-0.025em; }
 .pg-msg p { margin:0 0 14px; color:var(--fg-55); font-size:13.5px; }
 
 @media (max-width: 640px) {

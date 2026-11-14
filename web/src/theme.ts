@@ -46,7 +46,7 @@ export function storeTheme(theme: Theme): void {
 }
 
 /** The page's own background in each theme, for what shows past its ends when the scroll bounces. */
-export const PAGE_BACKGROUND: Record<Theme, string> = { dark: "#15171b", light: "#fbfbfc" };
+export const PAGE_BACKGROUND: Record<Theme, string> = { dark: "#15171b", light: "#f7f7f5" };
 
 const SUN = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"></path></svg>`;
 const MOON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z"></path></svg>`;

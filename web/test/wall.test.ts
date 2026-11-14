@@ -128,7 +128,7 @@ describe("wallView mid-replay", () => {
     const r04 = tileOf(html, "r04");
     expect(r04).toContain("bw-pill--starting");
     expect(r04).toContain("Starting the VM");
-    expect(r04).toContain("ask-spin");
+    expect(r04).toContain("ds-spin");
     expect(r04).not.toContain("<img");
     const r05 = tileOf(html, "r05");
     expect(r05).toContain("Split into train and test");

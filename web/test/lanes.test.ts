@@ -246,15 +246,16 @@ describe("splitView", () => {
     const honest = cons.slice(cons.indexOf('data-morph-key="grp-honest"'), cons.indexOf('data-morph-key="grp-inflated"'));
     const inflated = cons.slice(cons.indexOf('data-morph-key="grp-inflated"'));
     expect(honest).toContain('aria-label="Reported 77.9%, true 76.5%, gap +1.4 pts"');
-    expect(honest).toContain('<b class="ln-gap-n">+1.4 pts</b>');
+    // The gap is a number that counts up (motion.ts `count`): what it arrives at is in `data-text`.
+    expect(honest).toMatch(/<b class="ln-gap-n"><span class="mo-n"[^>]*data-text="\+1\.4 pts">/);
     expect(honest).toContain("<b>0%</b> of test rows were also in training");
     expect(inflated).toContain('aria-label="Reported 89.2%, true 75.1%, gap +14.1 pts"');
-    expect(inflated).toContain('<b class="ln-gap-n">+14.1 pts</b><span class="ln-gap-w">reported above true</span>');
+    expect(inflated).toMatch(/<b class="ln-gap-n"><span class="mo-n"[^>]*data-text="\+14\.1 pts">.*?<\/b><span class="ln-gap-w">reported above true<\/span>/);
     expect(inflated).toContain("<b>53%</b> of test rows were also in training");
     // Bars run from 50% to 100%: the reported bar is solid up to the true value and hatched past it.
-    expect(inflated).toContain('<i class="ln-fill" style="width:50.2%"></i><i class="ln-over" style="left:50.2%;width:28.2%"></i>');
-    expect(inflated).toContain('<i class="ln-fill ln-fill--true" style="width:50.2%"></i>');
-    expect(honest).toContain('<i class="ln-fill" style="width:53%"></i><i class="ln-over" style="left:53%;width:2.8%"></i>');
+    expect(inflated).toContain('<i class="ln-fill ds-grow-x" style="width:50.2%"></i><i class="ln-over" style="left:50.2%;width:28.2%"></i>');
+    expect(inflated).toContain('<i class="ln-fill ln-fill--true ds-grow-x" style="width:50.2%;--mo-d:150ms"></i>');
+    expect(honest).toContain('<i class="ln-fill ds-grow-x" style="width:53%"></i><i class="ln-over" style="left:53%;width:2.8%"></i>');
     expect(count(cons, "<span>50%</span><span>100%</span>")).toBe(2);
     expect(cons).not.toContain("<table");
   });
@@ -272,7 +273,7 @@ describe("splitView", () => {
     expect(strip).toContain('class="ln-run ln-run--inflated is-shown" data-morph-key="run-r02"');
     expect(strip).toContain('title="r03, inflated: reported 86.5%, true 73.4%"');
     expect(strip).toContain('title="r02, inflated: reported 89.2%, true 76.0%. Shown above"');
-    expect(strip).toContain('<i class="ln-run-bar" style="height:78.4%"></i><i class="ln-run-true" style="bottom:51.9%"></i>');
+    expect(strip).toMatch(/<i class="ln-run-bar ds-grow-y" style="height:78\.4%;--mo-d:\d+ms"><\/i><i class="ln-run-true" style="bottom:51\.9%"><\/i>/);
   });
 
   it("draws failed and unscored runs in the strip without bars", () => {
@@ -482,7 +483,7 @@ describe("forkView", () => {
     const forced = html.slice(html.indexOf('data-morph-key="arm-forced"'));
     expect(control).toContain('class="ln-score ln-score--inflated"');
     expect(control).toContain('aria-label="Reported 87.8%, true 73.5%, gap +14.3 pts"');
-    expect(control).toContain('<b class="ln-gap-n">+14.3 pts</b>');
+    expect(control).toMatch(/<b class="ln-gap-n"><span class="mo-n"[^>]*data-text="\+14\.3 pts">/);
     expect(forced).toContain('class="ln-score ln-score--honest"');
     expect(forced).toContain('aria-label="Reported 76.2%, true 75.0%, gap +1.2 pts"');
     expect(count(html, "<span>50%</span><span>100%</span>")).toBe(2);

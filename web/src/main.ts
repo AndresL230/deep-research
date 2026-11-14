@@ -2,7 +2,8 @@
 //
 //   #/                         the landing page: a nav and a hero over a 3D scene of the pipeline (landing/)
 //   #/start                    home: saved and live batches, and the config screen to start one
-//   #/b/<id>                   a batch: phase panel, the wall of runs, the split lanes, the fork experiment, the verdict
+//   #/b/<id>                   a batch: the overview, the wall of runs, the split lanes, the investigator, the fork
+//                              experiment, the verdict
 //   #/b/<id>/run/<run>         one run in the Ask conversation view
 //   #/b/<id>/fork/<f>/<child>  one fork child in the conversation view
 //   #/costs                    what every batch cost, in total and one by one
@@ -14,6 +15,7 @@
 // patches the regions in place on every change (batched to a frame), so iframes and images never reload.
 
 import "./style.css";
+import "./system.css";
 import "./batch/page.css";
 import { attr, esc } from "./ui";
 import { askIcon } from "./ask-icons";
@@ -30,6 +32,7 @@ import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type
 import { costBar, homeView } from "./batch/home";
 import { hubBadge } from "./batch/hub-badge";
 import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
+import { overviewView } from "./batch/overview";
 import { wallView } from "./batch/wall";
 import { forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
@@ -41,6 +44,8 @@ import type { Loadable } from "./batch/model";
 import { costsLink, costsView } from "./batch/costs";
 import { landingView } from "./landing/landing";
 import { syncLanding } from "./landing/mount";
+import { syncMotion } from "./motion";
+import { smoothScroll } from "./scroll";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -121,6 +126,8 @@ const root = app.firstElementChild as HTMLElement;
 const headerEl = root.querySelector<HTMLElement>("[data-region=header]")!;
 const subEl = root.querySelector<HTMLElement>("[data-region=sub]")!;
 const scrollEl = root.querySelector<HTMLElement>("[data-region=scroll]")!;
+// The page scrolls smoothly (scroll.ts, Lenis); the jumps the app makes itself go through it too.
+const smooth = smoothScroll(scrollEl);
 const applyTheme = (): void => { root.dataset.cnpyTheme = theme(); syncPageTheme(); scheduleOrbs(); paint(); };
 themeQ.addEventListener("change", () => { if (themePick === "system") applyTheme(); });
 /** The switch: white or black, kept in this browser. */
@@ -229,8 +236,10 @@ function headerView(vm: BatchVm | null): string {
 }
 
 function batchBody(vm: BatchVm): string {
-  // The story in order: the runs, where they split, what the investigator makes of it, the fork, the verdict.
+  // The story in order: where the batch stands, the runs, where they split, what the investigator makes of it, the
+  // fork, the verdict.
   const sections: [string, string][] = [
+    ["overview", overviewView(vm)],
     ["wall", wallView(vm)],
     ["split", splitView(vm)],
     ["phase", investigatorView(vm)],
@@ -302,6 +311,8 @@ let shownSections = new Set<string>();
 
 let ticker: ReturnType<typeof setInterval> | null = null;
 function afterPaint(): void {
+  // First, before the browser styles the page: what morph took off the elements that move (motion.ts).
+  syncMotion(scrollEl, scrollEl);
   // The landing page's 3D scenes are canvases, not markup: start them when the page is there, stop them when it is
   // not, and show the open item's device.
   syncLanding(scrollEl);
@@ -310,10 +321,7 @@ function afterPaint(): void {
     const keys = new Set(els.map((el) => el.dataset.morphKey!));
     const fresh = els.filter((el) => !shownSections.has(el.dataset.morphKey!));
     // Follow the story while a replay plays: the split, the fork and the verdict scroll in as they appear.
-    if (S.batch?.replay?.playing && shownSections.size && fresh.length) {
-      const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-      fresh[fresh.length - 1].scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
-    }
+    if (S.batch?.replay?.playing && shownSections.size && fresh.length) smooth.to(fresh[fresh.length - 1], { offset: -16 });
     shownSections = keys;
   } else {
     shownSections = new Set();
@@ -651,7 +659,7 @@ function onRoute(): void {
   const r = S.route;
   const key = routeKey(r) ?? "";
   if (key !== S.cvKey) { S.cv = initialConversationUi(); S.cvKey = key; }
-  if (prev.name !== r.name || routeKey(prev) !== routeKey(r)) scrollEl.scrollTop = 0;
+  if (prev.name !== r.name || routeKey(prev) !== routeKey(r)) smooth.top();
   if (r.name === "landing") {
     closeBatch();
   } else if (r.name === "home") {
@@ -711,6 +719,12 @@ root.addEventListener("click", (e) => {
       return;
     }
     case ACT.back: if ("id" in r) go({ name: "batch", id: r.id }); else if (r.name === "costs") go(S.costsBack); return;
+    case ACT.goto: {
+      // A step of the pipeline: glide to its section of the page.
+      const sec = Array.from(scrollEl.querySelectorAll<HTMLElement>(".pg-sec[data-morph-key]")).find((el) => el.dataset.morphKey === `sec:${arg}`);
+      if (sec) smooth.to(sec, { offset: -12 });
+      return;
+    }
     case ACT.investigate:
       if (b && !b.live && b.resumable) void resumeAndInvestigate(b);
       else void liveAction("investigate", (id) => startInvestigation(id));
@@ -739,8 +753,7 @@ root.addEventListener("click", (e) => {
     case ACT.jump: {
       S.cv.stick = true;
       S.cv.away = false;
-      const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
-      scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+      smooth.to(scrollEl.scrollHeight);
       paint();
       return;
     }

@@ -1,0 +1,160 @@
+/* The app's design system: its colours in white mode and black mode, its shapes, and the motion every screen shares.
+   It follows one reference, measured from that site and its motion videos: near-black ink on a warm off-white, hairline
+   borders, 4px controls and 8px cards, two weights of one typeface, a purple gradient, and animation that eases in
+   long tails. motion.ts writes the markup these rules animate. Loaded after style.css (the conversation's rules) and
+   before each view's own stylesheet. */
+
+@property --ds-beam { syntax:"<angle>"; inherits:false; initial-value:0deg; }
+
+:root {
+  --r-ctl:4px; --r-card:8px;
+  /* Text rises on a slow start, a fast middle and a long tail. Cards and bars start fast and settle slowly. */
+  --ease-rise:cubic-bezier(.6, 0, .1, 1);
+  --ease-out:cubic-bezier(.16, 1, .3, 1);
+  --ease-swap:cubic-bezier(.3, .7, .2, 1);
+  --t-card:.93s; --t-char:.79s; --t-draw:.3s; --t-hover:.25s;
+  --char-gap:5.6ms;
+}
+
+/* ── colour ── */
+.app-root[data-cnpy-theme="light"] {
+  --bg:#f7f7f5; --surface:#ffffff; --muted:#f2f2f2; --muted-2:#e9e9e9;
+  --fg:#1a1a1a; --fg-70:#474747; --fg-55:#6a6a6a; --fg-40:#787878;
+  --border:#e2e2e2; --border-strong:#d1d1d1; --border-input:#8e8e8e; --hover:rgba(26,26,26,0.055); --line:#d1d1d1;
+  --accent:#6c24c4; --accent-fg:#ffffff; --accent-soft:rgba(108,36,196,0.09); --mark:#6c24c4; --focus:#6c24c4;
+  --pu-hi:#b07af2; --pu:#6c24c4; --pu-deep:#361e7e; --pu-wash:#f4effd; --pu-lav:#d7c9fe; --pu-peri:#dddcfe; --pu-pink:#fdf2ff;
+  --ink:#1a1a1a; --ink-fg:#ffffff;
+  --green:#1c7a50; --amber:#a8640f; --red:#c22f45; --blue:#2f6fd0; --purple:#6c24c4; --red-fg:#ffffff;
+  --ok:#4ec08a; --ok-bg:#e4f5ec; --bad:#e2536a; --bad-bg:#fce8ec; --warn:#f0b872; --warn-bg:#fcefdf; --idle-bg:#f2f2f2;
+  --ring-track:#dcdcdc; --bar-base:#e4e4e4;
+  --shadow:0 1px 2px rgba(26,26,26,0.04); --menu-shadow:0 14px 38px rgba(26,26,26,0.14);
+}
+.app-root[data-cnpy-theme="dark"] {
+  --bg:#15171b; --surface:#0e1013; --muted:#1f2227; --muted-2:#282b31;
+  --fg:#f4f4f4; --fg-70:rgba(244,244,244,0.74); --fg-55:rgba(244,244,244,0.58); --fg-40:rgba(244,244,244,0.5);
+  --border:rgba(244,244,244,0.10); --border-strong:rgba(244,244,244,0.18); --border-input:rgba(244,244,244,0.36); --hover:rgba(244,244,244,0.06); --line:rgba(244,244,244,0.2);
+  --accent:#b07af2; --accent-fg:#190a30; --accent-soft:rgba(176,122,242,0.14); --mark:#b07af2; --focus:#b07af2;
+  --pu-hi:#c9a3f7; --pu:#b07af2; --pu-deep:#6c24c4; --pu-wash:rgba(176,122,242,0.1); --pu-lav:#361e7e; --pu-peri:#2a2a66; --pu-pink:#4a2360;
+  --ink:#f4f4f4; --ink-fg:#111112;
+  --green:#6fd6a3; --amber:#f0b872; --red:#f48397; --blue:#7fb0f5; --purple:#b07af2; --red-fg:#15171b;
+  --ok:#4ec08a; --ok-bg:rgba(78,192,138,0.14); --bad:#e2536a; --bad-bg:rgba(226,83,106,0.16); --warn:#f0b872; --warn-bg:rgba(240,184,114,0.14); --idle-bg:rgba(244,244,244,0.07);
+  --ring-track:rgba(244,244,244,0.13); --bar-base:rgba(244,244,244,0.16);
+  --shadow:0 1px 2px rgba(0,0,0,0.5); --menu-shadow:0 14px 38px rgba(0,0,0,0.5);
+}
+body { background:#15171b; }
+
+/* ── controls: 4px corners, one border, the dark button for the one thing to do next ── */
+.ask-btn, .ask-ghostbtn--outline { height:34px; padding:0 14px; border-radius:var(--r-ctl); font-size:13px; font-weight:500; transition:background var(--t-hover) ease, color var(--t-hover) ease, border-color var(--t-hover) ease, opacity var(--t-hover) ease; }
+.ask-btn { background:var(--surface); color:var(--fg); }
+.ask-btn:hover { background:var(--muted); }
+.ask-ghostbtn { border-radius:var(--r-ctl); }
+.ask-btn--sm { height:30px; padding:0 12px; border-radius:var(--r-ctl); }
+.ds-primary, .ask-btn.ds-primary { border-color:var(--ink); background:var(--ink); color:var(--ink-fg); }
+.ds-primary:hover:not(:disabled), .ask-btn.ds-primary:hover:not(:disabled) { background:var(--ink); color:var(--ink-fg); opacity:.86; }
+.ds-primary .ask-spin, .ds-primary .ds-spin { color:inherit !important; }
+.ds-primary-go { display:inline-flex; transition:transform var(--t-hover) var(--ease-out); }
+.ds-primary:hover:not(:disabled) .ds-primary-go { transform:translateX(3px); }
+.ask-hdr-mark { border-radius:var(--r-ctl); background:var(--ink); color:var(--ink-fg); }
+
+/* ── a small label in a soft box, over a heading ── */
+.ds-eyebrow { display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 9px; border-radius:var(--r-ctl); background:var(--muted); color:var(--fg-55); font-size:12.5px; font-weight:400; line-height:1; white-space:nowrap; }
+.ds-eyebrow b { font-weight:500; color:var(--fg); }
+
+/* ── a status chip: a mark and a word ── */
+.ds-chip { display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 8px 0 6px; border-radius:var(--r-ctl); background:var(--idle-bg); color:var(--fg-55); font-size:12px; font-weight:500; line-height:1; white-space:nowrap; }
+.ds-chip--ok { background:var(--ok-bg); color:var(--green); }
+.ds-chip--bad { background:var(--bad-bg); color:var(--red); }
+.ds-chip--warn { background:var(--warn-bg); color:var(--amber); }
+.ds-chip--live { background:var(--accent-soft); color:var(--accent); }
+.ds-chip--idle { background:var(--idle-bg); color:var(--fg-55); }
+.ds-ic { flex:none; display:grid; place-items:center; width:14px; height:14px; }
+.ds-dot { display:block; width:6px; height:6px; border-radius:50%; background:currentColor; }
+.ds-chip--warn .ds-dot { background:var(--warn); }
+
+/* The spinner: eight ticks, turned one tick at a time. */
+.ds-spin { display:block; flex:none; animation:ds-spin .8s steps(8, end) infinite; }
+@keyframes ds-spin { to { transform:rotate(360deg); } }
+
+/* The badge a finished thing wears. It starts as the dot it replaces, grows to a disc, then its mark is drawn. */
+.ds-badge { display:block; flex:none; overflow:visible; }
+.ds-badge-c { fill:var(--ok); transform-box:fill-box; transform-origin:center; }
+.ds-badge--alert .ds-badge-c { fill:var(--bad); }
+.ds-badge--cross .ds-badge-c { fill:var(--fg-40); }
+.ds-badge-p { fill:none; stroke:#fff; stroke-width:1.7; stroke-linecap:square; stroke-linejoin:miter; stroke-dasharray:1; stroke-dashoffset:0; }
+[data-cnpy-theme="dark"] .ds-badge-p { stroke:#0e1013; }
+
+/* ── the light that runs round the edge of whatever is working ── */
+.ds-beam { position:relative; }
+.ds-beam::after { content:""; position:absolute; inset:-1px; border-radius:inherit; padding:1.5px; pointer-events:none;
+  background:conic-gradient(from var(--ds-beam), transparent 0 58%, var(--pu-deep) 70%, var(--pu) 84%, var(--pu-hi) 96%, transparent 100%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor;
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude;
+  animation:ds-beam 2.6s linear infinite, mo-fade .5s linear both; }
+@keyframes ds-beam { to { --ds-beam:360deg; } }
+
+/* ── a note that opens over a mark: the box widens first, then its words come in ── */
+.ds-tip { position:absolute; left:50%; z-index:4; display:flex; align-items:center; height:26px; padding:0 9px; border:1px solid var(--border); border-radius:var(--r-ctl); background:var(--surface); box-shadow:0 6px 18px rgba(0,0,0,0.10); color:var(--fg); font-size:12px; font-weight:400; font-variant-numeric:tabular-nums; white-space:nowrap; pointer-events:none; translate:-50% 0; opacity:0; clip-path:inset(-20px 50% -20px 50%); transition:clip-path .3s var(--ease-out), opacity .12s linear; }
+.ds-tip > span { opacity:0; transition:opacity .16s linear; }
+.ds-tip b { font-weight:500; }
+:is(:hover, :focus-visible) > .ds-tip, :is(:hover, :focus-visible) > * > .ds-tip { opacity:1; clip-path:inset(-20px -20px -20px -20px); }
+:is(:hover, :focus-visible) > .ds-tip > span, :is(:hover, :focus-visible) > * > .ds-tip > span { opacity:1; transition:opacity .2s linear .18s; }
+
+/* ── text that arrives a character at a time (motion.ts `reveal`) ── */
+.mo-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.mo-w { display:inline-block; white-space:pre; }
+.mo-c { display:inline-block; }
+.mo-n { font-variant-numeric:tabular-nums; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* An element marked `data-io` holds every animation inside it until it is on screen (motion.ts sets `data-in`).
+     Until then the element itself is only invisible, at its real size and place, so it can be seen to arrive (an
+     element held at the first frame of growing from nothing has no size to see). What is inside it is held at its
+     first frame. */
+  [data-io]:not([data-in]) { opacity:0 !important; animation:none !important; }
+  [data-io]:not([data-in])::after, [data-io]:not([data-in])::before, [data-io]:not([data-in]) *, [data-io]:not([data-in]) *::after, [data-io]:not([data-in]) *::before { animation-play-state:paused !important; }
+
+  /* A card arrives from nothing and its contents come in behind it. */
+  .ds-pop { animation:ds-pop var(--t-card) var(--ease-out) calc(var(--io-d, 0ms) + var(--mo-d, 0ms)) both; }
+  .ds-pop > * { animation:mo-fade .7s linear calc(var(--io-d, 0ms) + var(--mo-d, 0ms) + .22s) both; }
+  /* A whole section is too large to grow: it rises. */
+  .ds-rise { animation:ds-rise var(--t-card) var(--ease-out) var(--io-d, 0ms) both; }
+  /* A line of text replaced by another: the new one comes up from below. */
+  .ds-swap { animation:ds-swap .35s var(--ease-swap) both; }
+
+  .mo-c { animation:mo-rise var(--t-char) var(--ease-rise) both, mo-fade .35s linear both, mo-tint .5s ease-out both; animation-delay:calc(var(--c, 0) * var(--char-gap) + var(--io-d, 0ms) + var(--mo-d, 0ms)); }
+
+  .ds-badge-c { animation:ds-badge var(--t-draw) var(--ease-out) both; }
+  .ds-badge-p { animation:ds-draw var(--t-draw) ease-out var(--t-draw) both; }
+
+  .ds-grow-x { transform-origin:0 50%; animation:ds-grow-x 1.1s var(--ease-out) calc(var(--io-d, 0ms) + var(--mo-d, 0ms)) both; }
+  .ds-grow-y { transform-origin:50% 100%; animation:ds-grow-y 1.1s var(--ease-out) calc(var(--io-d, 0ms) + var(--mo-d, 0ms)) both; }
+}
+@keyframes ds-pop { from { opacity:0; transform:scale(0); } 18% { opacity:1; } to { opacity:1; transform:none; } }
+@keyframes ds-rise { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:none; } }
+@keyframes ds-swap { from { opacity:0; transform:translateY(70%); } to { opacity:1; transform:none; } }
+@keyframes mo-rise { from { transform:translateY(65%); } }
+@keyframes mo-fade { from { opacity:0; } }
+@keyframes mo-tint { from { color:var(--pu-hi); filter:blur(2px); } 60% { color:var(--pu); filter:blur(0); } }
+@keyframes ds-badge { from { transform:scale(.38); } }
+@keyframes ds-draw { from { stroke-dashoffset:1; } }
+@keyframes ds-grow-x { from { transform:scaleX(0); } }
+@keyframes ds-grow-y { from { transform:scaleY(0); } }
+
+/* ── the purple light behind a page's first screen: three soft shapes that drift. No blur filter, no glass. ── */
+.ds-aurora { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:0; }
+.ds-aurora i { position:absolute; display:block; border-radius:50%; will-change:transform; }
+.ds-aurora i:nth-child(1) { left:-8%; top:-46%; width:58%; aspect-ratio:1.5; background:radial-gradient(closest-side, var(--pu-lav), transparent); animation:ds-drift-a 26s ease-in-out infinite alternate; }
+.ds-aurora i:nth-child(2) { right:-6%; top:-38%; width:52%; aspect-ratio:1.35; background:radial-gradient(closest-side, var(--pu-peri), transparent); animation:ds-drift-b 31s ease-in-out infinite alternate; }
+.ds-aurora i:nth-child(3) { left:30%; top:-20%; width:44%; aspect-ratio:1.7; background:radial-gradient(closest-side, var(--pu-pink), transparent); animation:ds-drift-c 22s ease-in-out infinite alternate; }
+[data-cnpy-theme="light"] .ds-aurora { opacity:.9; }
+[data-cnpy-theme="dark"] .ds-aurora { opacity:.55; }
+@keyframes ds-drift-a { to { transform:translate(14%, 10%) scale(1.14); } }
+@keyframes ds-drift-b { to { transform:translate(-16%, 14%) scale(.9); } }
+@keyframes ds-drift-c { to { transform:translate(8%, -8%) scale(1.2); } }
+@media (prefers-reduced-motion: reduce) {
+  .ds-aurora i, .ds-spin, .ds-beam::after { animation:none !important; }
+  .ds-tip, .ds-tip > span { transition:none !important; }
+}
+
+/* ── smooth scrolling (scroll.ts, Lenis): the page may not also ease its own jumps ── */
+.lenis.lenis-smooth { scroll-behavior:auto !important; }

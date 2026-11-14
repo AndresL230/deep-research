@@ -1,0 +1,126 @@
+/* The top of a batch's page (overview.ts). Prefix ov-. Colours, shapes and motion come from system.css. */
+
+.ov { position:relative; container-type:inline-size; display:flex; flex-direction:column; gap:20px; min-width:0; }
+.ov > :not(.ds-aurora) { position:relative; z-index:1; }
+/* The purple light sits behind the title and the first row of cards, and fades out to the sides and below. */
+.ov > .ds-aurora { inset:-20px -24px auto; height:460px; -webkit-mask-image:radial-gradient(58% 100% at 50% 0%, #000 25%, transparent 100%); mask-image:radial-gradient(58% 100% at 50% 0%, #000 25%, transparent 100%); }
+
+/* ── the title ── */
+.ov-head { display:flex; flex-direction:column; align-items:flex-start; gap:14px; padding:26px 0 2px; }
+.ov-eyebrows { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.ov-title { margin:0; max-width:24ch; font-size:clamp(32px, 4.5cqi, 54px); line-height:1.12; font-weight:400; letter-spacing:-0.032em; text-wrap:balance; }
+.ov-title--bad { color:var(--red); font-size:clamp(24px, 3cqi, 34px); max-width:40ch; }
+.ov-sub { margin:0; max-width:64ch; font-size:15px; line-height:1.5; color:var(--fg-55); text-wrap:pretty; }
+
+/* ── the pipeline on a folder line: the steps sit in the raised tab, the line steps down beside them ── */
+.ov-folder { display:flex; align-items:stretch; height:61px; min-width:0; margin-top:4px; }
+.ov-steps { position:relative; flex:0 1 auto; min-width:0; display:flex; align-items:center; gap:2px; padding-right:6px; }
+.ov-steps::before { content:""; position:absolute; left:0; right:0; top:0; height:1px; background:var(--line); }
+.ov-curve { flex:none; display:block; overflow:visible; }
+.ov-curve path { fill:none; stroke:var(--line); stroke-width:1; stroke-dasharray:1; stroke-dashoffset:0; }
+.ov-folder-r { position:relative; flex:1 1 24px; min-width:0; }
+.ov-folder-r::after { content:""; position:absolute; left:0; right:0; bottom:0; height:1px; background:var(--line); }
+@media (prefers-reduced-motion: no-preference) {
+  /* Drawn in one stroke, left to right: the tab's line, the curve, the rest. */
+  .ov-steps::before { transform-origin:0 50%; animation:ds-grow-x .45s cubic-bezier(.5, 0, 1, 1) var(--io-d, 0ms) both; }
+  .ov-curve path { animation:ds-draw .2s linear calc(var(--io-d, 0ms) + .45s) both; }
+  .ov-folder-r::after { transform-origin:0 50%; animation:ds-grow-x .75s var(--ease-out) calc(var(--io-d, 0ms) + .65s) both; }
+  .ov-step { animation:mo-fade .5s linear calc(var(--io-d, 0ms) + .3s) both; }
+}
+
+.ov-step { flex:none; display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 10px; border-radius:var(--r-ctl); font-size:13.5px; font-weight:500; color:var(--fg); white-space:nowrap; transition:color var(--t-hover) ease, background var(--t-hover) ease; }
+.ov-step--pending { color:var(--fg-40); }
+.ov-step--active { color:var(--accent); }
+.ov-step:disabled { cursor:default; }
+.ov-step:not(:disabled):hover { background:var(--hover); color:var(--fg); }
+/* Under the pointer the other steps step back. */
+.ov-steps:hover .ov-step:not(:hover):not(:disabled) { color:var(--fg-40); }
+.ov-step:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+.ov-step-m { flex:none; display:grid; place-items:center; width:16px; height:16px; }
+.ov-step-box { display:block; width:7px; height:7px; border:1.5px solid currentColor; border-radius:1.5px; opacity:.75; }
+.ov-step-p { font-size:12px; font-weight:400; color:var(--fg-55); }
+.ov-step-line { flex:none; position:relative; width:22px; height:1px; background:var(--border-strong); }
+.ov-step-line::after { content:""; position:absolute; inset:0; background:var(--pu); transform-origin:0 50%; transform:scaleX(var(--p, 0)); transition:transform .6s var(--ease-out); }
+
+/* ── the numbers ── */
+.ov-kpis { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:12px; }
+.ov-kpi { display:flex; flex-direction:column; gap:10px; min-width:0; padding:16px 16px 15px; border-radius:var(--r-card); background:var(--muted); }
+.ov-kpi-k { font-size:13px; font-weight:500; color:var(--fg-70); }
+.ov-kpi-v { font-size:40px; line-height:1; font-weight:400; letter-spacing:-0.035em; white-space:nowrap; }
+.ov-kpi-s { font-size:12.5px; line-height:1.35; color:var(--fg-55); }
+/* The one that matters wears the gradient. */
+[data-cnpy-theme="light"] .ov-kpi--hi { background:radial-gradient(120% 150% at 0% 0%, #cfbffd 0%, transparent 62%), radial-gradient(110% 140% at 100% 0%, #dddcfe 0%, transparent 60%), radial-gradient(140% 120% at 70% 130%, #fdf2ff 0%, transparent 70%), #d7c9fe; }
+[data-cnpy-theme="dark"] .ov-kpi--hi { background:radial-gradient(120% 150% at 0% 0%, #6c24c4 0%, transparent 62%), radial-gradient(110% 140% at 100% 0%, #4a2d9c 0%, transparent 60%), radial-gradient(140% 120% at 70% 130%, #7a3bd0 0%, transparent 70%), #361e7e; }
+.ov-kpi--hi .ov-kpi-k, .ov-kpi--hi .ov-kpi-s { color:color-mix(in srgb, var(--fg) 78%, transparent); }
+
+/* ── the two cards ── */
+.ov-cards { display:grid; grid-template-columns:minmax(0, 5fr) minmax(0, 7fr); gap:12px; }
+.ov-card { display:flex; flex-direction:column; gap:16px; min-width:0; padding:20px; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); }
+.ov-card-h { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:6px 14px; }
+.ov-card-t { margin:0; font-size:15px; font-weight:500; letter-spacing:-0.01em; }
+.ov-card-s, .ov-keys { font-size:12.5px; color:var(--fg-55); }
+.ov-keys { display:flex; flex-wrap:wrap; gap:4px 14px; }
+.ov-keys span { display:inline-flex; align-items:center; gap:6px; }
+.ov-foot, .ov-none { margin:0; font-size:12.5px; line-height:1.45; color:var(--fg-55); }
+.ov-none { padding:28px 0; }
+.ov-sw { flex:none; display:block; width:8px; height:8px; border-radius:2px; background:var(--fg-40); }
+.ov-sw--honest { background:var(--ok); }
+.ov-sw--inflated { background:var(--bad); }
+.ov-sw--running, .ov-sw--over { background:var(--pu-hi); }
+.ov-sw--queued { background:none; box-shadow:inset 0 0 0 1.5px var(--border-strong); }
+.ov-sw--true { background:var(--bar-base); }
+
+/* the ring: one value on a track, its count in the middle */
+.ov-ring-row { flex:1; display:flex; align-items:center; flex-wrap:wrap; gap:16px 28px; }
+.ov-ring { position:relative; flex:none; width:148px; height:148px; }
+.ov-ring svg { display:block; width:100%; height:100%; transform:rotate(-90deg); }
+.ov-ring-t, .ov-ring-p { fill:none; stroke-width:11; }
+.ov-ring-t { stroke:var(--ring-track); }
+.ov-ring-p { stroke:var(--pu-hi); transition:stroke-dasharray .9s var(--ease-out); }
+.ov-ring-n { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; }
+.ov-ring-n .mo-n { font-size:38px; line-height:1; font-weight:400; letter-spacing:-0.035em; }
+.ov-ring-n small { font-size:12px; color:var(--fg-55); }
+.ov-legend { flex:1 1 170px; min-width:0; list-style:none; margin:0; padding:0; display:flex; flex-direction:column; }
+.ov-legend li { display:flex; align-items:center; gap:9px; height:33px; border-top:1px solid var(--border); font-size:13px; color:var(--fg-70); }
+.ov-legend li:first-child { border-top:0; }
+.ov-legend b { margin-left:auto; font-weight:500; color:var(--fg); }
+@media (prefers-reduced-motion: no-preference) {
+  /* The ring fills at the pace its number counts; the rows under it arrive one after another. */
+  .ov-ring-p { animation:ov-ring 1.9s linear calc(var(--io-d, 0ms) + .25s) both; }
+  .ov-legend li { animation:ds-swap .35s var(--ease-swap) calc(var(--io-d, 0ms) + .3s + var(--i) * .3s) both; }
+}
+@keyframes ov-ring { from { stroke-dasharray:0 100; } }
+
+/* the bars: what was true in grey, what was reported above it in purple */
+.ov-bars { flex:1; display:flex; align-items:flex-end; gap:6px; min-height:176px; padding-top:38px; }
+.ov-bar { flex:1 1 0; min-width:0; max-width:72px; align-self:stretch; display:flex; flex-direction:column; gap:8px; padding:0; font:inherit; color:inherit; transition:opacity var(--t-hover) ease; }
+.ov-bars:hover .ov-bar:not(:hover) { opacity:.45; }
+.ov-bar:focus-visible { outline:2px solid var(--focus); outline-offset:3px; border-radius:var(--r-ctl); }
+.ov-bar-col { position:relative; flex:1; min-height:0; display:block; }
+.ov-bar-fill { position:absolute; inset:0; display:block; }
+.ov-bar-true, .ov-bar-over { position:absolute; left:0; right:0; display:block; border-radius:3px 3px 0 0; }
+.ov-bar-true { bottom:0; background:var(--bar-base); }
+.ov-bar-true:has(+ .ov-bar-over) { border-radius:0; }
+.ov-bar-over { background:var(--pu-hi); }
+.ov-bar-wait { position:absolute; left:0; right:0; bottom:0; height:16%; display:block; border:1px dashed var(--border-strong); border-bottom:0; border-radius:3px 3px 0 0; }
+.ov-bar-id { font-size:11px; line-height:1; color:var(--fg-55); text-align:center; font-variant-numeric:tabular-nums; overflow:hidden; }
+.ov-bar:hover .ov-bar-id { color:var(--fg); }
+
+@container (max-width: 1040px) {
+  .ov-kpis { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+  .ov-cards { grid-template-columns:minmax(0, 1fr); }
+}
+@container (max-width: 760px) {
+  /* No room for the folder: the steps wrap over a plain line. */
+  .ov-folder { height:auto; }
+  .ov-steps { flex-wrap:wrap; padding:8px 0; border-bottom:1px solid var(--line); flex:1; }
+  .ov-steps::before, .ov-curve, .ov-folder-r, .ov-step-line { display:none; }
+}
+@container (max-width: 560px) {
+  .ov-kpis { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .ov-kpi-v { font-size:32px; }
+  .ov-bar-id { font-size:0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ov-step, .ov-step-line::after, .ov-ring-p, .ov-bar { transition:none; }
+}

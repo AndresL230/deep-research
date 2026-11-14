@@ -303,7 +303,7 @@ describe("the wall's tiles", () => {
     expect(html).not.toContain("bw-ovl-t");
     expect(html).not.toContain("Overlap unknown");
     // The gap alone on the device's panel, with no evidence sentence after it.
-    expect(tile(html, "r02")).toContain('<div class="bw-res"><span class="bw-gap">+18.0 pts</span></div>');
+    expect(tile(html, "r02")).toMatch(/<div class="bw-res"><span class="bw-gap"><span class="mo-n"[^>]*><span data-keep>\+18\.0 pts<\/span><\/span><\/span><\/div>/);
     // A run of an evidence trap that did not keep what the number is read from.
     const partial = wallView(batch(repeat, GROUPED, [null, 0.71]));
     expect(tile(partial, "r01")).not.toContain("bw-ovl-t");

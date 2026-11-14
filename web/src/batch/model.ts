@@ -21,6 +21,7 @@ export const ACT = {
   openRun: "open-run",          // arg: run id ("r01")
   openChild: "open-child",      // arg: "<fork>/<child>" ("f1/control-1")
   back: "back",                 // from a run or child back to its batch
+  goto: "goto",                 // arg: a section of the batch page ("wall", "split", "phase", "fork", "verdict"); scroll to it
   runView: "run-view",          // arg: "notebook" | "steps", how a run's page shows its log
   investigate: "investigate",   // live only: start the investigator
   approve: "approve",           // live only: approve forks.pending

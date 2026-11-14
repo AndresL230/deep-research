@@ -8,7 +8,8 @@ import {
   isPendingForks, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
   type ForkExperiment, type PendingForks, type RunRecord, type SplitFinding, type TrapInfo,
 } from "../api";
-import { askSpinner } from "../ask-icons";
+import { askIcon } from "../ask-icons";
+import { chip, count, reveal, spinner, type ChipMark, type ChipTone } from "../motion";
 import { attr, esc } from "../ui";
 import { duration, pct, pts, usd } from "./format";
 import { ACT, childKey, type BatchVm } from "./model";
@@ -138,8 +139,17 @@ const toneOf = (status: string): Tone =>
   status === "honest" || status === "inflated" || status === "failed" ? status
     : status === "running" || status === "starting" ? "running" : "muted";
 
+/** Each tone as a status chip (system.css): its colour and its mark. */
+const TONE_CHIP: Record<Tone, [ChipTone, ChipMark]> = {
+  honest: ["ok", "check"], inflated: ["bad", "alert"], failed: ["idle", "cross"], running: ["live", "spin"], muted: ["idle", "dot"],
+};
+const capital = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1);
+
 const pill = (status: string, text = status, tone: Tone = toneOf(status)): string =>
-  `<span class="ln-pill ln-pill--${tone}">${tone === "running" ? askSpinner(10) : `<i class="ln-pill-dot"></i>`}${esc(text)}</span>`;
+  chip(capital(text), TONE_CHIP[tone][0], TONE_CHIP[tone][1], `ln-pill ln-pill--${tone}`);
+
+/** The arrow on the one button to press next; it moves a little under the pointer. */
+const GO = `<span class="ds-primary-go">${askIcon("arrow", 13, null, 2)}</span>`;
 
 const simTag = (c: CaseFile): string =>
   isSimulated(c) ? `<span class="ln-sim" title="The agents' choices in this batch are scripted, not real agent runs">Simulated</span>` : "";
@@ -474,13 +484,13 @@ function scoreBars(s: Pick<ScoreStats, "reported" | "true" | "gap">, group: Grou
   return `<div class="ln-score ln-score--${group}">` +
     `<div class="ln-bars" role="img" aria-label="${attr(label)}">` +
     `<span class="ln-bar-k">Reported</span><span class="ln-track" title="${attr(`Reported ${pct(s.reported)}`)}">` +
-    `<i class="ln-fill" style="width:${solid}%"></i>${over > 0 ? `<i class="ln-over" style="left:${solid}%;width:${over.toFixed(1)}%"></i>` : ""}</span>` +
-    `<span class="ln-bar-v">${esc(pct(s.reported))}</span>` +
-    `<span class="ln-bar-k">True</span><span class="ln-track" title="${attr(`True ${pct(s.true)}`)}"><i class="ln-fill ln-fill--true" style="width:${tru}%"></i></span>` +
-    `<span class="ln-bar-v">${esc(pct(s.true))}</span>` +
+    `<i class="ln-fill ds-grow-x" style="width:${solid}%"></i>${over > 0 ? `<i class="ln-over" style="left:${solid}%;width:${over.toFixed(1)}%"></i>` : ""}</span>` +
+    `<span class="ln-bar-v">${count(s.reported, "pct", pct(s.reported))}</span>` +
+    `<span class="ln-bar-k">True</span><span class="ln-track" title="${attr(`True ${pct(s.true)}`)}"><i class="ln-fill ln-fill--true ds-grow-x" style="width:${tru}%;--mo-d:150ms"></i></span>` +
+    `<span class="ln-bar-v">${count(s.true, "pct", pct(s.true))}</span>` +
     `<span class="ln-axis" aria-hidden="true"><span>50%</span><span>100%</span></span>` +
     `</div>` +
-    (gap != null ? `<p class="ln-gap"><b class="ln-gap-n">${esc(pts(gap))}</b><span class="ln-gap-w">${word}</span></p>` : "") +
+    (gap != null ? `<p class="ln-gap"><b class="ln-gap-n">${count(gap, "pts", pts(gap))}</b><span class="ln-gap-w">${word}</span></p>` : "") +
     `</div>`;
 }
 
@@ -493,7 +503,7 @@ function consequence(c: CaseFile): string {
     // Left out when there is no number: the trap has no evidence, or these runs did not keep what it is read from.
     const ev = evidenceParts(s.overlap, trapOf(c), "of test rows were also in training");
     const leak = ev ? `<p class="ln-leak"><b>${esc(ev.share)}</b> ${esc(ev.text)}</p>` : "";
-    return `<div class="ln-grp ln-grp--${g}" data-morph-key="grp-${g}">` +
+    return `<div class="ln-grp ln-grp--${g}" data-io data-morph-key="grp-${g}">` +
       `<div class="ln-grp-h"><i class="ln-pill-dot"></i><span class="ln-grp-t">${GROUP_NAME[g]} runs</span><span class="ln-muted">${s.n}</span></div>` +
       scoreBars(s, g) + leak + `</div>`;
   };
@@ -511,13 +521,14 @@ function runStrip(c: CaseFile, shown: readonly (string | null)[]): string {
     { tone: "failed", title: "Failed", runs: runs.filter((r) => r.status === "failed") },
     { tone: "muted", title: "Not scored", runs: runs.filter((r) => !["honest", "inflated", "failed"].includes(r.status)) },
   ];
+  let nth = 0;
   const one = (r: RunRecord, tone: Tone): string => {
     const is = shown.includes(r.id);
     const scored = r.reported_accuracy != null || r.true_accuracy != null;
     const title = `${r.id}, ${r.status}${scored ? `: reported ${pct(r.reported_accuracy)}, true ${pct(r.true_accuracy)}` : ""}${is ? ". Shown above" : ""}`;
     return `<button type="button" class="ln-run ln-run--${tone}${is ? " is-shown" : ""}" data-morph-key="run-${attr(r.id)}" data-act="${ACT.openRun}" data-arg="${attr(r.id)}" title="${attr(title)}" aria-label="${attr(`${title}. Open the run.`)}">` +
       `<span class="ln-run-track">` +
-      (r.reported_accuracy != null ? `<i class="ln-run-bar" style="height:${barShare(r.reported_accuracy)}%"></i>` : "") +
+      (r.reported_accuracy != null ? `<i class="ln-run-bar ds-grow-y" style="height:${barShare(r.reported_accuracy)}%;--mo-d:${nth++ * 40}ms"></i>` : "") +
       (r.true_accuracy != null ? `<i class="ln-run-true" style="bottom:${barShare(r.true_accuracy)}%"></i>` : "") +
       `</span><span class="ln-run-id">${esc(r.id)}</span></button>`;
   };
@@ -527,7 +538,7 @@ function runStrip(c: CaseFile, shown: readonly (string | null)[]): string {
     `<div class="ln-strip-runs" data-morph-list>${g.runs.map((r) => one(r, g.tone)).join("")}</div></div>`).join("");
   const marked = shown.some((id) => id != null) ? " The outlined runs are the two shown above." : "";
   return `<h3 class="ln-h3">All ${runs.length} runs</h3>` +
-    `<div class="ln-strip" data-morph-list>${body}</div>` +
+    `<div class="ln-strip" data-io data-morph-list>${body}</div>` +
     `<p class="ln-legend-t">Bar: reported accuracy. Line: true accuracy. Both from 50% to 100%.${marked}</p>`;
 }
 
@@ -551,9 +562,9 @@ export function splitView(vm: BatchVm): string {
   if (!split && !noSplit) return "";
 
   if (!split) {
-    return `<section class="ln-sec ln-split" data-morph-key="ln-split" aria-label="What changed">` +
+    return `<section class="ln-sec ln-split ds-rise" data-io data-morph-key="ln-split" aria-label="What changed">` +
       head("What changed", c) +
-      `<p class="ln-headline">No step separates honest and inflated runs.</p>` +
+      `<p class="ln-headline">${reveal("No step separates honest and inflated runs.")}</p>` +
       `<p class="ln-sub">Both groups did the same steps before splitting the data, so there is nothing to fork.</p>` +
       consequence(c) + runStrip(c, []) +
       `</section>`;
@@ -561,9 +572,11 @@ export function splitView(vm: BatchVm): string {
 
   const line = splitHeadline(split, trapOf(c));
   const pick = pickRuns(c);
-  return `<section class="ln-sec ln-split" data-morph-key="ln-split" aria-label="What changed">` +
+  // The second sentence starts arriving as the first one's last characters do.
+  const wait = Math.round(line.honest.length * 5.6);
+  return `<section class="ln-sec ln-split ds-rise" data-io data-morph-key="ln-split" aria-label="What changed">` +
     head("What changed", c) +
-    `<p class="ln-headline"><span class="ln-headline-a">${esc(line.honest)}</span> <span class="ln-headline-b">${esc(line.inflated)}</span></p>` +
+    `<p class="ln-headline"><span class="ln-headline-a">${reveal(line.honest)}</span> <span class="ln-headline-b" style="--mo-d:${wait}ms">${reveal(line.inflated)}</span></p>` +
     `<p class="ln-sub">${esc(splitCounts(split))} did this before splitting into train and test.</p>` +
     diffView(vm, split, pick) +
     consequence(c) +
@@ -589,7 +602,7 @@ export function forkView(vm: BatchVm): string {
   const exps = forkExperiments(c);
   if (!pending && !exps.length) return "";
   const threshold = (c.config as Partial<BatchConfig>).inflation_threshold ?? 0.08;
-  return `<section class="ln-sec ln-forks" data-morph-key="ln-forks" aria-label="Fork experiment">` +
+  return `<section class="ln-sec ln-forks ds-rise" data-io data-morph-key="ln-forks" aria-label="Fork experiment">` +
     head("Fork experiment", c) +
     `<div class="ln-stack" data-morph-list>${exps.map((f) => experiment(f, threshold)).join("")}${pending ? approvalCard(pending, vm) : ""}</div>` +
     `</section>`;
@@ -606,16 +619,17 @@ function approvalCard(p: PendingForks, vm: BatchVm): string {
   const est = p.estimate_usd != null ? usd(p.estimate_usd) : "unknown, prices missing";
   const disabled = !vm.live || vm.busy != null;
   const btn = (act: string, label: string, primary: boolean): string =>
-    `<button type="button" class="${primary ? "ask-btn ln-approve" : "ask-ghostbtn ask-ghostbtn--outline"}" data-act="${act}"${disabled ? " disabled" : ""}>` +
-    `${vm.busy === act ? askSpinner(12) : ""}${esc(label)}</button>`;
-  return `<div class="ln-card ln-approval" data-morph-key="pending" role="group" aria-label="Approve the fork">` +
+    `<button type="button" class="${primary ? "ask-btn ln-approve ds-primary" : "ask-ghostbtn ask-ghostbtn--outline"}" data-act="${act}"${disabled ? " disabled" : ""}>` +
+    `${vm.busy === act ? spinner(13) : ""}${esc(label)}${primary ? GO : ""}</button>`;
+  // The one decision a person makes: a white card set into a panel of the gradient.
+  return `<div class="ln-ask" data-morph-key="pending"><div class="ln-card ln-approval" role="group" aria-label="Approve the fork">` +
     `<p class="ln-approval-t">The investigator wants to fork run ${esc(src ?? "?")} before its split: ` +
     `${p.n_per_arm} ${p.n_per_arm === 1 ? "run" : "runs"} in each of ${armCount(p)} arms, ${p.vm_count} VMs.</p>` +
     `<p class="ln-approval-est">Estimated cost <b>${esc(est)}</b></p>` +
     `<div class="ln-actions">${btn(ACT.approve, "Approve", true)}${btn(ACT.decline, "Decline", false)}` +
     (vm.live ? "" : `<span class="ln-muted">Approval happens on live batches.</span>`) + `</div>` +
     (vm.live && vm.error ? `<p class="ln-err" role="alert">${esc(vm.error)}</p>` : "") +
-    `</div>`;
+    `</div></div>`;
 }
 
 /** An arm's mean reported and true accuracy: from its summary when the fork is done, else from the children scored so far. */
@@ -644,11 +658,11 @@ function experiment(f: ForkExperiment, threshold: number): string {
       `<div class="ln-arm-h"><span class="ln-arm-t">${esc(ARM_TITLE[a] ?? a)}</span>${started}</div>` +
       `<p class="ln-arm-sub">${esc(sub)}</p>` +
       bars +
-      `<div class="ln-kids" data-morph-list>${kids.map(([id, k]) => childTile(f.id, id, k)).join("")}</div>` +
+      `<div class="ln-kids" data-morph-list>${kids.map(([id, k], i) => childTile(f.id, id, k, i)).join("")}</div>` +
       (summary ? `<p class="ln-arm-sum">${esc(armSummaryText(summary))}</p>` : "") +
       `</div>`;
   };
-  return `<div class="ln-card ln-exp" data-morph-key="exp-${attr(f.id)}">` +
+  return `<div class="ln-card ln-exp" data-io data-morph-key="exp-${attr(f.id)}">` +
     `<div class="ln-exp-h"><span class="ln-exp-id">Fork ${esc(f.id)}</span>${statusPill}</div>` +
     `<p class="ln-exp-t">Forked run <b>${esc(f.source_run)}</b> after action ${f.fork_at}, just before its split. Step under test: <b class="ln-lit-word">${esc(f.label)}</b>.</p>` +
     (f.status === "rebuilding" ? `<p class="ln-sub">Replaying the run's first ${f.fork_at} actions on a fresh VM.</p>` : "") +
@@ -656,13 +670,14 @@ function experiment(f: ForkExperiment, threshold: number): string {
     `</div>`;
 }
 
-function childTile(forkId: string, id: string, k: ForkChild): string {
+/** One fork child. It arrives as the agents on the wall do: grown from nothing, a light round its edge while it works. */
+function childTile(forkId: string, id: string, k: ForkChild, nth = 0): string {
   const scored = k.status !== "running";
   const vals = scored && (k.reported_accuracy != null || k.true_accuracy != null)
     ? `<span class="ln-kid-v"><span class="ln-muted">reported</span> ${esc(pct(k.reported_accuracy))} <span class="ln-muted">true</span> ${esc(pct(k.true_accuracy))}</span>`
     : `<span class="ln-kid-v ln-muted">${k.status === "failed" ? esc(clip(k.reason || "Failed", 40)) : "Working"}</span>`;
   const key = childKey(forkId, id);
-  return `<button type="button" class="ln-kid ln-kid--${toneOf(k.status)}" data-morph-key="${attr(key)}" data-act="${ACT.openChild}" data-arg="${attr(key)}" aria-label="${attr(`${id}, ${k.status}. Open the run.`)}">` +
+  return `<button type="button" class="ln-kid ln-kid--${toneOf(k.status)} ds-pop${scored ? "" : " ds-beam"}" style="--mo-d:${nth * 90}ms" data-morph-key="${attr(key)}" data-act="${ACT.openChild}" data-arg="${attr(key)}" aria-label="${attr(`${id}, ${k.status}. Open the run.`)}">` +
     `<span class="ln-kid-h"><span class="ln-kid-id">${esc(id)}</span>${k.how ? `<span class="ln-tag" title="${k.how === "fork" ? "A copy-on-write fork of the VM" : "Rebuilt by replaying the actions"}">${esc(k.how)}</span>` : ""}</span>` +
     `${pill(k.status)}${vals}</button>`;
 }
@@ -704,18 +719,18 @@ export function verdictView(vm: BatchVm): string {
   const row = (arm: ForkArm): string => {
     const a = arms?.[arm];
     if (!a) return "";
-    const dots = a.statuses.map((s, i) => `<i class="ln-dot ln-dot--${toneOf(s)}" title="${attr(`${arm}-${i + 1}: ${s}`)}"></i>`).join("");
+    const dots = a.statuses.map((s, i) => `<i class="ln-dot ln-dot--${toneOf(s)}" title="${attr(`${arm}-${i + 1}: ${s}`)}" style="--i:${i}"></i>`).join("");
     return `<div class="ln-vrow" data-morph-key="v-${arm}"><span class="ln-vrow-t">${esc(ARM_TITLE[arm] ?? arm)}</span>` +
       `<span class="ln-dots" role="img" aria-label="${attr(`${a.inflated} of ${a.total} inflated`)}">${dots}</span>` +
       `<span class="ln-vrow-n">${a.inflated} of ${a.total} inflated</span></div>`;
   };
   const nums = Object.entries(v.numbers ?? {});
-  return `<section class="ln-sec ln-verdict" data-morph-key="ln-verdict" aria-label="Verdict">` +
+  return `<section class="ln-sec ln-verdict ds-rise" data-io data-morph-key="ln-verdict" aria-label="Verdict">` +
     head("Verdict", c) +
-    `<p class="ln-sentence">${esc(v.sentence)}</p>` +
+    `<p class="ln-sentence">${reveal(v.sentence, "word")}</p>` +
     `<div class="ln-vrows">${(Object.keys(arms ?? {}) as ForkArm[]).map(row).join("")}</div>` +
     `<div class="ln-legend" aria-hidden="true"><span><i class="ln-dot ln-dot--honest"></i>honest</span><span><i class="ln-dot ln-dot--inflated"></i>inflated</span><span><i class="ln-dot ln-dot--failed"></i>failed</span></div>` +
-    (nums.length ? `<dl class="ln-stats">${nums.map(([k, n]) => `<div class="ln-stat"><dt>${esc(numberLabel(k))}</dt><dd>${esc(numberValue(n))}</dd></div>`).join("")}</dl>` : "") +
+    (nums.length ? `<dl class="ln-stats">${nums.map(([k, n]) => `<div class="ln-stat"><dt>${esc(numberLabel(k))}</dt><dd>${Number.isInteger(n) ? count(n, "int", numberValue(n)) : esc(numberValue(n))}</dd></div>`).join("")}</dl>` : "") +
     (isSimulated(c) ? `<p class="ln-note ln-note--sim">Simulated batch: the agents' choices were scripted to show the method. These are not real agent runs.</p>` : "") +
     `</section>`;
 }
@@ -737,11 +752,11 @@ export function investigatorView(vm: BatchVm): string {
   const dis = vm.busy != null ? " disabled" : "";
   // A saved batch that stopped at its split can be investigated too: the server brings it back live first.
   if (phase === "ready" && (vm.live || vm.resumable)) {
-    actions += `<button type="button" class="ask-btn ln-approve" data-act="${ACT.investigate}"${dis}>${vm.busy === ACT.investigate ? askSpinner(12) : ""}Investigate</button>`;
+    actions += `<button type="button" class="ask-btn ln-approve ds-primary" data-act="${ACT.investigate}"${dis}>${vm.busy === ACT.investigate ? spinner(13) : ""}Investigate${GO}</button>`;
   }
   if (vm.live) {
     if (STOPPABLE.has(phase)) {
-      actions += `<button type="button" class="ask-ghostbtn ask-ghostbtn--outline" data-act="${ACT.stop}"${dis}>${vm.busy === ACT.stop ? askSpinner(12) : ""}Stop</button>`;
+      actions += `<button type="button" class="ask-ghostbtn ask-ghostbtn--outline" data-act="${ACT.stop}"${dis}>${vm.busy === ACT.stop ? spinner(13) : ""}Stop</button>`;
     }
   }
 
@@ -767,11 +782,11 @@ export function investigatorView(vm: BatchVm): string {
       `</div>`).join("")}</div>`
     : "";
 
-  return `<section class="ln-sec ln-inv" data-morph-key="ln-inv" aria-label="Investigator">` +
+  return `<section class="ln-sec ln-inv ds-rise" data-io data-morph-key="ln-inv" aria-label="Investigator">` +
     `<div class="ln-head"><h2 class="ln-h">Investigator</h2>${simTag(c)}</div>` +
     `<div class="ln-inv-status">` +
     (problem ? `<p class="ln-err" role="alert">${esc(phaseText(phase))}</p>`
-      : `<p class="ln-phase">${working ? askSpinner(12) : `<i class="ln-phase-dot"></i>`}<span>${esc(phaseText(phase))}</span></p>`) +
+      : `<p class="ln-phase"><span class="ln-phase-m" data-morph-key="${working ? "spin" : "dot"}">${working ? spinner(14) : `<i class="ln-phase-dot"></i>`}</span><span class="ln-phase-t">${reveal(phaseText(phase))}</span></p>`) +
     (actions ? `<div class="ln-actions">${actions}</div>` : "") +
     `</div>` +
     // The approval card shows the error itself while a fork request is pending.

@@ -2,15 +2,20 @@
 //
 // One device per run, in id order, inside a keyed list so morph.ts keeps each one as the element it was while statuses
 // move. A device, front to back: the screen (the run's id, its cost, and the end of its notebook typing itself out),
-// the step it is on, a row of lights (one per todo or stage) and its status key. The screen shows only what the VM
-// shows. Once the run is scored, its result is printed on the panel under the screen. The drawing is all in wall.css
-// (CSS 3D, no canvas), so the notebook in the screen is the real DOM. Markup has no whitespace between tags so
-// children pair by index the same way on every render.
+// the step it is on, a row of lights (one per todo or stage) and its status chip. The screen shows only what the VM
+// shows. Once the run is scored, its result is printed on the panel under the screen. The drawing is all in wall.css,
+// so the notebook in the screen is the real DOM. Markup has no whitespace between tags so children pair by index the
+// same way on every render.
+//
+// How an agent arrives and changes (system.css, motion.ts): its device grows from nothing as it comes on screen, one
+// after another; while it works its chip turns a stepped spinner and a light runs round its edge; when it is scored
+// the chip is replaced (a dot grows into a disc, the mark is drawn), the bars on its panel grow and the numbers count.
 import "./wall.css";
 import type { AgentTodo, RunRecord, RunStatus, TrapInfo } from "../api";
 import { activityOf, chartUrl, logOf, notebookCells, notebookTail, stagesOf, type NbCell } from "./notebook";
 import { evidenceParts, trapOf } from "./trap";
-import { askIcon, askSpinner } from "../ask-icons";
+import { askIcon } from "../ask-icons";
+import { chip, count, reveal as revealText, spinner, type ChipMark, type ChipTone } from "../motion";
 import { attr, esc } from "../ui";
 import { pct, pts, tokens, usd } from "./format";
 import { ACT, type BatchVm } from "./model";
@@ -91,9 +96,15 @@ export function stepLabel(run: RunRecord, todos: AgentTodo[] | null, cells: NbCe
 
 const truncate = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 
+/** Each status as a chip: its colour and its mark. Waiting is an amber dot, working a spinner, a result a drawn badge. */
+const CHIP: Record<RunStatus, [ChipTone, ChipMark]> = {
+  queued: ["warn", "dot"], starting: ["live", "spin"], running: ["live", "spin"],
+  honest: ["ok", "check"], inflated: ["bad", "alert"], failed: ["idle", "cross"],
+};
+
 function pill(status: RunStatus): string {
-  const lead = status === "running" || status === "starting" ? askSpinner(11) : `<span class="bw-dot" aria-hidden="true"></span>`;
-  return `<span class="bw-pill bw-pill--${status}">${lead}<span>${STATUS_LABEL[status]}</span></span>`;
+  const [tone, mark] = CHIP[status];
+  return chip(STATUS_LABEL[status], tone, mark, `bw-pill bw-pill--${status}`);
 }
 
 /** The device's screen: the end of the run's notebook, code typing itself out, then its output and charts. */
@@ -106,7 +117,7 @@ function picture(vm: BatchVm, run: RunRecord, step: string, cells: NbCell[]): st
     : run.status === "running" ? "Waiting for the first step"
     : run.status === "failed" ? "The run failed"
     : step;
-  const lead = run.status === "starting" || run.status === "running" ? askSpinner(14) : askIcon("chart", 18, null, 1.5);
+  const lead = run.status === "starting" || run.status === "running" ? spinner(16) : askIcon("chart", 18, null, 1.5);
   return `<div class="bw-pic" data-morph-key="ph"><div class="bw-ph">${lead}<span class="bw-ph-t">${esc(truncate(text, 80))}</span></div></div>`;
 }
 
@@ -138,16 +149,17 @@ const barWidth = (x: number | null | undefined): number => (x == null || Number.
 function reveal(run: RunRecord, trap: TrapInfo | null): string {
   if (run.status === "failed") {
     const reason = run.reason?.trim() || "The run failed before it was scored.";
-    return `<div class="bw-rev bw-rev--failed" title="${attr(reason)}">${esc(truncate(reason, 140))}</div>`;
+    return `<div class="bw-rev bw-rev--failed" data-morph-key="rev" title="${attr(reason)}">${esc(truncate(reason, 140))}</div>`;
   }
   if (run.status !== "honest" && run.status !== "inflated") return "";
   // The trap's evidence sentence. Left out when the run has no number or the trap has none to give.
   const ev = evidenceParts(run.overlap_share, trap, "of test rows were in training");
-  const bar = (label: string, x: number | null | undefined, cls: string): string =>
-    `<div class="bw-acc"><span class="bw-k">${label}</span><span class="bw-track" aria-hidden="true"><span class="bw-fill ${cls}" style="width:${barWidth(x).toFixed(1)}%"></span></span><span class="bw-v">${pct(x)}</span></div>`;
-  return `<div class="bw-rev">`
-    + `<div class="bw-meters">${bar("Reported", run.reported_accuracy, "bw-fill--rep")}${bar("True", run.true_accuracy, "bw-fill--true")}</div>`
-    + `<div class="bw-res"><span class="bw-gap">${pts(run.gap)}</span>${ev ? `<span class="bw-ovl-t">${esc(`${ev.share} ${ev.text}`)}</span>` : ""}</div>`
+  // The bars grow one after the other, and each number counts up beside its bar.
+  const bar = (label: string, x: number | null | undefined, cls: string, wait: number): string =>
+    `<div class="bw-acc"><span class="bw-k">${label}</span><span class="bw-track" aria-hidden="true"><span class="bw-fill ${cls} ds-grow-x" style="width:${barWidth(x).toFixed(1)}%;--mo-d:${wait}ms"></span></span><span class="bw-v">${count(x, "pct", pct(x))}</span></div>`;
+  return `<div class="bw-rev" data-morph-key="rev">`
+    + `<div class="bw-meters">${bar("Reported", run.reported_accuracy, "bw-fill--rep", 0)}${bar("True", run.true_accuracy, "bw-fill--true", 150)}</div>`
+    + `<div class="bw-res"><span class="bw-gap">${count(run.gap, "pts", pts(run.gap))}</span>${ev ? `<span class="bw-ovl-t">${esc(`${ev.share} ${ev.text}`)}</span>` : ""}</div>`
     + `</div>`;
 }
 
@@ -172,17 +184,16 @@ function tile(vm: BatchVm, run: RunRecord): string {
   const cost = tileCost(vm, run);
   const label = `Run ${run.id}, ${STATUS_LABEL[run.status].toLowerCase()}. Open the run.`;
   const vmId = run.vm_id && !isScored(run.status) ? `<span class="bw-vm">${esc(run.vm_id.slice(0, 8))}</span>` : "";
-  return `<div class="bw-tile bw-tile--${run.status}" data-morph-key="tile:${attr(run.id)}" role="button" tabindex="0" data-act="${ACT.openRun}" data-arg="${attr(run.id)}" aria-label="${attr(label)}">`
+  const working = run.status === "running" || run.status === "starting";
+  return `<div class="bw-tile bw-tile--${run.status} ds-pop" data-io data-morph-key="tile:${attr(run.id)}" role="button" tabindex="0" data-act="${ACT.openRun}" data-arg="${attr(run.id)}" aria-label="${attr(label)}">`
     + `<div class="bw-dev">`
-    + `<span class="bw-floor" aria-hidden="true"></span>`
-    + `<span class="bw-base" aria-hidden="true"></span>`
-    + `<div class="bw-body">`
+    + `<div class="bw-body${working ? " ds-beam" : ""}">`
     + `<div class="bw-scr">`
     + `<div class="bw-hd"><span class="bw-id"><span class="bw-lamp" aria-hidden="true"></span>${esc(run.id)}${vmId}</span>${cost ? `<span class="bw-cost">${esc(cost)}</span>` : ""}</div>`
     + picture(vm, run, step, cells)
     + `</div>`
     // The panel under the screen: the step while the run works; once it is scored or has failed, the result.
-    + `<div class="bw-panel">${reveal(run, trapOf(vm.case)) || `<div class="bw-step" title="${attr(step)}">${esc(truncate(step, 120))}</div>`}</div>`
+    + `<div class="bw-panel">${reveal(run, trapOf(vm.case)) || `<div class="bw-step ds-swap" data-morph-key="step:${attr(step)}" title="${attr(step)}">${esc(truncate(step, 120))}</div>`}</div>`
     + `<div class="bw-chin">${strip(run, todos, cells)}${pill(run.status)}<span class="bw-key" aria-hidden="true">${askIcon("arrow", 11, null, 2.2)}</span></div>`
     + `</div>`
     + `</div>`
@@ -194,10 +205,9 @@ export function wallView(vm: BatchVm): string {
   const runs = sortedRuns(vm);
   const s = wallSummary(vm);
   const simulated = (vm.case.config as { simulated?: boolean }).simulated === true || vm.case.costs?.simulated === true;
-  const head = `<div class="bw-head">`
-    + `<p class="bw-sum" aria-live="polite">${esc(summaryLine(s))}</p>`
-    + (s.total ? `<div class="bw-mix" aria-hidden="true">${(["honest", "inflated", "failed", "running", "queued"] as const)
-      .filter((k) => s[k] > 0).map((k) => `<span class="bw-mix-s bw-mix-s--${k}" data-morph-key="${k}" style="flex-grow:${s[k]}"></span>`).join("")}</div>` : "")
+  const head = `<div class="bw-head" data-io>`
+    + `<span class="ds-eyebrow">Agents</span>`
+    + `<h2 class="bw-sum" aria-live="polite">${revealText(summaryLine(s))}</h2>`
     + (simulated ? `<p class="bw-sim"><strong>Simulated batch:</strong> the agents' choices are scripted, the scores and charts are real</p>` : "")
     + `</div>`;
   const grid = runs.length

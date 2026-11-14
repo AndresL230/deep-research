@@ -1,11 +1,11 @@
 /* The white mode / black mode switch (theme.ts): a small track with a button for each, and a thumb that slides
    under the pressed one. It takes its colours from the app's theme, which the landing page sets too. */
-.th-switch { --th-size:30px; position:relative; flex:none; display:inline-flex; padding:3px; border-radius:calc(var(--th-size) / 2 + 3px); background:var(--hover); box-shadow:inset 0 0 0 1px var(--border); isolation:isolate; }
-.th-switch::before { content:""; position:absolute; z-index:-1; top:3px; left:3px; width:var(--th-size); height:var(--th-size); border-radius:50%; background:var(--surface); box-shadow:0 1px 2px rgba(0,0,0,0.18), inset 0 0 0 1px var(--border); transition:transform .28s cubic-bezier(.3,.7,.2,1); }
+.th-switch { --th-size:30px; position:relative; flex:none; display:inline-flex; padding:3px; border-radius:6px; background:var(--hover); box-shadow:inset 0 0 0 1px var(--border); isolation:isolate; }
+.th-switch::before { content:""; position:absolute; z-index:-1; top:3px; left:3px; width:var(--th-size); height:var(--th-size); border-radius:var(--r-ctl, 4px); background:var(--surface); box-shadow:0 1px 2px rgba(0,0,0,0.18), inset 0 0 0 1px var(--border); transition:transform .28s cubic-bezier(.3,.7,.2,1); }
 .th-switch[data-theme="dark"]::before { transform:translateX(var(--th-size)); }
 /* On black the thumb is a lighter grey, so it reads against the track. */
 [data-cnpy-theme="dark"] .th-switch::before { background:rgba(255,255,255,0.13); box-shadow:inset 0 0 0 1px rgba(255,255,255,0.08); }
-.th-opt { display:grid; place-items:center; width:var(--th-size); height:var(--th-size); padding:0; border-radius:50%; color:var(--fg-55); cursor:pointer; transition:color .2s ease; }
+.th-opt { display:grid; place-items:center; width:var(--th-size); height:var(--th-size); padding:0; border-radius:var(--r-ctl, 4px); color:var(--fg-55); cursor:pointer; transition:color .2s ease; }
 .th-opt:hover { color:var(--fg); }
 .th-opt[aria-pressed="true"] { color:var(--fg); cursor:default; }
 .th-opt:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
