@@ -196,11 +196,16 @@ describe("runSummaryView", () => {
     expect(html).toContain("+13.2 pts over");
     expect(html).toContain('title="Claimed minus measured. Up to 12 pts honest, 12 to 27.5 unclear, over 27.5 inflated."');
     expect(html).toContain("20 can positions spread over the table that it never saw");
-    // Tabular batches keep their labels.
+    // A tabular batch says what its domain's words say (Claimed, Measured), without the robot's gap bands.
     const tab = runSummaryView(vmOf(), "r02");
-    expect(tab).toContain(">Reported<");
-    expect(tab).toContain(">True<");
+    expect(tab).toContain(">Claimed<");
+    expect(tab).toContain(">Measured<");
     expect(tab).not.toContain("pts over");
+    // One saved before the server sent words keeps the labels it always had.
+    const oldConfig = { ...demo.config, domain_info: { ...demo.config.domain_info!, words: undefined } } as typeof demo.config;
+    const old = runSummaryView(vmOf({ case: { ...demo, config: oldConfig } }), "r02");
+    expect(old).toContain(">Reported<");
+    expect(old).toContain(">True<");
   });
 
   it("shows an inflated run in red", () => {

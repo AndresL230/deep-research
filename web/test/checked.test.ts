@@ -299,10 +299,11 @@ describe("on the run page", () => {
 
   it("sits under a scored run's numbers", () => {
     const html = runSummaryView(vmOf(demo), "r03");
-    // The committed fixture predates n_test: the bar falls back to the run's overlap share.
+    // The fixture's r03 counts its own test rows and their copies of training rows: 89 of 185.
     expect(html).toContain('class="ck ck--tab"');
     expect(html.indexOf("</dl>")).toBeLessThan(html.indexOf('class="ck ck--tab"'));
-    expect(text(html)).toContain("48% of test rows were also in training");
+    expect(text(html)).toContain("89 of 185 test rows were also in training");
+    expect(text(html)).toContain("Holdout, 154 rows it never saw");
   });
 
   it("shows a fork child's own hidden results on its page", () => {

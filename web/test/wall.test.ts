@@ -75,7 +75,7 @@ describe("wallView on the finished demo batch", () => {
   });
 
   it("leads with the claim against the truth, the counts under it, and no simulated banner (the header has it)", () => {
-    expect(html).toContain('<p class="bw-headline" data-morph-key="headline">6 of 12 agents claimed 89%. Measured on rows they never saw: 75%.</p>');
+    expect(html).toContain('<p class="bw-headline" data-morph-key="headline">6 of 12 agents claimed 89%. Measured on 154 rows they never saw: 75%.</p>');
     expect(html.indexOf("bw-headline")).toBeLessThan(html.indexOf("12 runs: 6 honest, 6 inflated, 0 failed"));
     expect(html).toContain('class="bw-sum bw-sum--quiet"');
     expect(html).not.toContain("Simulated");
@@ -238,9 +238,14 @@ describe("tile parts", () => {
     expect(r02).toContain("+13.2 pts over");
     // No unclear threshold in this config: two bands.
     expect(r02).toContain('title="Claimed minus measured. Up to 27.5 pts honest, over 27.5 inflated."');
+    // A tabular batch's tiles use its own domain's words, Claimed and Measured too, without the robot's bands.
     const tab = wallView(vmOf(demo));
     expect(tab).toContain("Each agent trains a model and reports its test accuracy.");
-    expect(tileOf(tab, "r02")).toContain(">Reported<");
+    expect(tileOf(tab, "r02")).toContain(">Claimed<");
+    expect(tileOf(tab, "r02")).not.toContain("pts over");
+    // One saved before the server sent words keeps the labels it always had.
+    const old = { ...demo, config: { ...demo.config, domain_info: { ...demo.config.domain_info!, words: undefined } } } as CaseFile;
+    expect(tileOf(wallView(vmOf(old)), "r02")).toContain(">Reported<");
   });
 });
 
