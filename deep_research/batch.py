@@ -117,6 +117,9 @@ class Batch:
         await asyncio.gather(*(guarded(r) for r in run_ids))
         self.push_costs(force=True)
         self.analyze()
+        if self.case.data.get("phase") == "no_split":
+            # Nothing to investigate or fork, so nothing will use the VMs again.
+            await self.close()
 
     async def run_one(self, run_id: str) -> None:
         scope, rdir = f"run:{run_id}", self.runs_dir / run_id
@@ -325,6 +328,8 @@ class Batch:
                     self._emit({"kind": "investigator", "event": ev})
                 self.push_costs()
             self.case.set_phase("done")
+            # The investigator has finished and the verdict is in: the batch is over, so stop paying for its VMs.
+            await self.close()
         finally:
             log.close()
             self.push_costs(force=True)
@@ -344,8 +349,19 @@ class Batch:
         self.case.set_phase("awaiting_approval")
 
     async def close(self) -> None:
-        """Stop every VM this batch started: runs, fork bases and fork children."""
-        await asyncio.gather(*(asyncio.to_thread(vms.stop_vm, sb) for sb in list(self.vms.values())))
+        """Stop every VM this batch started: runs, fork bases and fork children. Safe to call again."""
+        stopping, self.vms = self.vms, {}
+        if not stopping:
+            return
+        await asyncio.gather(*(asyncio.to_thread(vms.stop_vm, sb) for sb in stopping.values()))
+        # The lab pages went with the VMs. Charts were saved when each run finished.
+        for run_id, run in list(self.case.data["runs"].items()):
+            if run.get("lab_url"):
+                self.case.update_run(run_id, lab_url=None)
+        for fork_id, fork in list(self.case.data["forks"].items()):
+            for cid, child in list((fork.get("children") or {}).items()):
+                if child.get("lab_url"):
+                    self._set_child(fork_id, cid, lab_url=None)
 
 
 def _arm_summary(rows: list[dict]) -> dict:

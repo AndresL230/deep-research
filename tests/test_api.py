@@ -216,3 +216,67 @@ def test_download_charts_saves_images_only(tmp_path):
             raise RuntimeError("no such dir")
 
     assert sandboxes.download_charts(NS(fs=Broken()), tmp_path / "none") == []
+
+
+# ---- VMs stop when the batch is over ----
+
+def _batch_with_vms(tmp_path, monkeypatch):
+    from deep_research import batch as batch_mod
+    from deep_research.config import BatchConfig
+
+    stopped = []
+    monkeypatch.setattr(batch_mod.vms, "stop_vm", stopped.append)
+    b = batch_mod.Batch(BatchConfig(n_runs=2), batch_id="t", root=tmp_path)
+    return b, stopped
+
+
+async def test_vms_stop_once_the_verdict_is_in(tmp_path, monkeypatch):
+    b, stopped = _batch_with_vms(tmp_path, monkeypatch)
+    b.case.update_run("r01", status="honest", lab_url="https://lab.example/r01")
+    b.case.update_fork("f1", status="done", children={"control-1": {"arm": "control", "status": "inflated", "lab_url": "https://lab.example/c1"}})
+    b.vms.update({"r01": "vm-run", "f1-base": "vm-base", "f1-control-1": "vm-child"})
+
+    class Investigator:
+        async def astream(self, *args, **kwargs):
+            b.case.record_verdict("Skipping the duplicate check caused it.", "deduplicate", {})
+            return
+            yield  # an async generator that ends at once
+
+    b._investigator, b._inv_config = Investigator(), {}
+    await b._stream_investigator({})
+    case = b.case.read()
+    assert case["phase"] == "done" and case["verdict"]["step_label"] == "deduplicate"
+    assert sorted(stopped) == ["vm-base", "vm-child", "vm-run"]
+    assert b.vms == {}
+    # The lab pages are gone with the VMs, so the UI is not pointed at them.
+    assert case["runs"]["r01"]["lab_url"] is None
+    assert case["forks"]["f1"]["children"]["control-1"]["lab_url"] is None
+    await b.close()  # again: nothing left to stop
+    assert len(stopped) == 3
+
+
+async def test_vms_stay_up_while_the_investigator_waits_for_approval(tmp_path, monkeypatch):
+    b, stopped = _batch_with_vms(tmp_path, monkeypatch)
+    b.vms["r01"] = "vm-run"
+
+    class Investigator:
+        async def astream(self, *args, **kwargs):
+            yield {"__interrupt__": []}
+
+    b._investigator, b._inv_config = Investigator(), {}
+    await b._stream_investigator({})
+    assert b.case.read()["phase"] == "awaiting_approval"
+    assert stopped == [] and b.vms == {"r01": "vm-run"}
+
+
+async def test_vms_stop_when_no_step_separates_the_runs(tmp_path, monkeypatch):
+    b, stopped = _batch_with_vms(tmp_path, monkeypatch)
+
+    async def run_one(run_id):
+        b.vms[run_id] = f"vm-{run_id}"
+        b.case.update_run(run_id, status="inflated")
+
+    monkeypatch.setattr(b, "run_one", run_one)
+    await b.run_all()
+    assert b.case.read()["phase"] == "no_split"
+    assert sorted(stopped) == ["vm-r01", "vm-r02"]

@@ -108,8 +108,9 @@ The case file's `phase` moves through `config`, `running`, `analyzing`, `ready` 
 ### VM cleanup
 
 Every VM is created with a 60 minute auto-stop and a 60 minute auto-delete after stopping, so a leaked VM stops
-billing on its own. `Batch.close()` stops every VM a batch started (runs, fork bases, fork children), and the
-server closes every open batch when it shuts down.
+billing on its own. `Batch.close()` stops every VM a batch started (runs, fork bases, fork children). A batch closes itself as
+soon as it is over: when the investigator finishes and the verdict is in, or when no step separates the runs. The
+server also closes every open batch when it shuts down.
 
 ## Demo data for the frontend
 
