@@ -62,6 +62,15 @@ def test_one_batch_is_split_by_group_and_by_kind():
     assert (t["batches"], t["runs"], t["honest"], t["inflated"], t["failed"], t["fork_runs"]) == (1, 3, 1, 1, 1, 1)
 
 
+def test_unclear_robot_runs_are_counted_only_where_there_are_some():
+    report = cost_report([entry("1114-091608-d825", case(FULL, runs=("honest", "unclear", "unclear", "inflated"), domain="robot_arm")),
+                          entry("1114-093012-a1b2", case(FULL))])
+    by_id = {b["id"]: b for b in report["batches"]}
+    assert by_id["1114-091608-d825"]["counts"] == {"runs": 4, "honest": 1, "inflated": 1, "failed": 0, "unclear": 2, "fork_runs": 0}
+    assert "unclear" not in by_id["1114-093012-a1b2"]["counts"]
+    assert report["totals"]["unclear"] == 2 and report["totals"]["runs"] == 7
+
+
 def test_totals_add_up_across_batches_and_models():
     other = case({"run:r01": scope(1.0, 0.1, 60, (10, 1, 0, 0)), "investigator": scope(2.0, 0.0, 0, (20, 2, 0, 0))}, runs=("honest",))
     report = cost_report([entry("1114-093012-a1b2", case(FULL)), entry("1113-080000-ffff", other, kind="live")])

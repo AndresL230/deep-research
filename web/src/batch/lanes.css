@@ -27,6 +27,8 @@
 .ln-pill--inflated, .ln-kid--inflated, .ln-code--inflated { --ln-tone:var(--red); }
 .ln-pill--failed, .ln-kid--failed, .ln-pill--muted, .ln-kid--muted, .ln-run--failed, .ln-run--muted, .ln-strip-g--failed, .ln-strip-g--muted { --ln-tone:var(--fg-40); }
 .ln-pill--running, .ln-kid--running { --ln-tone:var(--fg-55); }
+/* unclear (robot only): finished, neither honest nor inflated. Neutral grey, a step darker than failed. */
+.ln-pill--unclear, .ln-kid--unclear { --ln-tone:var(--fg-55); }
 .ln-pill-dot { display:inline-block; flex:none; width:7px; height:7px; border-radius:50%; background:var(--ln-tone, var(--fg-40)); }
 .ln-pill { display:inline-flex; align-items:center; gap:5px; width:max-content; padding:1px 8px 1px 6px; border:1px solid color-mix(in srgb, var(--ln-tone) 40%, transparent); border-radius:999px; color:var(--ln-tone); font-size:11px; font-weight:500; line-height:17px; white-space:nowrap; }
 
@@ -146,8 +148,13 @@ button.ln-col-h:focus-visible { outline:2px solid var(--accent); outline-offset:
 .ln-arm-sub { margin:0; font-size:12px; color:var(--fg-55); overflow-wrap:anywhere; }
 .ln-arm-sum { margin:0; padding-top:8px; border-top:1px solid var(--border); font-size:12px; color:var(--fg-70); }
 .ln-kids { display:grid; grid-template-columns:repeat(auto-fill, minmax(124px, 1fr)); gap:6px; }
-.ln-kid { display:flex; flex-direction:column; align-items:flex-start; gap:5px; min-width:0; padding:8px; border:1px solid var(--border); border-left:2px solid var(--ln-tone); border-radius:8px; background:var(--bg); text-align:left; font:inherit; color:inherit; animation:ln-in var(--fx-base) var(--fx-ease) both; transition:background var(--fx-fast) var(--fx-ease), border-color var(--fx-fast) var(--fx-ease); }
-.ln-kid:hover { background:var(--hover); }
+.ln-kid { display:flex; flex-direction:column; align-items:flex-start; gap:5px; min-width:0; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--bg); text-align:left; font:inherit; color:inherit; animation:ln-in var(--fx-base) var(--fx-ease) both; transition:background var(--fx-fast) var(--fx-ease), border-color var(--fx-fast) var(--fx-ease); }
+.ln-kid:hover { background:var(--hover); border-color:var(--border-strong); }
+/* a robot child's looping replay (robot/viewer.ts mountThumb, sharing the run tiles' one renderer) */
+.ln-kid-pic { position:relative; display:block; width:100%; aspect-ratio:4 / 3; overflow:hidden; border:1px solid var(--border); border-radius:6px; background:var(--nb-screen); }
+.ln-kid-pic--none { display:flex; align-items:center; justify-content:center; color:var(--fg-40); }
+.ln-kid-pic .rb-thumb-l { left:4px; right:4px; bottom:4px; padding:2px 6px; font-size:10px; }
+.ln-kid-pic .rb-thumb-r { display:none; }
 .ln-kid:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .ln-kid-h { display:flex; align-items:center; justify-content:space-between; gap:6px; width:100%; }
 .ln-kid-id { font-family:var(--code); font-size:11.5px; color:var(--fg-70); }
@@ -164,6 +171,7 @@ button.ln-col-h:focus-visible { outline:2px solid var(--accent); outline-offset:
 .ln-dot--honest { background:var(--green); }
 .ln-dot--inflated { background:var(--red); }
 .ln-dot--failed, .ln-dot--muted { background:var(--fg-40); }
+.ln-dot--unclear { background:color-mix(in srgb, var(--fg) 14%, transparent); box-shadow:inset 0 0 0 1.5px var(--fg-40); }
 .ln-dot--running { background:none; border:1.5px dashed var(--fg-40); }
 .ln-legend { display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--fg-55); }
 .ln-legend span { display:inline-flex; align-items:center; gap:5px; }

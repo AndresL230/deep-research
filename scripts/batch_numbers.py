@@ -46,13 +46,16 @@ def summarize(batch_dir: Path) -> dict:
 
     status = Counter(r.get("status") for r in runs.values())
     honest, inflated, failed = status.get("honest", 0), status.get("inflated", 0), status.get("failed", 0)
+    # Robot runs whose gap is between its two thresholds: finished, but neither honest nor inflated.
+    unclear = status.get("unclear", 0)
     scored = honest + inflated
 
     run_scopes = {k[len("run:"):]: v for k, v in scopes.items() if k.startswith("run:")}
     fork_scopes = [v for k, v in scopes.items() if k.startswith("fork:")]
     # Per-run figures describe a run that finished. One that died after seconds would drag them down,
     # so what failed runs cost is reported on its own line.
-    scored_scopes = [v for rid, v in run_scopes.items() if (runs.get(rid) or {}).get("status") in ("honest", "inflated")]
+    scored_scopes = [v for rid, v in run_scopes.items()
+                     if (runs.get(rid) or {}).get("status") in ("honest", "inflated", "unclear")]
     failed_scopes = [v for rid, v in run_scopes.items() if (runs.get(rid) or {}).get("status") == "failed"]
     scored_usd = _total(scored_scopes)
     minutes = _mean([s["vm_seconds"] / 60 for s in scored_scopes if s.get("vm_seconds") is not None])
@@ -81,7 +84,7 @@ def summarize(batch_dir: Path) -> dict:
         "simulated": bool((case.get("config") or {}).get("simulated")),
         "phase": case.get("phase"),
         "runs": {"total": len(runs), "honest": honest, "inflated": inflated, "failed": failed,
-                 "other": len(runs) - scored - failed},
+                 **({"unclear": unclear} if unclear else {}), "other": len(runs) - scored - unclear - failed},
         "inflated_share": inflated / scored if scored else None,
         "minutes_per_run": minutes,
         "usd_per_run": None if scored_usd is None else scored_usd / len(scored_scopes),
@@ -112,6 +115,7 @@ def render(s: dict) -> str:
     lines = [
         f"{head}, phase {s['phase']}",
         f"Runs: {r['total']} total, {r['honest']} honest, {r['inflated']} inflated, {r['failed']} failed"
+        + (f", {r['unclear']} unclear (left out of the share)" if r.get("unclear") else "")
         + (f", {r['other']} not finished" if r["other"] else ""),
         f"Inflated share of scored runs: {share}",
         f"Minutes per scored run (VM ready to run finished): {minutes}",

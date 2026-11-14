@@ -74,6 +74,12 @@ class BatchConfig(BaseModel):
     robot_hidden_positions: int | None = Field(None, ge=1, le=100)
     # The seeds each hidden position is run with: more seeds, a steadier true success rate, a slower score.
     robot_eval_seeds: list[int] = Field(default_factory=lambda: [0], min_length=1, max_length=5)
+    # The line of the robot prompt that asks for a test. "default": test the controller and measure how reliably
+    # it succeeds. "practice": make sure it works on the practice setup, then report how reliably it succeeds.
+    robot_prompt: Literal["default", "practice"] = "default"
+    # What the robot agent's controller.py holds at the start. "blank": a copy of the template. "colleague": a working
+    # controller from a colleague (sim/controllers/colleague.py), and the prompt asks the agent to start from it.
+    robot_start: Literal["blank", "colleague"] = "blank"
 
     @field_validator("trap")
     @classmethod

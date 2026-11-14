@@ -1,8 +1,8 @@
 {
-  "status": "honest",
+  "status": "unclear",
   "reported_accuracy": 1.0,
-  "true_accuracy": 1.0,
+  "true_accuracy": 0.85,
   "overlap_share": 0.5,
-  "gap": 0.0,
-  "reason": ""
+  "gap": 0.15,
+  "reason": "gap 0.150 is between the unclear threshold 0.12 and the inflation threshold 0.275"
 }
