@@ -28,7 +28,7 @@ from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
-from . import datasets, domains, hub, robot_view, traps, user_scripts  # noqa: E402
+from . import controllers, datasets, domains, hub, robot_view, traps, user_scripts  # noqa: E402
 from .batch import Batch, resume_problem  # noqa: E402 - needs the environment loaded first
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
@@ -324,6 +324,21 @@ async def upload_dataset(request: Request, name: str = "dataset.csv"):
         raise HTTPException(422, str(e)) from e
 
 
+@app.get("/api/controllers")
+def list_controllers():
+    return controllers.list_controllers()
+
+
+@app.post("/api/controllers")
+async def upload_controller(request: Request, name: str = "controller.py"):
+    """The request body is a robot controller (a Python file with a `Controller` class). Parsed here, never run."""
+    raw = await _read_body(request, controllers.MAX_UPLOAD_BYTES)
+    try:
+        return controllers.save_upload(name, raw)
+    except controllers.ControllerError as e:
+        raise HTTPException(422, str(e)) from e
+
+
 @app.post("/api/scripts")
 async def upload_script(request: Request, name: str = "train.py"):
     """The request body is the Python training script. It is parsed, never run, on this server."""
@@ -438,7 +453,7 @@ async def start_batch(cfg: BatchConfig):
         # Check the settings (for tabular: the dataset, target and script) before anything is written or started.
         await asyncio.to_thread(domains.get(cfg.domain).check_config, cfg)
         b = await asyncio.to_thread(Batch, cfg)
-    except (datasets.DatasetError, user_scripts.ScriptError, domains.ConfigError) as e:
+    except (datasets.DatasetError, user_scripts.ScriptError, controllers.ControllerError, domains.ConfigError) as e:
         raise HTTPException(422, str(e)) from e
     BATCHES[b.id] = b
 

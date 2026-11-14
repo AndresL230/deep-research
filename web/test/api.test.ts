@@ -6,8 +6,9 @@ import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import runEventsRaw from "../../fixtures/demo-batch/runs/r02/events.jsonl?raw";
 import forcedEventsRaw from "../../fixtures/demo-batch/forks/f1/forced-1/events.jsonl?raw";
 import {
-  ApiError, CASE_SECTIONS, PHASES, RUN_STATUSES, STEP_LABELS, applyMessage, batchFileUrl, batchSocketUrl, fetchBatches,
-  fetchCase, isPendingForks, labPageUrl, postDecision, type AgentEvent, type CaseFile, type ForkExperiment,
+  ApiError, CASE_SECTIONS, MAX_CONTROLLER_BYTES, MAX_SCRIPT_BYTES, PHASES, RUN_STATUSES, STEP_LABELS, applyMessage, batchFileUrl,
+  batchSocketUrl, fetchBatches, fetchCase, isPendingForks, labPageUrl, postDecision, uploadController, type AgentEvent, type CaseFile,
+  type ControllerInfo, type ForkExperiment,
 } from "../src/api";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
@@ -105,6 +106,21 @@ describe("REST", () => {
     expect(url).toBe("/api/batches/b1/decision");
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual({ approve: true });
+  });
+
+  it("uploads a controller as the request body", async () => {
+    const info: ControllerInfo = { id: "ct-0123abcd", name: "my arm.py", lines: 80, imports: ["numpy"], missing_packages: [] };
+    const f = stubFetch(new Response(JSON.stringify(info)));
+    const py = Object.assign(new Blob(["class Controller: ...\n"]), { name: "my arm.py" });
+    expect(await uploadController(py)).toEqual(info);
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/controllers?name=my%20arm.py");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(py);
+    expect(MAX_CONTROLLER_BYTES).toBe(MAX_SCRIPT_BYTES);
+    // A refused controller carries the server's reason.
+    stubFetch(new Response(JSON.stringify({ detail: "no class Controller" }), { status: 422 }));
+    await expect(uploadController(py)).rejects.toMatchObject({ status: 422, message: "The server answered HTTP 422: no class Controller" });
   });
 
   it("turns errors into messages", async () => {

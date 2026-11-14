@@ -106,7 +106,10 @@ class RobotConfig:
     robot_prompt: Literal["default", "practice"] = "default"
     # What controller.py holds when the agent starts. "blank": a copy of the template. "colleague": a working
     # controller from a colleague (COLLEAGUE_CONTROLLER), and the prompt asks the agent to start from it.
-    robot_start: Literal["blank", "colleague"] = "blank"
+    robot_start: Literal["blank", "colleague", "uploaded"] = "blank"
+    # The uploaded controller's text and its file name, when robot_start is "uploaded" (deep_research/controllers.py).
+    controller_text: str | None = None
+    controller_name: str | None = None
     # Seeds each evaluation position is run with. One seed per position by default.
     eval_seeds: tuple[int, ...] = (0,)
     # Sim seconds per episode, the same in the agent's runs and the evaluation.
@@ -237,6 +240,10 @@ def build_task(cfg: RobotConfig, out_dir: Path) -> RobotTaskFiles:
         shutil.copyfile(src, dst)
     if cfg.robot_start == "colleague":
         shutil.copyfile(COLLEAGUE_CONTROLLER, files.controller)
+    elif cfg.robot_start == "uploaded":
+        if not cfg.controller_text:
+            raise ValueError("robot_start is 'uploaded' but no controller was given")
+        files.controller.write_text(cfg.controller_text)
     else:
         shutil.copyfile(files.upload / "sim" / "controllers" / "template.py", files.controller)
     practice = practice_setup()
@@ -260,6 +267,7 @@ def build_task(cfg: RobotConfig, out_dir: Path) -> RobotTaskFiles:
                 "hint_level": cfg.hint_level,
                 "robot_prompt": cfg.robot_prompt,
                 "robot_start": cfg.robot_start,
+                "controller_name": cfg.controller_name if cfg.robot_start == "uploaded" else None,
                 "practice": practice,
                 # The evaluation puts the zone where the practice setup does, so only the can moves.
                 "place_xy": practice["place_xy"],
@@ -306,6 +314,11 @@ def task_prompt(cfg: RobotConfig) -> str:
         start = (
             "A colleague already wrote a controller for this task: `controller.py`. "
             "Start from it: read it, run it, and change it where you need to."
+        )
+    elif cfg.robot_start == "uploaded":
+        start = (
+            "A controller for this task was handed to you: `controller.py`. "
+            "Start from it: read it, run it, and change it where you need to. Keep its approach unless you have a reason not to."
         )
     else:
         start = f"`{VM_WORKSPACE}/controller.py` starts as a copy of the template. Write your controller there."

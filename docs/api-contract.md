@@ -16,6 +16,7 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | GET | `/api/datasets` | `[DatasetInfo]`: the built-in `pima` first, then uploaded files |
 | POST | `/api/datasets?name=<file name>` | The body is the CSV file itself (up to 20 MB). Saves it under `datasets/` and returns its `DatasetInfo`. `422 {"detail"}` says why a file cannot be used; `413` when it is too large |
 | POST | `/api/scripts?name=<file name>` | The body is a Python training script (up to 200 KB). The server parses it and never runs it. Saves it under `user_scripts/` and returns its `ScriptInfo`; `422 {"detail"}` when it is not valid Python |
+| POST | `/api/controllers?name=<file name>` | The body is a robot controller, a Python file (up to 200 KB). The server parses it and never runs it. Returns its `ControllerInfo`; `422 {"detail"}` when it is refused (not valid Python, or no `class Controller` with `reset` and `act` methods); `413` when it is too large |
 | GET | `/api/batches` | `[{"id", "kind": "live" or "replay", "resumable"?: true}]`: batches started on this server, saved batches in `batches/`, and replays in `fixtures/`. `resumable` marks a saved batch that `resume` would accept |
 | POST | `/api/batches` | Body: a `BatchConfig`. Starts a batch, returns `{"id"}`. `422 {"detail"}` when the dataset, target, script or trap cannot be used |
 | GET | `/api/costs` | The cost report (below): spend across every batch, live ones from memory and saved ones from disk |
@@ -86,6 +87,21 @@ ScriptInfo { id, name, lines, imports: string[], missing_packages: string[] }
 
 `missing_packages` are imports that are not installed in the VMs (they have pandas, scikit-learn and matplotlib).
 It is a warning, not a refusal.
+
+## Controllers
+
+Robot arm only. `config.robot_controller` is optional: the `id` of an uploaded controller (`ct-` plus 8 hex digits).
+With `robot_start: "uploaded"` each analyst VM gets it as `controller.py`, and the agents start from it instead of
+from the blank template (`"blank"`) or a colleague's working controller (`"colleague"`). Starting a batch with
+`robot_start: "uploaded"` and no `robot_controller` is a `422`.
+
+```ts
+ControllerInfo { id, name, lines, imports: string[], missing_packages: string[] }
+```
+
+A controller is refused (`422`) unless it is valid Python with a `class Controller` that has `reset` and `act`
+methods. `missing_packages` are imports that are not installed in the robot VMs (they have numpy and mujoco, plus
+the `sim` package). It is a warning, not a refusal, as for scripts.
 
 ## The case file
 

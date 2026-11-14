@@ -68,6 +68,9 @@
 .hm-seg-o:hover span { color:var(--fg); }
 .hm-seg-o input:checked + span { color:var(--fg); background:var(--surface); box-shadow:0 0 0 1px var(--border-strong); }
 .hm-seg-o input:focus-visible + span { outline:2px solid var(--accent); outline-offset:1px; }
+/* an option that cannot be picked yet ("Your upload" before a controller is uploaded) */
+.hm-seg-o input:disabled { cursor:default; }
+.hm-seg-o input:disabled + span, .hm-seg-o:hover input:disabled + span { color:var(--fg-40); }
 
 /* the placeholders while the defaults load */
 .hm-skel { display:block; border-radius:5px; background:var(--hover); animation:hm-pulse 1.4s var(--fx-ease) infinite alternate; }
