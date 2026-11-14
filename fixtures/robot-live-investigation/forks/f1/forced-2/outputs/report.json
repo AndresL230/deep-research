@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 47,
+  "notes": "Final controller: phase machine (approach, descend, close, lift, carry, lower, release, retreat) with a damped least-squares IK that holds grasp height, gripper pointing down and a yaw tangential to the base-to-can direction. 47/47 final-version episodes succeeded: 20 practice-layout seeds (place error 1.2-1.6 cm), 22 layouts with varied can and zone positions, and 5 CLI runs. Earlier development versions without the yaw constraint failed at far can positions (the hand housing hit the can side); those runs are not counted."
+}

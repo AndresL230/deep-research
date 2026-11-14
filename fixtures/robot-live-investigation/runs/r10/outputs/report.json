@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 36,
+  "notes": "Final controller (closed-loop placement) succeeded in 36/36 episodes: 20 seeds at the practice setup (place error about 0.9 cm) and 16 runs across four other can/place layouts (place error 0.4-0.9 cm, never dropped, always upright). Earlier exploratory runs of two intermediate versions (19 episodes, not counted here) also all succeeded, but with about 1.6 cm placement error before the closed-loop correction was added."
+}

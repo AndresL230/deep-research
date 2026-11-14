@@ -880,6 +880,14 @@ function question(f: ForkExperiment, vm: BatchVm): string {
     `</div>`;
 }
 
+/** How the copies were made, in words that match what happened: a copy-on-write fork of the base VM, or (when the
+ *  sandbox refused to fork) a fresh VM that replayed the same actions. */
+export function builtText(forkAt: number, nFork: number, nReplay: number): string {
+  if (nReplay > 0 && nFork === 0) return `Each copy is a fresh VM that replayed the run's first ${forkAt} actions (the sandbox could not fork a VM)`;
+  if (nReplay > 0) return `One base VM replayed the first ${forkAt} actions; copies are copy-on-write forks of it, or fresh VMs that replayed the same actions`;
+  return `One base VM replayed the first ${forkAt} actions. Each copy is a copy-on-write fork of it`;
+}
+
 /** A hypothesis's state in words. */
 const OUTCOME_WORDS: Record<string, string> = {
   untested: "untested", testing: "testing", supported: "supported", contradicted: "contradicted",
@@ -923,7 +931,7 @@ function forkPoint(f: ForkExperiment, vm: BatchVm): string {
     ? `a scripted analyst continued from there, standing in for a fresh Deep Agent${model ? ` on ${esc(model)}` : ""}`
     : `a fresh analyst Deep Agent${model ? ` on ${esc(model)}` : ""} continued from there`;
   const mechanics = kids.length
-    ? `<p class="ln-src-how">${whoTag("py")}<span>One base VM replayed the first ${f.fork_at} actions. Each copy is a copy-on-write fork of it${made}, and ${who}.</span></p>`
+    ? `<p class="ln-src-how">${whoTag("py")}<span>${esc(builtText(f.fork_at, nFork, nReplay))}${made}, and ${who}.</span></p>`
     : "";
   const splitAt = c.split?.fork_at;
   const moved = !fixing && splitAt != null && c.split?.fork_run_id === f.source_run && splitAt !== f.fork_at
