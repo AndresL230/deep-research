@@ -101,3 +101,29 @@ def test_the_hub_start_time_is_used_when_the_id_has_none():
     s = summarize("live-robot-demo", _case(), hub_started_at="2026-11-14T10:04:18+00:00")
     assert s["started_at"] is not None and s["started_at"].startswith("2026-11-14T")
     assert summarize("live-robot-demo", _case(), hub_started_at="garbage")["started_at"] is None
+
+
+def test_a_fork_waiting_for_approval_says_its_size_and_estimate():
+    pending = {"id": "pending", "status": "awaiting_approval", "n_per_arm": 4, "vm_count": 17, "estimate_usd": 2.1}
+    s = summarize("b", _case(phase="awaiting_approval", forks={"pending": pending}))
+    assert s["verdict"] == {"state": "awaiting_approval"}
+    assert s["pending"] == {"kind": "method", "n_per_arm": 4, "vm_count": 17, "estimate_usd": 2.1}
+    # A fix test, waiting with no prices: its kind, and no dollar figure.
+    fix = summarize("b", _case(phase="awaiting_approval", forks={"pending": {**pending, "kind": "fix", "estimate_usd": None}}))
+    assert fix["pending"] == {"kind": "fix", "n_per_arm": 4, "vm_count": 17, "estimate_usd": None}
+    # Nothing waiting, or a request saved before it had numbers.
+    assert summarize("b", _case())["pending"] is None
+    assert summarize("b", _case(forks={"pending": {"label": "x"}}))["pending"] == {
+        "kind": "method", "n_per_arm": None, "vm_count": None, "estimate_usd": None}
+
+
+def test_a_going_fork_says_how_many_copies_are_scored():
+    kids = {"control-1": {"arm": "control", "status": "honest"}, "forced-1": {"arm": "forced", "status": "running"},
+            "control-2": {"arm": "control", "status": "inflated"}}
+    fork = {"status": "running", "n_per_arm": 3, "arm_steps": {"control": None, "forced": "dedupe"}, "children": kids}
+    assert summarize("b", _case(phase="forking", forks={"f1": fork}))["fork_progress"] == {"scored": 2, "total": 6}
+    # A round of more pairs: n_per_arm is the copies per arm over every round, so the total counts the earlier ones.
+    assert summarize("b", _case(phase="forking", forks={"f1": {**fork, "n_per_arm": 8}}))["fork_progress"]["total"] == 16
+    # Over, or nothing going: none.
+    assert summarize("b", _case(phase="stopped", forks={"f1": fork}))["fork_progress"] is None
+    assert summarize("b", _case(forks={"f1": {**fork, "status": "done"}}))["fork_progress"] is None

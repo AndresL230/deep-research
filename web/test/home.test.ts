@@ -64,7 +64,7 @@ describe("homeView", () => {
       expect(html).not.toMatch(/<(fieldset|legend|details)\b/);
     }
     expect(text(homeView(vm({ advanced: true })))).toBe(
-      "Batches 2 batches, newest first, simulated last "
+      "Nothing needs you. Batches 2 batches, newest first, simulated last "
       + "Batch Domain Started Runs Claimed vs measured Step found Verdict Models Spend "
       + "b-20261114 Live demo-batch Replay New batch Pima diabetes · planted duplicate rows "
       + "Runs Duplicated rows 50% Hint None Light Budget $ "

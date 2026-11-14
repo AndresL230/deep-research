@@ -8,6 +8,7 @@
 
 import type { AgentEvent, BatchConfig, BatchListItem, CaseFile, Defaults, Estimate, Health } from "../api";
 import type { TableView } from "./batch-table";
+import type { NeedUi } from "./needs-you";
 
 export const ACT = {
   // anywhere
@@ -155,5 +156,7 @@ export interface HomeVm {
   starting: boolean;
   /** How the batch table is sorted and filtered (batch-table.ts); absent: newest first, every domain. */
   table?: TableView;
+  /** The "Needs you" rows' states (needs-you.ts), keyed by `needKey`: a quote, an open confirm, an error. Absent: at rest. */
+  needs?: Record<string, NeedUi>;
   error: string | null;
 }

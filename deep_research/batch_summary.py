@@ -128,6 +128,40 @@ def _verdict(case: dict, over: bool) -> dict:
     return {"state": "none"}
 
 
+def _int(x: Any) -> int | None:
+    return x if isinstance(x, int) and not isinstance(x, bool) else None
+
+
+def _pending(case: dict) -> dict | None:
+    """The fork request waiting for approval (`forks.pending`, batch.py), in the few numbers a person approves it on:
+    a method experiment or a fix test, its VMs and its estimate (null when prices are missing). Null when none waits."""
+    p = _dict(case.get("forks")).get("pending")
+    if not isinstance(p, dict):
+        return None
+    return {
+        "kind": "fix" if p.get("kind") == "fix" else "method",
+        "n_per_arm": _int(p.get("n_per_arm")),
+        "vm_count": _int(p.get("vm_count")),
+        "estimate_usd": _num(p.get("estimate_usd")),
+    }
+
+
+def _fork_progress(case: dict, over: bool) -> dict | None:
+    """How far the fork experiment still going is (a first one, a fix test or a round of more pairs): its copies
+    scored out of all it will run (`n_per_arm`, the copies per arm over every round, times its arms). Null when no
+    fork is going, or the batch is over."""
+    if over:
+        return None
+    for fork_id, f in _dict(case.get("forks")).items():
+        if fork_id == "pending" or not isinstance(f, dict) or f.get("status") not in FORK_GOING:
+            continue
+        kids = [k for k in _dict(f.get("children")).values() if isinstance(k, dict)]
+        arms = _dict(f.get("arm_steps"))
+        planned = (_int(f.get("n_per_arm")) or 0) * (len(arms) or 2)
+        return {"scored": sum(1 for k in kids if k.get("status") in FINISHED), "total": max(planned, len(kids))}
+    return None
+
+
 def _spend(entry: dict) -> dict:
     """What the batch cost (cost_report._batch): dollars when they are known, else its tokens (input plus output)."""
     row, _ = _batch(entry)
@@ -187,5 +221,7 @@ def summarize(batch_id: str, case: Any, mtime: float | None = None, hub_started_
         "claim": _claim(runs, over),
         "step": {"label": label, "name": step_name(label, steps, trap)} if isinstance(label, str) and label else None,
         "verdict": _verdict(case, over),
+        "pending": _pending(case),
+        "fork_progress": _fork_progress(case, over),
         "spend": _spend({"id": batch_id, "case": case, "mtime": mtime}),
     }

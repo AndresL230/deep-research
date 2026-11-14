@@ -17,7 +17,7 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | POST | `/api/datasets?name=<file name>` | The body is the CSV file itself (up to 20 MB). Saves it under `datasets/` and returns its `DatasetInfo`. `422 {"detail"}` says why a file cannot be used; `413` when it is too large |
 | POST | `/api/scripts?name=<file name>` | The body is a Python training script (up to 200 KB). The server parses it and never runs it. Saves it under `user_scripts/` and returns its `ScriptInfo`; `422 {"detail"}` when it is not valid Python |
 | POST | `/api/controllers?name=<file name>` | The body is a robot controller, a Python file (up to 200 KB). The server parses it and never runs it. Returns its `ControllerInfo`; `422 {"detail"}` when it is refused (not valid Python, or no `class Controller` with `reset` and `act` methods); `413` when it is too large |
-| GET | `/api/batches` | `[{"id", "kind": "live" or "replay", "resumable"?: true, "remote"?: true, "machine"?, "summary": BatchSummary or null}]`: batches started on this server, saved batches in `batches/`, replays in `fixtures/`, and the team hub's batches (`remote`, run on `machine`). `resumable` marks a saved batch that `resume` would accept. `summary` is below ([The batch list](#the-batch-list)) |
+| GET | `/api/batches` | `[{"id", "kind": "live" or "replay", "resumable"?: true, "fixture"?: true, "remote"?: true, "machine"?, "summary": BatchSummary or null}]`: batches started on this server, saved batches in `batches/`, replays in `fixtures/` (`fixture`), and the team hub's batches (`remote`, run on `machine`). `resumable` marks a saved batch that `resume` would accept. `summary` is below ([The batch list](#the-batch-list)) |
 | POST | `/api/batches` | Body: a `BatchConfig`. Starts a batch, returns `{"id"}`. `422 {"detail"}` when the dataset, target, script or trap cannot be used |
 | GET | `/api/costs` | The cost report (below): spend across every batch, live ones from memory and saved ones from disk |
 | GET | `/api/batches/{id}/case` | The case file (below) |
@@ -312,6 +312,8 @@ BatchSummary {
   claim: { of: "inflated" | "honest", n, claimed, measured, n_hidden: number | null } | null,
   step: { label, name } | null,                   // split.label, and its name in the domain's words
   verdict: { state, pairs?, needed_pairs? },
+  pending: { kind: "method" | "fix", n_per_arm, vm_count, estimate_usd } | null,
+  fork_progress: { scored, total } | null,
   spend: { usd: number | null, usd_partial: boolean, tokens },
 }
 ```
@@ -326,6 +328,13 @@ BatchSummary {
 - `verdict.state`: `none` (no fork yet), `awaiting_approval` (a fork waits for approval), `fork_running`,
   `fork_stopped`, `forked` (the fork finished, no verdict yet), or the verdict's evidence level `open` or `supported`
   (deep_research/evidence.py) with its `pairs` and `needed_pairs`.
+- `pending` is the fork request waiting for approval (`forks.pending`): a method experiment or a fix test, its copies
+  per arm, its VMs and its estimate in dollars (null when prices are missing; the numbers are null on a request saved
+  before it had them). Null when nothing waits. The home screen's "Needs you" list offers Approve and Decline on it
+  for a live batch.
+- `fork_progress` is the fork experiment still going (a first one, a fix test or a round of more pairs): its copies
+  scored out of `n_per_arm` times its arms (`n_per_arm` counts every round). Null when none is going or the batch is
+  over.
 - `spend` comes from the cost report's per batch row (`cost_report._batch`). `usd` is null for a simulated batch,
   and when prices are missing and nothing was priced; `tokens` is input plus output.
 - Summaries are kept between calls while a saved case file's mtime and size, or a hub batch's revision, stay the

@@ -6,6 +6,7 @@ import { attr, esc } from "../ui";
 import { pct, tokens, usd } from "./format";
 import { DEFAULT_VIEW, batchTable, type TableView } from "./batch-table";
 import { ACT, type HomeVm, type Loadable } from "./model";
+import { needsView } from "./needs-you";
 import { DEFAULT_PLANTED, chosenTrap } from "./trap";
 
 // ── home screen ──────────────────────────────────────────────────────────────
@@ -14,7 +15,8 @@ import { DEFAULT_PLANTED, chosenTrap } from "./trap";
  *  the robot arm domain's controller row with the uploaded controller it shows, if any. */
 export interface HomeInputs { html: string; label: string; controllerHtml?: string; controller?: ControllerInfo | null }
 
-/** The home screen: the batches to open, then one panel to start a new one. Labels only, no prose. */
+/** The home screen: what needs a person, the batches to open, then one panel to start a new one. Labels only, no
+ *  prose. */
 export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
   const trap = chosenTrap(vm.defaults, vm.draft?.trap);
   // What the batch runs on, the trap and its strength only mean something in the tabular domain.
@@ -24,6 +26,7 @@ export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
     ? summaryLabel(inputs?.label ?? `Pima diabetes · ${DEFAULT_PLANTED}`, trap)
     : controller ? `Starting from ${controller.name}` : "";
   return `<div class="hm" data-morph-key="home">
+    ${needsView(vm.batches, vm.needs)}
     ${batchesSection(vm.batches, vm.table)}
     <section class="hm-panel" data-morph-key="new" aria-labelledby="hm-new-h">
       <div class="hm-panel-h" data-morph-key="head">
