@@ -382,6 +382,6 @@ describe("no em dashes", () => {
   it("in anything these screens write", () => {
     const c = caseOf(ROBOT_CONFIG, robotRuns(), { forks: { f1: robotFork() }, verdict: verdict() });
     const vm = vmOf(c);
-    for (const html of [wallView(vm), forkView(vm), verdictView(vm), runSummaryView(vm, "r07")]) expect(html).not.toContain("—");
+    for (const html of [wallView(vm), forkView(vm), verdictView(vm), runSummaryView(vm, "r07")]) expect(html).not.toContain("\u2014");
   });
 });
