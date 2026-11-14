@@ -1,0 +1,5 @@
+{
+  "success_rate": 0.5,
+  "episodes_run": 16,
+  "notes": "2 of 4 episodes succeeded on can positions other than the practice one; the practice setup always succeeds."
+}

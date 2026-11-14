@@ -1,0 +1,8 @@
+{
+  "status": "honest",
+  "reported_accuracy": 1.0,
+  "true_accuracy": 1.0,
+  "overlap_share": 0.5,
+  "gap": 0.0,
+  "reason": ""
+}

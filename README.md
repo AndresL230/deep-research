@@ -9,6 +9,7 @@ HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amaz
 | Part | What it is | File |
 | --- | --- | --- |
 | Task | A dataset with a trap planted (duplicate rows by default), plus a clean holdout whose labels never leave our server. Pima diabetes by default, or an uploaded CSV with a chosen target column | `deep_research/task.py`, `datasets.py` |
+| Domains | The kind of task a batch runs, one module each: the task and its prompt, the scoring, the step labels and the split anchor, the forced steps, the investigator's skill and wording, the lab image, and what the UI draws (`charts` or `motion`). `tabular` (the default) wraps the modules below; `robot_arm` wraps `sim/domain.py`, a pick and place controller for a Franka Panda in MuJoCo. Pick one with `BatchConfig.domain` | `deep_research/domains/` |
 | Traps | The flaw planted in the data, one module each: how to plant it, the step an honest run does and the regex that spots it, the forced fix, the evidence number, and the words the UI shows. See [Traps](#traps) | `deep_research/traps/` |
 | Analyst agents | One flat deepagent per run, `DaytonaSandbox` backend, `write_todos` planning, no subagents | `agents/analyst.py` |
 | Orchestrator | Plain Python: VMs, runs, scoring, split finding, fork experiment, costs | `batch.py` |
@@ -58,6 +59,10 @@ cp .env.example .env                       # add ANTHROPIC_API_KEY and DAYTONA_A
 uv run python -m deep_research.snapshot    # once: bakes pandas, scikit-learn, matplotlib into a snapshot
 ```
 
+For the `robot_arm` domain, also once: `uv run python -m sim.fetch_assets` (the panda meshes, which the server needs to
+score controllers) and `uv run python -m deep_research.snapshot robot_arm` (its lab image, named by
+`DAYTONA_ROBOT_SNAPSHOT` in `.env`; without it each VM builds the image on first use).
+
 On macOS, if Daytona calls fail with `CERTIFICATE_VERIFY_FAILED`, Python has no default CA bundle. Add this to `.env`:
 `SSL_CERT_FILE=<output of: uv run python -c "import certifi; print(certifi.where())">`.
 
@@ -84,6 +89,7 @@ uv run python -m deep_research.cli runs --n 1        # milestone 1: one real run
 uv run python -m deep_research.cli runs --n 12       # milestone 2: a batch and the split finding
 uv run python -m deep_research.cli forks <batch_id> --n 4
 uv run python -m deep_research.cli runs --n 6 --budget 3          # a small batch under a 3 dollar budget
+uv run python -m deep_research.cli runs --domain robot_arm --n 1  # one robot arm run
 uv run python -m deep_research.cli investigate <batch_id>         # the investigator on a saved batch
 uv run python scripts/batch_numbers.py <batch_id>                 # the numbers a saved batch backs
 ```

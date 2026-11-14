@@ -18,19 +18,17 @@ from langchain_core.messages import messages_from_dict, messages_to_dict
 from langchain_daytona import DaytonaSandbox
 from langgraph.types import Command
 
-from . import hub
+from . import domains, hub
 from . import sandboxes as vms
-from . import traps
 from .agents.analyst import build_analyst
 from .agents.investigator import build_investigator
-from .analysis import actions_from_events, find_split
+from .analysis import find_split
 from .case_file import CaseFile
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
 from .events import EventLog, current_step, events_from_update, read_events
-from .forks import arm_plan, cut_history, forced_turn, intervention_for
-from .scoring import score_run
-from .task import TaskFiles, build_task, task_prompt
+from .domains import actions_from_events, build_task, intervention_for, score_run
+from .forks import cut_history, forced_turn
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +69,11 @@ def resume_problem(case: dict, batch_dir: Path) -> str | None:
     src = split.get("fork_run_id")
     if not src:
         return "no split was found"
-    if not (batch_dir / "runs" / src / "messages.json").is_file() or not (batch_dir / "task" / "data.csv").is_file():
+    try:
+        marker = domains.get(cfg.get("domain")).task_marker
+    except ValueError:
+        return f"its domain '{cfg.get('domain')}' is not available here"
+    if not (batch_dir / "runs" / src / "messages.json").is_file() or not (batch_dir / "task" / marker).is_file():
         return "the files needed to fork are missing"
     return None
 
@@ -79,6 +81,10 @@ def resume_problem(case: dict, batch_dir: Path) -> str | None:
 class Batch:
     def __init__(self, cfg: BatchConfig, batch_id: str | None = None, root: Path = BATCHES_DIR, resume: bool = False):
         self.cfg = cfg
+        # What the task is, how a run is scored and what its steps are called (deep_research/domains/).
+        self.domain = domains.get(cfg.domain)
+        # The VM calls name the domain only when it is not the default one, so a tabular batch calls them as before.
+        self._vm_domain = {} if cfg.domain == domains.DEFAULT else {"domain": cfg.domain}
         self.id = batch_id or time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
         self.dir = root / self.id
         self.runs_dir = self.dir / "runs"
@@ -87,7 +93,7 @@ class Batch:
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         if resume:
             # The task files are already there from the first time round.
-            self.task = TaskFiles.in_dir(self.dir / "task")
+            self.task = self.domain.open_task(self.dir / "task")
         else:
             try:
                 # First, and before the case file exists: if the task cannot be built there is no batch.
@@ -96,7 +102,7 @@ class Batch:
                 if fresh:
                     shutil.rmtree(self.dir, ignore_errors=True)
                 raise
-        self.case = CaseFile(self.dir / "case" / "case.json")
+        self.case = CaseFile(self.dir / "case" / "case.json", labels=self.domain.labels())
         self.tracker = CostTracker(budget_usd=cfg.budget_usd)
         # A reopened batch (Batch.resume, cli forks, cli investigate) has spend on record already.
         self.tracker.restore(self.case.data.get("costs") or {})
@@ -113,11 +119,12 @@ class Batch:
         self.started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         if self._hub is not None:
             self.case.subscribe(lambda section, value: self._push_case())
+        # The domain in words and what the UI draws for a run, plus the domain's own keys (the tabular `trap_info`).
+        info = {"visual": self.domain.visual, "domain_info": self.domain.public(), **self.domain.case_config(cfg)}
         if not resume:
-            # `trap_info` is the trap in words and patterns, so the UI and the investigator need no list of traps.
-            self.case.set_config({**cfg.model_dump(), "trap_info": traps.get(cfg.trap).public()})
-        elif "trap_info" not in self.case.data.get("config", {}):
-            self.case.set_config({**self.case.data["config"], "trap_info": traps.get(cfg.trap).public()})
+            self.case.set_config({**cfg.model_dump(), **info})
+        elif any(k not in self.case.data.get("config", {}) for k in info):
+            self.case.set_config({**info, **self.case.data["config"]})
 
     # ---- the team hub ----
     def _push_case(self) -> None:
@@ -264,7 +271,7 @@ class Batch:
         log = self._log(rdir / "events.jsonl", run_id)
         self.case.update_run(run_id, status="starting")
         try:
-            sb = await asyncio.to_thread(vms.create_vm, f"{self.id}-{run_id}")
+            sb = await asyncio.to_thread(vms.create_vm, f"{self.id}-{run_id}", **self._vm_domain)
             self.vms[run_id] = sb
             self.tracker.vm_started(scope)
             await asyncio.to_thread(vms.load_task, sb, self.task)
@@ -272,17 +279,19 @@ class Batch:
             self.case.update_run(run_id, status="running", vm_id=sb.id, lab_url=url)
 
             agent = build_analyst(DaytonaSandbox(sandbox=sb), self.cfg.analyst_model)
-            inp = {"messages": [{"role": "user", "content": task_prompt(self.cfg)}]}
+            inp = {"messages": [{"role": "user", "content": self.domain.task_prompt(self.cfg)}]}
             msgs = await asyncio.wait_for(
                 self._drive(agent, inp, f"{self.id}-{run_id}", scope, self.cfg.analyst_model, log, self._run_event(run_id)),
                 RUN_TIMEOUT_S,
             )
             (rdir / "messages.json").write_text(json.dumps(messages_to_dict(msgs)))
-            await asyncio.to_thread(vms.download_outputs, sb, rdir / "outputs")
+            motion = await asyncio.to_thread(vms.download_outputs, sb, rdir / "outputs", **self._vm_domain)
             charts = await asyncio.to_thread(vms.download_charts, sb, rdir / "live")
             await self._finish_run(run_id, rdir, log)
             if charts:
                 self.case.update_run(run_id, charts=[f"runs/{run_id}/live/{name}" for name in charts])
+            if motion:
+                self.case.update_run(run_id, motion_files=[f"runs/{run_id}/outputs/{path}" for path in motion])
         except Exception as e:  # noqa: BLE001 - one bad run must not sink the batch
             self.case.update_run(run_id, status="failed", reason=f"{type(e).__name__}: {e}"[:500])
         finally:
@@ -308,7 +317,7 @@ class Batch:
         score = await asyncio.to_thread(score_run, rdir / "outputs", self.task, self.cfg.inflation_threshold)
         (rdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
         actions = await asyncio.to_thread(
-            lambda: actions_from_events(read_events(log.path), self.task.given_files())
+            lambda: actions_from_events(read_events(log.path), self.task)
         )
         (rdir / "actions.json").write_text(
             json.dumps([{"index": a.index, "tool": a.tool, "args": a.args, "labels": a.labels} for a in actions], indent=2)
@@ -323,14 +332,14 @@ class Batch:
         for r in statuses:
             p = self.runs_dir / r / "events.jsonl"
             if p.exists():
-                runs[r] = actions_from_events(read_events(p), self.task.given_files())
-        finding = find_split(runs, statuses, prefer=traps.get(self.cfg.trap).label)
+                runs[r] = actions_from_events(read_events(p), self.task)
+        finding = find_split(runs, statuses, prefer=self.domain.prefer_label(self.cfg), steps=self.domain.steps())
         if finding is None:
             self.case.set_split(None)
             self.case.set_phase("no_split")
             return
         split = finding.to_dict()
-        iv = intervention_for(finding.label, self.cfg.trap)
+        iv = intervention_for(finding.label, self.cfg)
         split["intervention"] = None if iv is None else iv["description"]
         self.case.set_split(split)
         self.case.set_phase("ready")
@@ -339,7 +348,7 @@ class Batch:
     def arm_plan(self) -> dict[str, dict | None]:
         """The arms this batch's fork experiment would run, from its split and its config (forks.arm_plan)."""
         split = self.case.data.get("split") or {}
-        return arm_plan(split.get("label") or "", self.cfg.placebo_arm, self.cfg.show_arm, self.cfg.trap)
+        return self.domain.arm_plan(split.get("label") or "", self.cfg)
 
     def estimate_forks_usd(self, n_per_arm: int) -> float | None:
         avg = self.tracker.average_run_usd()
@@ -351,7 +360,7 @@ class Batch:
         split = self.case.data.get("split")
         if not split or split.get("fork_run_id") is None:
             return "no split finding with a run to fork from"
-        if intervention_for(split["label"], self.cfg.trap) is None:
+        if intervention_for(split["label"], self.cfg) is None:
             return f"no intervention is defined for '{split['label']}' yet"
         return None
 
@@ -361,7 +370,7 @@ class Batch:
         if why_not:
             return f"error: {why_not}"
         split = self.case.data["split"]
-        iv = intervention_for(split["label"], self.cfg.trap)
+        iv = intervention_for(split["label"], self.cfg)
         plan = self.arm_plan()
         n_per_arm = max(1, min(int(n_per_arm), 8))
         try:
@@ -375,7 +384,7 @@ class Batch:
         base_scope = f"fork:{fork_id}:base"
         try:
             msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
-            actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task.given_files())
+            actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task)
             prefix_msgs, n_prefix = cut_history(msgs, split["fork_at"])
             prefix_actions = actions[:n_prefix]
             self.case.set_phase("forking")
@@ -384,7 +393,7 @@ class Batch:
                 intervention=iv["description"], n_per_arm=n_per_arm, children={},
                 arm_steps={a: (step or {}).get("description") for a, step in plan.items()},
             )
-            base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base")
+            base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base", **self._vm_domain)
             self.vms[f"{fork_id}-base"] = base
             self.tracker.vm_started(base_scope)
             await asyncio.to_thread(vms.load_task, base, self.task)
@@ -418,7 +427,7 @@ class Batch:
                     except Exception as e:  # noqa: BLE001 - fall back to rebuilding by replay
                         logger.warning("fork %s %s: could not fork the base VM (%s: %s); rebuilding it by replay",
                                        fork_id, cid, type(e).__name__, e)
-                        vm = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-{cid}")
+                        vm = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-{cid}", **self._vm_domain)
                         self.vms[f"{fork_id}-{cid}"] = vm
                         # From here, not after the rebuild: the VM is up and billing while it replays.
                         self.tracker.vm_started(scope)
@@ -451,7 +460,7 @@ class Batch:
                                     self.cfg.analyst_model, log, on_event),
                         RUN_TIMEOUT_S,
                     )
-                    await asyncio.to_thread(vms.download_outputs, vm, cdir / "outputs")
+                    motion = await asyncio.to_thread(vms.download_outputs, vm, cdir / "outputs", **self._vm_domain)
                     charts = await asyncio.to_thread(vms.download_charts, vm, cdir / "live")
                     score = await asyncio.to_thread(
                         score_run, cdir / "outputs", self.task, self.cfg.inflation_threshold
@@ -459,6 +468,8 @@ class Batch:
                     (cdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
                     results[cid] = {"arm": arm, **score.to_dict()}
                     extra = {"charts": [f"forks/{fork_id}/{cid}/live/{name}" for name in charts]} if charts else {}
+                    if motion:
+                        extra["motion_files"] = [f"forks/{fork_id}/{cid}/outputs/{path}" for path in motion]
                     self._set_child(fork_id, cid, **results[cid], **extra)
                 except Exception as e:  # noqa: BLE001
                     results[cid] = {"arm": arm, "status": "failed", "reason": f"{type(e).__name__}: {e}"[:300]}

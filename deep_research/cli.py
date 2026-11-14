@@ -3,6 +3,7 @@
     python -m deep_research.cli runs --n 1          # one real run end to end
     python -m deep_research.cli runs --n 12         # a full batch, then the split finding
     python -m deep_research.cli runs --n 6 --budget 3
+    python -m deep_research.cli runs --domain robot_arm --n 1   # another domain (deep_research/domains/)
     python -m deep_research.cli forks <batch_id> --n 4
     python -m deep_research.cli investigate <batch_id>                  # asks before each experiment
     python -m deep_research.cli investigate <batch_id> --auto-approve   # unattended, small budgets only
@@ -24,6 +25,7 @@ from . import hub  # noqa: E402
 
 hub.load_runner_env()  # keys this machine does not have come from the team hub
 
+from . import domains  # noqa: E402
 from .batch import Batch  # noqa: E402
 from .config import BATCHES_DIR, BatchConfig  # noqa: E402
 
@@ -55,10 +57,11 @@ def _reopen(batch_id: str) -> Batch:
     return Batch(_saved_config(batch_id), batch_id=batch_id, root=BATCHES_DIR)
 
 
-async def runs(n: int, strength: float, hint: str, noise: float, hidden: float, budget: float) -> None:
+async def runs(n: int, strength: float, hint: str, noise: float, hidden: float, budget: float,
+               domain: str = domains.DEFAULT) -> None:
     b = Batch(
-        BatchConfig(n_runs=n, trap_strength=strength, hint_level=hint, trap_noise=noise, trap_hidden_share=hidden,
-                    budget_usd=budget),
+        BatchConfig(domain=domain, n_runs=n, trap_strength=strength, hint_level=hint, trap_noise=noise,
+                    trap_hidden_share=hidden, budget_usd=budget),
         root=BATCHES_DIR,
     )
     print("batch", b.id)
@@ -146,6 +149,8 @@ def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("runs")
+    r.add_argument("--domain", choices=domains.names(), default=domains.DEFAULT,
+                   help="the kind of task; the --strength, --noise and --hidden trap settings are tabular only")
     r.add_argument("--n", type=int, default=1)
     r.add_argument("--strength", type=float, default=0.5)
     r.add_argument("--hint", choices=["none", "light"], default="none")
@@ -169,7 +174,9 @@ def main(argv: list[str] | None = None) -> None:
     elif a.cmd == "cleanup":
         cleanup()
     elif a.cmd == "runs":
-        asyncio.run(runs(a.n, a.strength, a.hint, a.noise, a.hidden, a.budget))
+        # The domain is named only when it is not the default one, so a plain `runs` calls `runs` as before.
+        on = {} if a.domain == domains.DEFAULT else {"domain": a.domain}
+        asyncio.run(runs(a.n, a.strength, a.hint, a.noise, a.hidden, a.budget, **on))
     elif a.cmd == "forks":
         asyncio.run(forks(a.batch_id, a.n))
     else:

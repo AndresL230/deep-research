@@ -76,13 +76,20 @@ def arm_plan(label: str, placebo: bool = True, show: bool = True, trap: str | No
 
     Empty when no intervention is defined for `label`: there is nothing to force, so there is no experiment.
     """
-    iv = intervention_for(label, trap)
+    return arms(intervention_for(label, trap), SHOW.get(label), PLACEBO, placebo, show)
+
+
+def arms(
+    iv: dict | None, weak: dict | None, placebo_step: dict, placebo: bool = True, show: bool = True
+) -> dict[str, dict | None]:
+    """`arm_plan` for any domain: `iv` is the forced step, `weak` its `show` version (an `iv["show"]` wins) and
+    `placebo_step` the harmless command. Empty when there is no `iv`."""
     if iv is None:
         return {}
     plan: dict[str, dict | None] = {"control": None}
     if placebo:
-        plan["placebo"] = PLACEBO
-    weak = iv.get("show") or SHOW.get(label)
+        plan["placebo"] = placebo_step
+    weak = iv.get("show") or weak
     if show and weak:
         plan["show"] = weak
     plan["forced"] = {"description": iv["description"], "command": iv["command"]}
