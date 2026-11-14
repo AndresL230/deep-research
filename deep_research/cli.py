@@ -45,7 +45,10 @@ async def forks(batch_id: str, n: int) -> None:
     cfg = BatchConfig(**json.loads((BATCHES_DIR / batch_id / "case" / "case.json").read_text())["config"])
     # Reopens the batch. The task is rebuilt from the same seed, so the files are identical.
     b = Batch(cfg, batch_id=batch_id)
-    print(await b.run_forks(n))
+    try:
+        print(await b.run_forks(n))
+    finally:
+        await b.close()  # the fork base and children would otherwise run until auto-stop
     _print_case(b)
 
 
