@@ -30,7 +30,7 @@ import { hubBadge } from "./batch/hub-badge";
 import { DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { wallView } from "./batch/wall";
 import { feedView, notebookWithCaptions, wallWithFeed } from "./batch/commentary";
-import { diagnosisView, fixView, forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
+import { diagnosisView, fixView, forkView, investigatorView, keyPointsView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, runSummaryView, taskText, workStrip } from "./batch/run";
 import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule } from "./batch/replay";
@@ -82,6 +82,9 @@ interface AppState {
   hub: HubStatus | null;
   /** The batch page's live feed is unfolded (narrow screens only: on a wide one it is always open). */
   feedOpen: boolean;
+  /** The batch page's folds the person opened or closed (lanes.ts), and the batch they belong to. */
+  folds: Record<string, boolean>;
+  foldsFor: string;
 }
 
 const S: AppState = {
@@ -98,6 +101,8 @@ const S: AppState = {
   costsBack: { name: "home" },
   hub: null,
   feedOpen: false,
+  folds: {},
+  foldsFor: "",
 };
 
 const DEFAULT_SPEED = 4;
@@ -175,6 +180,7 @@ function batchVm(b: BatchState, full: CaseFile): BatchVm {
     busy: b.busy,
     error: b.error,
     now: Date.now(),
+    open: S.foldsFor === b.id ? S.folds : {},
   };
 }
 
@@ -219,9 +225,11 @@ function headerView(vm: BatchVm | null): string {
 }
 
 function batchBody(vm: BatchVm): string {
-  // The story in order: the runs, where they split, what the investigator makes of it, the fork, the verdict.
+  // The story in order: the runs, the key points, then each part in full: where the runs split, what the
+  // investigator makes of it, the fork, the verdict, the diagnosis and the fix.
   const sections: [string, string][] = [
     ["wall", wallWithFeed(wallView(vm), feedView(vm, S.feedOpen))],
+    ["points", keyPointsView(vm)],
     ["split", splitView(vm)],
     ["phase", investigatorView(vm)],
     ["fork", forkView(vm)],
@@ -719,6 +727,15 @@ root.addEventListener("click", (e) => {
     case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
     case ACT.workToggle: S.workOpen = !S.workOpen; paint(); return;
     case ACT.toggleFeed: S.feedOpen = !S.feedOpen; paint(); return;
+    case ACT.fold: {
+      if (!b) return;
+      // The button says whether its fold is open now, whatever made it so (its default, or an earlier click).
+      const was = el.getAttribute("aria-expanded") === "true";
+      S.folds = { ...(S.foldsFor === b.id ? S.folds : {}), [arg]: !was };
+      S.foldsFor = b.id;
+      paint();
+      return;
+    }
     case ACT.resetConfig:
       if (S.home.defaults) { S.home = { ...S.home, draft: resetDraft(S.home), error: null }; paint(); scheduleEstimate(); }
       return;

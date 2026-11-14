@@ -24,7 +24,7 @@ import { scoreWords } from "../src/robot/markup";
 const robotFixture = JSON.parse(robotRaw) as CaseFile;
 
 const vmOf = (c: CaseFile, over: Partial<BatchVm> = {}): BatchVm => ({
-  id: "b", live: false, case: c, events: {}, replay: null, busy: null, error: null, now: 0, ...over,
+  id: "b", live: false, case: c, events: {}, replay: null, busy: null, error: null, now: 0, open: "all", ...over,
 });
 
 const ROBOT_CONFIG = { domain: "robot_arm", visual: "motion", inflation_threshold: 0.275, unclear_threshold: 0.12, simulated: true } as unknown as BatchConfig;

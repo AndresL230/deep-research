@@ -26,7 +26,7 @@ const demo = JSON.parse(caseRaw) as CaseFile;
 const jsonl = (raw: string): AgentEvent[] => raw.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as AgentEvent);
 
 const vmOf = (c: Partial<CaseFile> = {}, over: Partial<BatchVm> = {}): BatchVm => ({
-  id: "demo", live: false, case: { ...structuredClone(demo), ...c }, events: {}, replay: null, busy: null, error: null, now: 0, ...over,
+  id: "demo", live: false, case: { ...structuredClone(demo), ...c }, events: {}, replay: null, busy: null, error: null, now: 0, open: "all", ...over,
 });
 const count = (html: string, needle: string): number => html.split(needle).length - 1;
 /** The demo batch with the two shown runs' logs loaded. */
@@ -34,7 +34,8 @@ const withLogs = (c: Partial<CaseFile> = {}): BatchVm => vmOf(c, { events: { r01
 /** One column of the side by side notebooks. */
 const col = (html: string, group: "honest" | "inflated"): string => {
   const from = html.indexOf(`data-morph-key="col-${group}"`);
-  const to = group === "honest" ? html.indexOf('data-morph-key="col-inflated"') : html.indexOf("What it did to the score");
+  // The two notebooks are unfolded detail: they come after the score, and the strip of every run follows them.
+  const to = group === "honest" ? html.indexOf('data-morph-key="col-inflated"') : html.indexOf('<h3 class="ln-h3">All ');
   expect(from).toBeGreaterThan(-1);
   return html.slice(from, to);
 };
@@ -358,7 +359,7 @@ describe("splitView on a real batch", () => {
     },
   };
   const real = (): BatchVm => ({
-    id: "real", live: false, replay: null, busy: null, error: null, now: 0,
+    id: "real", live: false, replay: null, busy: null, error: null, now: 0, open: "all",
     case: { ...structuredClone(demo), config: { ...demo.config, simulated: false }, costs: {}, phase: "ready", runs, split, forks: {}, verdict: null, hypotheses: [] } as CaseFile,
     events: { r01: REAL_R01, r06: REAL_R06 },
   });

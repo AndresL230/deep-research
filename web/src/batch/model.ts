@@ -28,6 +28,7 @@ export const ACT = {
   decline: "decline",           // live only: decline forks.pending
   stop: "stop",                 // live only: stop the batch and its VMs
   toggleFeed: "toggle-feed",    // fold or unfold the live commentary feed (narrow screens)
+  fold: "fold",                 // arg: a fold's key ("split", "exp:f1"): show or hide a section's detail
   // replay
   replayToggle: "replay-toggle",   // play / pause
   replaySpeed: "replay-speed",     // arg: speed multiplier ("1", "4", "16")
@@ -117,6 +118,9 @@ export interface BatchVm {
   error: string | null;
   /** Wall-clock ms, for "running for 42s" style labels. */
   now: number;
+  /** The folds the person opened or closed, by key (lanes.ts): each section shows its key points and keeps its
+   *  detail folded until asked for. A key that is absent takes the fold's own default. "all": every fold open. */
+  open?: Readonly<Record<string, boolean>> | "all";
 }
 
 export type Loadable<T> = { state: "loading" } | { state: "ready"; value: T } | { state: "error"; message: string };
