@@ -6,7 +6,7 @@
 import "./lanes.css";
 import {
   isPendingForks, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
-  type ForkExperiment, type PendingForks, type RunRecord, type SplitFinding,
+  type ForkExperiment, type PendingForks, type RunRecord, type SplitFinding, type TrapInfo,
 } from "../api";
 import { askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
@@ -14,6 +14,7 @@ import { duration, pct, pts, usd } from "./format";
 import { ACT, childKey, type BatchVm } from "./model";
 import { codeKind, highlightLines } from "./highlight";
 import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parseCommand, type NbCell } from "./notebook";
+import { evidenceParts, trapMark, trapOf, trapWords, type Mark } from "./trap";
 
 // ── pure helpers (exported for the tests) ────────────────────────────────────
 
@@ -162,16 +163,24 @@ const STEP_WORDS: Record<string, StepWords> = {
   report: { did: "wrote the report", missing: "No report written here" },
 };
 
-/** The words for a step label, generic for one this file does not know. */
-export function stepWords(label: string): StepWords {
-  return STEP_WORDS[label] ?? { did: `did the ${label} step`, missing: `No ${label} step here` };
+/**
+ * The words for a step label: the batch trap's own when the label is its step, else this file's, else generic ones
+ * for a label nobody describes.
+ */
+export function stepWords(label: string, trap: TrapInfo | null = null): StepWords {
+  return trapWords(trap, label) ?? STEP_WORDS[label] ?? { did: `did the ${label} step`, missing: `No ${label} step here` };
+}
+
+/** What marks a step in code, for the highlight: the batch trap's pattern for its own step, else the table's. */
+export function stepMark(label: string, trap: TrapInfo | null = null): Mark | null {
+  return trapMark(trap, label) ?? LABEL_PATTERNS[label] ?? null;
 }
 
 const ALL = 0.995;
 const NONE = 0.005;
 
 /** "Honest runs removed duplicate rows before splitting. Inflated runs did not." */
-export function splitHeadline(s: Pick<SplitFinding, "label" | "honest_rate" | "inflated_rate">): { honest: string; inflated: string } {
+export function splitHeadline(s: Pick<SplitFinding, "label" | "honest_rate" | "inflated_rate">, trap: TrapInfo | null = null): { honest: string; inflated: string } {
   const h = s.honest_rate;
   const i = s.inflated_rate;
   const who = h >= ALL ? "Honest runs" : h > 0.5 ? "Most honest runs" : h > NONE ? "Some honest runs" : "No honest run";
@@ -179,7 +188,7 @@ export function splitHeadline(s: Pick<SplitFinding, "label" | "honest_rate" | "i
   const inflated = i <= NONE ? (h > NONE ? "Inflated runs did not." : "Neither did inflated runs.")
     : i < 0.5 ? "Most inflated runs did not."
       : i < ALL ? `Most inflated runs did${too}.` : `Inflated runs did${too}.`;
-  return { honest: `${who} ${stepWords(s.label).did} before splitting.`, inflated };
+  return { honest: `${who} ${stepWords(s.label, trap).did} before splitting.`, inflated };
 }
 
 /** "6 of 6 honest runs, 0 of 6 inflated". */
@@ -240,7 +249,7 @@ export function lineWindows(n: number, hits: readonly number[], context = 2, max
 const IMPORT_LINE = /^\s*(?:from\s+\S+\s+import|import)\s/;
 
 /** The lines a pattern matches, leaving out import lines when it also matches real code. */
-function matchLines(lines: readonly string[], re: RegExp | null): number[] {
+function matchLines(lines: readonly string[], re: Mark | null): number[] {
   if (!re) return [];
   const all = lines.flatMap((l, i) => (re.test(l) ? [i] : []));
   const code = all.filter((i) => !IMPORT_LINE.test(lines[i]));
@@ -254,7 +263,7 @@ const cellText = (c: NbCell): string => `${c.code}\n${c.then ?? ""}`;
  * splits (by its code, else by the backend's labels); `step` is that cell when it also does the step (one big
  * script), else the last cell before it that does. Indexes into `code`; -1 when there is none.
  */
-export function planCells(cells: readonly NbCell[], mark: RegExp | null, labels: readonly (readonly string[])[] = []): { code: NbCell[]; split: number; step: number } {
+export function planCells(cells: readonly NbCell[], mark: Mark | null, labels: readonly (readonly string[])[] = []): { code: NbCell[]; split: number; step: number } {
   const code = cells.filter((c) => c.kind !== "note" && c.state !== "typing");
   let split = code.findIndex((c) => LABEL_PATTERNS.split.test(c.code));
   if (split < 0) {
@@ -282,7 +291,7 @@ interface Side {
   step: number;
 }
 
-function sideOf(vm: BatchVm, id: string | null, mark: RegExp | null): Side {
+function sideOf(vm: BatchVm, id: string | null, mark: Mark | null): Side {
   const log = id ? logOf(vm, id) : null;
   const cells = log ? notebookCells(log) : [];
   const rec = id ? vm.case.runs?.[id] ?? null : null;
@@ -293,7 +302,7 @@ function sideOf(vm: BatchVm, id: string | null, mark: RegExp | null): Side {
 const SHORT_CELL = 9;
 
 /** A cell's code cut to the lines that matter: the step's lines (highlighted) and the line that splits. */
-function snippet(c: Pick<NbCell, "key" | "title" | "lang" | "code">, n: number | null, mark: RegExp | null, at: RegExp | null): string {
+function snippet(c: Pick<NbCell, "key" | "title" | "lang" | "code">, n: number | null, mark: Mark | null, at: RegExp | null): string {
   const code = c.code.replace(/\s+$/, "");
   const lines = code.split("\n");
   const colored = highlightLines(code, codeKind(c.lang, c.title, code));
@@ -318,7 +327,7 @@ function snippet(c: Pick<NbCell, "key" | "title" | "lang" | "code">, n: number |
 }
 
 /** A command from the split finding as a cell, for when the run's log is not loaded. */
-function exampleSnippet(key: string, command: string, mark: RegExp | null): string {
+function exampleSnippet(key: string, command: string, mark: Mark | null): string {
   const p = parseCommand(command);
   return snippet({ key, title: p.title, lang: p.lang, code: p.code }, null, mark, LABEL_PATTERNS.split);
 }
@@ -333,8 +342,9 @@ const GROUP_NAME: Record<Group, string> = { honest: "Honest", inflated: "Inflate
  * slot), the cells between, the cell that splits, the cells after.
  */
 function column(vm: BatchVm, s: Side, group: Group, split: SplitFinding, splitInBand: boolean): string {
-  const mark = LABEL_PATTERNS[split.label] ?? null;
-  const words = stepWords(split.label);
+  const trap = trapOf(vm.case);
+  const mark = stepMark(split.label, trap);
+  const words = stepWords(split.label, trap);
   const { code } = s;
   const n = (c: NbCell): number | null => s.num.get(c.key) ?? null;
   const id = s.id;
@@ -388,7 +398,7 @@ function column(vm: BatchVm, s: Side, group: Group, split: SplitFinding, splitIn
 
 /** The two notebooks as a diff: lined up at the step one did and the other skipped. */
 function diffView(vm: BatchVm, split: SplitFinding, pick: { honest: string | null; inflated: string | null }): string {
-  const mark = LABEL_PATTERNS[split.label] ?? null;
+  const mark = stepMark(split.label, trapOf(vm.case));
   const honest = sideOf(vm, pick.honest, mark);
   const inflated = sideOf(vm, pick.inflated, mark);
   const merged = honest.step >= 0 && honest.step === honest.split;
@@ -465,8 +475,9 @@ function consequence(c: CaseFile): string {
   const group = (g: Group): string => {
     const s = scoreStats(runs.filter((r) => r.status === g));
     if (!s.n) return "";
-    const leak = s.overlap != null
-      ? `<p class="ln-leak"><b>${esc(pct(s.overlap, 0))}</b> of test rows were also in training</p>` : "";
+    // Left out when there is no number: the trap has no evidence, or these runs did not keep what it is read from.
+    const ev = evidenceParts(s.overlap, trapOf(c), "of test rows were also in training");
+    const leak = ev ? `<p class="ln-leak"><b>${esc(ev.share)}</b> ${esc(ev.text)}</p>` : "";
     return `<div class="ln-grp ln-grp--${g}" data-morph-key="grp-${g}">` +
       `<div class="ln-grp-h"><i class="ln-pill-dot"></i><span class="ln-grp-t">${GROUP_NAME[g]} runs</span><span class="ln-muted">${s.n}</span></div>` +
       scoreBars(s, g) + leak + `</div>`;
@@ -533,7 +544,7 @@ export function splitView(vm: BatchVm): string {
       `</section>`;
   }
 
-  const line = splitHeadline(split);
+  const line = splitHeadline(split, trapOf(c));
   const pick = pickRuns(c);
   return `<section class="ln-sec ln-split" data-morph-key="ln-split" aria-label="What changed">` +
     head("What changed", c) +

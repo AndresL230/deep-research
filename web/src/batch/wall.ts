@@ -5,8 +5,9 @@
 // chart, or a placeholder), the step label, a progress strip from the todos, then the reveal once the run is scored,
 // and its cost. Markup has no whitespace between tags so children pair by index the same way on every render.
 import "./wall.css";
-import type { AgentTodo, RunRecord, RunStatus } from "../api";
+import type { AgentTodo, RunRecord, RunStatus, TrapInfo } from "../api";
 import { activityOf, chartUrl, logOf, notebookCells, notebookTail, stagesOf, type NbCell } from "./notebook";
+import { evidenceParts, trapOf } from "./trap";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { pct, pts, tokens, usd } from "./format";
@@ -130,20 +131,20 @@ function strip(run: RunRecord, todos: AgentTodo[] | null, cells: NbCell[]): stri
 /** A bar from 50% to 100% accuracy, so a 13 point gap is a visible length. */
 const barWidth = (x: number | null | undefined): number => (x == null || Number.isNaN(x) ? 0 : Math.max(0, Math.min(1, (x - 0.5) / 0.5)) * 100);
 
-function reveal(run: RunRecord): string {
+function reveal(run: RunRecord, trap: TrapInfo | null): string {
   if (run.status === "failed") {
     const reason = run.reason?.trim() || "The run failed before it was scored.";
     return `<div class="bw-rev bw-rev--failed" title="${attr(reason)}">${esc(truncate(reason, 140))}</div>`;
   }
   if (run.status !== "honest" && run.status !== "inflated") return "";
-  const share = run.overlap_share;
-  const overlap = share == null ? "Overlap unknown" : `${pct(share, 0)} of test rows were in training`;
+  // The trap's evidence sentence. Left out when the run has no number or the trap has none to give.
+  const ev = evidenceParts(run.overlap_share, trap, "of test rows were in training");
   const bar = (label: string, x: number | null | undefined, cls: string): string =>
     `<div class="bw-acc"><span class="bw-k">${label}</span><span class="bw-track" aria-hidden="true"><span class="bw-fill ${cls}" style="width:${barWidth(x).toFixed(1)}%"></span></span><span class="bw-v">${pct(x)}</span></div>`;
   return `<div class="bw-rev">`
     + bar("Reported", run.reported_accuracy, "bw-fill--rep")
     + bar("True", run.true_accuracy, "bw-fill--true")
-    + `<div class="bw-foot"><span class="bw-gap">${pts(run.gap)}</span><span class="bw-ovl-t">${esc(overlap)}</span></div>`
+    + `<div class="bw-foot"><span class="bw-gap">${pts(run.gap)}</span>${ev ? `<span class="bw-ovl-t">${esc(`${ev.share} ${ev.text}`)}</span>` : ""}</div>`
     + `</div>`;
 }
 
@@ -172,7 +173,7 @@ function tile(vm: BatchVm, run: RunRecord): string {
     + picture(vm, run, step, cells)
     + `<div class="bw-step${run.status === "failed" ? " bw-step--failed" : ""}" title="${attr(step)}">${esc(truncate(step, 120))}</div>`
     + strip(run, todos, cells)
-    + reveal(run)
+    + reveal(run, trapOf(vm.case))
     + (cost ? `<div class="bw-cost">${esc(cost)}</div>` : "")
     + `</div>`;
 }

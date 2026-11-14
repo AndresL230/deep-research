@@ -17,11 +17,42 @@ export const PHASES = [
 export type KnownPhase = (typeof PHASES)[number];
 export type Phase = KnownPhase | (string & {});
 
-/** Step labels the split finder and the investigator use (deep_research/analysis.py LABELS). */
+/** The step labels the server ships with (deep_research/analysis.py LABELS): the base steps plus each trap's honest
+ *  step (`deduplicate`, `drop_leak`, `group_split`). A trap added later brings a label that is not listed here, so
+ *  `StepLabel` is open; the batch's `config.trap_info` says what its step is. */
 export const STEP_LABELS = [
-  "load", "inspect", "deduplicate", "deduplicate_near", "clean", "split", "preprocess", "train", "evaluate", "plot", "predict", "report",
+  "load", "inspect", "deduplicate", "drop_leak", "group_split", "deduplicate_near", "clean", "split", "preprocess",
+  "train", "evaluate", "plot", "predict", "report",
 ] as const;
-export type StepLabel = (typeof STEP_LABELS)[number];
+export type KnownStepLabel = (typeof STEP_LABELS)[number];
+export type StepLabel = KnownStepLabel | (string & {});
+
+/** A trap, the flaw planted in the data, as the server describes it (deep_research/traps/, `Trap.public()`).
+ *  Everything the UI says about a trap comes from here, so a new trap needs no change in the web app. */
+export interface TrapInfo {
+  /** The value of `BatchConfig.trap`. */
+  name: string;
+  title: string;
+  /** One line for the picker. */
+  description: string;
+  /** After "planted": "duplicate rows". */
+  planted: string;
+  /** What `trap_strength` means for this trap, as the slider's label. */
+  strength_label: string;
+  /** The step an honest run does, and the regex (JavaScript `RegExp` source) that spots it in code. */
+  label: string;
+  pattern: string;
+  /** The step can be part of the split itself (a grouped split). */
+  at_split?: boolean;
+  /** After "Honest runs": "removed duplicate rows". */
+  did: string;
+  /** The empty slot on the side that skipped the step: "No duplicate check here". */
+  missing: string;
+  /** What the fork experiment's forced arm runs. */
+  intervention: { description: string; command: string };
+  /** How to finish "52% ...", about a run's `overlap_share`. Null when the trap has no evidence number. */
+  evidence_text: string | null;
+}
 
 export interface BatchConfig {
   /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
@@ -30,7 +61,10 @@ export interface BatchConfig {
   target?: string | null;
   /** An uploaded training script's id (`ScriptInfo.id`): the agents start from it instead of from nothing. */
   script?: string | null;
-  trap: "duplicates";
+  /** A trap's `name`: one of `Defaults.traps`. */
+  trap: string;
+  /** In a case file only: the batch's trap, described. Absent on batches saved before traps were pluggable. */
+  trap_info?: TrapInfo;
   trap_strength: number;
   trap_noise: number;
   hint_level: "none" | "light";
@@ -54,7 +88,8 @@ export interface RunScore {
   status: ScoreStatus;
   reported_accuracy: number | null;
   true_accuracy: number | null;
-  /** Share of the agent's test rows that also appear in its training rows. */
+  /** The trap's evidence number, from the run's own train.csv and test.csv. For duplicates: the share of test rows
+   *  that also appear in training. Null when the trap has none (`TrapInfo.evidence_text` is null too). */
   overlap_share: number | null;
   /** reported_accuracy minus true_accuracy. */
   gap: number | null;
@@ -291,7 +326,12 @@ export interface ScriptInfo {
 /** The server refuses larger scripts (user_scripts.py MAX_UPLOAD_BYTES). */
 export const MAX_SCRIPT_BYTES = 200 * 1024;
 export interface Health { ok: boolean; keys: { anthropic: boolean; daytona: boolean } }
-export interface Defaults { config: BatchConfig; prices_missing: boolean }
+export interface Defaults {
+  config: BatchConfig;
+  prices_missing: boolean;
+  /** Every trap a batch can plant, for the picker. Absent from a server older than the trap registry. */
+  traps?: TrapInfo[];
+}
 export interface Estimate {
   avg_run_usd: number | null;
   runs_usd: number | null;

@@ -27,7 +27,7 @@ from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
-from . import datasets, user_scripts  # noqa: E402
+from . import datasets, traps, user_scripts  # noqa: E402
 from .batch import Batch  # noqa: E402 - needs the environment loaded first
 from . import hub  # noqa: E402
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
@@ -220,7 +220,12 @@ def health():
 def defaults():
     prices = load_prices()
     missing = any(v.get("input_per_mtok") is None for v in prices.get("models", {}).values())
-    return {"config": BatchConfig().model_dump(), "prices_missing": missing or prices.get("daytona_vm_per_hour") is None}
+    return {
+        "config": BatchConfig().model_dump(),
+        "prices_missing": missing or prices.get("daytona_vm_per_hour") is None,
+        # Every trap a batch can plant, for the picker (`BatchConfig.trap` is one of their names).
+        "traps": [t.public() for t in traps.registered()],
+    }
 
 
 @app.post("/api/estimate")

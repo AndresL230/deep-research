@@ -28,6 +28,18 @@ function syncValue(live: Element, next: Element): void {
   }
 }
 
+/** The value of the option a <select>'s markup marks `selected`, or null when it marks none. */
+function markedOption(next: Element): string | null {
+  if (!(next instanceof HTMLSelectElement)) return null;
+  return Array.from(next.options).find((o) => o.hasAttribute("selected"))?.value ?? null;
+}
+
+/** A <select>'s LIVE choice is a property as well: once someone has picked an option, moving the `selected`
+ *  attribute no longer moves the choice. So set it, after the options are patched (a reset must show in the box). */
+function syncSelect(live: Element, marked: string | null): void {
+  if (live instanceof HTMLSelectElement && marked !== null && live.value !== marked) live.value = marked;
+}
+
 /** A KEYED list (`data-morph-list` on the container, `data-morph-key` on each child): children pair by key, not by
  *  index. A child still in the list stays the element it was (patched), a new one is inserted where it belongs, and
  *  one that is gone is removed. Children are elements only; a child without a key is always replaced. */
@@ -61,6 +73,7 @@ export function morph(live: Element, next: Element): void {
   syncAttrs(live, next);
   syncValue(live, next);
   if (next.hasAttribute("data-morph-list")) { morphList(live, next); return; }
+  const marked = markedOption(next);
   const a = Array.from(live.childNodes);
   const b = Array.from(next.childNodes);
   for (let i = 0; i < b.length; i++) {
@@ -73,6 +86,7 @@ export function morph(live: Element, next: Element): void {
     else if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue;
   }
   for (let i = b.length; i < a.length; i++) a[i].remove();
+  syncSelect(live, marked);
 }
 
 /** Patch `live`'s CHILDREN to match the markup `html` (`live` itself keeps its attributes). */

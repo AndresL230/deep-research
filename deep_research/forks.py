@@ -6,35 +6,40 @@ import uuid
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
-from .config import VM_WORKSPACE
+from . import traps
 
-# One forced action per label. "control" arms get nothing forced.
+# One forced action per label. "control" arms get nothing forced. Each trap brings the fix for its own
+# step (`deduplicate` comes from the duplicates trap); a step that is no trap's own is listed here.
 INTERVENTIONS: dict[str, dict] = {
-    "deduplicate": {
-        "description": "Remove duplicate rows from data.csv before the split",
-        "command": (
-            f"cd {VM_WORKSPACE} && python3 -c \""
-            "import pandas as pd; d = pd.read_csv('data.csv'); n = len(d); "
-            "d = d.drop_duplicates(); d.to_csv('data.csv', index=False); "
-            "print(f'Removed {n - len(d)} duplicate rows. {len(d)} rows remain.')\""
-        ),
-    },
     # Jittered copies differ only in their non-integer columns, so match rows on every other column.
     "deduplicate_near": {
         "description": "Remove near-duplicate rows from data.csv before the split, matching on the exact columns",
-        "command": (
-            f"cd {VM_WORKSPACE} && python3 -c \""
+        "command": traps.in_workspace(
             "import pandas as pd; d = pd.read_csv('data.csv'); n = len(d); "
             "num = d.select_dtypes('number'); "
             "exact = [c for c in d.columns if c not in num.columns or (num[c].dropna() % 1 == 0).all()]; "
             "d = d.drop_duplicates(subset=exact or None); d.to_csv('data.csv', index=False); "
-            "print(f'Removed {n - len(d)} near-duplicate rows, matching on {len(exact)} exact columns. {len(d)} rows remain.')\""
+            "print(f'Removed {n - len(d)} near-duplicate rows, matching on {len(exact)} exact columns. {len(d)} rows remain.')"
         ),
     },
 }
+for _trap in traps.registered():
+    INTERVENTIONS.setdefault(_trap.label, _trap.intervention)
 
 
-def intervention_for(label: str) -> dict | None:
+def intervention_for(label: str, trap: str | None = None) -> dict | None:
+    """What to force for a split finding's label, in a batch that planted `trap`.
+
+    The batch trap's own intervention when the finding is that trap's step. Otherwise the table: a
+    finding can land on another label (a dataset can have real duplicates under any trap).
+    """
+    if trap is not None:
+        try:
+            own = traps.get(trap)
+        except ValueError:
+            own = None
+        if own is not None and own.label == label:
+            return own.intervention
     return INTERVENTIONS.get(label)
 
 
