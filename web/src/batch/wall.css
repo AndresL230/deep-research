@@ -1,12 +1,31 @@
-/* The wall of run tiles (wall.ts). Prefix bw-. Tokens only, so light and dark both work. */
+/* The wall of runs (wall.ts): one small machine per sandbox VM. Prefix bw-.
+   Each device is drawn in CSS 3D (no canvas), so the notebook on its screen is the real DOM: a body with two plates
+   behind it for thickness, a screen, a chin of lights and keys, a foot and a floor grid. A scored run's
+   result is a readout on the screen. The device's own colors are the --dv-* tokens below; everything else uses the app's tokens. */
 
-.bw { container-type:inline-size; display:flex; flex-direction:column; gap:12px; min-width:0; }
+.bw { container-type:inline-size; display:flex; flex-direction:column; gap:26px; min-width:0;
+  --dv-display:"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+
+[data-cnpy-theme="light"] .bw {
+  --dv-top:#ffffff; --dv-bot:#f1f2f5; --dv-rim:rgba(255,255,255,0.95); --dv-edge:rgba(24,28,52,0.11);
+  --dv-side1:#e6e8ed; --dv-side2:#d5d8df;
+  --dv-scr:#f2f3f6; --dv-scr-line:rgba(28,36,80,0.038); --dv-scr-in:rgba(24,30,60,0.13);
+  --dv-shadow:rgba(44,54,104,0.20); --dv-grid:rgba(40,50,100,0.11);
+  --dv-key:#ffffff; --dv-recess:#eceef2; --dv-paper:#ffffff; --dv-slit:#24262e;
+}
+[data-cnpy-theme="dark"] .bw {
+  --dv-top:#3a3630; --dv-bot:#2c2924; --dv-rim:rgba(255,255,255,0.07); --dv-edge:rgba(0,0,0,0.5);
+  --dv-side1:#211f1b; --dv-side2:#161411;
+  --dv-scr:#14120f; --dv-scr-line:rgba(237,233,226,0.022); --dv-scr-in:rgba(0,0,0,0.6);
+  --dv-shadow:rgba(0,0,0,0.55); --dv-grid:rgba(237,233,226,0.07);
+  --dv-key:#45413a; --dv-recess:#24211d; --dv-paper:#37332d; --dv-slit:#0c0b09;
+}
 
 /* ── the line above the grid ── */
-.bw-head { display:flex; flex-direction:column; gap:4px; }
-.bw-sum { margin:0; font-size:15px; font-weight:600; letter-spacing:-0.01em; color:var(--fg); font-variant-numeric:tabular-nums; }
+.bw-head { display:flex; flex-direction:column; gap:10px; }
+.bw-sum { margin:0; font-family:var(--dv-display); font-size:clamp(26px, 3.3cqi, 40px); font-weight:400; line-height:1.1; letter-spacing:-0.015em; color:var(--fg); font-variant-numeric:tabular-nums; text-wrap:balance; }
 /* The mix of runs as one bar: honest, inflated, failed, still running, not started. */
-.bw-mix { display:flex; gap:2px; height:6px; margin:2px 0 4px; border-radius:3px; overflow:hidden; }
+.bw-mix { display:flex; gap:2px; height:6px; max-width:520px; border-radius:3px; overflow:hidden; }
 .bw-mix-s { min-width:0; transition:flex-grow var(--fx-slow) var(--fx-ease); }
 .bw-mix-s--honest { background:var(--green); }
 .bw-mix-s--inflated { background:var(--red); }
@@ -17,76 +36,125 @@
 .bw-sim strong { font-weight:600; color:var(--amber); }
 .bw-empty { padding:24px 12px; border:1px dashed var(--border-strong); border-radius:8px; font-size:13px; color:var(--fg-55); text-align:center; }
 
-/* ── the grid: 4 columns, 3 on a mid-width canvas, 2 on a phone ── */
-.bw-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; }
-@container (max-width: 860px) { .bw-grid { grid-template-columns:repeat(3, minmax(0, 1fr)); } }
-@container (max-width: 560px) { .bw-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; } }
+/* ── the grid: 3 across, then 2, 1. A device is never narrower than about 300px, so its screen holds the readout. ── */
+.bw-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:14px 26px; }
+@container (max-width: 1000px) { .bw-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px 18px; } }
+@container (max-width: 640px) { .bw-grid { grid-template-columns:minmax(0, 1fr); } }
 
-/* ── a tile ── */
-.bw-tile { display:flex; flex-direction:column; gap:8px; min-width:0; padding:10px; border:1px solid var(--border-strong); border-top:2px solid var(--border-strong); border-radius:8px; background:var(--surface); color:var(--fg); text-align:left; cursor:pointer; transition:border-color var(--fx-fast) var(--fx-ease), background-color var(--fx-fast) var(--fx-ease); }
-.bw-tile:hover { border-color:var(--border-strong); background:color-mix(in srgb, var(--fg) 3%, var(--surface)); }
-.bw-tile:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.bw-tile--running, .bw-tile--starting { border-top-color:var(--accent); }
-.bw-tile--honest { border-color:color-mix(in srgb, var(--green) 40%, var(--border)); border-top-color:var(--green); background:color-mix(in srgb, var(--green) 4%, var(--surface)); }
-.bw-tile--inflated { border-color:color-mix(in srgb, var(--red) 40%, var(--border)); border-top-color:var(--red); background:color-mix(in srgb, var(--red) 5%, var(--surface)); }
-.bw-tile--honest:hover { border-color:color-mix(in srgb, var(--green) 55%, var(--border)); }
-.bw-tile--inflated:hover { border-color:color-mix(in srgb, var(--red) 55%, var(--border)); }
+/* ── a device ── */
+/* The tile is the camera: square on to the device and a little above it, so the face is a true rectangle and only a
+   sliver of the top shows. The device is never turned: its screen always faces the reader. */
+.bw-tile { container:bwdev / inline-size; position:relative; min-width:0; padding:8px 0 44px; perspective:1500px; perspective-origin:50% -70%; color:var(--fg); text-align:left; cursor:pointer; outline:none; -webkit-tap-highlight-color:transparent; }
+.bw-dev { position:relative; transform-style:preserve-3d; transition:transform .35s cubic-bezier(.2,.8,.2,1); }
+/* Under the pointer the device lifts a few pixels. */
+.bw-tile:hover .bw-dev, .bw-tile:focus-visible .bw-dev { transform:translateY(-3px); }
+.bw-tile:focus-visible .bw-body { outline:2px solid var(--accent); outline-offset:4px; }
 
-.bw-hd { display:flex; align-items:center; justify-content:space-between; gap:6px; min-width:0; }
-.bw-id { font-family:var(--code); font-size:12.5px; font-weight:600; color:var(--fg); }
+.bw-body { position:relative; display:flex; flex-direction:column; gap:8px; padding:12px 12px 13px; border-radius:26px; background:linear-gradient(180deg, var(--dv-top), var(--dv-bot)); box-shadow:inset 0 0 0 1px var(--dv-rim), 0 0 0 1px var(--dv-edge); transform-style:preserve-3d; }
+/* Thickness: two plates behind the face. */
+.bw-body::before, .bw-body::after { content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; }
+.bw-body::before { background:var(--dv-side1); box-shadow:0 0 0 1px var(--dv-edge); transform:translateZ(-7px); }
+.bw-body::after { background:var(--dv-side2); box-shadow:0 0 0 1px var(--dv-edge); transform:translateZ(-14px); }
 
-/* status pill */
-.bw-pill { display:inline-flex; align-items:center; gap:5px; padding:1px 7px; border-radius:999px; font-size:11.5px; font-weight:500; line-height:18px; white-space:nowrap; color:var(--fg-55); background:var(--hover); }
+/* the screen */
+.bw-scr { position:relative; display:flex; flex-direction:column; aspect-ratio:16 / 10; min-width:0; overflow:hidden; border-radius:15px; background:repeating-linear-gradient(to bottom, var(--dv-scr-line) 0 1px, transparent 1px 3px), var(--dv-scr); box-shadow:inset 0 1px 3px var(--dv-scr-in), inset 0 0 0 1px var(--dv-edge); }
+.bw-hd { flex:none; display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; padding:10px 13px 5px; font-size:11.5px; line-height:16px; color:var(--fg-55); }
+.bw-id { display:inline-flex; align-items:center; gap:7px; min-width:0; font-size:12.5px; font-weight:500; color:var(--fg-70); }
+.bw-vm { font-family:var(--code); font-size:11px; font-weight:400; color:var(--fg-40); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bw-lamp { flex:none; width:7px; height:7px; border-radius:50%; background:var(--fg-40); }
+.bw-tile--starting .bw-lamp, .bw-tile--running .bw-lamp { background:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); animation:bw-pulse 1.6s var(--fx-ease) infinite; }
+.bw-tile--honest .bw-lamp { background:var(--green); }
+.bw-tile--inflated .bw-lamp { background:var(--red); }
+.bw-cost { flex:none; font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+/* what the screen shows: the notebook's tail, or a waiting note; beside it, once scored, the result */
+.bw-view { flex:1; display:flex; min-width:0; min-height:0; }
+.bw-pic { position:relative; flex:1; min-width:0; min-height:0; overflow:hidden; }
+.bw-pic--nb { padding:2px 13px 11px 7px; }
+.bw-ph { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; padding:0 12px 14px; color:var(--fg-40); text-align:center; }
+.bw-ph-t { font-family:var(--code); font-size:12px; line-height:1.4; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+/* On the screen the notebook reads as a terminal: no cell boxes. */
+.bw-scr .bw-pic--nb .nb-code { padding:0 0 0 2px; border:0; border-radius:0; background:none; }
+.bw-scr .bw-pic--nb .nb-out { margin-left:0; padding:0 0 0 2px; border-left:0; font-size:11.5px; line-height:1.5; color:var(--fg-55); }
+/* Every line fits the screen: one that is too long ends in an ellipsis instead of being cut at the glass. The lines
+   become blocks, so the pre's own newlines are sized away and the lines carry the type size. */
+.bw-scr .bw-pic--nb .nb-code { font-size:0; }
+.bw-scr .bw-pic--nb .nb-code .nb-ln, .bw-scr .bw-pic--nb .nb-code .nb-more { display:block; font-size:11.5px; line-height:1.5; overflow:hidden; text-overflow:ellipsis; }
+.bw-scr .bw-pic--nb .nb-out { text-overflow:ellipsis; }
+.bw-scr .bw-pic--nb .nb-gut { width:26px; padding-top:2px; font-size:10.5px; }
+.bw-scr .bw-pic--nb .nb-note { font-size:11.5px; line-height:1.5; }
+.bw-scr .bw-pic--nb .nb-cell--note { padding-left:34px; }
+.bw-scr .bw-pic--nb .nb-file { font-size:11px; }
+.bw-scr .bw-pic--nb .nb-img { max-height:112px; border-radius:6px; }
+.bw-scr .bw-pic--nb .nb--tail { -webkit-mask-image:linear-gradient(to bottom, transparent, #000 14px); mask-image:linear-gradient(to bottom, transparent, #000 14px); }
+
+/* the chin: the step it is on, then lights and keys */
+.bw-step { padding:2px 6px 0; font-size:13.5px; font-weight:500; line-height:18px; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bw-tile--queued .bw-step, .bw-step--failed { color:var(--fg-55); font-weight:400; }
+.bw-chin { display:flex; align-items:center; gap:10px; min-width:0; padding:0 4px 0 7px; }
+
+/* the lights: one per todo (or stage) */
+.bw-strip { flex:1; display:flex; align-items:center; flex-wrap:wrap; gap:7px; min-width:0; }
+.bw-seg { flex:none; width:8px; height:8px; border-radius:50%; background:var(--dv-key); box-shadow:inset 0 0 0 1.25px var(--border-strong); }
+.bw-seg--completed { background:var(--fg-55); box-shadow:none; }
+.bw-seg--in_progress { background:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); animation:bw-pulse 1.6s var(--fx-ease) infinite; }
+.bw-tile--honest .bw-seg--completed { background:var(--green); box-shadow:0 0 0 2.5px color-mix(in srgb, var(--green) 16%, transparent); }
+.bw-tile--inflated .bw-seg--completed { background:var(--red); box-shadow:0 0 0 2.5px color-mix(in srgb, var(--red) 16%, transparent); }
+.bw-tile--failed .bw-seg--completed { background:var(--fg-40); }
+@keyframes bw-pulse { 0%, 100% { opacity:1; } 50% { opacity:.4; } }
+
+/* the keys: the status key, and the one that opens the run. Each sits in a shallow recess. */
+.bw-pill, .bw-key { flex:none; display:inline-flex; align-items:center; justify-content:center; gap:6px; height:26px; margin:3px; border-radius:7.5px; background:var(--dv-key); color:var(--fg-55); font-size:12px; font-weight:600; line-height:1; white-space:nowrap; box-shadow:0 0 0 1px var(--dv-edge), 0 1.5px 0 0 var(--dv-edge), 0 0 0 3px var(--dv-recess), 0 0 0 4px var(--dv-edge); }
+.bw-pill { padding:0 10px; }
+.bw-key { width:26px; margin-left:1px; color:var(--fg-70); transition:transform var(--fx-fast) var(--fx-ease); }
+.bw-tile:hover .bw-key { color:var(--fg); }
+.bw-tile:active .bw-key { transform:translateY(1px); }
 .bw-dot { width:6px; height:6px; border-radius:50%; background:currentColor; flex:none; }
-.bw-pill--running, .bw-pill--starting { color:var(--accent); background:var(--accent-soft); }
-.bw-pill--running .ask-spin, .bw-pill--starting .ask-spin { color:var(--accent) !important; }
-.bw-pill--honest { color:var(--green); background:color-mix(in srgb, var(--green) 18%, transparent); font-weight:600; }
-.bw-pill--inflated { color:var(--red); background:color-mix(in srgb, var(--red) 18%, transparent); font-weight:600; }
+/* A machine that is on has its key down and dark. */
+.bw-pill--running, .bw-pill--starting { background:var(--fg); color:var(--bg); }
+.bw-pill--running .ask-spin, .bw-pill--starting .ask-spin { color:inherit !important; }
+.bw-pill--honest { color:var(--green); }
+.bw-pill--inflated { color:var(--red); }
 .bw-pill--failed { color:var(--fg-40); }
 
-/* the picture: a fixed 4:3 box so the grid never jumps */
-.bw-pic { position:relative; aspect-ratio:4 / 3; overflow:hidden; border:1px solid var(--border-strong); border-radius:6px; background:var(--nb-screen); }
-/* The lab page renders at 2.5x the box and is scaled down, so it reads as a thumbnail; the tile takes the click. */
-.bw-pic--nb { padding:6px 6px 6px 2px; }
-.bw-ph { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:10px; color:var(--fg-40); text-align:center; }
-.bw-ph-t { font-size:12px; line-height:1.35; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+/* the foot and the floor */
+.bw-base { position:absolute; left:9%; right:9%; top:calc(100% - 16px); height:48px; border-radius:5px 5px 11px 11px; background:linear-gradient(180deg, var(--dv-side1), var(--dv-bot)); box-shadow:inset 0 0 0 1px var(--dv-rim), 0 0 0 1px var(--dv-edge); transform:translateZ(-30px); pointer-events:none; }
+.bw-floor { position:absolute; left:-16%; right:-16%; top:calc(100% + 26px); height:260px; transform-origin:50% 0; transform:translateZ(-150px) rotateX(90deg); pointer-events:none;
+  background:
+    radial-gradient(closest-side, var(--dv-shadow), transparent 78%) 50% 46% / 78% 46% no-repeat,
+    linear-gradient(var(--dv-grid) 1px, transparent 1px) 0 0 / 100% 26px,
+    linear-gradient(90deg, var(--dv-grid) 1px, transparent 1px) 50% 0 / 26px 100%;
+  -webkit-mask-image:radial-gradient(closest-side, #000 25%, transparent 100%); mask-image:radial-gradient(closest-side, #000 25%, transparent 100%); }
 
-/* the step label */
-.bw-step { font-size:13.5px; font-weight:600; line-height:1.35; min-height:calc(1.35em * 2); color:var(--fg); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
-.bw-step--failed { color:var(--fg-55); font-weight:400; font-size:12.5px; }
-
-/* the progress strip: one segment per todo */
-.bw-strip { display:flex; gap:2px; height:5px; }
-.bw-seg { flex:1; min-width:0; border-radius:2px; background:color-mix(in srgb, var(--fg) 12%, transparent); }
-.bw-seg--completed { background:var(--accent); }
-.bw-seg--in_progress { background:var(--accent); animation:bw-pulse 1.6s var(--fx-ease) infinite; }
-.bw-tile--honest .bw-seg--completed { background:var(--green); }
-.bw-tile--inflated .bw-seg--completed { background:var(--red); }
-.bw-tile--failed .bw-seg--completed { background:var(--fg-40); }
-@keyframes bw-pulse { 0%, 100% { opacity:1; } 50% { opacity:.45; } }
-
-/* the reveal */
-.bw-rev { display:flex; flex-direction:column; gap:6px; padding-top:8px; border-top:1px solid var(--border); animation:bw-in var(--fx-base) var(--fx-ease) both; }
-.bw-acc { display:grid; grid-template-columns:56px 1fr 44px; align-items:center; gap:8px; }
-.bw-k { font-size:11px; color:var(--fg-70); }
-.bw-v { font-size:12.5px; font-weight:500; font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right; }
-.bw-track { height:9px; border-radius:4px; background:color-mix(in srgb, var(--fg) 10%, transparent); overflow:hidden; }
-.bw-fill { display:block; height:100%; border-radius:4px; background:var(--fg-40); transition:width var(--fx-slow) var(--fx-ease); }
-.bw-fill--true { background:var(--fg-70); }
-.bw-tile--honest .bw-fill--rep { background:var(--green); }
-.bw-tile--inflated .bw-fill--rep { background:var(--red); }
-.bw-foot { display:flex; align-items:baseline; gap:8px; min-width:0; }
-.bw-gap { flex:none; font-size:13.5px; font-weight:700; font-variant-numeric:tabular-nums; }
+/* The result, once the run is scored: a readout card on the screen itself, beside the notebook. */
+.bw-rev { flex:none; align-self:stretch; width:44%; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:8px; margin:2px 11px 11px 0; padding:10px 12px; border-radius:10px; background:var(--dv-paper); box-shadow:0 0 0 1px var(--dv-edge), 0 1px 2px var(--dv-scr-in); animation:bw-readout .45s cubic-bezier(.2,.75,.2,1) both; }
+@keyframes bw-readout { from { opacity:0; transform:translateX(8px); } to { opacity:1; transform:none; } }
+.bw-top { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.bw-gap { font-size:22px; font-weight:600; line-height:1.15; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .bw-tile--honest .bw-gap { color:var(--green); }
 .bw-tile--inflated .bw-gap { color:var(--red); }
-.bw-ovl-t { font-size:11.5px; line-height:1.35; color:var(--fg-70); min-width:0; }
-.bw-rev--failed { font-size:12px; line-height:1.4; color:var(--fg-55); overflow-wrap:anywhere; }
-@keyframes bw-in { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
+.bw-gap-k { font-size:10.5px; line-height:1.3; color:var(--fg-55); }
+/* A measure: its name and value on one line, its bar under them, so it works at any card width. */
+.bw-acc { display:grid; grid-template-columns:1fr auto; grid-template-areas:"k v" "t t"; align-items:baseline; gap:4px 8px; min-width:0; }
+.bw-k { grid-area:k; font-size:11px; color:var(--fg-55); }
+.bw-v { grid-area:v; font-size:12px; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right; }
+.bw-track { grid-area:t; height:5px; border-radius:3px; background:color-mix(in srgb, var(--fg) 8%, transparent); overflow:hidden; }
+.bw-fill { display:block; height:100%; border-radius:3px; background:var(--fg-40); transition:width var(--fx-slow) var(--fx-ease); }
+.bw-fill--true { background:var(--fg-55); }
+.bw-tile--honest .bw-fill--rep { background:var(--green); }
+.bw-tile--inflated .bw-fill--rep { background:var(--red); }
+.bw-ovl-t { font-size:10.5px; line-height:1.35; color:var(--fg-55); min-width:0; }
+.bw-rev--failed { justify-content:flex-start; font-size:11.5px; line-height:1.45; color:var(--fg-55); overflow:hidden; overflow-wrap:anywhere; }
 
-/* per-tile cost */
-.bw-cost { margin-top:auto; font-size:11.5px; color:var(--fg-55); font-variant-numeric:tabular-nums; }
+/* A narrow device (two across on a small window, or a phone): a taller screen and a tighter readout, so both fit. */
+@container bwdev (max-width: 400px) {
+  .bw-scr { aspect-ratio:4 / 3.2; }
+  .bw-scr .bw-pic--nb .nb-img { max-height:80px; }
+  .bw-rev { width:46%; gap:6px; margin:2px 9px 9px 0; padding:8px 10px; }
+  .bw-gap { font-size:18px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .bw-tile, .bw-fill { transition:none; }
-  .bw-rev, .bw-seg--in_progress { animation:none; }
+  .bw-dev, .bw-key, .bw-fill { transition:none; }
+  .bw-rev, .bw-seg--in_progress, .bw-lamp { animation:none !important; }
 }

@@ -1,6 +1,9 @@
 /* The page frame around the batch views (main.ts): header, the replay bar under it, the scrolling body. The views
    themselves style their own content (home.css, wall.css, lanes.css, run.css, replay.css). */
 
+/* The light canvas is a shade brighter than Trov's, so the white devices on the wall sit on it without a hard edge. */
+[data-cnpy-theme="light"] { --bg:#fbfbfc; }
+
 /* The header and the replay bar sit on the same column as the content under them (its width varies by screen). */
 .app-root { --pg-w:1240px; --pg-pad:24px; }
 .app-root[data-view="run"], .app-root[data-view="child"] { --pg-w:960px; }

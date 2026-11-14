@@ -83,7 +83,11 @@ const app = document.getElementById("app")!;
 const params = new URLSearchParams(location.search);
 const themeQ = matchMedia("(prefers-color-scheme: dark)");
 const forcedTheme = params.get("theme");
-const theme = (): "light" | "dark" => (forcedTheme === "dark" || forcedTheme === "light" ? forcedTheme : themeQ.matches ? "dark" : "light");
+// Light unless asked: the devices on the wall are drawn for a bright room. `?theme=dark` forces dark, `?theme=system`
+// follows the OS.
+const theme = (): "light" | "dark" => (forcedTheme === "dark" ? "dark" : forcedTheme === "system" && themeQ.matches ? "dark" : "light");
+const syncPageTheme = (): void => { document.documentElement.style.colorScheme = theme(); document.body.style.background = theme() === "dark" ? "#1c1a16" : "#fbfbfc"; };
+syncPageTheme();
 app.innerHTML = `<div class="app-root" data-cnpy-theme="${theme()}">
   <header class="cnpy-hdr pg-hdr" data-region="header"></header>
   <div class="pg-sub" data-region="sub" hidden></div>
@@ -93,7 +97,7 @@ const root = app.firstElementChild as HTMLElement;
 const headerEl = root.querySelector<HTMLElement>("[data-region=header]")!;
 const subEl = root.querySelector<HTMLElement>("[data-region=sub]")!;
 const scrollEl = root.querySelector<HTMLElement>("[data-region=scroll]")!;
-themeQ.addEventListener("change", () => { root.dataset.cnpyTheme = theme(); scheduleOrbs(); });
+themeQ.addEventListener("change", () => { root.dataset.cnpyTheme = theme(); syncPageTheme(); scheduleOrbs(); });
 
 // ── view models ──────────────────────────────────────────────────────────────
 

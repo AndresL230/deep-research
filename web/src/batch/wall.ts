@@ -1,9 +1,11 @@
-// OWNER: subagent B. The wall of run tiles: the Running and Reveal states.
+// OWNER: subagent B. The wall of runs: one small machine per sandbox VM, all working at once.
 //
-// One tile per run, in id order, inside a keyed list so morph.ts keeps each tile (and a live lab iframe in it) as the
-// element it was while statuses move. Each tile, top to bottom: header (id, status pill), the picture (lab page,
-// chart, or a placeholder), the step label, a progress strip from the todos, then the reveal once the run is scored,
-// and its cost. Markup has no whitespace between tags so children pair by index the same way on every render.
+// One device per run, in id order, inside a keyed list so morph.ts keeps each one as the element it was while statuses
+// move. A device, front to back: the screen (the run's id, its cost, and the end of its notebook typing itself out),
+// the step it is on, a row of lights (one per todo or stage) and its status key. Once the run is scored the result
+// shows on the screen itself, beside the notebook: the gap, reported vs true, the overlap. The drawing is all in wall.css
+// (CSS 3D, no canvas), so the notebook in the screen is the real DOM. Markup has no whitespace between tags so
+// children pair by index the same way on every render.
 import "./wall.css";
 import type { AgentTodo, RunRecord, RunStatus } from "../api";
 import { activityOf, chartUrl, logOf, notebookCells, notebookTail, stagesOf, type NbCell } from "./notebook";
@@ -93,7 +95,7 @@ function pill(status: RunStatus): string {
   return `<span class="bw-pill bw-pill--${status}">${lead}<span>${STATUS_LABEL[status]}</span></span>`;
 }
 
-/** The tile's screen: the end of the run's notebook, code typing itself out, then its output and charts. */
+/** The device's screen: the end of the run's notebook, code typing itself out, then its output and charts. */
 function picture(vm: BatchVm, run: RunRecord, step: string, cells: NbCell[]): string {
   if (cells.length) {
     return `<div class="bw-pic bw-pic--nb" data-morph-key="nb">${notebookTail(cells, { image: (name) => chartUrl(vm, run.id, name) })}</div>`;
@@ -101,6 +103,7 @@ function picture(vm: BatchVm, run: RunRecord, step: string, cells: NbCell[]): st
   const text = run.status === "queued" ? "Waiting to start"
     : run.status === "starting" ? "Starting the VM"
     : run.status === "running" ? "Waiting for the first step"
+    : run.status === "failed" ? "The run failed"
     : step;
   const lead = run.status === "starting" || run.status === "running" ? askSpinner(14) : askIcon("chart", 18, null, 1.5);
   return `<div class="bw-pic" data-morph-key="ph"><div class="bw-ph">${lead}<span class="bw-ph-t">${esc(truncate(text, 80))}</span></div></div>`;
@@ -141,9 +144,10 @@ function reveal(run: RunRecord): string {
   const bar = (label: string, x: number | null | undefined, cls: string): string =>
     `<div class="bw-acc"><span class="bw-k">${label}</span><span class="bw-track" aria-hidden="true"><span class="bw-fill ${cls}" style="width:${barWidth(x).toFixed(1)}%"></span></span><span class="bw-v">${pct(x)}</span></div>`;
   return `<div class="bw-rev">`
+    + `<div class="bw-top"><span class="bw-gap">${pts(run.gap)}</span><span class="bw-gap-k">reported vs true</span></div>`
     + bar("Reported", run.reported_accuracy, "bw-fill--rep")
     + bar("True", run.true_accuracy, "bw-fill--true")
-    + `<div class="bw-foot"><span class="bw-gap">${pts(run.gap)}</span><span class="bw-ovl-t">${esc(overlap)}</span></div>`
+    + `<div class="bw-ovl-t">${esc(overlap)}</div>`
     + `</div>`;
 }
 
@@ -167,17 +171,24 @@ function tile(vm: BatchVm, run: RunRecord): string {
   const step = stepLabel(run, todos, cells);
   const cost = tileCost(vm, run);
   const label = `Run ${run.id}, ${STATUS_LABEL[run.status].toLowerCase()}. Open the run.`;
+  const vmId = run.vm_id && !isScored(run.status) ? `<span class="bw-vm">${esc(run.vm_id.slice(0, 8))}</span>` : "";
   return `<div class="bw-tile bw-tile--${run.status}" data-morph-key="tile:${attr(run.id)}" role="button" tabindex="0" data-act="${ACT.openRun}" data-arg="${attr(run.id)}" aria-label="${attr(label)}">`
-    + `<div class="bw-hd"><span class="bw-id">${esc(run.id)}</span>${pill(run.status)}</div>`
-    + picture(vm, run, step, cells)
+    + `<div class="bw-dev">`
+    + `<span class="bw-floor" aria-hidden="true"></span>`
+    + `<span class="bw-base" aria-hidden="true"></span>`
+    + `<div class="bw-body">`
+    + `<div class="bw-scr">`
+    + `<div class="bw-hd"><span class="bw-id"><span class="bw-lamp" aria-hidden="true"></span>${esc(run.id)}${vmId}</span>${cost ? `<span class="bw-cost">${esc(cost)}</span>` : ""}</div>`
+    + `<div class="bw-view">${picture(vm, run, step, cells)}${reveal(run)}</div>`
+    + `</div>`
     + `<div class="bw-step${run.status === "failed" ? " bw-step--failed" : ""}" title="${attr(step)}">${esc(truncate(step, 120))}</div>`
-    + strip(run, todos, cells)
-    + reveal(run)
-    + (cost ? `<div class="bw-cost">${esc(cost)}</div>` : "")
+    + `<div class="bw-chin">${strip(run, todos, cells)}${pill(run.status)}<span class="bw-key" aria-hidden="true">${askIcon("arrow", 11, null, 2.2)}</span></div>`
+    + `</div>`
+    + `</div>`
     + `</div>`;
 }
 
-/** One tile per run: its notebook, step label, progress strip; once scored, reported vs true and overlap. */
+/** One device per run: its notebook on the screen, step, lights; once scored, a readout on the screen with reported vs true. */
 export function wallView(vm: BatchVm): string {
   const runs = sortedRuns(vm);
   const s = wallSummary(vm);
