@@ -230,7 +230,7 @@ function navView(tone: SceneTone): string {
   const demo = routeHash({ name: "batch", id: LANDING.demo });
   const go = (to: string, words: string): string => `<button type="button" class="lp-link" data-lp-go="${to}">${esc(words)}</button>`;
   return `<header class="lp-nav" data-lp-nav>
-      <a class="lp-brand" href="${attr(routeHash({ name: "landing" }))}">${mark(21.6, "lp-mark")}<span class="lp-name" role="img" aria-label="${attr(LANDING.brand)}">${wordmark(21)}</span></a>
+      <a class="lp-brand" href="${attr(routeHash({ name: "landing" }))}">${mark(18.5, "lp-mark")}<span class="lp-name" role="img" aria-label="${attr(LANDING.brand)}">${wordmark(18)}</span></a>
       <nav class="lp-links" aria-label="Main">
         ${go("how", "How it works")}${go("robots", "Robots")}${go("why", "Why Orro")}
         <a class="lp-link" href="${attr(demo)}">Demo replay</a>
@@ -358,7 +358,7 @@ function footView(): string {
   return `<footer class="lp-foot" data-keep>
       <div class="lp-foot-top" data-lp-rev>
         <div class="lp-foot-brand">
-          <a class="lp-brand" href="${attr(routeHash({ name: "landing" }))}">${mark(21.6, "lp-mark")}<span class="lp-name" role="img" aria-label="${attr(LANDING.brand)}">${wordmark(21)}</span></a>
+          <a class="lp-brand" href="${attr(routeHash({ name: "landing" }))}">${mark(18.5, "lp-mark")}<span class="lp-name" role="img" aria-label="${attr(LANDING.brand)}">${wordmark(18)}</span></a>
           <a class="lp-cta" href="${attr(start)}">Start a batch</a>
         </div>
         <nav class="lp-foot-cols" aria-label="Footer">
