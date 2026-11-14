@@ -318,7 +318,8 @@ async function apiRoute(req: Request, env: Env, url: URL, ctx: ExecutionContext)
       if (!who) return needSignIn();
       // Acting on a batch nobody owns here (a demo fixture) could spend money no one reserved: admins only.
       if (!row && !who.plan.is_admin) return json({ detail: "Only your own batches can be resumed or investigated." }, 403);
-      if (row && rest === "/resume") {
+      // Resuming a batch or running more pairs on a finished one spends again, up to the batch's budget.
+      if (row && (rest === "/resume" || rest === "/more-pairs")) {
         const held = await reserveForResume(env, who, row);
         if (held) return held;
       }
@@ -428,7 +429,7 @@ async function startBatch(req: Request, env: Env, url: URL, who: Who): Promise<R
   return json(body);
 }
 
-/** A settled batch that is resumed can spend again, up to its budget: hold that headroom first. */
+/** A settled batch that is resumed, or gets more pairs, can spend again up to its budget: hold that headroom first. */
 async function reserveForResume(env: Env, who: Who, row: BatchRow): Promise<Response | null> {
   if (row.status !== "settled") return null; // still holding its reservation
   const headroom = round(Math.max(0, row.budget_usd - row.charged_usd) + MAX_COMMENTARY_USD);
@@ -436,7 +437,7 @@ async function reserveForResume(env: Env, who: Who, row: BatchRow): Promise<Resp
   if (!took) return json({ detail: `Resuming this batch holds $${headroom.toFixed(2)} of credits; you do not have enough.` }, 402);
   await env.DB.batch([
     env.DB.prepare("UPDATE batches SET status = 'open', reserved_usd = ?, settled_at = NULL WHERE id = ?").bind(headroom, row.id),
-    env.DB.prepare("INSERT INTO ledger (user_id, batch_id, kind, amount_usd, note) VALUES (?, ?, 'reserve', ?, 'held to resume batch')").bind(
+    env.DB.prepare("INSERT INTO ledger (user_id, batch_id, kind, amount_usd, note) VALUES (?, ?, 'reserve', ?, 'held to resume batch or run more pairs')").bind(
       who.user.id,
       row.id,
       -headroom,
