@@ -104,6 +104,13 @@ export interface BatchConfig {
   placebo_arm?: boolean;
   show_arm?: boolean;
   analyst_model: string;
+  /** A lineup of analyst models the runs take in turn (r01 the first, r02 the second, ...). Null or absent: every run
+   *  uses `analyst_model`. The robot domain defaults to Haiku 5.5 and Sonnet 5.5. */
+  analyst_models?: string[] | null;
+  /** How many runs have a VM at once; the rest wait as "queued". */
+  max_concurrent_runs?: number;
+  /** The analysts' step limit (LangGraph recursion limit). */
+  max_agent_steps?: number;
   investigator_model: string;
   budget_usd: number;
   inflation_threshold: number;
@@ -141,6 +148,8 @@ export interface AgentTodo { content: string; status: "pending" | "in_progress" 
 export interface RunRecord extends Partial<Omit<RunScore, "status">> {
   id: string;
   status: RunStatus;
+  /** The analyst model this run uses (from the batch's lineup). Absent on batches saved before lineups. */
+  model?: string;
   vm_id?: string;
   /** Signed preview URL of the lab page inside the VM. Null when it could not start, in replays, and once the run
    *  has ended (the VM is deleted then; see `charts`). */
@@ -201,6 +210,8 @@ export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   motion_files?: string[];
   /** "fork": a copy-on-write VM fork. "replay": rebuilt by replaying the actions when forking failed. */
   how?: "fork" | "replay";
+  /** The analyst model the copy continues on: its source run's. */
+  model?: string;
 }
 
 export interface ArmSummary {
@@ -480,6 +491,8 @@ export interface Estimate {
   basis: string;
   /** The domain the estimate is for: each domain has its own average run cost. */
   domain?: string;
+  /** With a lineup of models: how many runs each model gets and its average run cost (null when unknown). */
+  by_model?: Record<string, { runs: number; avg_run_usd: number | null }>;
 }
 
 // The cost report (deep_research/cost_report.py, `GET /api/costs`): spend across every batch.

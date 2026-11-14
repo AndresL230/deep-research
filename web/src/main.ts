@@ -24,7 +24,7 @@ import {
   type AgentEvent, type HubStatus, type BatchConfig, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
-import { HM_ACT, costBar, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload } from "./batch/home";
+import { HM_ACT, costBar, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload, toggleModel } from "./batch/home";
 import { hubBadge } from "./batch/hub-badge";
 import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { wallView } from "./batch/wall";
@@ -674,6 +674,9 @@ root.addEventListener("click", (e) => {
       if (next !== S.home) { S.home = next; rememberDomain(arg); paint(); scheduleEstimate(); }
       return;
     }
+    case HM_ACT.model:
+      if (S.home.draft && !S.home.starting) { S.home = { ...S.home, draft: toggleModel(S.home.draft, arg), error: null }; paint(); scheduleEstimate(); }
+      return;
     case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
     case ACT.resetConfig:
       if (S.home.defaults) { S.home = { ...S.home, draft: resetDraft(S.home), error: null }; paint(); scheduleEstimate(); }

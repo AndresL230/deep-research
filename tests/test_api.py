@@ -333,7 +333,7 @@ def _fake_vms(monkeypatch, batch_mod, deleted, load_task=lambda sb, task: None):
     monkeypatch.setattr(batch_mod.vms, "download_outputs", lambda sb, dest: None)
     monkeypatch.setattr(batch_mod.vms, "download_charts", lambda sb, dest: ["01_counts.png"])
     monkeypatch.setattr(batch_mod.vms, "delete_vm", deleted.append)
-    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model: object())
+    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt: object())
     monkeypatch.setattr(batch_mod, "DaytonaSandbox", lambda sandbox: object())
 
 

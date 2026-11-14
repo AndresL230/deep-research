@@ -32,7 +32,7 @@ from . import datasets, domains, hub, robot_view, traps, user_scripts  # noqa: E
 from .batch import Batch, resume_problem  # noqa: E402 - needs the environment loaded first
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
-from .costs import OverBudget, estimate_batch_usd  # noqa: E402
+from .costs import OverBudget, estimate_batch_usd, run_rate  # noqa: E402
 from .events import read_events  # noqa: E402
 
 log = logging.getLogger("deep_research.api")
@@ -216,6 +216,11 @@ def _avg_run_usd(domain: str | None = None) -> float | None:
     return (stats.get("by_domain") or {}).get(domain)
 
 
+def _avg_by_model(domain: str) -> dict[str, float]:
+    """Average cost of one run per analyst model, from earlier `domain` batches (`by_domain_model`)."""
+    return dict(((_read_stats().get("by_domain_model") or {}).get(domain or domains.DEFAULT)) or {})
+
+
 def _save_stats(b: Batch) -> None:
     avg = b.tracker.average_run_usd()
     if avg is not None:
@@ -224,8 +229,35 @@ def _save_stats(b: Batch) -> None:
             stats["avg_run_usd"] = avg
         else:
             stats["by_domain"] = {**(stats.get("by_domain") or {}), b.cfg.domain: avg}
+        # And per analyst model, so a batch with a lineup is estimated from each model's own runs.
+        per_model: dict[str, set[str]] = {}
+        for run_id in b.case.data["runs"]:
+            per_model.setdefault(b.run_model(run_id), set()).add(f"run:{run_id}")
+        own = dict((stats.get("by_domain_model") or {}).get(b.cfg.domain) or {})
+        for model, keys in per_model.items():
+            m_avg = b.tracker.average_run_usd(keys=keys)
+            if m_avg is not None:
+                own[model] = m_avg
+        stats["by_domain_model"] = {**(stats.get("by_domain_model") or {}), b.cfg.domain: own}
         STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATS_FILE.write_text(json.dumps(stats))
+
+
+def _model_avg(model: str, own: dict[str, float], legacy: float | None, prices: dict) -> float | None:
+    """One run's cost on `model`: its own average when earlier runs used it, else another model's average scaled by
+    what a typical run's tokens cost on each (costs.run_rate). Stats saved before lineups have one average per domain,
+    from runs on the default analyst model."""
+    if model in own:
+        return own[model]
+    refs = list(own.items())
+    if legacy is not None:
+        refs.append((BatchConfig().analyst_model, legacy))
+    target = run_rate(prices, model)
+    for ref, avg in refs:
+        rate = run_rate(prices, ref)
+        if target is not None and rate:
+            return avg * target / rate
+    return None
 
 
 @app.get("/api/health")
@@ -274,6 +306,16 @@ def defaults():
 def estimate(cfg: BatchConfig):
     # Runs of different domains cost differently (a robot run simulates episodes), so each has its own average.
     avg = _avg_run_usd(cfg.domain)
+    lineup = cfg.lineup()
+    by_model = None
+    own = _avg_by_model(cfg.domain)
+    if len(lineup) > 1 or lineup[0] in own:
+        # Each model's runs at that model's average: runs take the models in turn.
+        prices = load_prices()
+        counts = {m: sum(cfg.model_for_run(i) == m for i in range(cfg.n_runs)) for m in lineup}
+        by_model = {m: {"runs": n, "avg_run_usd": _model_avg(m, own, avg, prices)} for m, n in counts.items()}
+        known = [v["avg_run_usd"] for v in by_model.values()]
+        avg = None if any(a is None for a in known) else sum(v["runs"] * v["avg_run_usd"] for v in by_model.values()) / cfg.n_runs
     runs = estimate_batch_usd(cfg.n_runs, avg)
     # No split yet, so this counts every arm the config allows. The `show` arm only exists for a step that
     # has a weaker version defined, so this is an upper bound (forks.arm_plan).
@@ -287,6 +329,7 @@ def estimate(cfg: BatchConfig):
         "over_budget": runs is not None and runs + forks > cfg.budget_usd,
         "basis": "average of earlier runs" if avg is not None else "no earlier runs yet",
         "domain": cfg.domain,
+        **({"by_model": by_model} if by_model else {}),
     }
 
 
