@@ -210,13 +210,18 @@ const PARTS: readonly [string, string][] = [
 ];
 
 function underTheHood(): string {
-  return `<section class="hw-hood" aria-labelledby="hw-hood-h" data-morph-key="how:hood">`
-    + `<h2 class="hw-h2" id="hw-hood-h">Under the hood</h2>`
-    + `<p class="hw-lead">A server runs the agents in sandboxes, scores them where they cannot look, and hands the evidence to an investigator agent.</p>`
+  return `<section class="hw-sec hw-hood" aria-labelledby="hw-hood-h" data-morph-key="how:hood">`
+    + secHead("hw-hood-h", "The setup", "Under the hood",
+      "A server runs the agents in sandboxes, scores them where they cannot look, and hands the evidence to an investigator agent.")
     + `<figure class="hw-fig">${harnessDiagram()}</figure>`
     + `<div class="hw-parts">${PARTS.map(([h, p]) => `<div class="hw-part"><h3 class="hw-h3">${esc(h)}</h3><p class="hw-p">${esc(p)}</p></div>`).join("")}</div>`
     + `</section>`;
 }
+
+/** A section's label, heading and one-line lead. */
+const secHead = (id: string, label: string, title: string, lead: string): string =>
+  `<header class="hw-sec-h"><p class="hw-eyebrow">${esc(label)}</p><h2 class="hw-h2" id="${attr(id)}">${esc(title)}</h2>`
+  + `<p class="hw-sec-lead">${esc(lead)}</p></header>`;
 
 /** The page. `demo` is the robot demo's case file, as far as it has loaded. */
 export function howView(demo: Loadable<CaseFile>): string {
@@ -230,17 +235,20 @@ export function howView(demo: Loadable<CaseFile>): string {
     const pic = c ? s.picture(c) : "";
     return `<li class="hw-step${pic ? "" : " is-text"}" data-morph-key="how:${s.key}">`
       + `<div class="hw-step-l"><span class="hw-n" aria-hidden="true">${i + 1}</span>`
-      + `<div><h2 class="hw-h">${esc(s.title)}</h2><p class="hw-p">${esc(s.text)}</p></div></div>`
+      + `<div><h3 class="hw-h">${esc(s.title)}</h3><p class="hw-p">${esc(s.text)}</p></div></div>`
       + (pic ? `<div class="hw-pic">${pic}</div>` : "")
       + `</li>`;
   }).join("");
   return `<div class="hw" data-morph-key="how">`
-    + `<header class="hw-top"><p class="hw-eyebrow">How it works</p>`
+    + `<section class="hw-intro" data-morph-key="how:intro"><header class="hw-top"><p class="hw-eyebrow">How it works</p>`
     + `<h1 class="hw-title">Orro catches wrong claims, not bad robots.</h1>`
     + `<p class="hw-lead">Each agent says how well it did. Orro checks that claim against the truth, finds the step that made the difference, and tests it.</p>`
-    + note + `</header>`
-    + `<figure class="hw-fig hw-fig--loop">${loopDiagram()}</figure>`
-    + `<ol class="hw-steps" data-morph-list>${steps}</ol>`
+    + `</header>`
+    + `<figure class="hw-fig hw-fig--loop">${loopDiagram()}</figure></section>`
+    + `<section class="hw-sec" aria-labelledby="hw-steps-h" data-morph-key="how:steps">`
+    + secHead("hw-steps-h", "Step by step", "One real batch, five steps", "Follow a robot arm batch from the agents' claims to a verdict.")
+    + note
+    + `<ol class="hw-steps" data-morph-list>${steps}</ol></section>`
     + underTheHood()
     + `<div class="hw-go">`
     + `<a class="ask-btn hw-btn ds-primary" href="${attr(routeHash({ name: "batch", id: HOW_BATCH }))}">See a real batch</a>`

@@ -131,7 +131,7 @@ describe("the page", () => {
   it("renders the five steps with pictures from a hand-made case", () => {
     const html = howView({ state: "ready", value: HAND });
     const t = text(html);
-    for (const h of ["Run", "Measure", "Find the step", "Fork to test it", "The verdict follows the evidence"]) expect(html).toContain(`<h2 class="hw-h">${h}</h2>`);
+    for (const h of ["Run", "Measure", "Find the step", "Fork to test it", "The verdict follows the evidence"]) expect(html).toContain(`<h3 class="hw-h">${h}</h3>`);
     expect(html.match(/class="hw-pic"/g)).toHaveLength(5);
     expect(t).toContain("2 of 3 agents claimed 100%. Measured at 4 positions they never tested: 55%.");
     expect(html).toContain('data-ck-key="r02"');
@@ -153,7 +153,7 @@ describe("the page", () => {
 
   it("reads as text alone when the demo cannot load, and while it loads", () => {
     for (const html of [howView({ state: "error", message: "404" }), howView({ state: "loading" })]) {
-      expect(html.match(/<h2 class="hw-h">/g)).toHaveLength(5);
+      expect(html.match(/<h3 class="hw-h">/g)).toHaveLength(5);
       expect(html).not.toContain('class="hw-pic"');
       expect(html.match(/class="hw-step is-text"/g)).toHaveLength(5);
       // The diagrams need no numbers: they stay.
