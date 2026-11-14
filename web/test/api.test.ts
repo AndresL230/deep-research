@@ -134,7 +134,7 @@ describe("REST", () => {
 
   it("asks what more pairs would cost, then starts them", async () => {
     const quote: MorePairsQuote = {
-      fork_id: "f1", n_per_arm: 4, max_per_arm: 8, arms: ["control", "forced"], vm_count: 9, estimate_usd: 1.2,
+      fork_id: "f1", n_per_arm: 4, max_per_arm: 8, arms: ["control", "forced"], vm_count: 9, estimate_usd: 1.2, basis: "8 new copies plus the base VM",
       pairs_now: 4, pairs_after: 8, needed_pairs: 8, level_now: "open", p_value_now: 0.0714, budget_usd: 10,
       spent_usd: 3.1, over_budget: false, budget_problem: null,
     };
