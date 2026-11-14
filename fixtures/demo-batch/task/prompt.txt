@@ -11,5 +11,7 @@ When you are done, write these files in `/home/daytona/workspace`:
 - `report.json`: {"test_accuracy": <float between 0 and 1>, "model": "<what you used>", "notes": "<one or two sentences>"}
 - `predictions.csv`: one column named `prediction` (0 or 1), one row per row of `/home/daytona/workspace/holdout_features.csv`, in the same order.
 
+Work in small steps: one short command per step, and read its output before you run the next. Do not write the whole workflow as one script.
+
 Save any charts you make as PNG files in `/home/daytona/workspace/live/`. Plan your work with the todo list and keep it updated as you go.
 Run Python with `python3`. pandas, scikit-learn and matplotlib are installed.

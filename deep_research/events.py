@@ -89,6 +89,25 @@ class EventLog:
         self._f.close()
 
 
+# Next to a fork child's events.jsonl: the source run's events up to the fork point (`prefix_events`). The child's
+# own log starts after them, but the episodes they ran are the child's too.
+PREFIX_EVENTS = "prefix_events.jsonl"
+
+
+def prefix_events(events: list[dict], n_actions: int) -> list[dict]:
+    """`events` up to the tool call of action `n_actions` (counting from 0), so with the results of the first
+    `n_actions` tool calls: what a run had done when a fork cut it there."""
+    out: list[dict] = []
+    seen = 0
+    for e in events:
+        if e.get("type") == "tool_call":
+            if seen >= n_actions:
+                break
+            seen += 1
+        out.append(e)
+    return out
+
+
 def read_events(path: Path) -> list[dict]:
     if not path.exists():
         return []

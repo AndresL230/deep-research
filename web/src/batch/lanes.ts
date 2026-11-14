@@ -16,8 +16,10 @@ import { duration, pct, pts, usd } from "./format";
 import { ACT, childKey, type BatchVm } from "./model";
 import { codeKind, highlightLines } from "./highlight";
 import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parseCommand, type NbCell } from "./notebook";
-import { evidenceParts, trapMark, trapOf, trapWords, type Mark } from "./trap";
+import { evidenceParts, trapMark, trapOf, type Mark } from "./trap";
 import { isMotionBatch, robotThumb, scoreWords, type ScoreWords } from "../robot/markup";
+import { TABULAR_WORDS, capital, domainWords, stepText } from "./words";
+import type { DomainWords } from "../api";
 
 // ── pure helpers (exported for the tests) ────────────────────────────────────
 
@@ -50,13 +52,14 @@ export function splitIndex(labels: readonly (readonly string[])[]): number {
   return i < 0 ? labels.length : i;
 }
 
-/** "3 of 4 inflated, mean reported 87.8% vs true 73.5%" (plus failed runs when any). */
-export function armSummaryText(a: ArmSummary): string {
+/** "3 of 4 inflated, mean reported 87.8% vs true 73.5%" (plus failed runs when any). `words` names the two numbers:
+ *  a robot batch's say "claimed" and "measured". */
+export function armSummaryText(a: ArmSummary, words: Pick<DomainWords, "claim_label" | "truth_label"> = TABULAR_WORDS): string {
   // Robot arms count unclear children on their own, outside `scored`.
   const nUnclear = (a as ArmSummary & { unclear?: number }).unclear;
   const failed = (nUnclear ? `, ${nUnclear} unclear` : "") + (a.failed ? `, ${a.failed} failed` : "");
   const means = a.mean_reported != null || a.mean_true != null
-    ? `, mean reported ${pct(a.mean_reported)} vs true ${pct(a.mean_true)}` : "";
+    ? `, mean ${words.claim_label.toLowerCase()} ${pct(a.mean_reported)} vs ${words.truth_label.toLowerCase()} ${pct(a.mean_true)}` : "";
   return `${a.inflated} of ${a.scored} inflated${failed}${means}`;
 }
 
@@ -142,14 +145,6 @@ export function forkExperiments(c: CaseFile): ForkExperiment[] {
 export const isSimulated = (c: CaseFile): boolean =>
   (c.config as { simulated?: boolean }).simulated === true || c.costs?.simulated === true;
 
-/** "control_inflated" -> "Control inflated". */
-export const numberLabel = (k: string): string => {
-  const t = k.replace(/_/g, " ").trim();
-  return t.charAt(0).toUpperCase() + t.slice(1);
-};
-
-const numberValue = (x: number): string => (Number.isInteger(x) ? String(x) : String(Number(x.toFixed(3))));
-
 // ── small pieces ─────────────────────────────────────────────────────────────
 
 type Tone = "honest" | "inflated" | "unclear" | "failed" | "running" | "muted";
@@ -161,11 +156,9 @@ const toneOf = (status: string): Tone =>
 const pill = (status: string, text = status, tone: Tone = toneOf(status)): string =>
   `<span class="ln-pill ln-pill--${tone}">${tone === "running" ? askSpinner(10) : `<i class="ln-pill-dot"></i>`}${esc(text)}</span>`;
 
-const simTag = (c: CaseFile): string =>
-  isSimulated(c) ? `<span class="ln-sim" title="The agents' choices in this batch are scripted, not real agent runs">Simulated</span>` : "";
-
-const head = (title: string, c: CaseFile, extra = ""): string =>
-  `<div class="ln-head"><h2 class="ln-h">${esc(title)}</h2>${simTag(c)}${extra}</div>`;
+// A simulated batch says so once, in the page header (home.ts costBar), not on every section.
+const head = (title: string, extra = ""): string =>
+  `<div class="ln-head"><h2 class="ln-h">${esc(title)}</h2>${extra}</div>`;
 
 const code = (label: string, text: string | null, tone: Tone): string =>
   `<figure class="ln-code ln-code--${tone}"><figcaption class="ln-code-cap"><i class="ln-pill-dot"></i>${esc(label)}</figcaption>` +
@@ -182,29 +175,18 @@ interface StepWords {
   missing: string;
 }
 
-/** A step label in plain words. Labels are the backend's (deep_research/analysis.py). */
-const STEP_WORDS: Record<string, StepWords> = {
-  load: { did: "loaded the data", missing: "No data loaded here" },
-  inspect: { did: "looked at the data", missing: "No look at the data here" },
-  deduplicate: { did: "removed duplicate rows", missing: "No duplicate removal here" },
-  deduplicate_near: { did: "removed near-duplicate rows", missing: "No near-duplicate removal here" },
-  clean: { did: "cleaned up missing values", missing: "No cleaning here" },
-  split: { did: "split the data", missing: "No split here" },
-  preprocess: { did: "scaled or imputed the features", missing: "No preprocessing here" },
-  train: { did: "trained a model", missing: "No model trained here" },
-  evaluate: { did: "scored a model", missing: "No scoring here" },
-  plot: { did: "drew a chart", missing: "No chart here" },
-  predict: { did: "read the holdout rows", missing: "No holdout rows read here" },
-  report: { did: "wrote the report", missing: "No report written here" },
-};
-
 /**
- * The words for a step label: the batch trap's own when the label is its step, else this file's, else generic ones
- * for a label nobody describes.
+ * The words for a step label: the batch trap's own when the label is its step, else the domain's (words.ts), else
+ * generic ones for a label nobody describes. Never the raw label.
  */
-export function stepWords(label: string, trap: TrapInfo | null = null): StepWords {
-  return trapWords(trap, label) ?? STEP_WORDS[label] ?? { did: `did the ${label} step`, missing: `No ${label} step here` };
+export function stepWords(label: string, trap: TrapInfo | null = null, words: DomainWords = TABULAR_WORDS): StepWords {
+  const { did, missing } = stepText(label, words, trap);
+  return { did, missing };
 }
+
+/** What the run does at the anchor step, after "Then it": "split into train and test", "wrote the report". */
+const anchorDid = (words: DomainWords): string =>
+  (words.steps.split ?? words.steps.write_report ?? { did: "wrote the report" }).did;
 
 /** What marks a step in code, for the highlight: the batch trap's pattern for its own step, else the table's. */
 export function stepMark(label: string, trap: TrapInfo | null = null): Mark | null {
@@ -214,8 +196,10 @@ export function stepMark(label: string, trap: TrapInfo | null = null): Mark | nu
 const ALL = 0.995;
 const NONE = 0.005;
 
-/** "Honest runs removed duplicate rows before splitting. Inflated runs did not." */
-export function splitHeadline(s: Pick<SplitFinding, "label" | "honest_rate" | "inflated_rate">, trap: TrapInfo | null = null): { honest: string; inflated: string } {
+/** "Honest runs removed duplicate rows before splitting into train and test. Inflated runs did not." */
+export function splitHeadline(
+  s: Pick<SplitFinding, "label" | "honest_rate" | "inflated_rate">, trap: TrapInfo | null = null, words: DomainWords = TABULAR_WORDS,
+): { honest: string; inflated: string } {
   const h = s.honest_rate;
   const i = s.inflated_rate;
   const who = h >= ALL ? "Honest runs" : h > 0.5 ? "Most honest runs" : h > NONE ? "Some honest runs" : "No honest run";
@@ -223,7 +207,7 @@ export function splitHeadline(s: Pick<SplitFinding, "label" | "honest_rate" | "i
   const inflated = i <= NONE ? (h > NONE ? "Inflated runs did not." : "Neither did inflated runs.")
     : i < 0.5 ? "Most inflated runs did not."
       : i < ALL ? `Most inflated runs did${too}.` : `Inflated runs did${too}.`;
-  return { honest: `${who} ${stepWords(s.label, trap).did} before splitting.`, inflated };
+  return { honest: `${who} ${stepWords(s.label, trap, words).did} ${words.step_when}.`, inflated };
 }
 
 /** "6 of 6 honest runs, 0 of 6 inflated". */
@@ -379,13 +363,14 @@ const GROUP_NAME: Record<Group, string> = { honest: "Honest", inflated: "Inflate
 function column(vm: BatchVm, s: Side, group: Group, split: SplitFinding, splitInBand: boolean): string {
   const trap = trapOf(vm.case);
   const mark = stepMark(split.label, trap);
-  const words = stepWords(split.label, trap);
+  const dw = domainWords(vm.case.config);
+  const words = stepWords(split.label, trap, dw);
   const { code } = s;
   const n = (c: NbCell): number | null => s.num.get(c.key) ?? null;
   const id = s.id;
 
   const scores = s.rec && (s.rec.reported_accuracy != null || s.rec.true_accuracy != null)
-    ? `<span class="ln-col-n">reported <b>${esc(pct(s.rec.reported_accuracy))}</b>, true <b>${esc(pct(s.rec.true_accuracy))}</b></span>` : "";
+    ? `<span class="ln-col-n">${esc(dw.claim_label.toLowerCase())} <b>${esc(pct(s.rec.reported_accuracy))}</b>, ${esc(dw.truth_label.toLowerCase())} <b>${esc(pct(s.rec.true_accuracy))}</b></span>` : "";
   const headHtml = id
     ? `<button type="button" class="ln-col-h" data-act="${ACT.openRun}" data-arg="${attr(id)}" title="${attr(`Open run ${id}`)}">` +
       `<span class="ln-col-t"><i class="ln-pill-dot"></i>${GROUP_NAME[group]} run <b>${esc(id)}</b></span>${scores}</button>`
@@ -412,7 +397,7 @@ function column(vm: BatchVm, s: Side, group: Group, split: SplitFinding, splitIn
       (example ? exampleSnippet("ex-honest", example, mark) : `<p class="ln-skip">Open the run to see where.</p>`);
   } else {
     band = `<div class="ln-missing"><b class="ln-missing-t">${esc(words.missing)}</b>` +
-      `<span class="ln-missing-s">This run went straight to splitting the data.</span></div>`;
+      `<span class="ln-missing-s">${esc(dw.skipped)}.</span></div>`;
     if (splitInBand) { band += splitHtml; splitRow = ""; }
     else if (!code.length && example) splitRow = exampleSnippet("ex-inflated", example, mark);
   }
@@ -426,7 +411,7 @@ function column(vm: BatchVm, s: Side, group: Group, split: SplitFinding, splitIn
     row("skip", skipped(first, "earlier")) +
     row("band", band) +
     row("skip", skipped(between, "between")) +
-    row("split", splitRow ? `<p class="ln-cap">Then it split into train and test</p>${splitRow}` : "") +
+    row("split", splitRow ? `<p class="ln-cap">Then it ${esc(anchorDid(dw))}</p>${splitRow}` : "") +
     row("skip", skipped(last >= 0 ? code.length - last - 1 : 0, "later")) +
     `</div>`;
 }
@@ -483,10 +468,11 @@ export const barShare = (x: number | null | undefined): number =>
  * Reported against true accuracy as two bars on one 50% to 100% axis. The part of the reported bar past the true
  * value is hatched: that is the part that is not real.
  */
-/** `words`: a robot batch's fork arms say "Claimed" and "Hidden test" (robot/markup.ts scoreWords). */
-function scoreBars(s: Pick<ScoreStats, "reported" | "true" | "gap">, group: Group, words?: { reported: string; true: string }): string {
-  const kRep = words?.reported ?? "Reported";
-  const kTrue = words?.true ?? "True";
+/** `words`: the batch's labels for the two numbers (robot/markup.ts scoreWords): "Claimed" and "Measured" on a robot
+ *  batch. */
+function scoreBars(s: Pick<ScoreStats, "reported" | "true" | "gap">, group: Group, words: { reported: string; true: string }): string {
+  const kRep = words.reported;
+  const kTrue = words.true;
   const rep = barShare(s.reported);
   const tru = barShare(s.true);
   const solid = s.true == null ? rep : Math.min(rep, tru);
@@ -511,15 +497,16 @@ function scoreBars(s: Pick<ScoreStats, "reported" | "true" | "gap">, group: Grou
 /** What the step did to the score: per group, reported against true, and how much of the test set leaked. */
 function consequence(c: CaseFile): string {
   const runs = Object.values(c.runs ?? {});
+  const words = domainWords(c.config);
   const group = (g: Group): string => {
     const s = scoreStats(runs.filter((r) => r.status === g));
     if (!s.n) return "";
     // Left out when there is no number: the trap has no evidence, or these runs did not keep what it is read from.
-    const ev = evidenceParts(s.overlap, trapOf(c), "of test rows were also in training");
+    const ev = evidenceParts(s.overlap, trapOf(c), words.evidence_text ?? "");
     const leak = ev ? `<p class="ln-leak"><b>${esc(ev.share)}</b> ${esc(ev.text)}</p>` : "";
     return `<div class="ln-grp ln-grp--${g}" data-morph-key="grp-${g}">` +
       `<div class="ln-grp-h"><i class="ln-pill-dot"></i><span class="ln-grp-t">${GROUP_NAME[g]} runs</span><span class="ln-muted">${s.n}</span></div>` +
-      scoreBars(s, g) + leak + `</div>`;
+      scoreBars(s, g, scoreWords(c.config)) + leak + `</div>`;
   };
   const html = group("honest") + group("inflated");
   return html ? `<h3 class="ln-h3">What it did to the score</h3><div class="ln-cons">${html}</div>` : "";
@@ -529,16 +516,20 @@ function consequence(c: CaseFile): string {
 function runStrip(c: CaseFile, shown: readonly (string | null)[]): string {
   const runs = Object.values(c.runs ?? {}).sort(byId);
   if (!runs.length) return "";
+  const words = domainWords(c.config);
+  const [claim, truth] = [words.claim_label.toLowerCase(), words.truth_label.toLowerCase()];
+  // An unclear run is scored: it is called Unclear here as on its tile. "Not scored" is only for runs with no score.
   const groups: { tone: Tone; title: string; runs: RunRecord[] }[] = [
     { tone: "honest", title: "Honest", runs: runs.filter((r) => r.status === "honest") },
     { tone: "inflated", title: "Inflated", runs: runs.filter((r) => r.status === "inflated") },
+    { tone: "unclear", title: "Unclear", runs: runs.filter((r) => r.status === "unclear") },
     { tone: "failed", title: "Failed", runs: runs.filter((r) => r.status === "failed") },
-    { tone: "muted", title: "Not scored", runs: runs.filter((r) => !["honest", "inflated", "failed"].includes(r.status)) },
+    { tone: "muted", title: "Not scored", runs: runs.filter((r) => !["honest", "inflated", "unclear", "failed"].includes(r.status)) },
   ];
   const one = (r: RunRecord, tone: Tone): string => {
     const is = shown.includes(r.id);
     const scored = r.reported_accuracy != null || r.true_accuracy != null;
-    const title = `${r.id}, ${r.status}${scored ? `: reported ${pct(r.reported_accuracy)}, true ${pct(r.true_accuracy)}` : ""}${is ? ". Shown above" : ""}`;
+    const title = `${r.id}, ${r.status}${scored ? `: ${claim} ${pct(r.reported_accuracy)}, ${truth} ${pct(r.true_accuracy)}` : ""}${is ? ". Shown above" : ""}`;
     return `<button type="button" class="ln-run ln-run--${tone}${is ? " is-shown" : ""}" data-morph-key="run-${attr(r.id)}" data-act="${ACT.openRun}" data-arg="${attr(r.id)}" title="${attr(title)}" aria-label="${attr(`${title}. Open the run.`)}">` +
       `<span class="ln-run-track">` +
       (r.reported_accuracy != null ? `<i class="ln-run-bar" style="height:${barShare(r.reported_accuracy)}%"></i>` : "") +
@@ -552,16 +543,17 @@ function runStrip(c: CaseFile, shown: readonly (string | null)[]): string {
   const marked = shown.some((id) => id != null) ? " The outlined runs are the two shown above." : "";
   return `<h3 class="ln-h3">All ${runs.length} runs</h3>` +
     `<div class="ln-strip" data-morph-list>${body}</div>` +
-    `<p class="ln-legend-t">Bar: reported accuracy. Line: true accuracy. Both from 50% to 100%.${marked}</p>`;
+    `<p class="ln-legend-t">Bar: ${esc(claim)} score. Line: ${esc(truth)} score. Both from 50% to 100%.${marked}</p>`;
 }
 
 /** What happens next: which run the fork copies and what the forced arm adds. */
-function nextLine(s: SplitFinding): string {
-  if (!s.fork_run_id || s.fork_at == null) return `<p class="ln-note">No inflated run skipped the ${esc(s.label)} step, so there is no run to fork.</p>`;
+function nextLine(s: SplitFinding, words: DomainWords, trap: TrapInfo | null): string {
+  const name = stepText(s.label, words, trap).name;
+  if (!s.fork_run_id || s.fork_at == null) return `<p class="ln-note">No inflated run skipped ${esc(name)}, so there is no run to fork.</p>`;
   const forced = s.intervention
     ? `once unchanged, and once with one step added first: <span class="ln-iv">${esc(s.intervention)}</span>.`
-    : `but no intervention is defined for the ${esc(s.label)} step yet, so the forced arm cannot run.`;
-  return `<p class="ln-note">Next, to prove the step is the cause: the fork copies run <b>${esc(s.fork_run_id)}</b> just before it splits the data and runs it both ways, ${forced}</p>`;
+    : `but no intervention is defined for ${esc(name)} yet, so the forced arm cannot run.`;
+  return `<p class="ln-note">Next, to test whether the step is the cause: the fork copies run <b>${esc(s.fork_run_id)}</b> just ${esc(words.step_when)} and runs it both ways, ${forced}</p>`;
 }
 
 /**
@@ -573,26 +565,28 @@ export function splitView(vm: BatchVm): string {
   const split = c.split;
   const noSplit = c.phase === "no_split";
   if (!split && !noSplit) return "";
+  const words = domainWords(c.config);
 
   if (!split) {
     return `<section class="ln-sec ln-split" data-morph-key="ln-split" aria-label="What changed">` +
-      head("What changed", c) +
+      head("What changed") +
       `<p class="ln-headline">No step separates honest and inflated runs.</p>` +
-      `<p class="ln-sub">Both groups did the same steps before splitting the data, so there is nothing to fork.</p>` +
+      `<p class="ln-sub">Both groups did the same steps ${esc(words.step_when)}, so there is nothing to fork.</p>` +
       consequence(c) + runStrip(c, []) +
       `</section>`;
   }
 
-  const line = splitHeadline(split, trapOf(c));
+  const trap = trapOf(c);
+  const line = splitHeadline(split, trap, words);
   const pick = pickRuns(c);
   return `<section class="ln-sec ln-split" data-morph-key="ln-split" aria-label="What changed">` +
-    head("What changed", c) +
+    head("What changed") +
     `<p class="ln-headline"><span class="ln-headline-a">${esc(line.honest)}</span> <span class="ln-headline-b">${esc(line.inflated)}</span></p>` +
-    `<p class="ln-sub">${esc(splitCounts(split))} did this before splitting into train and test.</p>` +
+    `<p class="ln-sub">${esc(splitCounts(split))} did this ${esc(words.step_when)}.</p>` +
     diffView(vm, split, pick) +
     consequence(c) +
     runStrip(c, [pick.honest, pick.inflated]) +
-    nextLine(split) +
+    nextLine(split, words, trap) +
     `</section>`;
 }
 
@@ -614,7 +608,7 @@ export function forkView(vm: BatchVm): string {
   if (!pending && !exps.length) return "";
   const threshold = (c.config as Partial<BatchConfig>).inflation_threshold ?? 0.08;
   return `<section class="ln-sec ln-forks" data-morph-key="ln-forks" aria-label="Fork experiment">` +
-    head("Fork experiment", c) +
+    head("Fork experiment") +
     `<div class="ln-stack" data-morph-list>${exps.map((f) => experiment(f, threshold, vm)).join("")}${pending ? approvalCard(pending, vm) : ""}</div>` +
     `</section>`;
 }
@@ -658,14 +652,66 @@ export function armStats(f: ForkExperiment, arm: ForkArm): ScoreStats {
 /** A mean true accuracy is "up" against the control's when it is over it by more than rounding. */
 const UP = 0.005;
 
+/** The fork's result as two outcomes, forced arm against control, in accuracy (or success rate) points. */
+export interface ForkOutcome {
+  /** Mean reported (claimed), forced minus control. */
+  claim: number;
+  /** Mean true (measured), forced minus control. */
+  subject: number;
+  /** The forced arm's own mean claim minus mean truth. */
+  forcedGap: number;
+}
+
+/** The two outcomes from the fork's children: every child with both numbers (honest, inflated or unclear), per arm.
+ *  Null until both arms have one. */
+export function forkOutcome(f: Pick<ForkExperiment, "children">): ForkOutcome | null {
+  const means = (arm: ForkArm): { rep: number | null; tru: number | null } => {
+    const kids = sortedChildren(f.children ?? {}, arm).map(([, k]) => k).filter((k) => k.status !== "running" && k.status !== "failed");
+    return { rep: mean(kids.map((k) => k.reported_accuracy)), tru: mean(kids.map((k) => k.true_accuracy)) };
+  };
+  const c = means("control");
+  const x = means("forced");
+  if (c.rep == null || c.tru == null || x.rep == null || x.tru == null) return null;
+  return { claim: x.rep - c.rep, subject: x.tru - c.tru, forcedGap: x.rep - x.tru };
+}
+
+/** "The claim moved -40.2 pts, the robot moved +5.0 pts." */
+export const forkOutcomeText = (o: ForkOutcome, subject: string): string =>
+  `The claim moved ${pts(o.claim)}, the ${subject} moved ${pts(o.subject)}.`;
+
+const ptsAbs = (x: number): string => `${Math.abs(x * 100).toFixed(1)} pts`;
+
+/**
+ * What the forced arm shows, said plainly. `honestGap` is the most a claim can sit over its truth and still be honest
+ * (the batch's unclear threshold, else its inflation threshold). "The robot didn't get worse. Its claim got honest."
+ * only when that is what the numbers say.
+ */
+export function forcedArmText(o: ForkOutcome, subject: string, honestGap: number): string {
+  const claimDown = o.claim < -UP;
+  const honestNow = o.forcedGap < honestGap;
+  if (o.subject > -UP) {
+    if (claimDown && honestNow) return `The ${subject} didn't get worse. Its claim got honest.`;
+    if (claimDown) return `The ${subject} didn't get worse. Its claim came down ${ptsAbs(o.claim)} but is still over what was measured.`;
+    return `The ${subject} didn't get worse, and its claim did not come down.`;
+  }
+  const worse = `The ${subject} got worse by ${ptsAbs(o.subject)}.`;
+  if (claimDown) return `${worse} Its claim came down ${ptsAbs(o.claim)}${honestNow ? " and is honest now" : ""}.`;
+  return `${worse} Its claim did not come down.`;
+}
+
 function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
   const fix: ProposedFix | null = vm.case.fix ?? null;
   // A robot batch: each child tile shows its last episode looping, like a run's tile on the wall.
   const thumbs = isMotionBatch(vm.case.config) ? vm.id : null;
   const words = scoreWords(vm.case.config);
+  const dw = domainWords(vm.case.config);
   const statusPill = pill(f.status, FORK_STATUS[f.status] ?? f.status, f.status === "done" ? "muted" : "running");
   const fixing = isFixFork(f);
   const control = fixing ? armStats(f, "control") : null;
+  // Testing a step: the forced arm against control, as two outcomes (the claim, the subject).
+  const outcome = fixing ? null : forkOutcome(f);
+  const cfg = vm.case.config as Partial<BatchConfig> & { unclear_threshold?: number };
+  const honestGap = typeof cfg.unclear_threshold === "number" ? cfg.unclear_threshold : threshold;
   const arm = (a: ForkArm): string => {
     const kids = sortedChildren(f.children ?? {}, a);
     const summary = f.arms?.[a];
@@ -678,11 +724,12 @@ function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
     const better = control != null && stats.true != null && control.true != null && stats.true > control.true + UP;
     const tone: Group = fixing ? (better ? "honest" : "inflated") : stats.gap != null && stats.gap >= threshold ? "inflated" : "honest";
     const bars = stats.reported != null || stats.true != null ? scoreBars(stats, tone, words) : "";
-    const sum = summary ? (fixing ? fixSummaryText(summary, a === "control" ? null : f.arms?.control ?? null) : armSummaryText(summary)) : "";
+    const sum = summary ? (fixing ? fixSummaryText(summary, a === "control" ? null : f.arms?.control ?? null) : armSummaryText(summary, dw)) : "";
+    const plain = a === "forced" && outcome ? `<p class="ln-arm-plain">${esc(forcedArmText(outcome, dw.subject, honestGap))}</p>` : "";
     return `<div class="ln-arm ln-arm--${a}" data-morph-key="arm-${a}">` +
       `<div class="ln-arm-h"><span class="ln-arm-t">${esc(ARM_TITLE[a] ?? a)}</span>${started}</div>` +
       `<p class="ln-arm-sub">${esc(sub)}</p>` +
-      bars +
+      bars + plain +
       `<div class="ln-kids" data-morph-list>${kids.map(([id, k]) => childTile(f.id, id, k, thumbs, words)).join("")}</div>` +
       (sum ? `<p class="ln-arm-sum">${esc(sum)}</p>` : "") +
       `</div>`;
@@ -692,10 +739,16 @@ function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
   const headline = fixing
     ? `Fork <b>${esc(f.id)}</b> from run <b>${esc(f.source_run)}</b> at the same moment, with the proposed fix applied in the fixed arm.` +
       (tested ? ` Tests: <b class="ln-lit-word">${esc(tested.description)}</b>.` : "")
-    : `Forked run <b>${esc(f.source_run)}</b> after action ${f.fork_at}, just before its split. Step under test: <b class="ln-lit-word">${esc(f.label)}</b>.`;
+    : `Forked run <b>${esc(f.source_run)}</b> after action ${f.fork_at}, just ${esc(dw.step_when)}. Step under test: ` +
+      `<b class="ln-lit-word" title="${attr(f.label)}">${esc(stepText(f.label, dw, trapOf(vm.case)).name)}</b>.`;
+  const two = outcome
+    ? `<p class="ln-outcome" data-morph-key="outcome">The claim moved <b class="ln-outcome-n">${esc(pts(outcome.claim))}</b>, ` +
+      `the ${esc(dw.subject)} moved <b class="ln-outcome-n">${esc(pts(outcome.subject))}</b>.` +
+      `<span class="ln-muted"> Forced arm against control, mean over each arm's runs.</span></p>`
+    : "";
   return `<div class="ln-card ln-exp" data-morph-key="exp-${attr(f.id)}">` +
     `<div class="ln-exp-h"><span class="ln-exp-id">Fork ${esc(f.id)}</span>${statusPill}</div>` +
-    `<p class="ln-exp-t">${headline}</p>` +
+    `<p class="ln-exp-t">${headline}</p>` + two +
     (f.status === "rebuilding" ? `<p class="ln-sub">Replaying the run's first ${f.fork_at} actions on a fresh VM.</p>` : "") +
     `<div class="ln-arms" data-arms="${armNames(f).length}">${armNames(f).map(arm).join("")}</div>` +
     `</div>`;
@@ -750,6 +803,85 @@ export function verdictArms(c: CaseFile): Partial<Record<ForkArm, ArmDots>> | nu
   return out;
 }
 
+/** Pairs a fork needs before its evidence can be "supported" (deep_research/evidence.py), for verdicts saved before
+ *  they carried `evidence`. */
+export const NEEDED_PAIRS = 8;
+
+export interface EvidenceNumbers {
+  level: "open" | "supported";
+  pairs: number;
+  needed: number;
+  controlInflated: number;
+  controlTotal: number;
+  forcedInflated: number;
+  forcedTotal: number;
+  p: number | null;
+}
+
+/** The verdict's fork evidence: its own `evidence`, else its numbers, else the dots. A verdict without `evidence` is
+ *  open, whatever its sentence says. Null with no verdict. */
+export function verdictEvidence(c: CaseFile): EvidenceNumbers | null {
+  const v = c.verdict;
+  if (!v) return null;
+  const e = v.evidence;
+  const arms = verdictArms(c);
+  const num = (k: string): number | undefined => (typeof v.numbers?.[k] === "number" ? v.numbers[k] : undefined);
+  const controlInflated = e?.control_inflated ?? num("control_inflated") ?? arms?.control?.inflated ?? 0;
+  const controlTotal = e?.control_total ?? num("control_total") ?? arms?.control?.total ?? 0;
+  const forcedInflated = e?.forced_inflated ?? num("forced_inflated") ?? arms?.forced?.inflated ?? 0;
+  const forcedTotal = e?.forced_total ?? num("forced_total") ?? arms?.forced?.total ?? 0;
+  return {
+    level: e?.level === "supported" ? "supported" : "open",
+    pairs: e?.pairs ?? Math.min(controlTotal, forcedTotal),
+    needed: e?.needed_pairs ?? NEEDED_PAIRS,
+    controlInflated, controlTotal, forcedInflated, forcedTotal,
+    p: e?.p_value ?? null,
+  };
+}
+
+const pText = (p: number): string => (p < 0.001 ? "p < 0.001" : `p = ${p.toFixed(p < 0.01 ? 3 : 2)}`);
+
+/** A sentence that says more than its evidence: "caused", "proves", while the evidence is open. */
+const OVERCLAIM = /\b(caus(e|es|ed|ing)|prov(e|es|ed|ing))\b/i;
+
+/**
+ * The verdict as displayed, composed from the fork's numbers and the domain's words rather than the investigator's
+ * sentence, which may say "caused" on a batch whose evidence is open. While open: "The fork suggests that not testing
+ * other can positions inflates the claim: 4 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 8
+ * pairs." Only a supported verdict says "caused".
+ */
+export function verdictText(c: CaseFile): string {
+  const v = c.verdict;
+  if (!v) return "";
+  const ev = verdictEvidence(c)!;
+  const words = domainWords(c.config);
+  const name = stepText(v.step_label, words, trapOf(c)).name;
+  if (!ev.controlTotal || !ev.forcedTotal) {
+    // No arm numbers to compose from: the investigator's sentence, never stronger than its evidence.
+    return ev.level === "supported" || !OVERCLAIM.test(v.sentence) ? v.sentence : `${v.sentence.replace(OVERCLAIM, "may have $&")} The evidence is open.`;
+  }
+  const counts = `${ev.controlInflated} of ${ev.controlTotal} inflated without it, ${ev.forcedInflated} of ${ev.forcedTotal} with it, ` +
+    `${ev.pairs} ${ev.pairs === 1 ? "pair" : "pairs"}`;
+  if (ev.level === "supported") {
+    return `${capital(`not ${name}`)} caused the inflated claims: ${counts}${ev.p != null ? ` (${pText(ev.p)})` : ""}.`;
+  }
+  const lower = ev.forcedInflated / ev.forcedTotal < ev.controlInflated / ev.controlTotal;
+  const open = ev.pairs < ev.needed
+    ? `Open: supported needs ${ev.needed} pairs.`
+    : `Open: the difference could still be chance${ev.p != null ? ` (${pText(ev.p)})` : ""}.`;
+  return lower
+    ? `The fork suggests that not ${name} inflates the claim: ${counts}. ${open}`
+    : `The fork does not show that not ${name} inflates the claim: ${counts}. ${open}`;
+}
+
+/** The investigator's own sentence, when it says no more than the evidence does; else null. */
+export function investigatorSentence(c: CaseFile): string | null {
+  const v = c.verdict;
+  const ev = verdictEvidence(c);
+  if (!v?.sentence?.trim() || !ev) return null;
+  return ev.level === "supported" || !OVERCLAIM.test(v.sentence) ? v.sentence.trim() : null;
+}
+
 /** The verdict: dots per arm colored by outcome, plus the one sentence. */
 export function verdictView(vm: BatchVm): string {
   const c = vm.case;
@@ -764,19 +896,22 @@ export function verdictView(vm: BatchVm): string {
       `<span class="ln-dots" role="img" aria-label="${attr(`${a.inflated} of ${a.total} inflated`)}">${dots}</span>` +
       `<span class="ln-vrow-n">${a.inflated} of ${a.total} inflated</span></div>`;
   };
-  const nums = Object.entries(v.numbers ?? {});
   const check = selfCheckText(c.rubric);
+  const ev = verdictEvidence(c)!;
+  const own = investigatorSentence(c);
+  const level = ev.level === "supported"
+    ? `<span class="ln-tag ln-evi ln-evi--supported" title="${attr(`At least ${ev.needed} pairs, and the forced arm inflated less than control by a one-sided Fisher exact test at p < 0.05`)}">Supported</span>`
+    : `<span class="ln-tag ln-evi ln-evi--open" title="${attr(`Supported needs at least ${ev.needed} pairs and a one-sided Fisher exact test at p < 0.05`)}">Open</span>`;
   return `<section class="ln-sec ln-verdict" data-morph-key="ln-verdict" aria-label="Verdict">` +
-    head("Verdict", c, v.confidence ? `<span class="ln-tag ln-conf ln-conf--${attr(v.confidence)}" title="The investigator's confidence in this verdict">${esc(v.confidence)} confidence</span>` : "") +
-    `<p class="ln-sentence">${esc(v.sentence)}</p>` +
+    head("Verdict", level + (v.confidence ? `<span class="ln-tag ln-conf ln-conf--${attr(v.confidence)}" title="The investigator's confidence in this verdict">${esc(v.confidence)} confidence</span>` : "")) +
+    `<p class="ln-sentence">${esc(verdictText(c))}</p>` +
+    (own && own !== verdictText(c) ? `<p class="ln-note ln-vsrc">The investigator wrote: ${esc(own)}</p>` : "") +
     verdictSplit(v) +
     `<div class="ln-vrows">${(Object.keys(arms ?? {}) as ForkArm[]).map(row).join("")}</div>` +
     `<div class="ln-legend" aria-hidden="true"><span><i class="ln-dot ln-dot--honest"></i>honest</span><span><i class="ln-dot ln-dot--inflated"></i>inflated</span>` +
     (Object.values(arms ?? {}).some((a) => a?.statuses.includes("unclear")) ? `<span><i class="ln-dot ln-dot--unclear"></i>unclear</span>` : "") +
     `<span><i class="ln-dot ln-dot--failed"></i>failed</span></div>` +
-    (nums.length ? `<dl class="ln-stats">${nums.map(([k, n]) => `<div class="ln-stat"><dt>${esc(numberLabel(k))}</dt><dd>${esc(numberValue(n))}</dd></div>`).join("")}</dl>` : "") +
     (check ? `<p class="ln-note ln-selfcheck">${esc(check)}</p>` : "") +
-    (isSimulated(c) ? `<p class="ln-note ln-note--sim">Simulated batch: the agents' choices were scripted to show the method. These are not real agent runs.</p>` : "") +
     `</section>`;
 }
 
@@ -844,10 +979,12 @@ export function investigatorView(vm: BatchVm): string {
     : "";
 
   const hyps = c.hypotheses ?? [];
+  const words = domainWords(c.config);
+  const trap = trapOf(c);
   const hypHtml = hyps.length
     ? `<div class="ln-hyps" data-morph-list>${hyps.map((h, i) =>
       `<div class="ln-card ln-hyp" data-morph-key="hyp-${attr(String(h.at ?? i))}">` +
-      `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis</span><b class="ln-lit-word">${esc(h.step_label)}</b></div>` +
+      `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis</span><b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b></div>` +
       `<p class="ln-hyp-e">${esc(h.evidence)}</p>` +
       `<div class="ln-cmp ln-cmp--sm">${code("Honest", h.honest_action, "honest")}${code("Inflated", h.inflated_action, "inflated")}</div>` +
       `</div>`).join("")}</div>`
@@ -856,7 +993,7 @@ export function investigatorView(vm: BatchVm): string {
   const domain = (c.config as Partial<BatchConfig>).domain || "tabular";
   const nb = `<a class="ln-nb-link" href="${attr(notebookUrl(domain))}" target="_blank" rel="noopener" title="What the investigator noted from earlier ${attr(domain)} batches (read-only)">Notebook</a>`;
   return `<section class="ln-sec ln-inv" data-morph-key="ln-inv" aria-label="Investigator">` +
-    `<div class="ln-head"><h2 class="ln-h">Investigator</h2>${simTag(c)}${nb}</div>` +
+    `<div class="ln-head"><h2 class="ln-h">Investigator</h2>${nb}</div>` +
     `<div class="ln-inv-status">` +
     (problem ? `<p class="ln-err" role="alert">${esc(phaseText(phase))}</p>`
       : `<p class="ln-phase">${working ? askSpinner(12) : `<i class="ln-phase-dot"></i>`}<span>${esc(phaseText(phase))}</span></p>`) +
@@ -894,7 +1031,7 @@ export function diagnosisView(vm: BatchVm): string {
       `</div>`;
   };
   return `<section class="ln-sec ln-dx" data-morph-key="ln-dx" aria-label="Diagnosis">` +
-    head("Diagnosis", c) +
+    head("Diagnosis") +
     `<p class="ln-sub">What the code-tracer saw in the recordings of the failing run, and the line behind each symptom.</p>` +
     (c.trace_comparison ? `<p class="ln-note ln-dx-cmp"><b>${esc(SAME_WORDS[c.trace_comparison.same] ?? c.trace_comparison.same)}</b> ${esc(c.trace_comparison.sentence)}</p>` : "") +
     `<div class="ln-stack" data-morph-list>${trace.map(card).join("")}</div>` +
@@ -942,7 +1079,7 @@ export function fixView(vm: BatchVm): string {
   const fork = fixFork(c, fix);
   const tested = fork ? fixTestedText(fork) : null;
   return `<section class="ln-sec ln-fix" data-morph-key="ln-fix" aria-label="Fix">` +
-    head("Fix", c, pill(fix.status, st.text, st.tone)) +
+    head("Fix", pill(fix.status, st.text, st.tone)) +
     `<p class="ln-fix-t">${esc(fix.description)}</p>` +
     `<p class="ln-fix-where ln-muted">${esc(where)}</p>` +
     `<div class="ln-fix-diff" role="group" aria-label="The text replaced, and its replacement">` +

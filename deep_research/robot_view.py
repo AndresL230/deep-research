@@ -229,7 +229,7 @@ RESULT_KEYS = (
 
 
 def _public_result(result: dict) -> dict:
-    """The episode result keys the viewer shows (everything in it is the run's own episode: nothing hidden)."""
+    """The episode result keys the viewer shows. A hidden episode's file only gets here once its run is scored (api.py)."""
     out = {k: result[k] for k in RESULT_KEYS if k in result}
     if isinstance(out.get("exception"), str):
         out["exception"] = out["exception"][:400]

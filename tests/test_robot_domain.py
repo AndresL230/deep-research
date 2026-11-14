@@ -152,10 +152,10 @@ def test_the_split_is_moving_the_can_before_the_report():
 
 
 def test_the_robot_investigator_is_told_about_the_robot():
-    prompt = main_prompt(ROBOT.planted(BatchConfig(domain="robot_arm")), ROBOT.labels(), ROBOT.words)
+    prompt = main_prompt(ROBOT.planted(BatchConfig(domain="robot_arm")), ROBOT.labels(), ROBOT.investigator_words)
     assert "robotics agent" in prompt and "`robot-method-errors` skill" in prompt and "vary_positions" in prompt
     assert "data science" not in prompt and "planted" not in prompt
-    assert (ROBOT.skills_dir / ROBOT.words.skill / "SKILL.md").is_file()
+    assert (ROBOT.skills_dir / ROBOT.investigator_words.skill / "SKILL.md").is_file()
 
 
 def test_the_robot_domain_matches_the_sim_and_registers_without_it():
@@ -221,9 +221,9 @@ def test_unclear_runs_and_children_are_finished_but_not_counted_as_either_group(
 
 
 def test_only_the_robot_investigator_hears_about_unclear_runs():
-    robot = domains.get("robot_arm").words
+    robot = domains.get("robot_arm").investigator_words
     assert "`unclear`" in main_prompt("", None, robot) and "`unclear`" not in main_prompt()
-    assert domains.get("tabular").words.other_statuses == ""
+    assert domains.get("tabular").investigator_words.other_statuses == ""
 
 
 def test_cli_runs_takes_a_domain(monkeypatch):

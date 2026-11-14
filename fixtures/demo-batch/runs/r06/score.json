@@ -4,5 +4,8 @@
   "true_accuracy": 0.7403,
   "overlap_share": 0.5676,
   "gap": 0.1462,
-  "reason": ""
+  "reason": "",
+  "n_test": 185,
+  "n_test_copies": 105,
+  "n_hidden": 154
 }

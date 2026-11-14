@@ -32,7 +32,7 @@ which returns a list of problems (empty when the file is fine).
 | `actuator_names` | string[] | `actuator1` .. `actuator8`, in `ctrl` order |
 | `can_start` | [x, y] | nominal can start position, meters (the actual start includes seed noise; it is the first frame's `can_pos`) |
 | `place_target` | [x, y] | center of the place zone, meters |
-| `fps` | int | nominal frame rate, 30 |
+| `fps` | int | nominal frame rate, a whole number from 1 to 30: 30 for the agents' own runs, 8 (`sim.motion.LOW_FPS`) for the small recordings the server keeps of every evaluation episode |
 | `nq` | int | length of every `qpos`, 16 |
 
 Extra header keys written by the current recorder (readers must not require them): `nu` (8),
@@ -61,13 +61,13 @@ qpos layout (nq = 16):
 | 12..15 | `can_joint` orientation quaternion w, x, y, z | |
 
 Sampling: the recorder checks after every physics step (0.002 s) and takes a frame whenever the sim
-time reaches the next multiple of 1/30 s, so consecutive `t` values differ by about 0.0333 s (each `t`
+time reaches the next multiple of 1/fps s, so consecutive `t` values differ by about 1/fps s (each `t`
 is up to one physics step after the ideal time). The first frame is at `t = 0` (state before the
 first action) and the last frame is always the final state of the episode, so the final gap can be
 shorter. Viewers should interpolate on `t` rather than assume an exact spacing. A 10 s episode has
-about 301 frames and takes about 90 KB.
+about 301 frames and takes about 90 KB at 30 fps; at 8 fps it has about 81 frames and takes about 20 KB.
 
-Numbers are rounded to 4 decimal places. The world frame has z up, the robot base at the origin and
+Numbers are rounded to 4 decimal places (3 in the 8 fps recordings, `sim.motion.LOW_DECIMALS`: 1 mm, 0.001 rad). The world frame has z up, the robot base at the origin and
 the floor at z = 0. The can is a cylinder of radius 0.025 m and half height 0.05 m (standing upright
 its center is at z = 0.05). The place zone is a flat disc of radius 0.05 m centered on `place_target`.
 
