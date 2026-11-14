@@ -63,7 +63,7 @@ def test_public_dict_is_plain_json_with_the_words_the_ui_needs(name):
     assert (public["evidence_text"] is None) == (trap.evidence is None)
     re.compile(public["pattern"])
     # No em dashes in anything a person reads.
-    assert "—" not in json.dumps(public, ensure_ascii=False)
+    assert "\u2014" not in json.dumps(public, ensure_ascii=False)
 
 
 def test_patterns_are_valid_javascript_regular_expressions():
@@ -74,6 +74,20 @@ def test_patterns_are_valid_javascript_regular_expressions():
     script = "for (const [k, p] of Object.entries(JSON.parse(process.argv[1]))) { new RegExp(p); new RegExp(p, 'u'); }"
     done = subprocess.run([node, "-e", script, json.dumps(patterns)], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
+
+
+def test_the_web_app_reads_the_same_fields_and_tests_against_the_real_traps():
+    from deep_research.config import ROOT_DIR
+
+    # The web client's type for a trap has exactly the fields `public()` sends.
+    source = (ROOT_DIR / "web" / "src" / "api.ts").read_text()
+    body = source.split("export interface TrapInfo {", 1)[1].split("\n}\n", 1)[0]
+    fields = set(re.findall(r"^  (\w+)\??:", body, flags=re.MULTILINE))
+    assert fields == set(traps.get("duplicates").public())
+    # web/test/traps.json is a copy of what the server sends, so the web tests run on real words and patterns.
+    # Changed a trap's words? Write the file again from `[t.public() for t in traps.registered()]`.
+    for saved in json.loads((ROOT_DIR / "web" / "test" / "traps.json").read_text()):
+        assert saved == traps.get(saved["name"]).public()
 
 
 def test_labels_are_the_base_steps_plus_each_traps_step():
@@ -395,6 +409,22 @@ def test_a_grouped_split_or_one_row_per_subject_is_spotted(code):
 ])
 def test_looking_at_the_subject_id_is_not_a_grouped_split(code):
     assert "group_split" not in label_text(code)
+
+
+def test_importing_a_grouped_splitter_is_not_using_it():
+    unused = RANDOM.replace("import train_test_split", "import GroupShuffleSplit, train_test_split")
+    assert "group_split" not in label_text(unused) and "split" in label_text(unused)
+    run = _script_run(unused)
+    assert "group_split" not in run[2].labels and _did_before_split(run, "group_split") is False
+    block = "from sklearn.model_selection import (\n    GroupKFold,\n    train_test_split,\n)\ntrain_test_split(df)\n"
+    assert "group_split" not in label_text(block)
+    # In a one-liner the code after the import still counts, and an import alone still does not.
+    one = "cd /w && python3 -c \"from sklearn.model_selection import GroupKFold; cv = GroupKFold(5)\""
+    assert "group_split" in label_text(one)
+    assert "group_split" not in label_text("cd /w && python3 -c \"from sklearn.model_selection import GroupKFold; print(1)\"")
+    assert "group_split" in label_text("import pandas as pd; df = pd.read_csv('data.csv').drop_duplicates(subset='subject_id')")
+    # The duplicates step is spotted where it always was.
+    assert "deduplicate" in label_text("import pandas as pd; df = pd.read_csv('data.csv'); print(df.duplicated().sum())")
 
 
 def test_a_grouped_split_is_the_split_and_is_credited():

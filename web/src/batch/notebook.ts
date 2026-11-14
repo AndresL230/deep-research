@@ -12,6 +12,7 @@ import { attr, esc } from "../ui";
 import { mdView } from "../ask-conversation";
 import { codeKind, highlightLines, type CodeKind } from "./highlight";
 import type { BatchVm, EventKey, LogView } from "./model";
+import type { Mark } from "./trap";
 
 export type CellState = "typing" | "running" | "done";
 export type CellLang = "python" | "shell" | "file" | "tool";
@@ -270,13 +271,15 @@ export function chartUrl(vm: BatchVm, key: EventKey, name: string): string | nul
 
 // ── drawing ──────────────────────────────────────────────────────────────────
 
-/** What marks a step in code, as the backend labels it (deep_research/analysis.py _RULES). */
+/** What marks a step in code, as the backend labels it (deep_research/analysis.py _RULES). A trap's own step is not
+ *  listed here: its pattern comes with the batch (`config.trap_info`, see trap.ts). `deduplicate` stays for batches
+ *  saved before that. */
 export const LABEL_PATTERNS: Record<string, RegExp> = {
   load: /read_csv/,
   inspect: /\.describe\(|\.info\(|\.head\(|value_counts|\.isnull\(|\.isna\(|\.shape\b/,
   deduplicate: /drop_duplicates|\.duplicated\(/,
   clean: /fillna|dropna|replace\(\s*0|\.median\(\)/,
-  split: /train_test_split|KFold|StratifiedKFold|\.sample\(\s*frac/,
+  split: /train_test_split|KFold|StratifiedKFold|ShuffleSplit|\.sample\(\s*frac/,
   preprocess: /StandardScaler|MinMaxScaler|fit_transform|SimpleImputer/,
   train: /\.fit\(/,
   evaluate: /accuracy_score|\.score\(|classification_report|confusion_matrix|cross_val_score/,
@@ -289,7 +292,7 @@ export interface CellOpts {
   /** Resolve a saved chart's file name to a URL (null: do not draw it). */
   image?: (name: string) => string | null;
   /** Lines matching this are highlighted (the step under test). */
-  mark?: RegExp | null;
+  mark?: Mark | null;
   /** Tile size: only the tail of long code and output. */
   compact?: boolean;
 }

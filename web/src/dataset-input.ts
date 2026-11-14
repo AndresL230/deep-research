@@ -9,6 +9,7 @@ import "./dataset-input.css";
 import { attr, esc, fmtBytes } from "./ui";
 import { askIcon, askSpinner } from "./ask-icons";
 import { MAX_DATASET_BYTES, MAX_SCRIPT_BYTES, type BatchConfig, type DatasetInfo, type ScriptInfo } from "./api";
+import { DEFAULT_PLANTED } from "./batch/trap";
 
 export type UploadKind = "dataset" | "script";
 
@@ -46,11 +47,12 @@ export function inputsConfig(s: DatasetUi): Pick<BatchConfig, "dataset" | "targe
   return { dataset: d?.id ?? "pima", target: d && !d.builtin ? selectedTarget(s) : null, script: s.script?.id ?? null };
 }
 
-/** The panel's one-line summary of what the batch will run on. */
+/** The panel's one-line summary of what the batch will run on. The trap is not chosen in these rows, so the summary
+ *  names the default one; home.ts puts the chosen trap's words in its place. */
 export function inputsLabel(s: DatasetUi): string {
   const d = selectedDataset(s);
   const data = !d || d.builtin ? "Pima diabetes" : `${d.name}, predicting ${selectedTarget(s) ?? "?"}`;
-  return [data, "planted duplicate rows", s.script ? "starting from your script" : ""].filter(Boolean).join(" · ");
+  return [data, DEFAULT_PLANTED, s.script ? "starting from your script" : ""].filter(Boolean).join(" · ");
 }
 
 /** What a chosen or dropped file is, or why it cannot be uploaded. Checked before it is sent. */

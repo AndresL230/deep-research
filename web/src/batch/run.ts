@@ -13,13 +13,14 @@
 // `runSummaryView` is the strip above it: back, which run, status, score, cost, charts.
 
 import "./run.css";
-import { batchFileUrl, labPageUrl, type AgentEvent, type AgentTodo, type BatchConfig, type ForkChild, type ForkExperiment, type RunRecord, type ScopeCost } from "../api";
+import { batchFileUrl, labPageUrl, type AgentEvent, type AgentTodo, type BatchConfig, type ForkChild, type ForkExperiment, type RunRecord, type ScopeCost, type TrapInfo } from "../api";
 import type { AskActivityIcon, AskEvent } from "../ask-core";
 import { foldAskEvent, newTurn, type AskConvo, type AskTurn } from "../ask-stream";
 import { askIcon } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { ACT, type BatchVm, type EventKey } from "./model";
 import { duration, pct, pts, tokens, usd } from "./format";
+import { evidenceParts, trapOf } from "./trap";
 
 // ── text helpers ─────────────────────────────────────────────────────────────
 
@@ -284,6 +285,19 @@ export function chartName(path: string): string {
 const stat = (label: string, value: string, cls = "", title = ""): string =>
   `<div class="rn-stat${cls}"${title ? ` title="${attr(title)}"` : ""}><dt class="rn-stat-l">${esc(label)}</dt><dd class="rn-stat-v">${esc(value)}</dd></div>`;
 
+/**
+ * The trap's evidence number, with its sentence as the tooltip ("53% of test rows were also in training"). Left out
+ * when the batch's trap has no evidence number, or the run is scored and has none. A batch that does not describe its
+ * trap planted duplicate rows.
+ */
+function overlapStat(share: number | null | undefined, trap: TrapInfo | null, scored: boolean): string {
+  if (trap && !trap.evidence_text) return "";
+  if (share == null && scored) return "";
+  const ev = evidenceParts(share, trap, "", 1);
+  const title = trap ? (ev ? `${ev.share} ${ev.text}` : "") : "Share of its test rows that also appear in its training rows";
+  return stat("Overlap", pct(share), "", title);
+}
+
 /** The strip above the conversation: which run, its status and score, charts, back to the batch. */
 export function runSummaryView(vm: BatchVm, key: EventKey): string {
   const s = subject(vm, key);
@@ -323,7 +337,7 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
     stat("Reported", pct(s.score.reported_accuracy), "", "Test accuracy the agent wrote in report.json"),
     stat("True", pct(s.score.true_accuracy), "", "Accuracy of its predictions on the holdout set"),
     stat("Gap", pts(s.score.gap), gapTone, "Reported minus true"),
-    stat("Overlap", pct(s.score.overlap_share), "", "Share of its test rows that also appear in its training rows"),
+    overlapStat(s.score.overlap_share, trapOf(vm.case), scored),
     stat("Time", duration(s.durationS)),
     tin != null || tout != null ? stat("Tokens", `${tokens(tin)} in, ${tokens(tout)} out`, " rn-stat--wide") : "",
     money != null ? stat("Cost", usd(money)) : "",

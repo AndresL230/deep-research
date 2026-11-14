@@ -28,6 +28,7 @@ import { costBar, homeView } from "./batch/home";
 import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, type DatasetUi, type UploadKind } from "./dataset-input";
 import { wallView } from "./batch/wall";
 import { forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
+import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, runSummaryView, taskText } from "./batch/run";
 import { agentTimes, caseAt, eventsAt, replayBar, replayDuration, replaySchedule } from "./batch/replay";
 import { LABEL_PATTERNS, chartUrl, logOf, notebookCells, notebookView } from "./batch/notebook";
@@ -215,7 +216,7 @@ function runBody(vm: BatchVm, key: EventKey): string {
     const cells = log ? notebookCells(log) : [];
     const label = vm.case.split?.label;
     const body = cells.length
-      ? notebookView(cells, { image: (name) => chartUrl(vm, key, name), mark: label ? LABEL_PATTERNS[label] ?? null : null })
+      ? notebookView(cells, { image: (name) => chartUrl(vm, key, name), mark: trapMark(trapOf(vm.case), label) ?? (label ? LABEL_PATTERNS[label] ?? null : null) })
       : `<p class="pg-note">Nothing has run yet.</p>`;
     return `${summary}<div class="pg-nb" data-morph-key="nb:${attr(key)}">${body}</div>`;
   }
