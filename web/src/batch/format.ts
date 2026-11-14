@@ -7,6 +7,27 @@ const DASH = "-";
 export const pct = (x: number | null | undefined, digits = 1): string =>
   x == null || Number.isNaN(x) ? DASH : `${(x * 100).toFixed(digits)}%`;
 
+/** 0.992 -> "99%": a headline's whole percent. */
+export const wholePct = (x: number | null | undefined): string =>
+  x == null || Number.isNaN(x) ? DASH : `${Math.round(x * 100)}%`;
+
+/**
+ * Why a run failed, for people: no "[Errno 2]", and a file path in it cut to its file name, or dropped when it only
+ * repeats the file the sentence already names. "report.json missing or invalid: [Errno 2] No such file or directory:
+ * 'runs/r07/outputs/report.json'" -> "report.json missing or invalid: No such file or directory".
+ */
+export function cleanReason(reason: string | null | undefined): string {
+  let s = (reason ?? "").trim();
+  if (!s) return "";
+  s = s.replace(/\[Errno\s*-?\d+\]\s*/g, "");
+  s = s.replace(/:?\s*(['"])([^'"\s]*\/[^'"\s]*)\1/g, (_m, _q: string, path: string) => {
+    const name = path.split("/").filter(Boolean).at(-1) ?? "";
+    return s.includes(name) && s.indexOf(name) < s.indexOf(path) ? "" : `: ${name}`;
+  });
+  s = s.replace(/(?:^|\s)(?:\.{0,2}\/)?(?:[\w.-]+\/)+([\w.-]+)/g, (m, name: string) => `${m.startsWith(" ") ? " " : ""}${name}`);
+  return s.replace(/\s+/g, " ").replace(/\s*:\s*$/, "").trim();
+}
+
 /** A gap in accuracy as points: 0.1743 -> "+17.4 pts", -0.0036 -> "-0.4 pts". */
 export const pts = (x: number | null | undefined): string =>
   x == null || Number.isNaN(x) ? DASH : `${x >= 0 ? "+" : "-"}${Math.abs(x * 100).toFixed(1)} pts`;

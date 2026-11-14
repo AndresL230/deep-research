@@ -10,7 +10,7 @@ import type { AgentEvent, CaseFile, ForkExperiment, PendingForks, ProposedFix, R
 import {
   armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, diagnosisView, eventLine, fixSummaryText, fixTestedText, fixView,
   forkView, investigatorView, isProblemPhase, lineWindows,
-  numberLabel, phaseText, pickRuns, planCells, scoreStats, selfCheckText, shortArgs, sortedChildren, splitCounts, splitHeadline,
+  phaseText, pickRuns, planCells, scoreStats, selfCheckText, shortArgs, sortedChildren, splitCounts, splitHeadline,
   splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictSplit, verdictView,
 } from "../src/batch/lanes";
 
@@ -61,13 +61,13 @@ describe("helpers", () => {
   });
 
   it("splitHeadline says the finding in plain words, with a fallback for a label it does not know", () => {
-    expect(splitHeadline(demo.split!)).toEqual({ honest: "Honest runs removed duplicate rows before splitting.", inflated: "Inflated runs did not." });
+    expect(splitHeadline(demo.split!)).toEqual({ honest: "Honest runs removed duplicate rows before splitting into train and test.", inflated: "Inflated runs did not." });
     expect(splitCounts(demo.split!)).toBe("6 of 6 honest runs, 0 of 6 inflated");
     const some = splitHeadline({ label: "clean", honest_rate: 0.556, inflated_rate: 0.25 });
-    expect(some.honest).toBe("Most honest runs cleaned up missing values before splitting.");
+    expect(some.honest).toBe("Most honest runs cleaned up missing values before splitting into train and test.");
     expect(some.inflated).toBe("Most inflated runs did not.");
     expect(splitHeadline({ label: "preprocess", honest_rate: 0.3, inflated_rate: 1 }).inflated).toBe("Inflated runs did too.");
-    expect(splitHeadline({ label: "shuffle" as StepLabel, honest_rate: 1, inflated_rate: 0 }).honest).toBe("Honest runs did the shuffle step before splitting.");
+    expect(splitHeadline({ label: "shuffle" as StepLabel, honest_rate: 1, inflated_rate: 0 }).honest).toBe("Honest runs did the shuffle step before splitting into train and test.");
     expect(stepWords("shuffle").missing).toBe("No shuffle step here");
     expect(stepWords("deduplicate").missing).toBe("No duplicate removal here");
   });
@@ -138,11 +138,10 @@ describe("helpers", () => {
     expect(armSummaryText({ ...f.arms!.forced!, failed: 1 })).toContain("0 of 4 inflated, 1 failed");
   });
 
-  it("clip, shortArgs, numberLabel", () => {
+  it("clip, shortArgs", () => {
     expect(clip("a  b\n c", 10)).toBe("a b c");
     expect(clip("abcdefghij", 5)).toBe("abcd…");
     expect(shortArgs({ n_per_arm: 4, run: "r02" })).toBe('n_per_arm=4, run="r02"');
-    expect(numberLabel("control_inflated")).toBe("Control inflated");
   });
 
   it("eventLine summarizes each event kind", () => {
@@ -168,10 +167,11 @@ describe("splitView", () => {
   it("says what changed in one line, with the counts", () => {
     const html = splitView(withLogs());
     expect(html).toContain("What changed</h2>");
-    expect(html).toContain("Honest runs removed duplicate rows before splitting.");
+    expect(html).toContain("Honest runs removed duplicate rows before splitting into train and test.");
     expect(html).toContain("Inflated runs did not.");
-    expect(html).toContain("6 of 6 honest runs, 0 of 6 inflated did this before splitting");
-    expect(html).toContain("Simulated");
+    expect(html).toContain("6 of 6 honest runs, 0 of 6 inflated did this before splitting into train and test.");
+    // A simulated batch says so once, in the page header, not on each section.
+    expect(html).not.toContain("Simulated");
   });
 
   it("shows one honest and one inflated run side by side, each opening its run", () => {
@@ -287,7 +287,7 @@ describe("splitView", () => {
 
   it("says what the fork does next, escaped", () => {
     const html = splitView(withLogs());
-    expect(html).toContain("the fork copies run <b>r02</b> just before it splits the data and runs it both ways");
+    expect(html).toContain("the fork copies run <b>r02</b> just before splitting into train and test and runs it both ways");
     expect(html).toContain("Remove duplicate rows from data.csv before the split");
     const odd = splitView(vmOf({ split: { ...demo.split!, label: "<i>x" as StepLabel, intervention: "<b>bold</b>" } }));
     expect(odd).toContain("&lt;b&gt;bold&lt;/b&gt;");
@@ -365,7 +365,7 @@ describe("splitView on a real batch", () => {
 
   it("words a finding that is not all or nothing", () => {
     const html = splitView(real());
-    expect(html).toContain("Most honest runs removed duplicate rows before splitting.");
+    expect(html).toContain("Most honest runs removed duplicate rows before splitting into train and test.");
     expect(html).toContain("5 of 9 honest runs, 0 of 3 inflated");
     expect(html).not.toContain("Simulated");
   });
@@ -524,15 +524,20 @@ describe("verdictView", () => {
     expect(verdictView(vmOf({ verdict: null }))).toBe("");
   });
 
-  it("shows the sentence, one dot per child and the numbers", () => {
+  it("shows the sentence from the numbers, one dot per child, and no raw number grid or simulated note", () => {
     const html = verdictView(vmOf());
-    expect(html).toContain(demo.verdict!.sentence);
+    // The stored sentence says "caused" on 4 pairs: the displayed one says "suggests", with the score and the pairs.
+    expect(html).not.toContain(demo.verdict!.sentence);
+    expect(html).toContain("The fork suggests that not removing duplicate rows inflates the claim: 3 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 8 pairs.");
+    expect(html).not.toMatch(/caused/);
+    expect(html).toContain(">Open<");
     expect(count(html, "ln-dot ln-dot--inflated\" title")).toBe(3);
     expect(count(html, "ln-dot ln-dot--honest\" title")).toBe(5);
     expect(html).toContain("3 of 4 inflated");
     expect(html).toContain("0 of 4 inflated");
-    expect(html).toContain("Control inflated");
-    expect(html).toContain("Simulated batch");
+    expect(html).not.toContain("Control inflated");
+    expect(html).not.toContain("Control total");
+    expect(html).not.toContain("Simulated");
   });
 
   it("shows the confidence and the structured split numbers when the verdict has them", () => {
