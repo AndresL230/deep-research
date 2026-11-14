@@ -102,3 +102,15 @@ S=$(openssl rand -hex 32); printf %s "$S" | wrangler secret put GATEWAY_SECRET; 
 - WorkOS is on its Staging environment. For real users, switch to Production, add the same redirect URIs there,
   and update `WORKOS_CLIENT_ID`.
 - Batches that sit in `ready` or `awaiting_approval` keep their hold until they finish or are stopped.
+
+## Deploying from GitHub
+
+Pushes to `main` deploy on their own once this is set up:
+
+- **Cloudflare (web app + gateway):** Workers Builds, connected to this repository in the dashboard (Workers &
+  Pages → orro → Settings → Builds). Settings: branch `main`, root directory `gateway`, build command
+  `npm ci && cd ../web && npm ci && npm run build`, deploy command `npx wrangler deploy`. D1 migrations are not run
+  by the build: apply new ones with `npm run migrate` in `gateway/`.
+- **Fly.io (Python server):** `.github/workflows/fly-deploy.yml`, when files the server runs change. It needs the
+  repository secret `FLY_API_TOKEN` (`fly tokens create deploy -a orro-research | gh secret set FLY_API_TOKEN`),
+  which only a repository admin can add.

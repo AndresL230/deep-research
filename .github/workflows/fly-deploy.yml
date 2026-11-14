@@ -1,0 +1,47 @@
+# Deploy the Python server to Fly.io (app orro-research) when main changes something it runs.
+# The web app and the gateway deploy separately, through Cloudflare Workers Builds (docs/cloudflare-gateway.md).
+#
+# Needs the repository secret FLY_API_TOKEN, a deploy token for orro-research only:
+#   fly tokens create deploy -a orro-research | gh secret set FLY_API_TOKEN -R AndresL230/deep-research
+# Without it the job skips with a notice instead of failing.
+name: Deploy to Fly.io
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deep_research/**"
+      - "lab_page/**"
+      - "sim/**"
+      - "skills/**"
+      - "data/**"
+      - "fixtures/**"
+      - "samples/**"
+      - "prices.json"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "fly.toml"
+      - "scripts/fly-start.sh"
+  workflow_dispatch:
+
+concurrency:
+  group: fly-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@1.5
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::notice::FLY_API_TOKEN is not set, so nothing was deployed. See the comment at the top of this file."
+            exit 0
+          fi
+          flyctl deploy --remote-only -a orro-research
