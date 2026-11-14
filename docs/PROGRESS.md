@@ -23,7 +23,7 @@ What went wrong on the live run, and is in the record:
   `superseded_verdicts`.
 - The investigator chose 4 per arm, so its fork cannot reach `supported`.
 
-Final checks: 387 Python, 138 sim and 647 web tests; `tsc` clean; build OK; 0 VMs left running.
+Final checks: 387 Python, 138 sim and 646 web tests; `tsc` clean; build OK; 0 VMs left running.
 
 Plan: `docs/MASTER_PLAN.md`. Branch: `upgrade/investigator`, cut from `origin/main` at `14f1d0a`.
 All times are US Eastern. Deadline: Sunday Nov 15, 8:00 am.
