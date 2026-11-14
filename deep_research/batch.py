@@ -26,7 +26,7 @@ from .case_file import CaseFile
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
 from .events import EventLog, current_step, events_from_update, read_events
-from .forks import cut_history, forced_turn, intervention_for
+from .forks import arm_plan, cut_history, forced_turn, intervention_for
 from .scoring import score_run
 from .task import TaskFiles, build_task, task_prompt
 
@@ -292,10 +292,15 @@ class Batch:
         self.case.set_phase("ready")
 
     # ---- phase 3: the fork experiment ----
+    def arm_plan(self) -> dict[str, dict | None]:
+        """The arms this batch's fork experiment would run, from its split and its config (forks.arm_plan)."""
+        split = self.case.data.get("split") or {}
+        return arm_plan(split.get("label") or "", self.cfg.placebo_arm, self.cfg.show_arm)
+
     def estimate_forks_usd(self, n_per_arm: int) -> float | None:
         avg = self.tracker.average_run_usd()
         # Forks start partway through a run, so this overestimates a little.
-        return None if avg is None else avg * 2 * n_per_arm
+        return None if avg is None else avg * max(2, len(self.arm_plan())) * n_per_arm
 
     def fork_blocker(self) -> str | None:
         """Why the fork experiment cannot run on this batch, or None when it can."""
@@ -313,6 +318,7 @@ class Batch:
             return f"error: {why_not}"
         split = self.case.data["split"]
         iv = intervention_for(split["label"])
+        plan = self.arm_plan()
         n_per_arm = max(1, min(int(n_per_arm), 8))
         try:
             self.tracker.check(self.estimate_forks_usd(n_per_arm), f"{2 * n_per_arm} fork runs")
@@ -332,6 +338,7 @@ class Batch:
             self.case.update_fork(
                 fork_id, status="rebuilding", source_run=src, fork_at=n_prefix, label=split["label"],
                 intervention=iv["description"], n_per_arm=n_per_arm, children={},
+                arm_steps={a: (step or {}).get("description") for a, step in plan.items()},
             )
             base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base")
             self.vms[f"{fork_id}-base"] = base
@@ -376,14 +383,15 @@ class Batch:
                     self._set_child(fork_id, cid, arm=arm, status="running", lab_url=url, how=how)
 
                     history = list(prefix_msgs)
-                    if arm == "forced":
+                    step = plan[arm]
+                    if step is not None:
                         backend = DaytonaSandbox(sandbox=vm)
-                        res = await asyncio.to_thread(backend.execute, iv["command"])
+                        res = await asyncio.to_thread(backend.execute, step["command"])
                         if res.exit_code not in (0, None):
-                            # Nothing was forced in this copy, so it must not be scored as a forced result.
-                            raise RuntimeError(f"forced step failed with exit code {res.exit_code}: {res.output[:200]}")
-                        history += forced_turn(iv["command"], res.output)
-                        log.write({"type": "forced", "command": iv["command"], "output": res.output[:2000]})
+                            # Nothing was forced here, so this copy must not be scored as a result of its arm.
+                            raise RuntimeError(f"the {arm} step failed with exit code {res.exit_code}: {res.output[:200]}")
+                        history += forced_turn(step["command"], res.output)
+                        log.write({"type": "forced", "command": step["command"], "output": res.output[:2000]})
 
                     agent = build_analyst(DaytonaSandbox(sandbox=vm), self.cfg.analyst_model)
 
@@ -416,21 +424,23 @@ class Batch:
         try:
             await asyncio.gather(*(
                 asyncio.create_task(child(arm, i), context=contextvars.Context())
-                for arm in ("control", "forced") for i in range(n_per_arm)
+                for arm in plan for i in range(n_per_arm)
             ))
         finally:
             await self._release(f"{fork_id}-base", base_scope)
 
-        arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in ("control", "forced")}
+        arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in plan}
         self.case.update_fork(fork_id, status="done", arms=arms)
         self.case.set_phase("forked")
-        c, f = arms["control"], arms["forced"]
-        return (
+        lines = [
             f"Fork {fork_id} from run {src} before action {n_prefix} ({split['label']}). "
-            f"Control: {c['inflated']} of {c['scored']} inflated. "
-            f"Forced '{iv['description']}': {f['inflated']} of {f['scored']} inflated. "
-            f"Failed runs are not counted: control {c['failed']}, forced {f['failed']}."
-        )
+            f"Every arm starts from the same moment of the same run. Failed copies are not counted."
+        ]
+        for arm, step in plan.items():
+            a = arms[arm]
+            what = "continues unchanged" if step is None else step["description"]
+            lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
+        return " ".join(lines)
 
     def _set_child(self, fork_id: str, cid: str, **fields: Any) -> None:
         children = dict(self.case.data["forks"][fork_id].get("children", {}))
@@ -500,7 +510,7 @@ class Batch:
             pass
         est = self.estimate_forks_usd(n)
         self.case.update_fork(
-            "pending", status="awaiting_approval", n_per_arm=n, vm_count=2 * n + 1,
+            "pending", status="awaiting_approval", n_per_arm=n, vm_count=max(2, len(self.arm_plan())) * n + 1,
             estimate_usd=None if est is None else round(est, 2),
         )
         self.case.set_phase("awaiting_approval")

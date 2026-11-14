@@ -185,7 +185,10 @@ def defaults():
 def estimate(cfg: BatchConfig):
     avg = _avg_run_usd()
     runs = estimate_batch_usd(cfg.n_runs, avg)
-    forks = None if avg is None else avg * 2 * cfg.forks_per_choice
+    # No split yet, so this counts every arm the config allows. The `show` arm only exists for a step that
+    # has a weaker version defined, so this is an upper bound (forks.arm_plan).
+    n_arms = 2 + cfg.placebo_arm + cfg.show_arm
+    forks = None if avg is None else avg * n_arms * cfg.forks_per_choice
     return {
         "avg_run_usd": avg,
         "runs_usd": runs,

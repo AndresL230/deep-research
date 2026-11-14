@@ -105,7 +105,10 @@ export interface SplitFinding {
   intervention: string | null;
 }
 
-export type ForkArm = "control" | "forced";
+/** The experiment's arms (deep_research/forks.py `arm_plan`), in the order they are run.
+ *  `placebo` runs a harmless command so `forced` is not the only arm with an extra tool call in its history;
+ *  `show` is told what `forced` fixes and left to decide. Both are optional per batch. */
+export type ForkArm = "control" | "placebo" | "show" | "forced";
 
 export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   arm: ForkArm;
@@ -133,12 +136,16 @@ export interface ForkExperiment {
   source_run: string;
   fork_at: number;
   label: StepLabel;
+  /** What the `forced` arm runs first. */
   intervention: string;
   n_per_arm: number;
-  /** Keyed `control-1`, `forced-1`, ... */
+  /** Each arm in order, mapped to the step run before it continues (null for `control`).
+   *  Absent on batches saved before the extra arms existed: those ran `control` and `forced` only. */
+  arm_steps?: Partial<Record<ForkArm, string | null>>;
+  /** Keyed `control-1`, `placebo-1`, `show-1`, `forced-1`, ... */
   children: Record<string, ForkChild>;
   /** Set when status is "done". */
-  arms?: Record<ForkArm, ArmSummary>;
+  arms?: Partial<Record<ForkArm, ArmSummary>>;
 }
 
 /** forks["pending"]: the investigator asked for forks and is waiting for `postDecision`. */

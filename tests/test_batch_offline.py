@@ -109,9 +109,10 @@ async def test_the_fork_experiment_changes_one_step_and_keeps_a_control(local_vm
     assert fork["arms"]["control"]["inflated"] == 1 and fork["arms"]["forced"]["inflated"] == 0
     assert "Control: 1 of 1 inflated" in summary and "0 of 1 inflated" in summary
 
-    # The base VM was rebuilt by replaying the source run's actions before the fork point, then forked twice.
+    # The base VM was rebuilt by replaying the source run's actions before the fork point, then forked once per arm.
+    arms = list(b.arm_plan())
     assert "t-f1-base" in local_vms["created"]
-    assert sorted(local_vms["forked"]) == ["t-f1-control-1", "t-f1-forced-1"]
+    assert sorted(local_vms["forked"]) == sorted(f"t-f1-{a}-1" for a in arms)
     vms_root = local_vms["root"]
     data = lambda vm: pd.read_csv(vms_root / vm / VM_WORKSPACE.lstrip("/") / "data.csv")  # noqa: E731
     assert data("t-f1-control-1").duplicated().sum() > 0   # untouched
@@ -124,10 +125,10 @@ async def test_the_fork_experiment_changes_one_step_and_keeps_a_control(local_vm
     control_events = read_events(b.forks_dir / "f1" / "control-1" / "events.jsonl")
     assert control_events[0]["type"] == "tool_call"
 
-    assert {"fork:f1:base", "fork:f1:control-1", "fork:f1:forced-1"} <= set(case["costs"]["scopes"])
+    assert {"fork:f1:base", *(f"fork:f1:{a}-1" for a in arms)} <= set(case["costs"]["scopes"])
     assert "t-f1-base" in local_vms["stopped"]
     await b.close()
-    assert {"t-f1-control-1", "t-f1-forced-1"} <= set(local_vms["stopped"])
+    assert {f"t-f1-{a}-1" for a in arms} <= set(local_vms["stopped"])
 
 
 async def test_fork_children_are_rebuilt_by_replay_when_the_vm_cannot_be_forked(local_vms, tmp_path, monkeypatch):
@@ -152,7 +153,7 @@ async def test_the_reason_a_vm_could_not_be_forked_is_logged(local_vms, tmp_path
     b = await _run_batch(tmp_path)
     with caplog.at_level("WARNING"):
         await b.run_forks(1)
-    assert caplog.text.count("forking is not available on this plan") == 2  # once per child
+    assert caplog.text.count("forking is not available on this plan") == len(b.arm_plan())  # once per child
     assert "replay" in caplog.text
     await b.close()
 
@@ -241,4 +242,43 @@ async def test_a_base_vm_that_cannot_be_rebuilt_is_stopped_and_its_time_is_recor
     assert "t-f1-base" in local_vms["stopped"] and "f1-base" not in b.vms
     assert "fork:f1:base" in case["costs"]["scopes"]
     assert case["phase"] == "ready" and case["forks"] == {}
+    await b.close()
+
+
+async def test_every_arm_runs_its_own_step_and_only_the_forced_arm_changes_the_data(local_vms, tmp_path):
+    """Four copies of one moment, differing only in what is run before they continue."""
+    b = await _run_batch(tmp_path)
+    await b.run_forks(1)
+    fork = _case(b)["forks"]["f1"]
+    assert list(fork["arm_steps"]) == ["control", "placebo", "show", "forced"]
+    assert fork["arm_steps"]["control"] is None
+    assert set(fork["arms"]) == set(fork["arm_steps"])
+
+    vms_root = local_vms["root"]
+    data = lambda vm: pd.read_csv(vms_root / vm / VM_WORKSPACE.lstrip("/") / "data.csv")  # noqa: E731
+    # Only the forced arm touches the data. The other three model the same table the source run had.
+    for arm in ("control", "placebo", "show"):
+        assert data(f"t-f1-{arm}-1").duplicated().sum() > 0, arm
+    assert data("t-f1-forced-1").duplicated().sum() == 0
+
+    # Every arm but the control opens with its own step, so the forced arm is not the only one whose history
+    # carries an extra tool call. That is what the placebo arm is for.
+    first = {a: read_events(b.forks_dir / "f1" / f"{a}-1" / "events.jsonl")[0] for a in fork["arm_steps"]}
+    assert first["control"]["type"] == "tool_call"
+    for arm in ("placebo", "show", "forced"):
+        assert first[arm]["type"] == "forced", arm
+    assert "__version__" in first["placebo"]["command"]
+    assert "duplicated" in first["show"]["command"] and "drop_duplicates" in first["forced"]["command"]
+    # The show arm is told what the forced arm fixes and left to decide; nothing on disk changed for it.
+    assert "exact copy of another row" in first["show"]["output"]
+    assert "pandas" in first["placebo"]["output"] and "duplicate" not in first["placebo"]["output"]
+    await b.close()
+
+
+async def test_the_extra_arms_can_be_turned_off(local_vms, tmp_path):
+    b = await _run_batch(tmp_path, placebo_arm=False, show_arm=False)
+    await b.run_forks(1)
+    fork = _case(b)["forks"]["f1"]
+    assert list(fork["arm_steps"]) == ["control", "forced"]
+    assert set(fork["children"]) == {"control-1", "forced-1"}
     await b.close()

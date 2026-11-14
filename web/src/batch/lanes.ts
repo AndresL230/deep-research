@@ -84,6 +84,21 @@ export function eventLine(ev: AgentEvent): { kind: string; text: string } {
 }
 
 /** Child ids in arm order and by number: control-1, control-2, ..., forced-1, ... */
+/** What each arm is called on screen. */
+const ARM_TITLE: Record<ForkArm, string> = { control: "Control", placebo: "Placebo", show: "Shown", forced: "Forced" };
+
+/** The arms this experiment ran, in order. Batches saved before the extra arms existed ran these two. */
+export function armNames(f: Pick<ForkExperiment, "arm_steps">): ForkArm[] {
+  const named = Object.keys(f.arm_steps ?? {}) as ForkArm[];
+  return named.length ? named : ["control", "forced"];
+}
+
+/** The step an arm runs before it continues, in words, or null when it continues unchanged. */
+export function armStep(f: Pick<ForkExperiment, "arm_steps" | "intervention">, arm: ForkArm): string | null {
+  if (f.arm_steps) return f.arm_steps[arm] ?? null;
+  return arm === "control" ? null : f.intervention;
+}
+
 export function sortedChildren(children: Record<string, ForkChild>, arm: ForkArm): [string, ForkChild][] {
   const num = (id: string): number => Number(/(\d+)$/.exec(id)?.[1] ?? 0);
   return Object.entries(children).filter(([, c]) => c.arm === arm).sort((a, b) => num(a[0]) - num(b[0]));
@@ -566,6 +581,12 @@ export function forkView(vm: BatchVm): string {
     `</section>`;
 }
 
+/** How many arms the pending experiment would run, from the VMs it asks for (one base, then n per arm). */
+export function armCount(p: Pick<PendingForks, "n_per_arm" | "vm_count">): number {
+  if (!(p.n_per_arm > 0) || !(p.vm_count > 1)) return 2;
+  return Math.max(2, Math.round((p.vm_count - 1) / p.n_per_arm));
+}
+
 function approvalCard(p: PendingForks, vm: BatchVm): string {
   const src = vm.case.split?.fork_run_id;
   const est = p.estimate_usd != null ? usd(p.estimate_usd) : "unknown, prices missing";
@@ -575,7 +596,7 @@ function approvalCard(p: PendingForks, vm: BatchVm): string {
     `${vm.busy === act ? askSpinner(12) : ""}${esc(label)}</button>`;
   return `<div class="ln-card ln-approval" data-morph-key="pending" role="group" aria-label="Approve the fork">` +
     `<p class="ln-approval-t">The investigator wants to fork run ${esc(src ?? "?")} before its split: ` +
-    `${p.n_per_arm} control and ${p.n_per_arm} forced runs, ${p.vm_count} VMs.</p>` +
+    `${p.n_per_arm} ${p.n_per_arm === 1 ? "run" : "runs"} in each of ${armCount(p)} arms, ${p.vm_count} VMs.</p>` +
     `<p class="ln-approval-est">Estimated cost <b>${esc(est)}</b></p>` +
     `<div class="ln-actions">${btn(ACT.approve, "Approve", true)}${btn(ACT.decline, "Decline", false)}` +
     (vm.live ? "" : `<span class="ln-muted">Approval happens on live batches.</span>`) + `</div>` +
@@ -598,14 +619,15 @@ function experiment(f: ForkExperiment, threshold: number): string {
   const arm = (a: ForkArm): string => {
     const kids = sortedChildren(f.children ?? {}, a);
     const summary = f.arms?.[a];
-    const sub = a === "control" ? "Continues unchanged" : `Runs first: ${f.intervention}`;
+    const step = armStep(f, a);
+    const sub = step === null ? "Continues unchanged" : `Runs first: ${step}`;
     const started = f.status !== "done" && kids.length < f.n_per_arm ? `<span class="ln-muted">${kids.length} of ${f.n_per_arm} started</span>` : "";
     const stats = armStats(f, a);
     // The arm's bar wears the color of what its runs turned out to be: inflated when the mean gap is over the line.
     const bars = stats.reported != null || stats.true != null
       ? scoreBars(stats, stats.gap != null && stats.gap >= threshold ? "inflated" : "honest") : "";
     return `<div class="ln-arm ln-arm--${a}" data-morph-key="arm-${a}">` +
-      `<div class="ln-arm-h"><span class="ln-arm-t">${a === "control" ? "Control" : "Forced"}</span>${started}</div>` +
+      `<div class="ln-arm-h"><span class="ln-arm-t">${esc(ARM_TITLE[a] ?? a)}</span>${started}</div>` +
       `<p class="ln-arm-sub">${esc(sub)}</p>` +
       bars +
       `<div class="ln-kids" data-morph-list>${kids.map(([id, k]) => childTile(f.id, id, k)).join("")}</div>` +
@@ -616,7 +638,7 @@ function experiment(f: ForkExperiment, threshold: number): string {
     `<div class="ln-exp-h"><span class="ln-exp-id">Fork ${esc(f.id)}</span>${statusPill}</div>` +
     `<p class="ln-exp-t">Forked run <b>${esc(f.source_run)}</b> after action ${f.fork_at}, just before its split. Step under test: <b class="ln-lit-word">${esc(f.label)}</b>.</p>` +
     (f.status === "rebuilding" ? `<p class="ln-sub">Replaying the run's first ${f.fork_at} actions on a fresh VM.</p>` : "") +
-    `<div class="ln-arms">${arm("control")}${arm("forced")}</div>` +
+    `<div class="ln-arms" data-arms="${armNames(f).length}">${armNames(f).map(arm).join("")}</div>` +
     `</div>`;
 }
 
@@ -636,13 +658,14 @@ function childTile(forkId: string, id: string, k: ForkChild): string {
 interface ArmDots { statuses: string[]; inflated: number; total: number }
 
 /** The dots per arm: from the verdict's fork children when there is one, else from the verdict's numbers. */
-export function verdictArms(c: CaseFile): Record<ForkArm, ArmDots> | null {
+export function verdictArms(c: CaseFile): Partial<Record<ForkArm, ArmDots>> | null {
   const v = c.verdict;
   if (!v) return null;
   const exps = forkExperiments(c);
   const f = [...exps].reverse().find((e) => e.label === v.step_label && e.status === "done") ?? exps[exps.length - 1];
-  const out = {} as Record<ForkArm, ArmDots>;
-  for (const arm of ["control", "forced"] as const) {
+  const out: Partial<Record<ForkArm, ArmDots>> = {};
+  // Every arm the experiment ran. With no experiment to read, the verdict's own numbers cover control and forced.
+  for (const arm of f ? armNames(f) : (["control", "forced"] as ForkArm[])) {
     const kids = f ? sortedChildren(f.children ?? {}, arm) : [];
     if (kids.length) {
       const statuses = kids.map(([, k]) => k.status);
@@ -651,6 +674,7 @@ export function verdictArms(c: CaseFile): Record<ForkArm, ArmDots> | null {
     } else {
       const inflated = v.numbers[`${arm}_inflated`] ?? 0;
       const total = v.numbers[`${arm}_total`] ?? 0;
+      if (!total) continue;  // an arm the verdict does not report
       out[arm] = { statuses: Array.from({ length: total }, (_, i) => (i < inflated ? "inflated" : "honest")), inflated, total };
     }
   }
@@ -667,7 +691,7 @@ export function verdictView(vm: BatchVm): string {
     const a = arms?.[arm];
     if (!a) return "";
     const dots = a.statuses.map((s, i) => `<i class="ln-dot ln-dot--${toneOf(s)}" title="${attr(`${arm}-${i + 1}: ${s}`)}"></i>`).join("");
-    return `<div class="ln-vrow" data-morph-key="v-${arm}"><span class="ln-vrow-t">${arm === "control" ? "Control" : "Forced"}</span>` +
+    return `<div class="ln-vrow" data-morph-key="v-${arm}"><span class="ln-vrow-t">${esc(ARM_TITLE[arm] ?? arm)}</span>` +
       `<span class="ln-dots" role="img" aria-label="${attr(`${a.inflated} of ${a.total} inflated`)}">${dots}</span>` +
       `<span class="ln-vrow-n">${a.inflated} of ${a.total} inflated</span></div>`;
   };
@@ -675,7 +699,7 @@ export function verdictView(vm: BatchVm): string {
   return `<section class="ln-sec ln-verdict" data-morph-key="ln-verdict" aria-label="Verdict">` +
     head("Verdict", c) +
     `<p class="ln-sentence">${esc(v.sentence)}</p>` +
-    `<div class="ln-vrows">${row("control")}${row("forced")}</div>` +
+    `<div class="ln-vrows">${(Object.keys(arms ?? {}) as ForkArm[]).map(row).join("")}</div>` +
     `<div class="ln-legend" aria-hidden="true"><span><i class="ln-dot ln-dot--honest"></i>honest</span><span><i class="ln-dot ln-dot--inflated"></i>inflated</span><span><i class="ln-dot ln-dot--failed"></i>failed</span></div>` +
     (nums.length ? `<dl class="ln-stats">${nums.map(([k, n]) => `<div class="ln-stat"><dt>${esc(numberLabel(k))}</dt><dd>${esc(numberValue(n))}</dd></div>`).join("")}</dl>` : "") +
     (isSimulated(c) ? `<p class="ln-note ln-note--sim">Simulated batch: the agents' choices were scripted to show the method. These are not real agent runs.</p>` : "") +

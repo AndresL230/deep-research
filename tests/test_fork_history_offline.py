@@ -132,7 +132,8 @@ async def test_a_control_copy_replays_exactly_what_the_source_run_sent_at_the_fo
 async def test_a_forced_copy_appends_the_forced_step_and_changes_nothing_before_it(tmp_path, api):
     source, children = await _source_run_and_fork(tmp_path, api)
     at_fork = _prefix(source[1])
-    forced = _prefix(next(r for r in children if "forced-" in json.dumps(r["messages"])))
+    # Every arm but the control appends a step, so the forced copy is the one that ran the real fix.
+    forced = _prefix(next(r for r in children if "drop_duplicates" in json.dumps(r["messages"])))
     n = len(at_fork["messages"])
     assert forced["system"] == at_fork["system"] and forced["tools"] == at_fork["tools"]
     assert forced["messages"][:n] == at_fork["messages"]

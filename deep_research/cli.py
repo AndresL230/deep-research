@@ -89,9 +89,11 @@ async def investigate(batch_id: str, auto_approve: bool) -> None:
         await b.investigate()
         while b.case.data.get("phase") == "awaiting_approval":
             pending = b.case.data["forks"].get("pending", {})
+            arms = list(b.arm_plan()) or ["control", "forced"]
             question = (
-                f"The investigator asks for a fork experiment: {pending.get('n_per_arm')} runs per arm, "
-                f"{pending.get('vm_count')} VMs, about ${pending.get('estimate_usd')}. Approve? [y/N] "
+                f"The investigator asks for a fork experiment: {pending.get('n_per_arm')} runs in each of "
+                f"{len(arms)} arms ({', '.join(arms)}), {pending.get('vm_count')} VMs, "
+                f"about ${pending.get('estimate_usd')}. Approve? [y/N] "
             )
             if not auto_approve:
                 approve = input(question).strip().lower() in ("y", "yes")

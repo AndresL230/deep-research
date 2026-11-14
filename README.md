@@ -13,7 +13,7 @@ HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amaz
 | Orchestrator | Plain Python: VMs, runs, scoring, split finding, fork experiment, costs | `batch.py` |
 | Scorer | Reported accuracy vs true holdout accuracy, plus the share of test rows also in training | `scoring.py` |
 | Split finder | Labels each action, finds the label honest runs do before the split and inflated runs skip | `analysis.py` |
-| Fork experiment | Rebuild the run just before its split, fork the VM, continue N copies unchanged (control) and N with the step forced | `batch.py`, `forks.py` |
+| Fork experiment | Rebuild the run just before its split, fork the VM, then run N copies in each arm: `control` unchanged, `forced` with the step done for it, and by default `placebo` (a harmless command, so `forced` is not the only arm with an extra tool call in its history) and `show` (told what `forced` fixes, left to decide) | `batch.py`, `forks.py` |
 | Investigator | Deepagent with `step-tagger` and `hypothesis` subagents, the `method-errors` skill, and an approval gate on `request_forks` | `agents/investigator.py` |
 | Case file | One JSON file per batch with everything the investigator knows. It is also the UI's data source | `case_file.py` |
 | Costs | Tokens from every model response, VM time, budget guard | `costs.py`, `prices.json` |
@@ -204,6 +204,23 @@ on the hidden holdout, and whether agents working from it catch the planted dupl
 The VMs have pandas, scikit-learn and matplotlib only. A script that imports anything else (PyTorch, for example)
 is accepted with a warning; the agents may fail on it or rewrite that part. Saved weights (`.pth`) are not
 accepted: a finished model has no steps to compare or fork.
+
+## The arms of the fork experiment
+
+Every arm starts from the same moment of the same run and differs only in what is run before it continues
+(`forks.py`, `arm_plan`):
+
+| Arm | Runs first | What it answers |
+| --- | --- | --- |
+| `control` | nothing | How often this moment inflates on its own |
+| `placebo` | a harmless command | Whether the forced arm's result comes from the step or from being interrupted with one more tool call |
+| `show` | the problem, reported but not fixed | Whether the run simply never noticed, or noticed and split the data anyway |
+| `forced` | the step itself | What doing the step is worth |
+
+`placebo` and `show` are on by default and each costs another `forks_per_choice` VMs; turn them off with
+`placebo_arm` and `show_arm`. `show` exists only for a step with a weaker version defined, so a step without one
+runs three arms. Only `deduplicate` has an intervention today: a batch that splits on any other step reports the
+finding and the fork experiment refuses with its reason.
 
 ## Next
 

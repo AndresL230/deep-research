@@ -36,7 +36,7 @@ describe("the demo case file matches the types", () => {
     const f = demo.forks.f1;
     expect(isPendingForks(f)).toBe(false);
     const fork = f as ForkExperiment;
-    expect(fork.arms?.control.scored).toBe(4);
+    expect(fork.arms?.control?.scored).toBe(4);
     for (const c of Object.values(fork.children)) expect(["control", "forced"]).toContain(c.arm);
     expect(demo.verdict?.step_label).toBe("deduplicate");
   });

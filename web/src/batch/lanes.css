@@ -136,9 +136,11 @@ button.ln-col-h:focus-visible { outline:2px solid var(--accent); outline-offset:
 .ln-exp-id { font-size:13px; font-weight:600; }
 .ln-exp-t { margin:0; font-size:12.5px; color:var(--fg-70); }
 .ln-exp-t b { color:var(--fg); font-weight:600; }
-.ln-arms { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+.ln-arms { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:10px; }
 .ln-arm { display:flex; flex-direction:column; gap:8px; min-width:0; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
 .ln-arm--forced { border-color:color-mix(in srgb, var(--accent) 35%, var(--border)); }
+/* The two arms between control and forced: present, but not the ones the verdict rests on. */
+.ln-arm--placebo, .ln-arm--show { border-style:dashed; }
 .ln-arm-h { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
 .ln-arm-t { font-size:12.5px; font-weight:600; }
 .ln-arm-sub { margin:0; font-size:12px; color:var(--fg-55); overflow-wrap:anywhere; }
@@ -154,7 +156,7 @@ button.ln-col-h:focus-visible { outline:2px solid var(--accent); outline-offset:
 /* ── 3. the verdict ── */
 .ln-sentence { margin:0; font-size:18px; line-height:1.4; font-weight:500; letter-spacing:-0.01em; text-wrap:pretty; }
 .ln-vrows { display:flex; flex-direction:column; gap:8px; }
-.ln-vrow { display:grid; grid-template-columns:64px auto 1fr; align-items:center; gap:12px; }
+.ln-vrow { display:grid; grid-template-columns:72px auto 1fr; align-items:center; gap:12px; }
 .ln-vrow-t { font-size:12.5px; font-weight:600; }
 .ln-vrow-n { font-size:12.5px; color:var(--fg-70); font-variant-numeric:tabular-nums; }
 .ln-dots { display:flex; flex-wrap:wrap; gap:5px; }

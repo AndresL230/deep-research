@@ -77,9 +77,15 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   `fork_at`, examples, `intervention`), or null.
 - `hypotheses`: the investigator's, in order.
 - `forks`: by id (`f1`...): `status` (`rebuilding`, `running`, `done`), `source_run`, `fork_at`, `label`,
-  `intervention`, `n_per_arm`, `children` (each with `arm`, `status`, scores, `how`), and `arms` summaries when
-  done. While the investigator waits for approval there is also `forks.pending` with `n_per_arm`, `vm_count` and
-  `estimate_usd`.
+  `intervention`, `n_per_arm`, `arm_steps`, `children` (each with `arm`, `status`, scores, `how`), and `arms`
+  summaries when done. While the investigator waits for approval there is also `forks.pending` with `n_per_arm`,
+  `vm_count` and `estimate_usd`.
+
+  `arm_steps` maps each arm, in the order it runs, to the step forced on it before it continues (null for
+  `control`). `control` and `forced` are always there. `placebo` (`config.placebo_arm`) runs a harmless command so
+  `forced` is not the only arm whose history carries an extra tool call, and `show` (`config.show_arm`) tells the
+  agent what `forced` fixes and leaves it to decide. A batch saved before these existed has no `arm_steps` and ran
+  `control` and `forced` only. `vm_count` is one base VM plus `n_per_arm` per arm.
 - `verdict`: `{sentence, step_label, numbers}` or null.
 - `costs`: `budget_usd`, `spent_usd` (null when a price is unknown), `prices_missing`, and `scopes`
   (`run:r01`, `fork:f1:base`, `fork:f1:control-1`, `investigator`), each with input, output, cache read and

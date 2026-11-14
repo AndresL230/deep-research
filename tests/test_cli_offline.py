@@ -81,8 +81,9 @@ def test_reopening_a_batch_keeps_its_spend_so_the_budget_guard_still_works(tmp_p
     again = Batch(first.cfg, batch_id="t", root=tmp_path)
     assert again.tracker.total_usd() == pytest.approx(spent, abs=1e-3)
     assert again.tracker.average_run_usd() == pytest.approx(spent / 2, abs=1e-3)
-    # The fork estimate comes from the saved runs, and the guard refuses what the budget cannot cover.
-    assert again.estimate_forks_usd(2) == pytest.approx(spent * 2, abs=1e-2)
+    # The fork estimate comes from the saved runs, one average run per copy, and the guard refuses what the
+    # budget cannot cover. Two runs per arm, over however many arms the experiment would have.
+    assert again.estimate_forks_usd(2) == pytest.approx(spent / 2 * len(again.arm_plan()) * 2, abs=1e-2)
     with pytest.raises(batch_mod.OverBudget):
         again.tracker.check(again.estimate_forks_usd(2), "4 fork runs")
 
@@ -174,8 +175,8 @@ async def test_cli_investigate_asks_a_person_without_auto_approve(offline, tmp_p
 
     case = json.loads((tmp_path / "t" / "case" / "case.json").read_text())
     # The question carries what the investigator really asked for, read from the interrupt, and what it would cost.
-    assert len(asked) == 1 and "3 runs per arm, 7 VMs" in asked[0]
-    assert "$4.51" in asked[0]  # 6 fork runs at the saved runs' average cost
+    assert len(asked) == 1 and "3 runs in each of 4 arms (control, placebo, show, forced), 13 VMs" in asked[0]
+    assert "$9.03" in asked[0]  # 12 fork runs at the saved runs' average cost
     assert calls == []  # declined: nothing ran, nothing was spent
     assert case["verdict"] is None and "pending" not in case["forks"]
 
