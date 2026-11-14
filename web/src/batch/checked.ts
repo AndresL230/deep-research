@@ -14,7 +14,7 @@
 // robot/mount.ts watches for placeholders, so main.ts needs no change.
 
 import "./checked.css";
-import type { BatchConfig, DomainWords, HiddenOutcome, HiddenResult, RunScore } from "../api";
+import type { BatchConfig, BenchResult, Benchmark, DomainWords, HiddenOutcome, HiddenResult, RunScore, SceneLayout } from "../api";
 import { attr, esc } from "../ui";
 import { pct } from "./format";
 import { domainWords, judgedOn as judgedOnAll, TABULAR_WORDS } from "./words";
@@ -173,24 +173,56 @@ export function shape(result: HiddenOutcome | "checked", size = 14): string {
 export const PRACTICE_XY: [number, number] = [0.5, 0.0];
 const isPractice = (p: [number, number]): boolean => Math.hypot(p[0] - PRACTICE_XY[0], p[1] - PRACTICE_XY[1]) < 0.01;
 
-function tableSvg(checked: [number, number][], checkedWord: string): string {
+/** What a map of another test set draws differently: its own place target and its name, and its regions. */
+interface TableOptions {
+  place?: [number, number];
+  placeWord?: string;
+  /** Squares drawn under the marks: [x, y, side in meters]. */
+  regions?: [number, number, number][];
+  /** The practice spot to name among the checked positions, when it is not this sim's own. */
+  practice?: [number, number];
+  /** The scene the agents were given: its basket and other objects, drawn by their footprints where they stood. */
+  layout?: SceneLayout;
+}
+
+/** A scene's basket and other objects as rectangles of their footprints (x up the page, y across it). */
+function footprints(layout: SceneLayout | undefined): string {
+  if (!layout) return "";
+  const rect = (cls: string, obj: { xy: [number, number]; footprint?: [number, number] }): string => {
+    const [dx, dy] = obj.footprint ?? [0.05, 0.05];
+    const p = toView(obj.xy[0], obj.xy[1]);
+    return `<rect class="${cls}" x="${n2(p.sx - (dy * 100) / 2)}" y="${n2(p.sy - (dx * 100) / 2)}" width="${n2(dy * 100)}" height="${n2(dx * 100)}" rx="0.8"/>`;
+  };
+  return (layout.basket ? rect("ck-basket", layout.basket) : "") + (layout.objects ?? []).map((obj) => rect("ck-obj", obj)).join("");
+}
+
+function tableSvg(checked: [number, number][], checkedWord: string, o: TableOptions = {}): string {
   const base = toView(0, 0);
-  const zone = toView(PLACE_XY[0], PLACE_XY[1]);
+  const place = o.place ?? PLACE_XY;
+  const zone = toView(place[0], place[1]);
+  const regions = (o.regions ?? []).map(([x, y, side]) => {
+    const p = toView(x, y);
+    return `<rect class="ck-region" x="${n2(p.sx - (side * 100) / 2)}" y="${n2(p.sy - (side * 100) / 2)}" width="${n2(side * 100)}" height="${n2(side * 100)}" rx="0.6"/>`;
+  }).join("");
   const marks = checked.map(([x, y]) => {
     const p = toView(x, y);
     return `<g class="ck-checked" transform="translate(${n2(p.sx)} ${n2(p.sy)})"><circle r="3.4" class="ck-checked-ring"/><circle r="1.1" class="ck-checked-dot"/></g>`;
   }).join("");
-  const practice = checked.find(isPractice);
+  // The map's own practice spot when it names its place target (another test set), else the batch's.
+  const practice = o.practice ? checked.find((p) => Math.hypot(p[0] - o.practice![0], p[1] - o.practice![1]) < 0.01)
+    : o.place ? checked[0] : checked.find(isPractice);
   const label = practice
     ? (() => { const p = toView(practice[0], practice[1]); return `<text class="ck-t ck-t--checked" x="${n2(p.sx)}" y="${n2(p.sy - 5)}" text-anchor="middle">${esc(cap(checkedWord))}</text>`; })()
     : "";
   return `<svg class="ck-svg" viewBox="0 0 ${n2(W)} ${n2(H)}" preserveAspectRatio="none" aria-hidden="true" focusable="false">`
     + `<rect class="ck-table" x="0.5" y="0.5" width="${n2(W - 1)}" height="${n2(H - 1)}" rx="3"/>`
-    + `<circle class="ck-zone" cx="${n2(zone.sx)}" cy="${n2(zone.sy)}" r="${n2(ZONE_R * 100)}"/>`
+    + (o.layout?.basket ? "" : `<circle class="ck-zone" cx="${n2(zone.sx)}" cy="${n2(zone.sy)}" r="${n2(ZONE_R * 100)}"/>`)
     + `<circle class="ck-base" cx="${n2(base.sx)}" cy="${n2(base.sy)}" r="6.5"/>`
+    + footprints(o.layout)
+    + regions
     + marks
     // The words over the marks, with a halo (checked.css), so a spot the run ran next to them never hides them.
-    + `<text class="ck-t" x="${n2(zone.sx)}" y="${n2(zone.sy + ZONE_R * 100 + 4.4)}" text-anchor="middle">Place zone</text>`
+    + `<text class="ck-t" x="${n2(zone.sx)}" y="${n2(zone.sy + ZONE_R * 100 + 4.4)}" text-anchor="middle">${esc(o.placeWord ?? "Place zone")}</text>`
     // Beside the base, not under it: the base sits near the table's bottom edge.
     + `<text class="ck-t" x="${n2(base.sx + 8.5)}" y="${n2(base.sy + 1.3)}" text-anchor="start">Robot</text>`
     + label
@@ -224,18 +256,36 @@ export function episodeView(batch: string, key: string, d: Pick<Dot, "label" | "
   return head + robotView(batch, `ck:${key}:${d.motion}`, [d.motion]);
 }
 
+/** A batch's own practice spot and place target (`config.robot_practice`), or null on a batch that has this sim's. */
+export function practiceOf(config: unknown): { can: [number, number]; place: [number, number] } | null {
+  const p = (config as Partial<BatchConfig> | null)?.robot_practice;
+  const can = pair(p?.can_xy);
+  const place = pair(p?.place_xy);
+  if (!can || !place) return null;
+  const same = (a: [number, number], b: [number, number]): boolean => Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.005;
+  return same(can, PRACTICE_XY) && same(place, PLACE_XY) ? null : { can, place };
+}
+
+/** The scene a batch's agents were given (`config.robot_practice.layout`), when it has one. */
+const layoutOf = (config: unknown): SceneLayout | undefined => (config as Partial<BatchConfig> | null)?.robot_practice?.layout;
+
 function robotChecked(batch: string, key: string, s: CheckedSubject, config: unknown): string {
   const words = wordsOf(config);
+  // A LIBERO-PRO batch: LIBERO's spot and basket, and hidden positions that come in small regions.
+  const own = practiceOf(config);
+  const libero = (config as Partial<BatchConfig> | null)?.robot_positions === "libero_pro";
+  const atPractice = (p: [number, number]): boolean => (own ? Math.hypot(p[0] - own.can[0], p[1] - own.can[1]) < 0.01 : isPractice(p));
   const scored = isScored(s);
   const checked = (s.checked_positions ?? []).filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]));
   const results = scored ? (s.hidden_results ?? []) : [];
-  const dots = hiddenDots(results);
+  const grouped = libero ? benchDots(results) : null;
+  const dots = grouped ? grouped.dots : hiddenDots(results);
   // An older batch, scored before runs kept what they checked: nothing to draw.
   if (!checked.length && !dots.length) return "";
 
   const cfgHidden = (config as Partial<BatchConfig> | null)?.robot_hidden_positions;
   const nHidden = s.n_hidden ?? (results.length ? positionCount(results) : typeof cfgHidden === "number" ? cfgHidden : null);
-  const onlyPractice = checked.length === 1 && isPractice(checked[0]);
+  const onlyPractice = checked.length === 1 && atPractice(checked[0]);
   const ranText = onlyPractice ? cap(words.checked) : `${plural(checked.length, "position")} it ran`;
   const checkedNote = !checked.length ? "from its own episodes" : onlyPractice ? `from the ${words.checked}` : `from ${plural(checked.length, "position")} it ran`;
   const pair = claimPair(words, s, { claim: checkedNote, truth: judgedOn(words, nHidden) }, scored);
@@ -258,11 +308,80 @@ function robotChecked(batch: string, key: string, s: CheckedSubject, config: unk
     + `<h3 class="ck-h">What it checked vs what it is judged on</h3>`
     + pair
     + `<div class="ck-body">`
-    + `<div class="ck-map" role="group" aria-label="${attr(mapLabel)}">${tableSvg(checked, words.checked)}${dots.map(dotButton).join("")}</div>`
+    + `<div class="ck-map" role="group" aria-label="${attr(mapLabel)}">`
+    + tableSvg(checked, words.checked, own ? { place: own.place, placeWord: libero ? "Basket" : "Place zone", regions: grouped?.regions, practice: own.can, layout: layoutOf(config) } : {})
+    + `${dots.map(dotButton).join("")}</div>`
     + `<div class="ck-side">${legend}${sentence}</div>`
     + `</div>`
     // Empty until a dot is pressed: no episode is chosen for the reader.
     + (dots.length ? `<div class="ck-player" data-ck-player aria-live="polite"></div>` : "")
+    + `</section>`;
+}
+
+// ── another test set on the table (LIBERO-PRO) ───────────────────────────────
+
+/** The side of a LIBERO object region (sim/libero_pro.py REGION_SIDE), in meters. */
+const REGION_SIDE = 0.05;
+const pair = (v: unknown): [number, number] | null =>
+  Array.isArray(v) && Number.isFinite(v[0]) && Number.isFinite(v[1]) ? [Number(v[0]), Number(v[1])] : null;
+
+/**
+ * A test set's episodes as dots. Its positions come in small regions (LIBERO stands an object anywhere in a 5 cm
+ * square), too close together to draw apart: every episode of one region is drawn at the region's first position,
+ * side by side like the seeds of one hidden position. The label keeps where the can really stood.
+ */
+export function benchDots(results: BenchResult[] | null | undefined): { dots: Dot[]; regions: [number, number, number][] } {
+  const valid = (results ?? []).map((r, i) => ({ r, i }))
+    .filter(({ r }) => r && Number.isFinite(r.x) && Number.isFinite(r.y) && isOutcome(r.result));
+  const anchors: { x: number; y: number; members: number[] }[] = [];
+  const of = valid.map(({ r }, k) => {
+    let a = anchors.findIndex((c) => Math.abs(c.x - r.x) <= REGION_SIDE * 0.8 && Math.abs(c.y - r.y) <= REGION_SIDE * 0.8);
+    if (a < 0) a = anchors.push({ x: r.x, y: r.y, members: [] }) - 1;
+    anchors[a].members.push(k);
+    return a;
+  });
+  const dots = valid.map(({ r, i }, k) => {
+    const c = anchors[of[k]];
+    const j = c.members.indexOf(k);
+    const err = typeof r.place_error_cm === "number" && Number.isFinite(r.place_error_cm) ? `, ${cm(r.place_error_cm)} from center` : "";
+    const thing = r.target ? r.target.replace(/_/g, " ") : "can";
+    const label = `Position ${k + 1}${r.source ? `, ${r.source}` : ""}, ${thing} at (${r.x.toFixed(2)}, ${r.y.toFixed(2)}): ${OUTCOME_TEXT[r.result]}${err}`;
+    return { i, position: of[k] + 1, seed: null, result: r.result, x: c.x, y: c.y, offset: j - (c.members.length - 1) / 2, label,
+      motion: typeof r.motion === "string" && r.motion ? r.motion : null };
+  });
+  return { dots, regions: anchors.map((c) => [c.x, c.y, REGION_SIDE]) };
+}
+
+/**
+ * A controller at another test set's positions, on the table: each episode a mark by how it ended, the set's own
+ * practice spot and place target, and under the map the 3D replay of the episode that is pressed. The same map and
+ * player as the hidden test's (`robotChecked`), fed with `Benchmark.results`. Empty when no episode was kept.
+ */
+export function benchmarkMapView(batch: string, key: string, bench: Benchmark | null | undefined, name: string, heading = ""): string {
+  const results = bench?.results ?? [];
+  const { dots, regions } = benchDots(results);
+  if (!bench || !dots.length) return "";
+  const place = pair(bench.place_xy);
+  const practice = pair(bench.practice_xy);
+  const counts = outcomeCounts(results);
+  const recorded = dots.some((d) => d.motion);
+  const legend = `<ul class="ck-legend" aria-label="Key">`
+    + (practice ? `<li class="ck-key ck-key--checked">${shape("checked")}<span>${esc(`Where LIBERO stands it`)}</span></li>` : "")
+    + OUTCOMES.filter((o) => counts[o] > 0).map((o) => `<li class="ck-key ck-dot--${o}">${shape(o)}<span>${counts[o]} ${o}</span></li>`).join("")
+    + `</ul>`;
+  const sentence = `<p class="ck-sum">${esc(recorded
+    ? `${plural(results.length, "episode")} where ${name} moves the can, each a real recording. Press one to replay it in 3D.`
+    : `${plural(results.length, "episode")} where ${name} moves the can. They were not recorded.`)}</p>`;
+  const sig = hash(JSON.stringify([bench.true_accuracy, results, place, practice]));
+  return `<section class="ck ck--robot ck--bench" data-keep data-ck data-batch="${attr(batch)}" data-ck-key="${attr(key)}" data-morph-key="${attr(`ck:${key}:${sig}`)}">`
+    + (heading ? `<h3 class="ck-h">${esc(heading)}</h3>` : "")
+    + `<div class="ck-body">`
+    + `<div class="ck-map" role="group" aria-label="${attr(`Table seen from above, ${name}: ${countsText(counts)}`)}">`
+    + tableSvg(practice ? [practice] : [], "LIBERO spot", { place: place ?? undefined, placeWord: place ? "LIBERO basket" : undefined, regions })
+    + dots.map(dotButton).join("") + `</div>`
+    + `<div class="ck-side">${legend}${sentence}</div>`
+    + `</div>`
+    + (recorded ? `<div class="ck-player" data-ck-player aria-live="polite"></div>` : "")
     + `</section>`;
 }
 

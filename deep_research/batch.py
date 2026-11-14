@@ -33,6 +33,7 @@ from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, p
 from .evidence import describe as describe_evidence
 from .evidence import verdict_evidence
 from .domains import actions_from_events, build_task, intervention_for, score_run
+from .domains.robot_arm import BENCH_DIR
 from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
 
 logger = logging.getLogger(__name__)
@@ -450,8 +451,10 @@ class Batch:
             logger.warning("batch %s: the starting code could not be scored", self.id, exc_info=True)
             self.case.set_baseline({"status": "failed", "name": name, "reason": f"{type(e).__name__}: {e}"[:300]})
             return
+        other = await asyncio.to_thread(self.other_benchmarks, path.parent, self.dir / "baseline" / BENCH_DIR)
         self.case.set_baseline({"status": "scored", "name": name, **_measurement(measured),
-                                "hidden_results": measured.get("hidden_results") or []})
+                                "hidden_results": measured.get("hidden_results") or [],
+                                **({"benchmarks": other} if other else {})})
 
     async def run_one(self, run_id: str) -> None:
         scope, rdir = f"run:{run_id}", self.runs_dir / run_id
@@ -527,6 +530,35 @@ class Batch:
             json.dumps([{"index": a.index, "tool": a.tool, "args": a.args, "labels": a.labels} for a in actions], indent=2)
         )
         self.case.update_run(run_id, **score.to_dict(), n_actions=len(actions), labels=[a.labels for a in actions])
+        if score.status in ("honest", "inflated", "unclear"):
+            other = await asyncio.to_thread(self.other_benchmarks, rdir / "outputs", rdir / BENCH_DIR)
+            if other:
+                self.case.update_run(run_id, benchmarks=other)
+
+    def other_benchmarks(self, outputs: Path, record_to: Path | None = None) -> dict:
+        """The code in `outputs` on the domain's other test sets (`Domain.benchmarks`), as the case file keeps it:
+        {name: {"true_accuracy", "successes", "n", "by_source", "results", ...}}. Every episode is recorded under
+        `record_to/<name>/` (a folder of this batch) and named in `results` by its batch-relative path, for the
+        screens to replay. {} when the domain has none, the file is missing, or the measurement fails: a second
+        number never fails a run."""
+        if self.domain.benchmarks is None or self.domain.fix_output is None:
+            return {}
+        code = outputs / self.domain.fix_output
+        if not code.is_file():
+            return {}
+        prefix = None
+        if record_to is not None:
+            try:
+                prefix = record_to.resolve().relative_to(self.dir.resolve()).as_posix()
+            except ValueError:
+                record_to = None  # outside the batch: nothing the files route could serve
+        try:
+            measured = self.domain.benchmarks(self.task, code, record_to, prefix)
+        except Exception:  # noqa: BLE001
+            logger.warning("batch %s: %s could not be measured on the other test sets", self.id, code, exc_info=True)
+            return {}
+        return {name: {**_measurement(m), **{k: v for k, v in m.items() if k not in ("success_rate", "successes", "n")}}
+                for name, m in measured.items()}
 
     # ---- phase 2: find the split ----
     def analyze(self) -> None:

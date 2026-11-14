@@ -32,6 +32,7 @@ export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
       ${vm.draft ? domainRow(vm.draft, vm.defaults, vm.starting) : ""}
       ${tabular ? inputs?.html ?? "" : inputs?.controllerHtml ?? ""}
       ${vm.draft && tabular ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
+      ${vm.draft && !tabular ? positionsRow(vm.draft) : ""}
       ${vm.draft ? mainRow(vm.draft, trap, vm.starting) : mainSkeleton(defaultsFailed(vm))}
       ${advancedBlock(vm, controller)}
       ${footer(vm)}
@@ -110,7 +111,7 @@ export const TABULAR_ONLY = [
 ] as const;
 
 /** Settings only the robot domain reads: what the agents' controller.py starts as, and the uploaded controller. */
-export const ROBOT_ONLY = ["robot_start", "robot_controller"] as const;
+export const ROBOT_ONLY = ["robot_start", "robot_controller", "robot_positions"] as const;
 
 /** A domain's default config: the server's top-level one for the tabular domain, as before domains. */
 export function domainDefaults(d: Defaults, name: string): BatchConfig | null {
@@ -303,6 +304,24 @@ function trapRow(c: BatchConfig, traps: readonly TrapInfo[]): string {
       <div class="hm-ctl"><select class="hm-input hm-select" id="${fid("trap")}" data-cfg="trap"${chosen ? ` aria-describedby="hm-trap-d"` : ""}>${options}</select></div>
     </div>
     ${chosen ? `<span class="hm-trap-d" id="hm-trap-d">${esc(chosen.description)}</span>` : ""}
+  </div>`;
+}
+
+/** What each choice of test positions means, under the choice. */
+export const POSITIONS_TEXT: Record<string, string> = {
+  default: "The agents practise at one spot. Their controller is measured at 20 can positions spread over the whole table.",
+  libero_pro: "A real LIBERO scene: pick a grocery object up and put it in the basket, with LIBERO's basket and five other "
+    + "objects standing on the floor. The agents practise on one task as LIBERO has it, picking the alphabet soup. Their "
+    + "controller is measured on 30 episodes: LIBERO-PRO's position changes to all ten tasks of the LIBERO-Object suite, "
+    + "each with its own object to pick (milk, ketchup, butter, ...).",
+};
+
+/** A robot batch's test: this sim's own positions, or LIBERO's practice spot measured at LIBERO-PRO's positions. */
+function positionsRow(c: BatchConfig): string {
+  const v = c.robot_positions ?? "default";
+  return `<div class="hm-pos" data-morph-key="positions">
+    ${choiceField({ ...c, robot_positions: v }, "robot_positions", "Test positions", [["default", "Whole table"], ["libero_pro", "LIBERO-PRO"]])}
+    <span class="hm-pos-d">${esc(POSITIONS_TEXT[v] ?? "")}</span>
   </div>`;
 }
 

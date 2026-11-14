@@ -649,6 +649,9 @@ def memory_notebook(domain: str):
 # ---- the robot viewer (robot_view.py): the 3D scene and each motion file's poses ----
 
 # Where a run or fork child keeps its outputs: the only places a motion file is read from (never task/).
+# A run's, or the starting code's, recorded episodes on another test set (`Batch.other_benchmarks`): LIBERO-PRO's
+# positions. Not the hidden test, so nothing to keep back.
+BENCH_PATH = re.compile(r"^(runs/[A-Za-z0-9._-]+|baseline)/benchmarks/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.motion\.json$")
 MOTION_PATH = re.compile(r"^(runs/[A-Za-z0-9._-]+|forks/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/outputs/[A-Za-z0-9._/ -]+\.json$")
 
 
@@ -716,7 +719,7 @@ def _motion_file(root: Path, path: str, batch_id: str) -> Path:
     hidden episode's recording that the case lists for a scored run or fork child (`_hidden_listed`)."""
     rel = path.strip()
     hidden = bool(HIDDEN_PATH.match(rel))
-    if ".." in rel.split("/") or not (MOTION_PATH.match(rel) or hidden):
+    if ".." in rel.split("/") or not (MOTION_PATH.match(rel) or hidden or BENCH_PATH.match(rel)):
         raise HTTPException(400, "not a motion file path: it must be under runs/<run>/outputs or forks/<fork>/<child>/outputs")
     secret = ("holdout_labels", *domains.secret_files())
     full = (root / rel).resolve()

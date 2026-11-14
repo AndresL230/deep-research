@@ -24,7 +24,7 @@ import { domainWords } from "./words";
 import { evidenceParts, trapOf } from "./trap";
 import { isMotionBatch, robotView, scoreWords } from "../robot/markup";
 import "../robot/mount";
-import { checkedView } from "./checked";
+import { benchmarkMapView, checkedView } from "./checked";
 
 // ── text helpers ─────────────────────────────────────────────────────────────
 
@@ -388,8 +388,10 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
 
   // What it checked next to what it is judged on (checked.ts), right under the numbers.
   const checked = checkedView(vm.id, key, { ...s.score, status }, vm.case.config);
+  // The same controller where LIBERO-PRO moves the can, on the table and in 3D (a run only: a fork copy has none).
+  const libero = benchmarkMapView(vm.id, `bm:${key}`, vm.case.runs?.[key]?.benchmarks?.libero_pro, "LIBERO-PRO", "At LIBERO-PRO's positions");
 
-  return `<section class="rn" data-morph-key="rn:${attr(key)}">${top}${head}${note}<dl class="rn-stats">${stats}</dl>${checked}${charts}${lab}</section>`;
+  return `<section class="rn" data-morph-key="rn:${attr(key)}">${top}${head}${note}<dl class="rn-stats">${stats}</dl>${checked}${libero}${charts}${lab}</section>`;
 }
 
 

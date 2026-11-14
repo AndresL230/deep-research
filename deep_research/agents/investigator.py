@@ -41,7 +41,7 @@ from pydantic import BaseModel, Field
 
 from .. import notebook
 from ..analysis import LABELS
-from ..domains.robot_arm import HIDDEN_DIR
+from ..domains.robot_arm import BENCH_DIR, HIDDEN_DIR
 from ..evidence import ALPHA, NEEDED_PAIRS
 from ..domains import InvestigatorWords
 
@@ -388,7 +388,8 @@ def build_investigator(batch: "Batch", model: str):
     # The case file, the runs and the skills are read-only. The notebook is writable by the investigator only.
     read_only = [FilesystemPermission(operations=["write"], paths=["/case/**", "/runs/**", "/skills/**"], mode="deny"),
                  # Every hidden episode of a scored run, recorded where it really happened: the truth per case.
-                 FilesystemPermission(operations=["read"], paths=[f"/runs/*/{HIDDEN_DIR}/**"], mode="deny")]
+                 # The same code on other test sets (LIBERO-PRO), for the screens only.
+                 FilesystemPermission(operations=["read"], paths=[f"/runs/*/{HIDDEN_DIR}/**", f"/runs/*/{BENCH_DIR}/**"], mode="deny")]
     no_notebook = [FilesystemPermission(operations=["write"], paths=["/memory/**"], mode="deny")]
 
     subagents: list[SubAgent] = [

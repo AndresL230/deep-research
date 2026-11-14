@@ -114,6 +114,8 @@ export interface HiddenResult {
   place_error_cm: number | null;
   /** The episode's motion file, low frame rate, as a path for `batchFileUrl` (`runs/r02/hidden/07-s0.motion.json`). */
   motion: string | null;
+  /** What was picked, in a scene whose object differs from episode to episode: "milk". Absent for the can. */
+  target?: string;
 }
 
 export interface BatchConfig {
@@ -130,6 +132,13 @@ export interface BatchConfig {
   /** robot_arm only: an uploaded controller's id (`ControllerInfo.id`), the one `robot_start: "uploaded"` starts from. */
   robot_controller?: string | null;
   robot_prompt?: "default" | "practice";
+  /** robot_arm only: where the can stands. "default": the sim's own practice spot, measured over the whole table.
+   *  "libero_pro": the agents practise where LIBERO stands the object, with LIBERO's basket as the place target, and
+   *  are measured where LIBERO-PRO moves it. Absent on batches saved before it existed: read as "default". */
+  robot_positions?: "default" | "libero_pro";
+  /** In a case file only: the batch's practice spot and place target, in meters (robot base at the origin), and in
+   *  a batch with a scene its `layout`: the basket and the other objects as the agents were given them. */
+  robot_practice?: { can_xy: [number, number]; place_xy: [number, number]; layout?: SceneLayout };
   /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
   dataset: string;
   /** The column to predict. Needed for an uploaded dataset; absent or null means Pima's `outcome`. */
@@ -212,6 +221,9 @@ export interface AgentTodo { content: string; status: "pending" | "in_progress" 
 /** One analyst run. Fields fill in as it goes: queued, then starting, running, and finally its score. */
 export interface RunRecord extends Partial<Omit<RunScore, "status">> {
   id: string;
+  /** This run's final code on other test sets than the hidden test, by name ("libero_pro"). Absent on batches
+   *  saved before they were measured, and in a domain that has none. */
+  benchmarks?: Record<string, Benchmark>;
   status: RunStatus;
   /** The analyst model this run uses (from the batch's lineup). Absent on batches saved before lineups. */
   model?: string;
@@ -466,6 +478,38 @@ export interface MeasuredRate {
   n: number | null;
 }
 
+/** One object standing in a scene (sim/scene.py, "A layout"): where, and how large when it stands. */
+export interface SceneObject {
+  name: string;
+  xy: [number, number];
+  height?: number;
+  footprint?: [number, number];
+}
+
+/** A scene's basket and other objects, as an episode starts. */
+export interface SceneLayout {
+  basket?: SceneObject;
+  objects?: SceneObject[];
+}
+
+/** A piece of code on another test set than the batch's own hidden test (`Domain.benchmarks`): a second number
+ *  for the screens, never part of a run's status. `by_source` splits it by where each case comes from. */
+export interface Benchmark extends MeasuredRate {
+  by_source?: Record<string, { successes: number; n: number }>;
+  /** One per episode, in order: where the can stood, what happened, its recording (a batch-relative path the 3D
+   *  player can replay, or null) and where the position comes from ("position swap"). Absent on a batch measured
+   *  before episodes were recorded. */
+  results?: BenchResult[];
+  /** The test set's own practice spot (where LIBERO stands the object) and place target (LIBERO's basket). */
+  practice_xy?: [number, number];
+  place_xy?: [number, number];
+}
+
+/** One episode of a `Benchmark`. */
+export interface BenchResult extends HiddenResult {
+  source?: string;
+}
+
 /** A proposed fix measured on the code itself (`ProposedFix.measured`). */
 export interface FixMeasured {
   before: MeasuredRate;
@@ -488,6 +532,8 @@ export interface Baseline extends Partial<MeasuredRate> {
   /** Why it could not be scored, when `status` is "failed". */
   reason?: string;
   hidden_results?: HiddenResult[];
+  /** The same code on other test sets, by name ("libero_pro"). */
+  benchmarks?: Record<string, Benchmark>;
 }
 
 export interface ScopeCost {

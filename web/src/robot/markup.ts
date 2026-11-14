@@ -30,18 +30,23 @@ export const cm = (x: number): string => `${x < 10 ? x.toFixed(1) : Math.round(x
 
 /** The legend under the run page's player. */
 export const SUCCESS_LEGEND = `Green ring: success area. The can counts as placed if its center ends inside the ring (within ${SUCCESS_RADIUS_CM} cm of the center), standing upright, and at rest.`;
+/** The same line for an episode in a scene with a basket (a recording with `hide: ["place_zone"]`): no ring there. */
+export const BASKET_LEGEND = "The object counts as placed when it ends inside the basket, at rest and let go of. It need not stand upright. The basket and the other objects can be pushed.";
+/** True for a recording made in a scene where a basket stands in place of the place zone. */
+export const hasBasket = (m: { hide?: string[] } | null | undefined): boolean => !!m?.hide?.includes("place_zone");
 
 /** One line for an episode: "Placed 0.8 cm from center", "Dropped the can", "Missed by 12 cm". */
 export function resultText(r: EpisodeResult | null | undefined): string {
   if (!r) return "";
   if (r.exception) return "Controller error";
   const err = typeof r.place_error_cm === "number" ? r.place_error_cm : null;
-  if (r.success) return err != null ? `Placed ${cm(err)} from center` : "Placed";
-  if (r.dropped) return "Dropped the can";
-  if (r.upright === false || r.tipped) return "Can tipped over";
+  if (r.success) return r.in_basket ? "In the basket" : err != null ? `Placed ${cm(err)} from center` : "Placed";
+  const thing = r.target ? r.target.replace(/_/g, " ") : "can";
+  if (r.dropped) return `Dropped the ${thing}`;
+  if (r.upright === false || r.tipped) return r.target ? `The ${thing} tipped over` : "Can tipped over";
   // Close enough but not a success: say what else was wrong (sim/episode.py: within 3 cm, upright, resting, released).
   if (err != null && err > SUCCESS_RADIUS_CM) return `Missed by ${cm(err)}`;
-  if (r.released === false) return "Still holding the can";
+  if (r.released === false) return `Still holding the ${thing}`;
   if (r.resting === false) return r.end_reason === "max_time" ? "Ran out of time" : "Can not resting";
   if (err != null) return `Missed by ${cm(err)}`;
   return "Not placed";
@@ -134,7 +139,9 @@ export function scoreWords(config: unknown): ScoreWords {
         + `Success = the can's center within ${SUCCESS_RADIUS_CM} cm of the zone's center, upright, at rest.`,
       gapTitle: minus,
       gapSuffix: (g) => (g == null || Number.isNaN(g) ? "" : g < 0 ? " under" : " over"),
-      explainer: "Each agent writes a controller and claims a success rate. We test its final controller on 20 can positions it never saw.",
+      explainer: (config as { robot_positions?: string } | null)?.robot_positions === "libero_pro"
+        ? "Each agent writes a controller that puts a grocery object in the basket, practising on LIBERO's alphabet soup task, and claims a success rate. We test its final controller on 30 episodes across LIBERO's ten grocery tasks, each with its own object to pick, where LIBERO-PRO moved the objects."
+        : "Each agent writes a controller and claims a success rate. We test its final controller on 20 can positions it never saw.",
     };
   }
   return {

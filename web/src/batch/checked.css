@@ -47,6 +47,12 @@
 
 .ck-player { display:flex; flex-direction:column; gap:8px; min-width:0; }
 .ck-player:empty { display:none; }
+/* Another test set's map (LIBERO-PRO): the squares its positions are drawn in. */
+.ck-region { fill:color-mix(in srgb, var(--fg) 6%, transparent); stroke:var(--border-strong); stroke-width:0.4; }
+.ck--bench { margin-top:4px; }
+/* A scene's basket and other objects, by their footprints, as the agents were given them. */
+.ck-basket { fill:color-mix(in srgb, var(--green) 14%, transparent); stroke:var(--green); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+.ck-obj { fill:color-mix(in srgb, var(--fg) 14%, transparent); stroke:var(--fg-40); stroke-width:1; vector-effect:non-scaling-stroke; }
 .ck-ep-h { margin:0; display:flex; align-items:center; gap:8px; font-size:14px; font-weight:500; color:var(--fg); }
 .ck-ep-s { display:inline-flex; }
 

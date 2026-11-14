@@ -36,7 +36,7 @@ import { DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputs
 import { notYetView, overviewView, pageHeadView, pagerView } from "./batch/overview";
 import { wallView } from "./batch/wall";
 import { feedView, notebookWithCaptions, wallWithFeed } from "./batch/commentary";
-import { diagnosisView, fixView, forkView, investigatorView, keyPointsView, splitView, verdictView } from "./batch/lanes";
+import { benchmarkView, diagnosisView, fixView, forkView, investigatorView, keyPointsView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, runSummaryView, taskText, workStrip } from "./batch/run";
 import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule } from "./batch/replay";
@@ -270,7 +270,7 @@ const STEP_VIEW: Record<Exclude<BatchStep, "wall">, (vm: BatchVm) => string> = {
 function batchBody(vm: BatchVm, step: BatchStep): string {
   const sections: [string, string][] = step === "wall"
     // The first page ends in the key points: what the batch found so far, one line each (lanes.ts keyPointsView).
-    ? [["overview", overviewView(vm)], ["wall", wallWithFeed(wallView(vm), feedView(vm, S.feedOpen))], ["points", keyPointsView(vm)]]
+    ? [["overview", overviewView(vm)], ["wall", wallWithFeed(wallView(vm), feedView(vm, S.feedOpen))], ["points", keyPointsView(vm)], ["bench", benchmarkView(vm)]]
     : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || notYetView(vm, step)]];
   // The bar is a new element on every page, so it arrives with the page.
   sections.push([`pager:${step}`, pagerView(vm, step)]);

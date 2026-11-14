@@ -54,7 +54,8 @@ def investigator_view(data: dict) -> dict:
 
 
 # Keys of a run (or fork copy) that never reach the investigator's view.
-VIEW_HIDDEN = frozenset({"hidden_results"})
+# `benchmarks`: a run's code on other test sets (LIBERO-PRO), a second number for the screens only.
+VIEW_HIDDEN = frozenset({"hidden_results", "benchmarks"})
 
 
 class CaseFile:

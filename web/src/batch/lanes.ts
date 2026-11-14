@@ -7,13 +7,14 @@
 import "./lanes.css";
 import {
   batchFileUrl, isPendingForks, notebookUrl, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
-  type FixMeasured, type ForkExperiment, type MeasuredRate, type PendingForks, type ProposedFix, type RubricCheck, type RunRecord, type SplitFinding, type TrapInfo,
+  type Benchmark, type FixMeasured, type ForkExperiment, type MeasuredRate, type PendingForks, type ProposedFix, type RubricCheck, type RunRecord, type SplitFinding, type TrapInfo,
   type Verdict,
 } from "../api";
 import { askIcon } from "../ask-icons";
 import { badge, chip, count, reveal, spinner, type ChipMark, type ChipTone } from "../motion";
 import { attr, esc } from "../ui";
 import { duration, pct, pts, usd, wholePct } from "./format";
+import { benchmarkMapView } from "./checked";
 import { ACT, childKey, type BatchVm } from "./model";
 import { codeKind, highlightLines } from "./highlight";
 import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parseCommand, type NbCell } from "./notebook";
@@ -252,6 +253,20 @@ export function keyPoints(c: CaseFile): KeyPoint[] {
     out.push({ id: "fails", label: "Where it fails", text: `${sentence(clip(t.symptom, 160))} Run ${t.run_id}, line ${t.line}.${more}`, tone: "muted" });
   }
 
+  // The same controllers on another test set, beside the hidden test.
+  const bench = benchRows(c).filter((r) => r.kind === "run" && r.bench);
+  if (bench.length) {
+    const span = (xs: number[]): string => {
+      const [lo, hi] = [Math.min(...xs), Math.max(...xs)];
+      return hi - lo < UP ? wholePct(hi) : `${wholePct(lo)} to ${wholePct(hi)}`;
+    };
+    const own = bench.filter((r) => r.measured != null).map((r) => r.measured as number);
+    const n = bench[0].bench!.n;
+    out.push({ id: "bench", label: BENCH_NAME.libero_pro, tone: "muted",
+      text: `At ${n ?? "the"} positions LIBERO-PRO moves the object to, ${bench.length === 1 ? "the controller passes" : `the ${bench.length} controllers pass`} ` +
+        `${span(bench.map((r) => r.bench!.true_accuracy))}.` + (own.length ? ` On the hidden test, over the whole table: ${span(own)}.` : "") });
+  }
+
   // The fix and what it measured.
   const fix = c.fix;
   if (fix) {
@@ -269,6 +284,77 @@ export function keyPoints(c: CaseFile): KeyPoint[] {
     out.push({ id: "fix", label: "Fix", text: `${what} ${result}${raised}`, tone });
   }
   return out;
+}
+
+// ── the other test sets ─────────────────────────────────────────────────────
+
+/** A test set's name on the screens. */
+export const BENCH_NAME: Record<string, string> = { libero_pro: "LIBERO-PRO" };
+
+export interface BenchRow {
+  kind: "start" | "run";
+  /** The run's id, or the starting code's file name. */
+  id: string;
+  status: string | null;
+  claimed: number | null;
+  /** On the batch's own hidden test. */
+  measured: number | null;
+  bench: Benchmark | null;
+}
+
+/** The starting code and every scored run, each with its rate on the hidden test and on `name`'s test set. Empty
+ *  when nothing in the batch was measured on it. */
+export function benchRows(c: CaseFile, name = "libero_pro"): BenchRow[] {
+  const rows: BenchRow[] = [];
+  const b = c.baseline;
+  if (b?.status === "scored") rows.push({ kind: "start", id: b.name, status: null, claimed: null, measured: b.true_accuracy ?? null, bench: b.benchmarks?.[name] ?? null });
+  for (const r of Object.values(c.runs ?? {}).sort(byId)) {
+    if (r.true_accuracy == null && !r.benchmarks?.[name]) continue;
+    rows.push({ kind: "run", id: r.id, status: r.status, claimed: r.reported_accuracy ?? null, measured: r.true_accuracy ?? null, bench: r.benchmarks?.[name] ?? null });
+  }
+  return rows.some((r) => r.bench) ? rows : [];
+}
+
+/**
+ * LIBERO-PRO beside the hidden test: one row per controller, its rate on the batch's own hidden test and at the
+ * positions LIBERO-PRO moves LIBERO's object to. A second number: a run's status comes from the hidden test alone.
+ */
+export function benchmarkView(vm: BatchVm): string {
+  const c = vm.case;
+  const rows = benchRows(c);
+  if (!rows.length) return "";
+  const words = domainWords(c.config);
+  const share = (x: number | null): string => (Math.max(0, Math.min(1, x ?? 0)) * 100).toFixed(1);
+  const cell = (x: number | null, of: string, cls: string): string => x == null
+    ? `<td class="ln-bm-c ln-muted">not measured</td>`
+    : `<td class="ln-bm-c"><span class="ln-bm-bar"><span class="ln-track"><i class="ln-fill ${cls}" style="width:${share(x)}%"></i></span>` +
+      `<b class="ln-bm-v">${esc(wholePct(x))}</b>${of ? `<span class="ln-muted">${esc(of)}</span>` : ""}</span></td>`;
+  // One controller's episodes on the table at a time, each replayable in 3D: the first that has them, until the
+  // person opens another (a fold per row).
+  const first = rows.find((r) => r.bench?.results?.length);
+  const row = (r: BenchRow): string => {
+    const of = r.bench && r.bench.successes != null && r.bench.n != null ? `${r.bench.successes} of ${r.bench.n}` : "";
+    const who = r.kind === "start" ? `<span class="ln-muted">Start</span> ${esc(r.id)}` : `<b>${esc(r.id)}</b>${r.status ? pill(r.status) : ""}`;
+    const key = `bm:${r.kind}:${r.id}`;
+    const has = !!r.bench?.results?.length;
+    const open = has && isOpen(vm, key, r === first);
+    return `<tr class="ln-bm-r" data-morph-key="bm-${attr(r.kind)}-${attr(r.id)}"><th scope="row" class="ln-bm-who">${who}</th>` +
+      `<td class="ln-bm-c ln-bm-claim">${r.claimed == null ? "" : esc(wholePct(r.claimed))}</td>` +
+      cell(r.measured, "", "ln-fill--true") + cell(r.bench?.true_accuracy ?? null, of, "") +
+      `<td class="ln-bm-see">${has ? foldButton(key, open, "on the table") : ""}</td></tr>` +
+      (open ? `<tr class="ln-bm-map" data-morph-key="bm-map-${attr(r.kind)}-${attr(r.id)}"><td colspan="5">` +
+        benchmarkMapView(vm.id, key, r.bench, "LIBERO-PRO") + `</td></tr>` : "");
+  };
+  const sample = rows.find((r) => r.bench)!.bench!;
+  const sources = Object.entries(sample.by_source ?? {}).map(([k, v]) => `${v.n} from its ${k}`).join(", ");
+  return `<section class="ln-sec ln-bm" data-morph-key="ln-bm" aria-label="LIBERO-PRO">` +
+    head("LIBERO-PRO positions") +
+    `<p class="ln-sub">The same controllers with the can where the LIBERO-PRO benchmark moves LIBERO's object: ${sample.n ?? "its"} positions` +
+    `${sources ? ` (${esc(sources)})` : ""}, placed in LIBERO's basket spot. A second number. Each run's status still comes from the hidden test, which covers the whole table.</p>` +
+    `<table class="ln-bm-t"><thead><tr><th scope="col">Controller</th><th scope="col">${esc(words.claim_label)}</th>` +
+    `<th scope="col">${esc(words.truth_label)}, hidden test</th><th scope="col">LIBERO-PRO</th><th scope="col"><span class="mo-sr">Watch</span></th></tr></thead>` +
+    `<tbody data-morph-list>${rows.map(row).join("")}</tbody></table>` +
+    `</section>`;
 }
 
 /** The key points as a short list under the runs. Empty until there is one to give. */

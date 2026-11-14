@@ -82,6 +82,95 @@ def _decimate(verts, faces):
     return new_verts[used], remap[f]
 
 
+# Models of scenes with a layout (a basket and other objects, sim/scene.py), by the layout's bodies and shapes.
+_layout_models: OrderedDict[str, Any] = OrderedDict()
+LAYOUT_MODELS = 8
+
+
+def _layout_key(layout: dict) -> str:
+    """What makes two layouts the same model: their bodies and shapes, not where each stands (qpos says that)."""
+    shape = lambda o: [o.get("name"), o.get("boxes"), o.get("quat"), o.get("z"), o.get("contain"), o.get("rgba")]  # noqa: E731
+    return json.dumps([shape(layout["basket"]) if layout.get("basket") else None,
+                       [shape(o) for o in layout.get("objects") or []],
+                       shape(layout["target"]) if layout.get("target") else None], sort_keys=True)
+
+
+MAX_LAYOUT_OBJECTS = 12
+MAX_OBJECT_BOXES = 40
+
+
+def _check_layout(layout: dict) -> None:
+    """A layout read from a file an agent may have written: only a small scene of finite boxes is built."""
+    import math
+
+    num = lambda v, n: isinstance(v, list) and len(v) == n and all(  # noqa: E731
+        isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and abs(x) < 10 for x in v)
+    objects = layout.get("objects") or []
+    entries = ([layout["basket"]] if layout.get("basket") else []) + (objects if isinstance(objects, list) else [None])
+    if layout.get("target"):
+        entries.append({"xy": [0.0, 0.0], **layout["target"]} if isinstance(layout["target"], dict) else None)
+    if len(entries) > MAX_LAYOUT_OBJECTS + 2:
+        raise MotionError("the file's scene layout has too many objects")
+    for o in entries:
+        boxes = o.get("boxes") if isinstance(o, dict) else None
+        if not isinstance(o.get("name") if isinstance(o, dict) else None, str) or not num(o.get("xy"), 2) \
+                or not isinstance(boxes, list) or not 1 <= len(boxes) <= MAX_OBJECT_BOXES:
+            raise MotionError("the file's scene layout is not one")
+        for b in boxes:
+            if not isinstance(b, dict) or not num(b.get("pos"), 3) or not num(b.get("size"), 3) or not num(b.get("quat", [1, 0, 0, 0]), 4) \
+                    or min(b["size"]) <= 0:
+                raise MotionError("the file's scene layout has a box that is not one")
+        if not num(o.get("quat", [1, 0, 0, 0]), 4) or not isinstance(o.get("z", 0), (int, float)):
+            raise MotionError("the file's scene layout is not one")
+        if "rgba" in o and not num(o["rgba"], 4):
+            raise MotionError("the file's scene layout is not one")
+
+
+def layout_model(layout: dict):
+    """The model of a scene with `layout`'s container and objects, compiled once per set of bodies. The arm, the
+    place zone and the can have the same body ids as in `model()`: the layout's bodies come after them."""
+    _check_layout(layout)
+    key = _layout_key(layout)
+    with _lock:
+        hit = _layout_models.get(key)
+        if hit is not None:
+            _layout_models.move_to_end(key)
+            return hit
+    from sim.scene import build_model
+
+    try:
+        m = build_model([0.5, 0.0], [0.45, -0.3], layout=layout)
+    except Exception as e:  # noqa: BLE001 - a layout from a file: anything wrong with it is the file's problem
+        raise MotionError(f"the file's scene layout cannot be built: {type(e).__name__}") from e
+    with _lock:
+        _layout_models[key] = m
+        while len(_layout_models) > LAYOUT_MODELS:
+            _layout_models.popitem(last=False)
+    return m
+
+
+def layout_geoms(m, first_body: int, also: int | None = None) -> list[dict]:
+    """The visual geoms of the bodies from `first_body` on (a layout's container and objects), as `build_scene`
+    gives a scene's: boxes, in each body's own frame. `also`: one more body to give the geoms of (the body "can",
+    when the layout makes it out of an object's boxes)."""
+    import mujoco
+
+    out: list[dict] = []
+    for g in range(m.ngeom):
+        body = int(m.geom_bodyid[g])
+        if (body < first_body and body != also) or int(m.geom_group[g]) == COLLISION_GROUP:
+            continue
+        gtype = GEOM_TYPES.get(int(m.geom_type[g]))
+        if gtype is None or gtype == "mesh":
+            continue
+        out.append({
+            "body": int(m.geom_bodyid[g]), "type": gtype, "name": mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, g) or "",
+            "size": _r(m.geom_size[g], 5), "pos": _r(m.geom_pos[g], POS_DECIMALS), "quat": _r(m.geom_quat[g], QUAT_DECIMALS),
+            "rgba": _r(m.geom_rgba[g], 3),
+        })
+    return out
+
+
 def build_scene() -> dict:
     """The scene as plain data: bodies, meshes (decimated, flat arrays) and visual geoms. See `scene()`."""
     import mujoco
@@ -165,6 +254,11 @@ def poses(motion: dict) -> dict:
     {"fps", "can_start", "place_target", "result", "n": frames, "t": [...], "bodies": [body ids],
      "frames": [[x, y, z, qw, qx, qy, qz for each body in `bodies`], ...],
      "static": {"<body id>": [x, y, z, qw, qx, qy, qz]} (bodies that never move; the place zone where this file has it)}
+
+    A file recorded in a scene with a layout (its header's `layout`: a basket and other objects) also has
+    "extra": the visual geoms of the layout's bodies, as the scene gives its own (`layout_geoms`), for the viewer
+    to draw on top of the scene, and "hide": ["place_zone"], the scene geom the basket stands in place of. Their
+    bodies are in `bodies` like any other moving body.
     """
     import mujoco
     import numpy as np
@@ -172,7 +266,8 @@ def poses(motion: dict) -> dict:
     if not isinstance(motion, dict) or not isinstance(motion.get("frames"), list) or not motion["frames"]:
         raise MotionError("not a motion file: no frames")
     header = motion.get("header") if isinstance(motion.get("header"), dict) else {}
-    m = model()
+    layout = header.get("layout") if isinstance(header.get("layout"), dict) else None
+    m = layout_model(layout) if layout else model()
     d = mujoco.MjData(m)
     moving = _moving_bodies(m)
     times: list[float] = []
@@ -215,7 +310,18 @@ def poses(motion: dict) -> dict:
         "bodies": moving,
         "frames": frames,
         "static": static,
+        **(_layout_extra(m, layout) if layout else {}),
     }
+
+
+def _layout_extra(m, layout: dict) -> dict:
+    """What a recording with a layout adds to and takes from the scene: the geoms of its container and objects,
+    and of the object to pick when that is one of its own (in place of the scene's cylinder)."""
+    import mujoco
+
+    picked = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "can") if layout.get("target") else None
+    hide = (["place_zone"] if layout.get("basket") else []) + (["can"] if picked is not None else [])
+    return {"extra": layout_geoms(m, model().nbody, picked), "hide": hide}
 
 
 def _xy(v) -> bool:
@@ -224,7 +330,7 @@ def _xy(v) -> bool:
 
 RESULT_KEYS = (
     "success", "place_error_cm", "upright", "dropped", "max_height_cm", "time_taken", "exception", "end_reason",
-    "resting", "released", "tipped", "tilt_deg", "seed",
+    "resting", "released", "tipped", "tilt_deg", "seed", "in_basket", "target",
 )
 
 

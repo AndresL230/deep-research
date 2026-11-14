@@ -41,6 +41,10 @@ export interface EpisodeResult {
   tipped?: boolean;
   tilt_deg?: number;
   seed?: number;
+  /** In a scene with a basket: whether the can's center ended inside it. */
+  in_basket?: boolean;
+  /** What was picked, when it is not the can: "milk". */
+  target?: string;
 }
 
 export interface MotionData {
@@ -58,6 +62,11 @@ export interface MotionData {
   frames: number[][];
   /** Bodies that never move in this file (the base, the place zone), same seven numbers. */
   static: Record<string, number[]>;
+  /** A file recorded in a scene with a basket and other objects: their geoms, drawn on top of the scene's own. Their
+   *  bodies are in `bodies` like any other. Absent for the bare scene. */
+  extra?: SceneGeom[];
+  /** Names of scene geoms this file does not have: "place_zone" where a basket stands in its place. */
+  hide?: string[];
 }
 
 export interface MotionSummary {

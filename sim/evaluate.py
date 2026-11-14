@@ -469,8 +469,12 @@ def evaluate(
     workers: int | None = None,
     controller_timeout: float | None = None,
     record_dir=None,
+    layouts=None,
 ) -> dict:
     """Run the controller once per can position and seed; return the success rate and every result.
+
+    layouts: one scene layout per position (sim/scene.py), or None for the bare scene: the basket and the other
+    objects the episode at that position stands in.
 
     positions: list of [x, y] can starts. place_xy: the place target (default: the practice one).
     timeout: per episode, wall clock seconds. controller_timeout: total wall clock seconds for all the
@@ -491,6 +495,8 @@ def evaluate(
     for i, xy in enumerate(positions):
         for seed in seeds:
             job = {"controller_path": path, "can_xy": [float(xy[0]), float(xy[1])], "place_xy": place, "seed": seed}
+            if layouts is not None and layouts[i]:
+                job["layout"] = layouts[i]
             if record_dir is not None:
                 job.update(record_to=str(Path(record_dir) / motion_name(i, seed)), record_all=True,
                            motion_fps=LOW_FPS, motion_decimals=LOW_DECIMALS)
