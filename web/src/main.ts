@@ -15,6 +15,7 @@
 import "./style.css";
 import "./batch/page.css";
 import { attr, esc } from "./ui";
+import { symbolTile, wordmark } from "./brand";
 import { morphInner } from "./morph";
 import { AWAY_PX, conversationView, initialConversationUi, jumpButton, stickAfterScroll, thinkingLabel, type ConversationUi } from "./ask-conversation";
 import { scheduleOrbs } from "./thinking-orb";
@@ -205,7 +206,7 @@ function headerView(vm: BatchVm | null): string {
   if (r.name === "run") crumbs.push(`<span class="pg-crumb is-cur">${esc(r.run)}</span>`);
   if (r.name === "child") crumbs.push(`<span class="pg-crumb is-cur">${esc(`${r.fork} ${r.child}`)}</span>`);
   const left = `<div class="ask-hdr-l pg-hdr-l">
-    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Home"><span class="ask-h1 ask-h1-t${crumbs.length ? " is-parent" : ""}">Orro</span></button>
+    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${symbolTile(22)}<span class="ask-h1 ask-h1-t${crumbs.length ? " is-parent" : ""}">${wordmark(16)}</span></button>
     ${crumbs.map((c) => `<span class="ask-crumb-sep">›</span>${c}`).join("")}
   </div>`;
   const bar = vm ? costBar(vm.case.costs ?? {}, { simulated: !!(vm.case.config as BatchConfig).simulated }) : "";
