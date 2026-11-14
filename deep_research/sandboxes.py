@@ -10,7 +10,10 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 
 from daytona import (
@@ -29,6 +32,47 @@ from .analysis import Action
 from .config import ROOT_DIR, LAB_PAGE_PORT, VM_LIVE_DIR, VM_WORKSPACE
 
 log = logging.getLogger(__name__)
+
+
+# Creating a VM from an image with local files (the robot lab image, without DAYTONA_ROBOT_SNAPSHOT) uploads them
+# through Daytona's ObjectStorage, which builds its S3 client inside `isolated_env()`: it saves os.environ, clears it,
+# and restores the saved copy afterwards. Two creates at once (a batch starts 12) nest those: the second saves the
+# already empty environment and restores that last, so the whole server is left with no environment at all. Every
+# analyst built after that gets no ANTHROPIC_API_KEY, sends "Authorization: Bearer " and fails at its first call
+# with "Connection error.". This replacement hides only the AWS_* variables (what Daytona keeps away from the S3
+# client), one caller at a time, and puts them back.
+_ENV_LOCK = threading.Lock()
+
+
+@contextmanager
+def _aws_free_env(temp_env: Mapping[str, str] | None = None) -> Iterator[None]:
+    with _ENV_LOCK:
+        hidden = {k: os.environ[k] for k in list(os.environ) if k.startswith("AWS_")}
+        replaced = {k: os.environ.get(k) for k in temp_env or {}}
+        for k in hidden:
+            del os.environ[k]
+        os.environ.update(temp_env or {})
+        try:
+            yield
+        finally:
+            for k, v in replaced.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            os.environ.update(hidden)
+
+
+def _patch_daytona_env() -> None:
+    import daytona._async.object_storage as async_storage
+    import daytona._sync.object_storage as sync_storage
+
+    for module in (sync_storage, async_storage):
+        if hasattr(module, "isolated_env"):
+            module.isolated_env = _aws_free_env
+
+
+_patch_daytona_env()
 
 LAB_PAGE_SRC = ROOT_DIR / "lab_page" / "server.py"
 LAB_PAGE_VM = "/home/daytona/lab_page.py"
