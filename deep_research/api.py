@@ -11,6 +11,7 @@ import logging
 import mimetypes
 import os
 import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -26,9 +27,10 @@ from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
-from . import datasets, user_scripts  # noqa: E402
-from .batch import Batch  # noqa: E402 - needs the environment loaded first
+from . import datasets, hub, traps, user_scripts  # noqa: E402
+from .batch import Batch, resume_problem  # noqa: E402 - needs the environment loaded first
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
+from .cost_report import cost_report  # noqa: E402
 from .costs import OverBudget, estimate_batch_usd  # noqa: E402
 from .events import read_events  # noqa: E402
 
@@ -73,8 +75,13 @@ def lab_client() -> httpx.AsyncClient:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Keys this machine does not have come from the team hub, when one is set up (hub.py).
+    await asyncio.to_thread(hub.load_runner_env)
     yield
     await close_all()
+    pusher = hub.pusher()
+    if pusher is not None:
+        await asyncio.to_thread(pusher.close)  # send what is still queued
     if _lab_client is not None:
         await _lab_client.aclose()
 
@@ -116,6 +123,40 @@ def _inside(base: Path, candidate: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+# ---- the team hub: batches other machines ran ----
+
+HUB_CACHE_SECONDS = 10.0
+_hub_cache: dict[str, tuple[float, object]] = {}
+
+
+def _hub_cached(name: str, fetch) -> object:
+    """A hub read shared for a few seconds, so the home screen and the cost screen do not wait on it each time."""
+    hit = _hub_cache.get(name)
+    if hit and time.monotonic() - hit[0] < HUB_CACHE_SECONDS:
+        return hit[1]
+    value = fetch()
+    if value is not None:
+        _hub_cache[name] = (time.monotonic(), value)
+    return value
+
+
+def _is_local(batch_id: str) -> bool:
+    return any((root / batch_id / "case" / "case.json").exists() for root in (BATCHES_DIR, FIXTURES_DIR))
+
+
+def _remote_case(batch_id: str) -> dict:
+    case = hub.get_case(batch_id) if hub.enabled() else None
+    if case is None:
+        raise HTTPException(404, f"no batch {batch_id}")
+    return case
+
+
+def _remote_events(batch_id: str, key: str) -> list[dict]:
+    if not hub.enabled():
+        raise HTTPException(404, f"no batch {batch_id}")
+    return hub.get_events(batch_id, key) or []
 
 
 def _batch_dir(batch_id: str) -> Path:
@@ -171,21 +212,51 @@ def _save_stats(b: Batch) -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "keys": key_status()}
+    # The hub check is a network call: shared for a few seconds, like the other hub reads.
+    hub_status = _hub_cached_status()
+    return {"ok": True, "keys": key_status(), "hub": hub_status}
+
+
+HUB_STATUS_SECONDS = 15.0
+_hub_status: tuple[float, dict] | None = None
+
+
+def _hub_cached_status() -> dict:
+    global _hub_status
+    if not hub.enabled():
+        return {"state": "off"}
+    if _hub_status and time.monotonic() - _hub_status[0] < HUB_STATUS_SECONDS:
+        cached = dict(_hub_status[1])
+    else:
+        cached = hub.status()
+        _hub_status = (time.monotonic(), cached)
+    # What is queued changes every second: always fresh.
+    p = hub.pusher()
+    if p is not None:
+        cached.update(queued=p.queued(), last_push_at=p.last_ok_at, push_error=p.last_error)
+    return cached
 
 
 @app.get("/api/defaults")
 def defaults():
     prices = load_prices()
     missing = any(v.get("input_per_mtok") is None for v in prices.get("models", {}).values())
-    return {"config": BatchConfig().model_dump(), "prices_missing": missing or prices.get("daytona_vm_per_hour") is None}
+    return {
+        "config": BatchConfig().model_dump(),
+        "prices_missing": missing or prices.get("daytona_vm_per_hour") is None,
+        # Every trap a batch can plant, for the picker (`BatchConfig.trap` is one of their names).
+        "traps": [t.public() for t in traps.registered()],
+    }
 
 
 @app.post("/api/estimate")
 def estimate(cfg: BatchConfig):
     avg = _avg_run_usd()
     runs = estimate_batch_usd(cfg.n_runs, avg)
-    forks = None if avg is None else avg * 2 * cfg.forks_per_choice
+    # No split yet, so this counts every arm the config allows. The `show` arm only exists for a step that
+    # has a weaker version defined, so this is an upper bound (forks.arm_plan).
+    n_arms = 2 + cfg.placebo_arm + cfg.show_arm
+    forks = None if avg is None else avg * n_arms * cfg.forks_per_choice
     return {
         "avg_run_usd": avg,
         "runs_usd": runs,
@@ -240,16 +311,102 @@ async def upload_script(request: Request, name: str = "train.py"):
         raise HTTPException(422, str(e)) from e
 
 
+def _resumable(batch_id: str) -> bool:
+    """A saved batch of ours (not a fixture, not live) that `Batch.resume` would accept."""
+    if _running(batch_id):
+        return False
+    d = BATCHES_DIR / batch_id
+    try:
+        case = json.loads((d / "case" / "case.json").read_text())
+    except Exception:  # noqa: BLE001 - a half-written case file is not resumable
+        return False
+    return resume_problem(case, d) is None
+
+
 @app.get("/api/batches")
 def list_batches():
     out = []
-    # Live means running in this server. Anything else on disk, ours or a fixture, is a replay.
+    # Live means running in this server. Anything else on disk, ours or a fixture, is a replay; one of ours that
+    # stopped at a split can be resumed.
     for root in (BATCHES_DIR, FIXTURES_DIR):
         if root.exists():
             for d in sorted(root.iterdir()):
                 if (d / "case" / "case.json").exists():
-                    out.append({"id": d.name, "kind": "live" if _running(d.name) else "replay"})
+                    item = {"id": d.name, "kind": "live" if _running(d.name) else "replay"}
+                    if root is BATCHES_DIR and _resumable(d.name):
+                        item["resumable"] = True
+                    out.append(item)
+    # Batches other machines ran, from the team hub. They open as replays, read from the hub.
+    seen = {b["id"] for b in out}
+    for row in (_hub_cached("batches", hub.list_batches) if hub.enabled() else None) or []:
+        if isinstance(row, dict) and row.get("id") not in seen:
+            out.append({"id": row["id"], "kind": "replay", "machine": row.get("machine"), "remote": True})
     return out
+
+
+@app.get("/api/costs")
+def costs():
+    """Spend across every batch (cost_report.py): live ones from memory, saved ones and fixtures from disk."""
+    entries, seen = [], set()
+    for root in (BATCHES_DIR, FIXTURES_DIR):
+        if not root.exists():
+            continue
+        for d in sorted(root.iterdir()):
+            path = d / "case" / "case.json"
+            if d.name in seen or not path.exists():
+                continue
+            seen.add(d.name)
+            b = BATCHES.get(d.name)
+            try:
+                case = b.case.read() if b is not None else json.loads(path.read_text())
+                # Fixtures carry no date: their files' times are the checkout's, not the batch's.
+                mtime = None if root == FIXTURES_DIR else path.stat().st_mtime
+            except (OSError, ValueError):
+                continue  # a case file that cannot be read is left out, not a failed report
+            entries.append({"id": d.name, "kind": "live" if _running(d.name) else "replay", "case": case, "mtime": mtime})
+    # The rest of the team's spend, from the hub.
+    for row in (_hub_cached("cases", hub.all_cases) if hub.enabled() else None) or []:
+        if isinstance(row, dict) and row.get("id") not in seen and isinstance(row.get("case"), dict):
+            seen.add(row["id"])
+            entries.append({"id": row["id"], "kind": "replay", "case": row["case"], "mtime": None, "machine": row.get("machine")})
+    return cost_report(entries)
+
+
+# One resume at a time per batch: two clicks (two tabs) must not build two batches and start two investigators.
+_RESUME_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+@app.post("/api/batches/{batch_id}/resume")
+async def resume_batch(batch_id: str, investigate: bool = False):
+    """Load a saved batch back into this server so the investigator and the fork experiment can run on it.
+
+    Only a batch whose runs are scored, with a split and no verdict yet. It comes back in phase `ready`; with
+    `?investigate=true` the investigator starts right away.
+    """
+    return await _resume_locked(batch_id, investigate)
+
+
+async def _resume_locked(batch_id: str, investigate: bool) -> dict:
+    async with _RESUME_LOCKS.setdefault(batch_id, asyncio.Lock()):
+        return await _resume(batch_id, investigate)
+
+
+async def _resume(batch_id: str, investigate: bool) -> dict:
+    b = _running(batch_id)
+    if b is None:
+        _batch_dir(batch_id)  # 404 for an unknown id
+        # A batch that is over in this server (stopped, say) is a replay; resuming it starts from its files on disk.
+        BATCHES.pop(batch_id, None)
+        try:
+            b = await asyncio.to_thread(Batch.resume, batch_id, BATCHES_DIR)
+        except ValueError as e:
+            raise HTTPException(409, f"this batch cannot be resumed: {e}") from e
+        BATCHES[b.id] = b
+    # Only when nothing is already running for it: a second click must not start a second investigator.
+    task = TASKS.get(b.id)
+    if investigate and b.case.data.get("phase") == "ready" and (task is None or task.done()):
+        _spawn(b.id, b.investigate())
+    return {"id": b.id, "phase": b.case.data.get("phase")}
 
 
 @app.post("/api/batches")
@@ -307,23 +464,31 @@ def _with_charts(case: dict, root: Path) -> dict:
 
 @app.get("/api/batches/{batch_id}/case")
 def get_case(batch_id: str):
+    if not _is_local(batch_id):
+        return _remote_case(batch_id)
     root = _batch_dir(batch_id)
     return _with_charts(json.loads((root / "case" / "case.json").read_text()), root)
 
 
+def _events(batch_id: str, rel: str, key: str) -> list[dict]:
+    if not _is_local(batch_id):
+        return _remote_events(batch_id, key)
+    return read_events(_batch_dir(batch_id) / rel / "events.jsonl")
+
+
 @app.get("/api/batches/{batch_id}/runs/{run_id}/events")
 def run_events(batch_id: str, run_id: str):
-    return read_events(_batch_dir(batch_id) / "runs" / run_id / "events.jsonl")
+    return _events(batch_id, f"runs/{run_id}", run_id)
 
 
 @app.get("/api/batches/{batch_id}/forks/{fork_id}/{child}/events")
 def fork_events(batch_id: str, fork_id: str, child: str):
-    return read_events(_batch_dir(batch_id) / "forks" / fork_id / child / "events.jsonl")
+    return _events(batch_id, f"forks/{fork_id}/{child}", f"{fork_id}/{child}")
 
 
 @app.get("/api/batches/{batch_id}/investigator/events")
 def investigator_events(batch_id: str):
-    return read_events(_batch_dir(batch_id) / "investigator" / "events.jsonl")
+    return _events(batch_id, "investigator", "investigator")
 
 
 @app.get("/api/batches/{batch_id}/files/{path:path}")
@@ -419,7 +584,7 @@ async def ws(websocket: WebSocket, batch_id: str):
             await websocket.send_json({"kind": "error", "message": e.detail})
             await websocket.close(code=4404)
             return
-        await websocket.send_json({"kind": "snapshot", "case": case, "live": False})
+        await websocket.send_json({"kind": "snapshot", "case": case, "live": False, "resumable": _resumable(batch_id)})
         await websocket.close()
         return
     q = b.subscribe()

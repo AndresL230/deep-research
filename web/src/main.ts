@@ -4,6 +4,7 @@
 //   #/b/<id>                   a batch: phase panel, the wall of runs, the split lanes, the fork experiment, the verdict
 //   #/b/<id>/run/<run>         one run in the Ask conversation view
 //   #/b/<id>/fork/<f>/<child>  one fork child in the conversation view
+//   #/costs                    what every batch cost, in total and one by one
 //
 // A live batch follows the server over the websocket. A saved batch (a replay) loads its final case file and every
 // event log once, then a clock plays it back on the timeline in batch/replay.ts.
@@ -20,17 +21,22 @@ import { AWAY_PX, conversationView, initialConversationUi, jumpButton, stickAfte
 import { scheduleOrbs } from "./thinking-orb";
 import {
   applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
-  fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, startBatch, uploadDataset, uploadScript, startInvestigation, stopBatch,
-  type AgentEvent, type BatchConfig, type BatchSocket, type CaseFile,
+  fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, uploadDataset, uploadScript, startInvestigation, stopBatch,
+  type AgentEvent, type HubStatus, type BatchConfig, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
 import { costBar, homeView } from "./batch/home";
-import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, type DatasetUi, type UploadKind } from "./dataset-input";
+import { hubBadge } from "./batch/hub-badge";
+import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { wallView } from "./batch/wall";
 import { forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
+import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, runSummaryView, taskText } from "./batch/run";
 import { agentTimes, caseAt, eventsAt, replayBar, replayDuration, replaySchedule } from "./batch/replay";
 import { LABEL_PATTERNS, chartUrl, logOf, notebookCells, notebookView } from "./batch/notebook";
+import { fetchCosts, type CostReport } from "./api";
+import type { Loadable } from "./batch/model";
+import { costsLink, costsView } from "./batch/costs";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +45,8 @@ interface BatchState {
   /** Null until the websocket's snapshot (or the case fetch) arrives. */
   full: CaseFile | null;
   live: boolean;
+  /** A saved batch the server can bring back live (the snapshot said so). */
+  resumable: boolean;
   events: Record<EventKey, AgentEvent[]>;
   /** Live only: per log, the last event's time and when it arrived, to run that log's clock between events. */
   ticks: Record<EventKey, { t: number; at: number }>;
@@ -61,6 +69,12 @@ interface AppState {
   cvKey: string;
   /** A run's page: its notebook, or the same log as conversation steps. */
   runView: "notebook" | "steps";
+  /** The cost screen's report (GET /api/costs), loaded again on every visit. */
+  costs: Loadable<CostReport>;
+  /** Where the cost screen was opened from, for its back button. */
+  costsBack: Route;
+  /** This server's link to the team hub, for the header badge (refreshed every half minute). */
+  hub: HubStatus | null;
 }
 
 const S: AppState = {
@@ -72,6 +86,9 @@ const S: AppState = {
   cv: initialConversationUi(),
   cvKey: "",
   runView: "notebook",
+  costs: { state: "loading" },
+  costsBack: { name: "home" },
+  hub: null,
 };
 
 const DEFAULT_SPEED = 4;
@@ -144,6 +161,7 @@ function batchVm(b: BatchState, full: CaseFile): BatchVm {
   return {
     id: b.id,
     live: b.live,
+    resumable: b.resumable,
     case: c,
     events: r ? eventsAt(full, b.events, r.t) : b.events,
     logs: logViews(b, full, c),
@@ -181,14 +199,16 @@ function paint(): void {
 function headerView(vm: BatchVm | null): string {
   const r = S.route;
   const crumbs: string[] = [];
-  if (r.name !== "home") crumbs.push(`<button type="button" class="pg-crumb${r.name === "batch" ? " is-cur" : ""}" data-act="${ACT.back}">${esc(r.id)}</button>`);
+  if ("id" in r) crumbs.push(`<button type="button" class="pg-crumb${r.name === "batch" ? " is-cur" : ""}" data-act="${ACT.back}">${esc(r.id)}</button>`);
+  if (r.name === "costs") crumbs.push(`<span class="pg-crumb is-cur">Costs</span>`);
   if (r.name === "run") crumbs.push(`<span class="pg-crumb is-cur">${esc(r.run)}</span>`);
   if (r.name === "child") crumbs.push(`<span class="pg-crumb is-cur">${esc(`${r.fork} ${r.child}`)}</span>`);
   const left = `<div class="ask-hdr-l pg-hdr-l">
     <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Home"><span class="ask-hdr-mark">${askIcon("chart", 15, null, 2)}</span><span class="ask-h1 ask-h1-t${crumbs.length ? " is-parent" : ""}">Where do AI scientists go wrong?</span></button>
     ${crumbs.map((c) => `<span class="ask-crumb-sep">›</span>${c}`).join("")}
   </div>`;
-  const right = vm ? `<div class="pg-hdr-r">${costBar(vm.case.costs ?? {}, { simulated: !!(vm.case.config as BatchConfig).simulated })}</div>` : "";
+  const bar = vm ? costBar(vm.case.costs ?? {}, { simulated: !!(vm.case.config as BatchConfig).simulated }) : "";
+  const right = `<div class="pg-hdr-r">${bar}${hubBadge(S.hub)}${costsLink(r.name === "costs")}</div>`;
   return left + right;
 }
 
@@ -218,7 +238,7 @@ function runBody(vm: BatchVm, key: EventKey): string {
     const cells = log ? notebookCells(log) : [];
     const label = vm.case.split?.label;
     const body = cells.length
-      ? notebookView(cells, { image: (name) => chartUrl(vm, key, name), mark: label ? LABEL_PATTERNS[label] ?? null : null })
+      ? notebookView(cells, { image: (name) => chartUrl(vm, key, name), mark: trapMark(trapOf(vm.case), label) ?? (label ? LABEL_PATTERNS[label] ?? null : null) })
       : `<p class="pg-note">Nothing has run yet.</p>`;
     return `${summary}<div class="pg-nb" data-morph-key="nb:${attr(key)}">${body}</div>`;
   }
@@ -244,6 +264,7 @@ function render(): void {
 
   let body: string;
   if (r.name === "home") body = homeView(S.home, { html: inputsView(S.ds, S.home.starting), label: inputsLabel(S.ds) });
+  else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
   else if (!vm) body = messageView("loading", "Opening the batch", "Loading its case file and event logs…");
   else if (r.name === "batch") body = batchBody(vm);
@@ -316,10 +337,10 @@ function closeBatch(): void {
   S.batch = null;
 }
 
-function openBatch(id: string): void {
-  if (S.batch?.id === id) return;
+function openBatch(id: string, reopen = false): void {
+  if (S.batch?.id === id && !reopen) return;
   closeBatch();
-  const b: BatchState = { id, full: null, live: false, events: {}, ticks: {}, replay: null, busy: null, error: null, loadError: null, socket: null };
+  const b: BatchState = { id, full: null, live: false, resumable: false, events: {}, ticks: {}, replay: null, busy: null, error: null, loadError: null, socket: null };
   S.batch = b;
   let snapshotSeen = false;
   b.socket = openBatchSocket(id, {
@@ -329,6 +350,7 @@ function openBatch(id: string): void {
       if (m.kind === "snapshot") {
         snapshotSeen = true;
         b.live = m.live;
+        b.resumable = !m.live && m.resumable === true;
         if (m.live) { b.full = m.case; void loadLiveLogs(b); }
         else void loadReplay(b, m.case);
         paint();
@@ -463,6 +485,7 @@ async function loadInputs(): Promise<void> {
 const refusal = (e: unknown, lead: string, fallback: string): string =>
   message(e, fallback).replace(/^The server answered HTTP 422: /, `${lead}: `);
 
+let uploadSeq = 0;
 /** Upload a CSV (a dataset) or a .py file (the training script). `expected` is what the picker was opened for. */
 async function upload(file: File, expected?: UploadKind): Promise<void> {
   if (S.ds.upload.state === "busy" || S.home.starting) return;
@@ -471,17 +494,18 @@ async function upload(file: File, expected?: UploadKind): Promise<void> {
     : expected && k.kind !== expected ? (expected === "dataset" ? "Choose a CSV file for the dataset." : "Choose a Python file (.py) for the training script.")
     : null;
   if (problem !== null || "problem" in k) { S.ds = { ...S.ds, upload: { state: "error", message: problem ?? "" } }; paint(); return; }
+  const ticket: UploadTicket = { seq: ++uploadSeq, selected: S.ds.selected };
   S.ds = { ...S.ds, upload: { state: "busy", kind: k.kind } };
   S.home = { ...S.home, error: null };
   paint();
   try {
-    if (k.kind === "dataset") {
-      const info = await uploadDataset(file);
-      S.ds = { ...S.ds, datasets: [...(S.ds.datasets ?? []), info], selected: info.id, upload: { state: "idle" } };
-    } else {
-      S.ds = { ...S.ds, script: await uploadScript(file), upload: { state: "idle" } };
-    }
+    // Wait first, then merge into the state as it is by then: the person may have changed it meanwhile.
+    const done: Uploaded = k.kind === "dataset"
+      ? { kind: "dataset", info: await uploadDataset(file) }
+      : { kind: "script", info: await uploadScript(file) };
+    S.ds = withUpload(S.ds, ticket, uploadSeq, done);
   } catch (e) {
+    if (ticket.seq !== uploadSeq) return;
     S.ds = { ...S.ds, upload: { state: "error", message: refusal(e, "That file can't be used", "The upload failed.") } };
   }
   paint();
@@ -535,6 +559,22 @@ async function start(): Promise<void> {
   }
 }
 
+// ── the cost screen ──────────────────────────────────────────────────────────
+
+let costsSeq = 0;
+async function loadCosts(): Promise<void> {
+  const seq = ++costsSeq;
+  // A visit after the first keeps the last report on screen while the new one loads.
+  if (S.costs.state !== "ready") { S.costs = { state: "loading" }; paint(); }
+  try {
+    const value = await fetchCosts();
+    if (seq === costsSeq) S.costs = { state: "ready", value };
+  } catch (e) {
+    if (seq === costsSeq) S.costs = { state: "error", message: message(e, "Couldn't load the costs.") };
+  }
+  paint();
+}
+
 // ── live actions ─────────────────────────────────────────────────────────────
 
 async function liveAction(name: string, call: (id: string) => Promise<unknown>): Promise<void> {
@@ -548,6 +588,25 @@ async function liveAction(name: string, call: (id: string) => Promise<unknown>):
   } catch (e) {
     b.error = message(e, "That didn't work.");
   } finally {
+    b.busy = null;
+    paint();
+  }
+}
+
+/** A saved batch at its split: ask the server to bring it back live and start the investigator, then follow it over
+ *  a fresh websocket (the replay's one closed after its snapshot). */
+async function resumeAndInvestigate(b: BatchState): Promise<void> {
+  if (b.busy) return;
+  b.busy = ACT.investigate;
+  b.error = null;
+  paint();
+  try {
+    await resumeBatch(b.id, true);
+    if (S.batch !== b) return;
+    stopClock();
+    openBatch(b.id, true);
+  } catch (e) {
+    b.error = message(e, "Couldn't resume the batch.");
     b.busy = null;
     paint();
   }
@@ -571,6 +630,10 @@ function onRoute(): void {
   if (r.name === "home") {
     closeBatch();
     void loadHome();
+  } else if (r.name === "costs") {
+    if (prev.name !== "costs") S.costsBack = prev;
+    closeBatch();
+    void loadCosts();
   } else {
     openBatch(r.id);
     const b = S.batch;
@@ -594,27 +657,31 @@ root.addEventListener("click", (e) => {
   switch (el.dataset.act) {
     case ACT.home: go({ name: "home" }); if (S.home.batches.state === "error") void loadHome(true); return;
     case ACT.openBatch: go({ name: "batch", id: arg }); return;
+    case ACT.openCosts: go({ name: "costs" }); return;
     case ACT.start: void start(); return;
-    case DI_ACT.dataset: S.ds = { ...S.ds, selected: arg, upload: { state: "idle" } }; S.home = { ...S.home, error: null }; paint(); return;
+    case DI_ACT.dataset: S.ds = { ...S.ds, selected: arg, upload: uploadAfterEdit(S.ds.upload) }; S.home = { ...S.home, error: null }; paint(); return;
     case DI_ACT.upload: {
       const kind: UploadKind = arg === "script" ? "script" : "dataset";
       void pickFile(kind).then((f) => { if (f) void upload(f, kind); });
       return;
     }
-    case DI_ACT.scriptRemove: S.ds = { ...S.ds, script: null, upload: { state: "idle" } }; paint(); return;
+    case DI_ACT.scriptRemove: S.ds = { ...S.ds, script: null, upload: uploadAfterEdit(S.ds.upload) }; paint(); return;
     case ACT.toggleAdvanced: S.home = { ...S.home, advanced: !S.home.advanced }; paint(); return;
     case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
     case ACT.resetConfig:
       if (S.home.defaults) { S.home = { ...S.home, draft: { ...S.home.defaults.config }, error: null }; paint(); scheduleEstimate(); }
       return;
-    case ACT.openRun: if (r.name !== "home") go({ name: "run", id: r.id, run: arg }); return;
+    case ACT.openRun: if ("id" in r) go({ name: "run", id: r.id, run: arg }); return;
     case ACT.openChild: {
       const [fork, child] = arg.split("/");
-      if (r.name !== "home" && fork && child) go({ name: "child", id: r.id, fork, child });
+      if ("id" in r && fork && child) go({ name: "child", id: r.id, fork, child });
       return;
     }
-    case ACT.back: if (r.name !== "home") go({ name: "batch", id: r.id }); return;
-    case ACT.investigate: void liveAction("investigate", (id) => startInvestigation(id)); return;
+    case ACT.back: if ("id" in r) go({ name: "batch", id: r.id }); else if (r.name === "costs") go(S.costsBack); return;
+    case ACT.investigate:
+      if (b && !b.live && b.resumable) void resumeAndInvestigate(b);
+      else void liveAction("investigate", (id) => startInvestigation(id));
+      return;
     case ACT.approve: void liveAction("approve", (id) => postDecision(id, true)); return;
     case ACT.decline: void liveAction("decline", (id) => postDecision(id, false)); return;
     case ACT.stop: void liveAction("stop", (id) => stopBatch(id)); return;
@@ -708,5 +775,20 @@ scrollEl.addEventListener("scroll", () => {
 
 // A live batch's notebooks type between server messages.
 setInterval(() => { if (S.batch?.live && S.route.name !== "home") paint(); }, 150);
+// The cost screen follows a batch that is still running.
+setInterval(() => { if (S.route.name === "costs" && S.costs.state === "ready" && S.costs.value.batches.some((b) => b.kind === "live")) void loadCosts(); }, 5000);
+
+// The hub badge: whether this server reaches the team hub and its batches get there. Checked now and every 30s.
+async function refreshHub(): Promise<void> {
+  try {
+    const h = await fetchHealth();
+    S.hub = h.hub ?? { state: "off" };
+  } catch {
+    S.hub = { state: "unreachable", error: "this server did not answer" };
+  }
+  paint();
+}
+void refreshHub();
+setInterval(() => { void refreshHub(); }, 30_000);
 
 onRoute();

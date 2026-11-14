@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -58,7 +58,30 @@ class CostTracker:
     prices: dict = field(default_factory=load_prices)
     scopes: dict[str, ScopeCost] = field(default_factory=lambda: defaultdict(ScopeCost))
     _vm_started: dict[str, float] = field(default_factory=dict)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
+    # Re-entrant: `snapshot` holds it while it asks for the total. Each run's usage callback writes
+    # from a worker thread while the budget check reads the total on the event loop.
+    _lock: threading.RLock = field(default_factory=threading.RLock)
+
+    def restore(self, saved: dict) -> None:
+        """Take over the spend a saved batch already recorded (its case file's `costs` section).
+
+        A reopened batch then keeps counting from there: the budget guard sees the earlier
+        spend, and the next save adds to the saved scopes instead of replacing them.
+        A scope saved without a dollar figure stays unknown, never zero.
+        """
+        with self._lock:
+            for name, s in (saved.get("scopes") or {}).items():
+                if not isinstance(s, dict):
+                    continue
+                self.scopes[name] = ScopeCost(
+                    input_tokens=int(s.get("input_tokens") or 0),
+                    output_tokens=int(s.get("output_tokens") or 0),
+                    cache_read_tokens=int(s.get("cache_read_tokens") or 0),
+                    cache_write_tokens=int(s.get("cache_write_tokens") or 0),
+                    model_usd=s.get("model_usd"),
+                    vm_seconds=float(s.get("vm_seconds") or 0.0),
+                    vm_usd=s.get("vm_usd"),
+                )
 
     # ---- model usage ----
     def model_price(self, model: str, prompt_tokens: int = 0) -> dict:
@@ -121,9 +144,23 @@ class CostTracker:
             else:
                 s.vm_usd += seconds / 3600 * rate
 
+    def _current(self) -> dict[str, ScopeCost]:
+        """Every scope as of now: a VM that is still up is counted to this moment, not only once it is deleted."""
+        now, rate = time.monotonic(), self.prices.get("daytona_vm_per_hour")
+        out = {}
+        for k in [*self.scopes, *(k for k in list(self._vm_started) if k not in self.scopes)]:
+            s, start = self.scopes.get(k) or ScopeCost(), self._vm_started.get(k)
+            if start is not None:
+                seconds = max(0.0, now - start)
+                usd = None if rate is None or s.vm_usd is None else s.vm_usd + seconds / 3600 * rate
+                s = replace(s, vm_seconds=s.vm_seconds + seconds, vm_usd=usd)
+            out[k] = s
+        return out
+
     # ---- totals and the guard ----
     def total_usd(self) -> float | None:
-        totals = [s.total_usd for s in self.scopes.values()]
+        with self._lock:
+            totals = [s.total_usd for s in self._current().values()]
         if any(t is None for t in totals):
             return None
         return sum(totals)  # type: ignore[arg-type]
@@ -141,18 +178,22 @@ class CostTracker:
             )
 
     def average_run_usd(self, prefix: str = "run:") -> float | None:
-        vals = [s.total_usd for k, s in self.scopes.items() if k.startswith(prefix)]
+        with self._lock:
+            vals = [s.total_usd for k, s in self.scopes.items() if k.startswith(prefix)]
         if not vals or any(v is None for v in vals):
             return None
         return sum(vals) / len(vals)  # type: ignore[arg-type]
 
     def snapshot(self) -> dict:
         with self._lock:
+            scopes = self._current()
+            totals = [s.total_usd for s in scopes.values()]
+            spent = None if any(t is None for t in totals) else sum(totals)  # type: ignore[arg-type]
             return {
                 "budget_usd": self.budget_usd,
-                "spent_usd": _r(self.total_usd()),
-                "prices_missing": self.total_usd() is None,
-                "scopes": {k: v.to_dict() for k, v in self.scopes.items()},
+                "spent_usd": _r(spent),
+                "prices_missing": spent is None,
+                "scopes": {k: v.to_dict() for k, v in scopes.items()},
             }
 
 

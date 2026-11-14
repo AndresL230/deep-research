@@ -1,10 +1,11 @@
 // OWNER: subagent A. The home screen (batch cards, the new batch panel with its estimate and Start) and the header cost bar.
 import "./home.css";
-import type { BatchConfig, BatchListItem, Costs, Health, ScopeCost } from "../api";
+import type { BatchConfig, BatchListItem, Costs, Health, ScopeCost, TrapInfo } from "../api";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { pct, tokens, usd } from "./format";
 import { ACT, type HomeVm, type Loadable } from "./model";
+import { DEFAULT_PLANTED, chosenTrap } from "./trap";
 
 // ── home screen ──────────────────────────────────────────────────────────────
 
@@ -13,19 +14,27 @@ export interface HomeInputs { html: string; label: string }
 
 /** The home screen: the batches to open, then one panel to start a new one. Labels only, no prose. */
 export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
+  const trap = chosenTrap(vm.defaults, vm.draft?.trap);
   return `<div class="hm" data-morph-key="home">
     ${batchesSection(vm.batches)}
     <section class="hm-panel" data-morph-key="new" aria-labelledby="hm-new-h">
       <div class="hm-panel-h" data-morph-key="head">
         <h2 class="hm-h2" id="hm-new-h">New batch</h2>
-        <span class="hm-fixed">${esc(inputs?.label ?? "Pima diabetes · planted duplicate rows")}</span>
+        <span class="hm-fixed">${esc(summaryLabel(inputs?.label ?? `Pima diabetes · ${DEFAULT_PLANTED}`, trap))}</span>
       </div>
       ${inputs?.html ?? ""}
-      ${vm.draft ? mainRow(vm.draft) : mainSkeleton(defaultsFailed(vm))}
+      ${vm.draft ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
+      ${vm.draft ? mainRow(vm.draft, trap) : mainSkeleton(defaultsFailed(vm))}
       ${advancedBlock(vm)}
       ${footer(vm)}
     </section>
   </div>`;
+}
+
+/** The panel's one-line summary, saying what the chosen trap plants. The summary is written for the default trap. */
+function summaryLabel(label: string, trap: TrapInfo | null): string {
+  if (!trap?.planted) return label;
+  return label.split(" · ").map((part) => (part === DEFAULT_PLANTED ? `planted ${trap.planted}` : part)).join(" · ");
 }
 
 /** Why Start is disabled, as a few words, or null when it can be pressed. */
@@ -60,10 +69,12 @@ function batchesSection(b: Loadable<BatchListItem[]>): string {
     body = `<div class="hm-note" data-morph-key="empty">No batches yet</div>`;
   } else {
     const cards = b.value.map((it) => {
-      const live = it.kind === "live";
+      // Live: running here. Ready: saved at its split, Investigate brings it back. Otherwise a replay.
+      const kind = it.kind === "live" ? "live" : it.resumable ? "ready" : "replay";
+      const word = kind === "live" ? "Live" : kind === "ready" ? "Ready to investigate" : "Replay";
       return `<button type="button" class="hm-batch" data-morph-key="${attr(it.id)}" data-act="${ACT.openBatch}" data-arg="${attr(it.id)}" title="${attr(it.id)}">
-        <span class="hm-batch-id">${esc(it.id)}</span>
-        <span class="hm-kind" data-kind="${live ? "live" : "replay"}">${live ? "Live" : "Replay"}</span>
+        <span class="hm-batch-id">${esc(it.id)}${it.remote && it.machine ? `<span class="hm-batch-from">${esc(it.machine)}</span>` : ""}</span>
+        <span class="hm-kind" data-kind="${kind}">${word}</span>
       </button>`;
     }).join("");
     body = `<div class="hm-batches" data-morph-list data-morph-key="list">${cards}</div>`;
@@ -115,11 +126,31 @@ function textField(cfg: BatchConfig, f: Field, label: string): string {
 /** "8 pts" from 0.08: the threshold as whole accuracy points. */
 const points = (x: number) => `${Math.round(x * 1000) / 10} pts`;
 
-/** The four settings that matter, on one row. */
-function mainRow(c: BatchConfig): string {
+/**
+ * Which trap to plant: the server's list by title, with the chosen one's description under it. Nothing until the
+ * server sends a list. main.ts writes the picked option's value into the draft like any other `data-cfg` input.
+ */
+function trapRow(c: BatchConfig, traps: readonly TrapInfo[]): string {
+  if (!traps.length) return "";
+  const chosen = traps.find((t) => t.name === c.trap);
+  // A draft naming a trap the list does not have still shows what it holds.
+  const items = chosen ? traps : [...traps, { name: c.trap, title: c.trap }];
+  const options = items.map((t) =>
+    `<option value="${attr(t.name)}"${t.name === c.trap ? " selected" : ""}>${esc(t.title)}</option>`).join("");
+  return `<div class="hm-trap" data-morph-key="trap">
+    <div class="hm-field" data-f="trap">
+      <label class="hm-lbl" for="${fid("trap")}">Trap</label>
+      <div class="hm-ctl"><select class="hm-input hm-select" id="${fid("trap")}" data-cfg="trap"${chosen ? ` aria-describedby="hm-trap-d"` : ""}>${options}</select></div>
+    </div>
+    ${chosen ? `<span class="hm-trap-d" id="hm-trap-d">${esc(chosen.description)}</span>` : ""}
+  </div>`;
+}
+
+/** The four settings that matter, on one row. The strength slider is named by the chosen trap. */
+function mainRow(c: BatchConfig, trap: TrapInfo | null): string {
   return `<div class="hm-main" data-morph-key="main">
     ${numberField(c, "n_runs", "Runs", { min: 1, max: 24 })}
-    ${rangeField(c, "trap_strength", "Duplicated rows", 0, 1, 0.05, pct(c.trap_strength, 0))}
+    ${rangeField(c, "trap_strength", trap?.strength_label || "Duplicated rows", 0, 1, 0.05, pct(c.trap_strength, 0))}
     ${choiceField(c, "hint_level", "Hint", [["none", "None"], ["light", "Light"]])}
     ${numberField(c, "budget_usd", "Budget", { min: 0, step: "any", prefix: "$" })}
   </div>`;

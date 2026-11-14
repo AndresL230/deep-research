@@ -17,11 +17,42 @@ export const PHASES = [
 export type KnownPhase = (typeof PHASES)[number];
 export type Phase = KnownPhase | (string & {});
 
-/** Step labels the split finder and the investigator use (deep_research/analysis.py LABELS). */
+/** The step labels the server ships with (deep_research/analysis.py LABELS): the base steps plus each trap's honest
+ *  step (`deduplicate`, `drop_leak`, `group_split`). A trap added later brings a label that is not listed here, so
+ *  `StepLabel` is open; the batch's `config.trap_info` says what its step is. */
 export const STEP_LABELS = [
-  "load", "inspect", "deduplicate", "clean", "split", "preprocess", "train", "evaluate", "plot", "predict", "report",
+  "load", "inspect", "deduplicate", "drop_leak", "group_split", "deduplicate_near", "clean", "split", "preprocess",
+  "train", "evaluate", "plot", "predict", "report",
 ] as const;
-export type StepLabel = (typeof STEP_LABELS)[number];
+export type KnownStepLabel = (typeof STEP_LABELS)[number];
+export type StepLabel = KnownStepLabel | (string & {});
+
+/** A trap, the flaw planted in the data, as the server describes it (deep_research/traps/, `Trap.public()`).
+ *  Everything the UI says about a trap comes from here, so a new trap needs no change in the web app. */
+export interface TrapInfo {
+  /** The value of `BatchConfig.trap`. */
+  name: string;
+  title: string;
+  /** One line for the picker. */
+  description: string;
+  /** After "planted": "duplicate rows". */
+  planted: string;
+  /** What `trap_strength` means for this trap, as the slider's label. */
+  strength_label: string;
+  /** The step an honest run does, and the regex (JavaScript `RegExp` source) that spots it in code. */
+  label: string;
+  pattern: string;
+  /** The step can be part of the split itself (a grouped split). */
+  at_split?: boolean;
+  /** After "Honest runs": "removed duplicate rows". */
+  did: string;
+  /** The empty slot on the side that skipped the step: "No duplicate check here". */
+  missing: string;
+  /** What the fork experiment's forced arm runs. */
+  intervention: { description: string; command: string };
+  /** How to finish "52% ...", about a run's `overlap_share`. Null when the trap has no evidence number. */
+  evidence_text: string | null;
+}
 
 export interface BatchConfig {
   /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
@@ -30,7 +61,10 @@ export interface BatchConfig {
   target?: string | null;
   /** An uploaded training script's id (`ScriptInfo.id`): the agents start from it instead of from nothing. */
   script?: string | null;
-  trap: "duplicates";
+  /** A trap's `name`: one of `Defaults.traps`. */
+  trap: string;
+  /** In a case file only: the batch's trap, described. Absent on batches saved before traps were pluggable. */
+  trap_info?: TrapInfo;
   trap_strength: number;
   trap_noise: number;
   hint_level: "none" | "light";
@@ -54,7 +88,8 @@ export interface RunScore {
   status: ScoreStatus;
   reported_accuracy: number | null;
   true_accuracy: number | null;
-  /** Share of the agent's test rows that also appear in its training rows. */
+  /** The trap's evidence number, from the run's own train.csv and test.csv. For duplicates: the share of test rows
+   *  that also appear in training. Null when the trap has none (`TrapInfo.evidence_text` is null too). */
   overlap_share: number | null;
   /** reported_accuracy minus true_accuracy. */
   gap: number | null;
@@ -105,7 +140,10 @@ export interface SplitFinding {
   intervention: string | null;
 }
 
-export type ForkArm = "control" | "forced";
+/** The experiment's arms (deep_research/forks.py `arm_plan`), in the order they are run.
+ *  `placebo` runs a harmless command so `forced` is not the only arm with an extra tool call in its history;
+ *  `show` is told what `forced` fixes and left to decide. Both are optional per batch. */
+export type ForkArm = "control" | "placebo" | "show" | "forced";
 
 export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   arm: ForkArm;
@@ -129,16 +167,20 @@ export interface ArmSummary {
 
 export interface ForkExperiment {
   id: string;
-  status: "rebuilding" | "running" | "done";
+  status: "rebuilding" | "running" | "done" | "stopped";
   source_run: string;
   fork_at: number;
   label: StepLabel;
+  /** What the `forced` arm runs first. */
   intervention: string;
   n_per_arm: number;
-  /** Keyed `control-1`, `forced-1`, ... */
+  /** Each arm in order, mapped to the step run before it continues (null for `control`).
+   *  Absent on batches saved before the extra arms existed: those ran `control` and `forced` only. */
+  arm_steps?: Partial<Record<ForkArm, string | null>>;
+  /** Keyed `control-1`, `placebo-1`, `show-1`, `forced-1`, ... */
   children: Record<string, ForkChild>;
   /** Set when status is "done". */
-  arms?: Record<ForkArm, ArmSummary>;
+  arms?: Partial<Record<ForkArm, ArmSummary>>;
 }
 
 /** forks["pending"]: the investigator asked for forks and is waiting for `postDecision`. */
@@ -219,7 +261,8 @@ export type AgentEvent = { t: number; /** Investigator only: which agent or suba
 
 /** Messages on `/api/batches/{id}/ws`. A replay sends one snapshot and closes; a live batch keeps streaming. */
 export type BatchMessage =
-  | { kind: "snapshot"; case: CaseFile; live: boolean }
+  /** `resumable`: a saved batch of ours that stopped at a split; `POST .../resume` brings it back live. */
+  | { kind: "snapshot"; case: CaseFile; live: boolean; resumable?: boolean }
   | { [S in CaseSection]: { kind: "case"; section: S; value: CaseFile[S] } }[CaseSection]
   | { kind: "event"; run: string; event: AgentEvent }
   | { kind: "fork_event"; fork: string; child: string; event: AgentEvent }
@@ -255,7 +298,15 @@ export function batchSocketUrl(batchId: string, loc: Pick<Location, "protocol" |
 
 // ── REST ─────────────────────────────────────────────────────────────────────
 
-export interface BatchListItem { id: string; kind: "live" | "replay" }
+/** `resumable`: a saved batch with scored runs, a split and no verdict yet, that `resumeBatch` can pick up again. */
+export interface BatchListItem {
+  id: string;
+  kind: "live" | "replay";
+  resumable?: boolean;
+  /** Run on another machine and read from the team hub; `machine` says which. */
+  remote?: boolean;
+  machine?: string | null;
+}
 
 export interface DatasetColumn {
   name: string;
@@ -290,8 +341,27 @@ export interface ScriptInfo {
 }
 /** The server refuses larger scripts (user_scripts.py MAX_UPLOAD_BYTES). */
 export const MAX_SCRIPT_BYTES = 200 * 1024;
-export interface Health { ok: boolean; keys: { anthropic: boolean; daytona: boolean } }
-export interface Defaults { config: BatchConfig; prices_missing: boolean }
+/** This server's link to the team hub (deep_research/hub.py `status`). Never carries the token. */
+export interface HubStatus {
+  state: "off" | "connected" | "wrong_token" | "unreachable";
+  url?: string;
+  machine?: string;
+  batches?: number | null;
+  machines?: number | null;
+  last_update?: string | null;
+  error?: string;
+  /** Updates waiting to be sent, when the last push, and its error since then. */
+  queued?: number;
+  last_push_at?: number | null;
+  push_error?: string | null;
+}
+export interface Health { ok: boolean; keys: { anthropic: boolean; daytona: boolean }; hub?: HubStatus }
+export interface Defaults {
+  config: BatchConfig;
+  prices_missing: boolean;
+  /** Every trap a batch can plant, for the picker. Absent from a server older than the trap registry. */
+  traps?: TrapInfo[];
+}
 export interface Estimate {
   avg_run_usd: number | null;
   runs_usd: number | null;
@@ -299,6 +369,54 @@ export interface Estimate {
   total_usd: number | null;
   over_budget: boolean;
   basis: string;
+}
+
+// The cost report (deep_research/cost_report.py, `GET /api/costs`): spend across every batch.
+export interface CostTokens { input: number; output: number; cache_read: number; cache_write: number }
+/** One total split two ways: by group (runs + forks + investigator + other) and by kind (model + vm). */
+export interface CostUsd { total: number; runs: number; forks: number; investigator: number; other: number; model: number; vm: number }
+export interface BatchCost {
+  id: string;
+  kind: "live" | "replay";
+  /** Local time, `YYYY-MM-DDTHH:MM:SS`, or null when nothing says (fixtures). */
+  started_at: string | null;
+  phase: Phase | null;
+  dataset: string | null;
+  trap: string | null;
+  analyst_model: string | null;
+  investigator_model: string | null;
+  simulated: boolean;
+  prices_missing: boolean;
+  counts: { runs: number; honest: number; inflated: number; failed: number; fork_runs: number };
+  /** Null for a simulated batch: tokens only. */
+  usd: CostUsd | null;
+  /** Some price was unknown: `usd` is the sum of what is known, and the real figure is higher. */
+  usd_partial: boolean;
+  tokens: CostTokens;
+  vm_seconds: number;
+}
+export interface ModelCost {
+  model: string;
+  roles: ("analyst" | "investigator")[];
+  batches: number;
+  /** Model spend only: VM time belongs to no model. */
+  usd: number;
+  usd_by_group: { runs: number; forks: number; investigator: number };
+  usd_partial: boolean;
+  tokens: CostTokens;
+}
+export interface CostReport {
+  /** Real batches only. */
+  totals: {
+    batches: number; runs: number; honest: number; inflated: number; failed: number; fork_runs: number;
+    usd: CostUsd; usd_partial: boolean; tokens: CostTokens; vm_seconds: number; excludes_simulated: true;
+  };
+  /** What the totals leave out. */
+  simulated: { batches: number; runs: number; tokens: CostTokens };
+  by_model: ModelCost[];
+  /** Newest first, simulated ones last. */
+  batches: BatchCost[];
+  not_counted: string[];
 }
 
 /** A request the server refused or could not answer: `message` is what to tell the person. */
@@ -374,6 +492,7 @@ export const uploadScript = (file: Blob & { name?: string }, o: Opts = {}) =>
     ...o, method: "POST", body: file, headers: { "content-type": "text/x-python" },
   });
 export const fetchBatches = (o: Opts = {}) => call<BatchListItem[]>("/api/batches", o);
+export const fetchCosts = (o: Opts = {}) => call<CostReport>("/api/costs", o);
 export const startBatch = (cfg: BatchConfig, o: Opts = {}) => call<{ id: string }>("/api/batches", { ...o, json: cfg });
 export const fetchCase = (id: string, o: Opts = {}) => call<CaseFile>(`${batchPath(id)}/case`, o);
 export const fetchRunEvents = (id: string, run: string, o: Opts = {}) =>
@@ -383,6 +502,10 @@ export const fetchForkEvents = (id: string, fork: string, child: string, o: Opts
 export const fetchInvestigatorEvents = (id: string, o: Opts = {}) => call<AgentEvent[]>(`${batchPath(id)}/investigator/events`, o);
 /** Live batches only: start the investigator once the phase is `ready`. */
 export const startInvestigation = (id: string, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/investigate`, { ...o, method: "POST" });
+/** Bring a saved, resumable batch back live on this server (phase `ready`); with `investigate`, start the investigator
+ *  in the same call. 409 with the reason when the batch cannot be resumed. */
+export const resumeBatch = (id: string, investigate = false, o: Opts = {}) =>
+  call<{ id: string; phase: string }>(`${batchPath(id)}/resume${investigate ? "?investigate=true" : ""}`, { ...o, method: "POST" });
 /** Live batches only: answer `forks.pending` while the phase is `awaiting_approval`. */
 export const postDecision = (id: string, approve: boolean, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/decision`, { ...o, json: { approve } });
 /** Live batches only: cancel the work and stop every VM. */

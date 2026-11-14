@@ -8,7 +8,7 @@ import r01Raw from "../../fixtures/demo-batch/runs/r01/events.jsonl?raw";
 import r02Raw from "../../fixtures/demo-batch/runs/r02/events.jsonl?raw";
 import type { AgentEvent, CaseFile, ForkExperiment, PendingForks, RunRecord, SplitFinding, StepLabel } from "../src/api";
 import {
-  armStats, armSummaryText, barShare, clip, eventLine, forkView, investigatorView, isProblemPhase, lineWindows,
+  armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, eventLine, forkView, investigatorView, isProblemPhase, lineWindows,
   numberLabel, phaseText, pickRuns, planCells, scoreStats, shortArgs, sortedChildren, splitCounts, splitHeadline,
   splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictView,
 } from "../src/batch/lanes";
@@ -68,7 +68,7 @@ describe("helpers", () => {
     expect(splitHeadline({ label: "preprocess", honest_rate: 0.3, inflated_rate: 1 }).inflated).toBe("Inflated runs did too.");
     expect(splitHeadline({ label: "shuffle" as StepLabel, honest_rate: 1, inflated_rate: 0 }).honest).toBe("Honest runs did the shuffle step before splitting.");
     expect(stepWords("shuffle").missing).toBe("No shuffle step here");
-    expect(stepWords("deduplicate").missing).toBe("No duplicate check here");
+    expect(stepWords("deduplicate").missing).toBe("No duplicate removal here");
   });
 
   it("lineWindows keeps a few lines around each hit and merges windows that touch", () => {
@@ -133,8 +133,8 @@ describe("helpers", () => {
     const running = { ...f, arms: undefined, children: { "control-1": f.children["control-1"], "control-2": { arm: "control" as const, status: "running" as const } } };
     expect(armStats(running, "control")).toMatchObject({ n: 1, reported: 0.9081, true: 0.7338 });
     expect(armStats(running, "forced").reported).toBeNull();
-    expect(armSummaryText(f.arms!.control)).toBe("3 of 4 inflated, mean reported 87.8% vs true 73.5%");
-    expect(armSummaryText({ ...f.arms!.forced, failed: 1 })).toContain("0 of 4 inflated, 1 failed");
+    expect(armSummaryText(f.arms!.control!)).toBe("3 of 4 inflated, mean reported 87.8% vs true 73.5%");
+    expect(armSummaryText({ ...f.arms!.forced!, failed: 1 })).toContain("0 of 4 inflated, 1 failed");
   });
 
   it("clip, shortArgs, numberLabel", () => {
@@ -195,10 +195,11 @@ describe("splitView", () => {
     const inflated = col(html, "inflated");
     expect(honest).toContain("This run removed duplicate rows");
     expect(honest).toContain('<span class="nb-ln nb-hl">df = df.drop_duplicates()</span>');
-    expect(count(honest, "nb-hl")).toBe(2);
+    // Only the removal is highlighted; the `duplicated().sum()` count above it is a look, not the step.
+    expect(count(honest, "nb-hl")).toBe(1);
     expect(honest).toContain(">307<");
     expect(honest).not.toContain("ln-missing");
-    expect(inflated).toContain('<div class="ln-missing"><b class="ln-missing-t">No duplicate check here</b>');
+    expect(inflated).toContain('<div class="ln-missing"><b class="ln-missing-t">No duplicate removal here</b>');
     expect(inflated).not.toContain("nb-hl");
     expect(inflated).not.toContain("drop_duplicates");
   });
@@ -233,7 +234,7 @@ describe("splitView", () => {
     const inflated = col(html, "inflated");
     expect(honest).toContain('<span class="nb-ln nb-hl">df = df.drop_duplicates()</span>');
     expect(honest).toContain("pd.read_csv(&#39;data.csv&#39;)");
-    expect(inflated).toContain("No duplicate check here");
+    expect(inflated).toContain("No duplicate removal here");
     expect(inflated).toContain("!python3 model.py");
     expect(inflated).not.toContain("nb-hl");
     expect(html).not.toContain("earlier cell");
@@ -391,7 +392,7 @@ describe("splitView on a real batch", () => {
 
   it("puts the inflated run's split beside it, under the empty slot, with nothing highlighted", () => {
     const inflated = col(splitView(real()), "inflated");
-    expect(inflated).toContain("No duplicate check here");
+    expect(inflated).toContain("No duplicate removal here");
     expect(inflated).toContain('<span class="nb-file">model.py</span>');
     expect(inflated).toContain('<span class="nb-ln ln-at">train, test = train_test_split(df, test_size=0.2, stratify=df[&quot;outcome&quot;], random_state=42)</span>');
     expect(inflated).not.toContain("nb-hl");
@@ -407,13 +408,49 @@ describe("splitView on a real batch", () => {
 describe("forkView", () => {
   const pending: PendingForks = { id: "pending", status: "awaiting_approval", n_per_arm: 4, vm_count: 9, estimate_usd: 1.234 };
 
+  it("draws every arm the experiment ran, in order, with the step each one runs first", () => {
+    const f = demo.forks.f1 as ForkExperiment;
+    const four = {
+      ...f,
+      arm_steps: { control: null, placebo: "Print the pandas version", show: "Count the duplicate rows and show them", forced: f.intervention },
+      arms: { ...f.arms, placebo: f.arms!.control, show: f.arms!.control },
+      children: {
+        ...f.children,
+        "placebo-1": { ...f.children["control-1"], arm: "placebo" as const },
+        "show-1": { ...f.children["control-1"], arm: "show" as const },
+      },
+    } as ForkExperiment;
+    const html = forkView(vmOf({ forks: { f1: four } }));
+    expect(armNames(four)).toEqual(["control", "placebo", "show", "forced"]);
+    expect(html).toContain('data-arms="4"');
+    for (const [key, title] of [["control", "Control"], ["placebo", "Placebo"], ["show", "Shown"], ["forced", "Forced"]]) {
+      expect(html).toContain(`data-morph-key="arm-${key}"`);
+      expect(html).toContain(`>${title}<`);
+    }
+    expect(html).toContain("Runs first: Print the pandas version");
+    expect(html).toContain("Continues unchanged");
+    // A batch saved before the extra arms existed still reads as control and forced.
+    expect(armNames(f)).toEqual(["control", "forced"]);
+    expect(armStep(f, "control")).toBeNull();
+    expect(armStep(f, "forced")).toBe(f.intervention);
+    expect(forkView(vmOf({ forks: { f1: f } }))).toContain('data-arms="2"');
+  });
+
+  it("reads the arm count of a pending experiment from the VMs it asks for", () => {
+    expect(armCount({ n_per_arm: 4, vm_count: 9 })).toBe(2);
+    expect(armCount({ n_per_arm: 4, vm_count: 17 })).toBe(4);
+    expect(armCount({ n_per_arm: 3, vm_count: 13 })).toBe(4);
+    expect(armCount({ n_per_arm: 0, vm_count: 0 })).toBe(2);
+  });
+
   it("is empty without forks", () => {
     expect(forkView(vmOf({ forks: {} }))).toBe("");
   });
 
   it("renders the approval card, enabled only when live and idle", () => {
     const replay = forkView(vmOf({ forks: { pending }, phase: "awaiting_approval" }));
-    expect(replay).toContain("The investigator wants to fork run r02 before its split: 4 control and 4 forced runs, 9 VMs");
+    // 9 VMs for 4 runs an arm is one base plus two arms.
+    expect(replay).toContain("The investigator wants to fork run r02 before its split: 4 runs in each of 2 arms, 9 VMs");
     expect(replay).toContain("$1.23");
     expect(replay).toContain("Approval happens on live batches");
     expect(count(replay, " disabled")).toBe(2);
@@ -487,8 +524,8 @@ describe("verdictView", () => {
 
   it("falls back to the verdict numbers without a fork", () => {
     const arms = verdictArms({ ...demo, forks: {} })!;
-    expect(arms.control.statuses).toEqual(["inflated", "inflated", "inflated", "honest"]);
-    expect(arms.forced.inflated).toBe(0);
+    expect(arms.control!.statuses).toEqual(["inflated", "inflated", "inflated", "honest"]);
+    expect(arms.forced!.inflated).toBe(0);
   });
 });
 
@@ -509,6 +546,11 @@ describe("investigatorView", () => {
   it("offers Investigate when ready and Stop while working, live only", () => {
     expect(investigatorView(vmOf({ phase: "ready" }, { live: true }))).toContain('data-act="investigate"');
     expect(investigatorView(vmOf({ phase: "ready" }))).not.toContain('data-act="investigate"');
+    // A saved batch that stopped at its split can be investigated too (the server resumes it first), but not stopped.
+    const saved = investigatorView(vmOf({ phase: "ready" }, { resumable: true }));
+    expect(saved).toContain('data-act="investigate"');
+    expect(saved).not.toContain('data-act="stop"');
+    expect(investigatorView(vmOf({ phase: "done" }, { resumable: true }))).not.toContain('data-act="investigate"');
     const running = investigatorView(vmOf({ phase: "running" }, { live: true, busy: "stop", error: "Nope <b>" }));
     expect(running).toContain('data-act="stop" disabled');
     expect(running).toContain("Nope &lt;b&gt;");

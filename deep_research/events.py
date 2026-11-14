@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from langchain_core.messages import AIMessage, ToolMessage
 
@@ -58,18 +58,31 @@ def current_step(todos: list[dict]) -> str | None:
 
 
 class EventLog:
-    """Append-only JSONL log for one run."""
+    """Append-only JSONL log for one run.
 
-    def __init__(self, path: Path):
+    Each event has a position (`seq`): its line number in the file, counting lines already there when a log is
+    reopened (the investigator appends to one file per resume). `on_write(seq, event)` is called after each write,
+    which is how events reach the hub; a failing callback never loses the event on disk.
+    """
+
+    def __init__(self, path: Path, on_write: Callable[[int, dict], None] | None = None):
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.seq = sum(1 for line in path.open() if line.strip()) if path.exists() else 0
         self._f = path.open("a")
         self.started = time.time()
+        self._on_write = on_write
 
     def write(self, ev: dict) -> dict:
         ev = {"t": round(time.time() - self.started, 2), **ev}
         self._f.write(json.dumps(ev, default=str) + "\n")
         self._f.flush()
+        seq, self.seq = self.seq, self.seq + 1
+        if self._on_write is not None:
+            try:
+                self._on_write(seq, json.loads(json.dumps(ev, default=str)))
+            except Exception:  # noqa: BLE001 - the log on disk is what matters
+                pass
         return ev
 
     def close(self) -> None:

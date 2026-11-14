@@ -6,7 +6,7 @@
 import "./lanes.css";
 import {
   isPendingForks, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
-  type ForkExperiment, type PendingForks, type RunRecord, type SplitFinding,
+  type ForkExperiment, type PendingForks, type RunRecord, type SplitFinding, type TrapInfo,
 } from "../api";
 import { askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
@@ -14,6 +14,7 @@ import { duration, pct, pts, usd } from "./format";
 import { ACT, childKey, type BatchVm } from "./model";
 import { codeKind, highlightLines } from "./highlight";
 import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parseCommand, type NbCell } from "./notebook";
+import { evidenceParts, trapMark, trapOf, trapWords, type Mark } from "./trap";
 
 // ── pure helpers (exported for the tests) ────────────────────────────────────
 
@@ -84,6 +85,21 @@ export function eventLine(ev: AgentEvent): { kind: string; text: string } {
 }
 
 /** Child ids in arm order and by number: control-1, control-2, ..., forced-1, ... */
+/** What each arm is called on screen. */
+const ARM_TITLE: Record<ForkArm, string> = { control: "Control", placebo: "Placebo", show: "Shown", forced: "Forced" };
+
+/** The arms this experiment ran, in order. Batches saved before the extra arms existed ran these two. */
+export function armNames(f: Pick<ForkExperiment, "arm_steps">): ForkArm[] {
+  const named = Object.keys(f.arm_steps ?? {}) as ForkArm[];
+  return named.length ? named : ["control", "forced"];
+}
+
+/** The step an arm runs before it continues, in words, or null when it continues unchanged. */
+export function armStep(f: Pick<ForkExperiment, "arm_steps" | "intervention">, arm: ForkArm): string | null {
+  if (f.arm_steps) return f.arm_steps[arm] ?? null;
+  return arm === "control" ? null : f.intervention;
+}
+
 export function sortedChildren(children: Record<string, ForkChild>, arm: ForkArm): [string, ForkChild][] {
   const num = (id: string): number => Number(/(\d+)$/.exec(id)?.[1] ?? 0);
   return Object.entries(children).filter(([, c]) => c.arm === arm).sort((a, b) => num(a[0]) - num(b[0]));
@@ -150,7 +166,8 @@ interface StepWords {
 const STEP_WORDS: Record<string, StepWords> = {
   load: { did: "loaded the data", missing: "No data loaded here" },
   inspect: { did: "looked at the data", missing: "No look at the data here" },
-  deduplicate: { did: "removed duplicate rows", missing: "No duplicate check here" },
+  deduplicate: { did: "removed duplicate rows", missing: "No duplicate removal here" },
+  deduplicate_near: { did: "removed near-duplicate rows", missing: "No near-duplicate removal here" },
   clean: { did: "cleaned up missing values", missing: "No cleaning here" },
   split: { did: "split the data", missing: "No split here" },
   preprocess: { did: "scaled or imputed the features", missing: "No preprocessing here" },
@@ -161,16 +178,24 @@ const STEP_WORDS: Record<string, StepWords> = {
   report: { did: "wrote the report", missing: "No report written here" },
 };
 
-/** The words for a step label, generic for one this file does not know. */
-export function stepWords(label: string): StepWords {
-  return STEP_WORDS[label] ?? { did: `did the ${label} step`, missing: `No ${label} step here` };
+/**
+ * The words for a step label: the batch trap's own when the label is its step, else this file's, else generic ones
+ * for a label nobody describes.
+ */
+export function stepWords(label: string, trap: TrapInfo | null = null): StepWords {
+  return trapWords(trap, label) ?? STEP_WORDS[label] ?? { did: `did the ${label} step`, missing: `No ${label} step here` };
+}
+
+/** What marks a step in code, for the highlight: the batch trap's pattern for its own step, else the table's. */
+export function stepMark(label: string, trap: TrapInfo | null = null): Mark | null {
+  return trapMark(trap, label) ?? LABEL_PATTERNS[label] ?? null;
 }
 
 const ALL = 0.995;
 const NONE = 0.005;
 
 /** "Honest runs removed duplicate rows before splitting. Inflated runs did not." */
-export function splitHeadline(s: Pick<SplitFinding, "label" | "honest_rate" | "inflated_rate">): { honest: string; inflated: string } {
+export function splitHeadline(s: Pick<SplitFinding, "label" | "honest_rate" | "inflated_rate">, trap: TrapInfo | null = null): { honest: string; inflated: string } {
   const h = s.honest_rate;
   const i = s.inflated_rate;
   const who = h >= ALL ? "Honest runs" : h > 0.5 ? "Most honest runs" : h > NONE ? "Some honest runs" : "No honest run";
@@ -178,7 +203,7 @@ export function splitHeadline(s: Pick<SplitFinding, "label" | "honest_rate" | "i
   const inflated = i <= NONE ? (h > NONE ? "Inflated runs did not." : "Neither did inflated runs.")
     : i < 0.5 ? "Most inflated runs did not."
       : i < ALL ? `Most inflated runs did${too}.` : `Inflated runs did${too}.`;
-  return { honest: `${who} ${stepWords(s.label).did} before splitting.`, inflated };
+  return { honest: `${who} ${stepWords(s.label, trap).did} before splitting.`, inflated };
 }
 
 /** "6 of 6 honest runs, 0 of 6 inflated". */
@@ -239,7 +264,7 @@ export function lineWindows(n: number, hits: readonly number[], context = 2, max
 const IMPORT_LINE = /^\s*(?:from\s+\S+\s+import|import)\s/;
 
 /** The lines a pattern matches, leaving out import lines when it also matches real code. */
-function matchLines(lines: readonly string[], re: RegExp | null): number[] {
+function matchLines(lines: readonly string[], re: Mark | null): number[] {
   if (!re) return [];
   const all = lines.flatMap((l, i) => (re.test(l) ? [i] : []));
   const code = all.filter((i) => !IMPORT_LINE.test(lines[i]));
@@ -253,7 +278,7 @@ const cellText = (c: NbCell): string => `${c.code}\n${c.then ?? ""}`;
  * splits (by its code, else by the backend's labels); `step` is that cell when it also does the step (one big
  * script), else the last cell before it that does. Indexes into `code`; -1 when there is none.
  */
-export function planCells(cells: readonly NbCell[], mark: RegExp | null, labels: readonly (readonly string[])[] = []): { code: NbCell[]; split: number; step: number } {
+export function planCells(cells: readonly NbCell[], mark: Mark | null, labels: readonly (readonly string[])[] = []): { code: NbCell[]; split: number; step: number } {
   const code = cells.filter((c) => c.kind !== "note" && c.state !== "typing");
   let split = code.findIndex((c) => LABEL_PATTERNS.split.test(c.code));
   if (split < 0) {
@@ -281,7 +306,7 @@ interface Side {
   step: number;
 }
 
-function sideOf(vm: BatchVm, id: string | null, mark: RegExp | null): Side {
+function sideOf(vm: BatchVm, id: string | null, mark: Mark | null): Side {
   const log = id ? logOf(vm, id) : null;
   const cells = log ? notebookCells(log) : [];
   const rec = id ? vm.case.runs?.[id] ?? null : null;
@@ -292,7 +317,7 @@ function sideOf(vm: BatchVm, id: string | null, mark: RegExp | null): Side {
 const SHORT_CELL = 9;
 
 /** A cell's code cut to the lines that matter: the step's lines (highlighted) and the line that splits. */
-function snippet(c: Pick<NbCell, "key" | "title" | "lang" | "code">, n: number | null, mark: RegExp | null, at: RegExp | null): string {
+function snippet(c: Pick<NbCell, "key" | "title" | "lang" | "code">, n: number | null, mark: Mark | null, at: RegExp | null): string {
   const code = c.code.replace(/\s+$/, "");
   const lines = code.split("\n");
   const colored = highlightLines(code, codeKind(c.lang, c.title, code));
@@ -317,7 +342,7 @@ function snippet(c: Pick<NbCell, "key" | "title" | "lang" | "code">, n: number |
 }
 
 /** A command from the split finding as a cell, for when the run's log is not loaded. */
-function exampleSnippet(key: string, command: string, mark: RegExp | null): string {
+function exampleSnippet(key: string, command: string, mark: Mark | null): string {
   const p = parseCommand(command);
   return snippet({ key, title: p.title, lang: p.lang, code: p.code }, null, mark, LABEL_PATTERNS.split);
 }
@@ -332,8 +357,9 @@ const GROUP_NAME: Record<Group, string> = { honest: "Honest", inflated: "Inflate
  * slot), the cells between, the cell that splits, the cells after.
  */
 function column(vm: BatchVm, s: Side, group: Group, split: SplitFinding, splitInBand: boolean): string {
-  const mark = LABEL_PATTERNS[split.label] ?? null;
-  const words = stepWords(split.label);
+  const trap = trapOf(vm.case);
+  const mark = stepMark(split.label, trap);
+  const words = stepWords(split.label, trap);
   const { code } = s;
   const n = (c: NbCell): number | null => s.num.get(c.key) ?? null;
   const id = s.id;
@@ -387,7 +413,7 @@ function column(vm: BatchVm, s: Side, group: Group, split: SplitFinding, splitIn
 
 /** The two notebooks as a diff: lined up at the step one did and the other skipped. */
 function diffView(vm: BatchVm, split: SplitFinding, pick: { honest: string | null; inflated: string | null }): string {
-  const mark = LABEL_PATTERNS[split.label] ?? null;
+  const mark = stepMark(split.label, trapOf(vm.case));
   const honest = sideOf(vm, pick.honest, mark);
   const inflated = sideOf(vm, pick.inflated, mark);
   const merged = honest.step >= 0 && honest.step === honest.split;
@@ -464,8 +490,9 @@ function consequence(c: CaseFile): string {
   const group = (g: Group): string => {
     const s = scoreStats(runs.filter((r) => r.status === g));
     if (!s.n) return "";
-    const leak = s.overlap != null
-      ? `<p class="ln-leak"><b>${esc(pct(s.overlap, 0))}</b> of test rows were also in training</p>` : "";
+    // Left out when there is no number: the trap has no evidence, or these runs did not keep what it is read from.
+    const ev = evidenceParts(s.overlap, trapOf(c), "of test rows were also in training");
+    const leak = ev ? `<p class="ln-leak"><b>${esc(ev.share)}</b> ${esc(ev.text)}</p>` : "";
     return `<div class="ln-grp ln-grp--${g}" data-morph-key="grp-${g}">` +
       `<div class="ln-grp-h"><i class="ln-pill-dot"></i><span class="ln-grp-t">${GROUP_NAME[g]} runs</span><span class="ln-muted">${s.n}</span></div>` +
       scoreBars(s, g) + leak + `</div>`;
@@ -532,7 +559,7 @@ export function splitView(vm: BatchVm): string {
       `</section>`;
   }
 
-  const line = splitHeadline(split);
+  const line = splitHeadline(split, trapOf(c));
   const pick = pickRuns(c);
   return `<section class="ln-sec ln-split" data-morph-key="ln-split" aria-label="What changed">` +
     head("What changed", c) +
@@ -551,6 +578,8 @@ const FORK_STATUS: Record<ForkExperiment["status"], string> = {
   rebuilding: "Rebuilding the VM",
   running: "Running",
   done: "Done",
+  // A resumed batch: the old server was still running this experiment when it stopped.
+  stopped: "Stopped before it finished",
 };
 
 /** The fork experiment: the approval card (forks.pending), then control and forced arms fanning out. */
@@ -566,6 +595,12 @@ export function forkView(vm: BatchVm): string {
     `</section>`;
 }
 
+/** How many arms the pending experiment would run, from the VMs it asks for (one base, then n per arm). */
+export function armCount(p: Pick<PendingForks, "n_per_arm" | "vm_count">): number {
+  if (!(p.n_per_arm > 0) || !(p.vm_count > 1)) return 2;
+  return Math.max(2, Math.round((p.vm_count - 1) / p.n_per_arm));
+}
+
 function approvalCard(p: PendingForks, vm: BatchVm): string {
   const src = vm.case.split?.fork_run_id;
   const est = p.estimate_usd != null ? usd(p.estimate_usd) : "unknown, prices missing";
@@ -575,7 +610,7 @@ function approvalCard(p: PendingForks, vm: BatchVm): string {
     `${vm.busy === act ? askSpinner(12) : ""}${esc(label)}</button>`;
   return `<div class="ln-card ln-approval" data-morph-key="pending" role="group" aria-label="Approve the fork">` +
     `<p class="ln-approval-t">The investigator wants to fork run ${esc(src ?? "?")} before its split: ` +
-    `${p.n_per_arm} control and ${p.n_per_arm} forced runs, ${p.vm_count} VMs.</p>` +
+    `${p.n_per_arm} ${p.n_per_arm === 1 ? "run" : "runs"} in each of ${armCount(p)} arms, ${p.vm_count} VMs.</p>` +
     `<p class="ln-approval-est">Estimated cost <b>${esc(est)}</b></p>` +
     `<div class="ln-actions">${btn(ACT.approve, "Approve", true)}${btn(ACT.decline, "Decline", false)}` +
     (vm.live ? "" : `<span class="ln-muted">Approval happens on live batches.</span>`) + `</div>` +
@@ -598,14 +633,15 @@ function experiment(f: ForkExperiment, threshold: number): string {
   const arm = (a: ForkArm): string => {
     const kids = sortedChildren(f.children ?? {}, a);
     const summary = f.arms?.[a];
-    const sub = a === "control" ? "Continues unchanged" : `Runs first: ${f.intervention}`;
+    const step = armStep(f, a);
+    const sub = step === null ? "Continues unchanged" : `Runs first: ${step}`;
     const started = f.status !== "done" && kids.length < f.n_per_arm ? `<span class="ln-muted">${kids.length} of ${f.n_per_arm} started</span>` : "";
     const stats = armStats(f, a);
     // The arm's bar wears the color of what its runs turned out to be: inflated when the mean gap is over the line.
     const bars = stats.reported != null || stats.true != null
       ? scoreBars(stats, stats.gap != null && stats.gap >= threshold ? "inflated" : "honest") : "";
     return `<div class="ln-arm ln-arm--${a}" data-morph-key="arm-${a}">` +
-      `<div class="ln-arm-h"><span class="ln-arm-t">${a === "control" ? "Control" : "Forced"}</span>${started}</div>` +
+      `<div class="ln-arm-h"><span class="ln-arm-t">${esc(ARM_TITLE[a] ?? a)}</span>${started}</div>` +
       `<p class="ln-arm-sub">${esc(sub)}</p>` +
       bars +
       `<div class="ln-kids" data-morph-list>${kids.map(([id, k]) => childTile(f.id, id, k)).join("")}</div>` +
@@ -616,7 +652,7 @@ function experiment(f: ForkExperiment, threshold: number): string {
     `<div class="ln-exp-h"><span class="ln-exp-id">Fork ${esc(f.id)}</span>${statusPill}</div>` +
     `<p class="ln-exp-t">Forked run <b>${esc(f.source_run)}</b> after action ${f.fork_at}, just before its split. Step under test: <b class="ln-lit-word">${esc(f.label)}</b>.</p>` +
     (f.status === "rebuilding" ? `<p class="ln-sub">Replaying the run's first ${f.fork_at} actions on a fresh VM.</p>` : "") +
-    `<div class="ln-arms">${arm("control")}${arm("forced")}</div>` +
+    `<div class="ln-arms" data-arms="${armNames(f).length}">${armNames(f).map(arm).join("")}</div>` +
     `</div>`;
 }
 
@@ -636,13 +672,14 @@ function childTile(forkId: string, id: string, k: ForkChild): string {
 interface ArmDots { statuses: string[]; inflated: number; total: number }
 
 /** The dots per arm: from the verdict's fork children when there is one, else from the verdict's numbers. */
-export function verdictArms(c: CaseFile): Record<ForkArm, ArmDots> | null {
+export function verdictArms(c: CaseFile): Partial<Record<ForkArm, ArmDots>> | null {
   const v = c.verdict;
   if (!v) return null;
   const exps = forkExperiments(c);
   const f = [...exps].reverse().find((e) => e.label === v.step_label && e.status === "done") ?? exps[exps.length - 1];
-  const out = {} as Record<ForkArm, ArmDots>;
-  for (const arm of ["control", "forced"] as const) {
+  const out: Partial<Record<ForkArm, ArmDots>> = {};
+  // Every arm the experiment ran. With no experiment to read, the verdict's own numbers cover control and forced.
+  for (const arm of f ? armNames(f) : (["control", "forced"] as ForkArm[])) {
     const kids = f ? sortedChildren(f.children ?? {}, arm) : [];
     if (kids.length) {
       const statuses = kids.map(([, k]) => k.status);
@@ -651,6 +688,7 @@ export function verdictArms(c: CaseFile): Record<ForkArm, ArmDots> | null {
     } else {
       const inflated = v.numbers[`${arm}_inflated`] ?? 0;
       const total = v.numbers[`${arm}_total`] ?? 0;
+      if (!total) continue;  // an arm the verdict does not report
       out[arm] = { statuses: Array.from({ length: total }, (_, i) => (i < inflated ? "inflated" : "honest")), inflated, total };
     }
   }
@@ -667,7 +705,7 @@ export function verdictView(vm: BatchVm): string {
     const a = arms?.[arm];
     if (!a) return "";
     const dots = a.statuses.map((s, i) => `<i class="ln-dot ln-dot--${toneOf(s)}" title="${attr(`${arm}-${i + 1}: ${s}`)}"></i>`).join("");
-    return `<div class="ln-vrow" data-morph-key="v-${arm}"><span class="ln-vrow-t">${arm === "control" ? "Control" : "Forced"}</span>` +
+    return `<div class="ln-vrow" data-morph-key="v-${arm}"><span class="ln-vrow-t">${esc(ARM_TITLE[arm] ?? arm)}</span>` +
       `<span class="ln-dots" role="img" aria-label="${attr(`${a.inflated} of ${a.total} inflated`)}">${dots}</span>` +
       `<span class="ln-vrow-n">${a.inflated} of ${a.total} inflated</span></div>`;
   };
@@ -675,7 +713,7 @@ export function verdictView(vm: BatchVm): string {
   return `<section class="ln-sec ln-verdict" data-morph-key="ln-verdict" aria-label="Verdict">` +
     head("Verdict", c) +
     `<p class="ln-sentence">${esc(v.sentence)}</p>` +
-    `<div class="ln-vrows">${row("control")}${row("forced")}</div>` +
+    `<div class="ln-vrows">${(Object.keys(arms ?? {}) as ForkArm[]).map(row).join("")}</div>` +
     `<div class="ln-legend" aria-hidden="true"><span><i class="ln-dot ln-dot--honest"></i>honest</span><span><i class="ln-dot ln-dot--inflated"></i>inflated</span><span><i class="ln-dot ln-dot--failed"></i>failed</span></div>` +
     (nums.length ? `<dl class="ln-stats">${nums.map(([k, n]) => `<div class="ln-stat"><dt>${esc(numberLabel(k))}</dt><dd>${esc(numberValue(n))}</dd></div>`).join("")}</dl>` : "") +
     (isSimulated(c) ? `<p class="ln-note ln-note--sim">Simulated batch: the agents' choices were scripted to show the method. These are not real agent runs.</p>` : "") +
@@ -696,11 +734,12 @@ export function investigatorView(vm: BatchVm): string {
   const working = ["running", "analyzing", "investigating", "forking"].includes(phase);
 
   let actions = "";
+  const dis = vm.busy != null ? " disabled" : "";
+  // A saved batch that stopped at its split can be investigated too: the server brings it back live first.
+  if (phase === "ready" && (vm.live || vm.resumable)) {
+    actions += `<button type="button" class="ask-btn ln-approve" data-act="${ACT.investigate}"${dis}>${vm.busy === ACT.investigate ? askSpinner(12) : ""}Investigate</button>`;
+  }
   if (vm.live) {
-    const dis = vm.busy != null ? " disabled" : "";
-    if (phase === "ready") {
-      actions += `<button type="button" class="ask-btn ln-approve" data-act="${ACT.investigate}"${dis}>${vm.busy === ACT.investigate ? askSpinner(12) : ""}Investigate</button>`;
-    }
     if (STOPPABLE.has(phase)) {
       actions += `<button type="button" class="ask-ghostbtn ask-ghostbtn--outline" data-act="${ACT.stop}"${dis}>${vm.busy === ACT.stop ? askSpinner(12) : ""}Stop</button>`;
     }

@@ -18,3 +18,9 @@ dist/
 
 # Training scripts uploaded through the UI
 /user_scripts/
+
+# Claude Code worktrees
+.claude/
+
+# The panda meshes are downloaded by sim/fetch_assets.py, not committed.
+sim/assets/

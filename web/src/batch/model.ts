@@ -12,6 +12,7 @@ export const ACT = {
   // anywhere
   home: "home",                 // go to the home screen
   openBatch: "open-batch",      // arg: batch id
+  openCosts: "open-costs",      // go to the overall cost screen (also its Retry)
   // home / config
   start: "start",               // start a live batch with the draft config
   resetConfig: "reset-config",  // draft back to the server defaults
@@ -39,6 +40,7 @@ export const ACT = {
 
 export type Route =
   | { name: "home" }
+  | { name: "costs" }
   | { name: "batch"; id: string }
   | { name: "run"; id: string; run: string }
   | { name: "child"; id: string; fork: string; child: string };
@@ -50,6 +52,7 @@ export function parseRoute(hash: string): Route {
     if (parts[2] === "fork" && parts[3] && parts[4]) return { name: "child", id: parts[1], fork: parts[3], child: parts[4] };
     return { name: "batch", id: parts[1] };
   }
+  if (parts[0] === "costs") return { name: "costs" };
   return { name: "home" };
 }
 
@@ -57,6 +60,7 @@ export function routeHash(r: Route): string {
   const e = encodeURIComponent;
   switch (r.name) {
     case "home": return "#/";
+    case "costs": return "#/costs";
     case "batch": return `#/b/${e(r.id)}`;
     case "run": return `#/b/${e(r.id)}/run/${e(r.run)}`;
     case "child": return `#/b/${e(r.id)}/fork/${e(r.fork)}/${e(r.child)}`;
@@ -95,6 +99,8 @@ export interface BatchVm {
   id: string;
   /** Started on this server: the live-only actions (investigate, approve, decline, stop) work. */
   live: boolean;
+  /** A saved batch that stopped at its split: Investigate brings it back live first (`resumeBatch`). */
+  resumable?: boolean;
   /** The case file. During a replay it is the case AT `replay.t` (replay.ts `caseAt`), not the final one. */
   case: CaseFile;
   /** Event logs loaded so far, keyed by EventKey. During a replay, cut to `replay.t`. Missing key = not loaded. */

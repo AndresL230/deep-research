@@ -4,12 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAX_DATASET_BYTES, uploadDataset, uploadScript, type DatasetInfo, type ScriptInfo } from "../src/api";
 import { homeView } from "../src/batch/home";
 import type { HomeVm } from "../src/batch/model";
-import { fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, selectedTarget, type DatasetUi } from "../src/dataset-input";
+import { fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, selectedTarget, uploadAfterEdit, withUpload, type DatasetUi } from "../src/dataset-input";
 
 const col = (name: string, target_problem: string | null = null) => ({ name, kind: "number" as const, n_unique: 2, missing: 0, target_problem });
 const pima: DatasetInfo = { id: "pima", name: "Pima diabetes (built in)", builtin: true, rows: 768, columns: [col("glucose", "too many"), col("outcome")], target: "outcome" };
 const mine: DatasetInfo = { id: "ds-0123abcd", name: "<b>mine</b>.csv", builtin: false, rows: 1200, columns: [col("size", "too many"), col("kind"), col("label")], target: "label" };
 const script: ScriptInfo = { id: "sc-0123abcd", name: "train_<v2>.py", lines: 1240, imports: ["pandas", "torch"], missing_packages: ["torch"] };
+const busyUpload: DatasetUi["upload"] = { state: "busy", kind: "dataset" };
 const ready = (over: Partial<DatasetUi> = {}): DatasetUi => ({ ...initialDatasetUi(), datasets: [pima, mine], ...over });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -81,6 +82,35 @@ describe("the data rows of a new batch", () => {
     expect(fileKind({ name: "big.csv", size: MAX_DATASET_BYTES + 1 })).toMatchObject({ problem: expect.stringMatching(/limit for a dataset is 20 MB/) });
     expect(fileKind({ name: "big.py", size: 300 * 1024 })).toMatchObject({ problem: expect.stringMatching(/limit for a script is 200 KB/) });
     expect(fileKind({ name: "empty.csv", size: 0 })).toMatchObject({ problem: expect.stringMatching(/empty/) });
+  });
+
+  it("keeps what the person changed while an upload was on its way", () => {
+    const other: DatasetInfo = { ...mine, id: "ds-89abcdef", name: "other.csv" };
+    const busy = { state: "busy", kind: "script" } as const;
+    // The script upload started on Pima. Meanwhile the person picked their own dataset and another target.
+    const now = ready({ selected: mine.id, targets: { [mine.id]: "kind" }, upload: busy });
+    const after = withUpload(now, { seq: 1, selected: "pima" }, 1, { kind: "script", info: script });
+    expect(after).toEqual({ ...now, script, upload: { state: "idle" } });
+    expect(inputsConfig(after)).toEqual({ dataset: mine.id, target: "kind", script: script.id });
+
+    // A new dataset becomes the chosen one, unless the person picked another one meanwhile.
+    const start = ready({ upload: { state: "busy", kind: "dataset" } });
+    const chosen = withUpload(start, { seq: 2, selected: "pima" }, 2, { kind: "dataset", info: other });
+    expect(chosen.selected).toBe(other.id);
+    expect(chosen.datasets).toEqual([pima, mine, other]);
+    expect(chosen.upload).toEqual({ state: "idle" });
+    const kept = withUpload({ ...start, selected: mine.id }, { seq: 2, selected: "pima" }, 2, { kind: "dataset", info: other });
+    expect(kept.selected).toBe(mine.id);
+    expect(kept.datasets).toEqual([pima, mine, other]);
+
+    // The result of an upload that a newer one has replaced changes nothing, the busy state included.
+    expect(withUpload(now, { seq: 1, selected: "pima" }, 2, { kind: "script", info: script })).toBe(now);
+  });
+
+  it("stays busy when a row changes during an upload", () => {
+    expect(uploadAfterEdit(busyUpload)).toBe(busyUpload);
+    expect(uploadAfterEdit({ state: "error", message: "the file has 3 rows" })).toEqual({ state: "idle" });
+    expect(uploadAfterEdit({ state: "idle" })).toEqual({ state: "idle" });
   });
 
   it("uploads a dataset and a script as the request body", async () => {
