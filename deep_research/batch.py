@@ -54,6 +54,16 @@ MIN_HYPOTHESES = 2
 # A proposed fix is one small, bounded change.
 MAX_FIX_CHARS = 4000
 _TRACE_SLOTS = threading.BoundedSemaphore(MAX_PARALLEL_TRACES)
+# Scorings at once on this server. Each one starts its own evaluation worker processes; eight at once (a fork's copies
+# finishing together, on a laptop) starved them past their start-up timeout and every copy failed to be scored.
+MAX_PARALLEL_SCORING = 2
+_SCORE_SLOTS = threading.BoundedSemaphore(MAX_PARALLEL_SCORING)
+
+
+def _score(outputs, task, threshold):
+    """`score_run`, waiting for one of the server's scoring slots."""
+    with _SCORE_SLOTS:
+        return score_run(outputs, task, threshold)
 # One trace of a run at a time: a trace writes its recordings under the run's `trace/` folder.
 _TRACE_RUN_LOCKS: dict[Path, threading.Lock] = {}
 _TRACE_RUN_LOCKS_LOCK = threading.Lock()
@@ -347,7 +357,13 @@ class Batch:
     async def _create_vm(self, key: str, label: str) -> Any:
         """Create a VM and keep it under `key`. If this is cancelled while Daytona is still creating it (the batch was
         stopped), the VM is deleted as soon as it exists instead of being left running."""
-        fut = asyncio.ensure_future(asyncio.to_thread(vms.create_vm, label, **self._vm_domain))
+        return await self._new_vm(key, vms.create_vm, label, **self._vm_domain)
+
+    async def _new_vm(self, key: str, make, *args, **kwargs) -> Any:
+        """`make(*args, **kwargs)` in a thread (create_vm or fork_vm), kept under `key`, deleted when it arrives if the
+        caller was cancelled meanwhile: the thread keeps running after a cancel, and its VM would otherwise be left
+        running with nothing holding it."""
+        fut = asyncio.ensure_future(asyncio.to_thread(make, *args, **kwargs))
         try:
             sb = await asyncio.shield(fut)
         except asyncio.CancelledError:
@@ -523,7 +539,7 @@ class Batch:
     async def _finish_run(self, run_id: str, rdir: Path, log: EventLog) -> None:
         # Scoring reads whole CSVs, which takes seconds on a large upload. Off the event loop, the other runs and
         # the websocket pushes carry on meanwhile.
-        score = await asyncio.to_thread(score_run, rdir / "outputs", self.task, self.cfg.inflation_threshold)
+        score = await asyncio.to_thread(_score, rdir / "outputs", self.task, self.cfg.inflation_threshold)
         (rdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
         actions = await asyncio.to_thread(
             lambda: actions_from_events(read_events(log.path), self.task)
@@ -889,8 +905,7 @@ class Batch:
                 fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=n_prefix, n_per_arm=n_per_arm,
                 children={}, arm_steps={a: (step or {}).get("description") for a, step in plan.items()}, **record,
             )
-            base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base", **self._vm_domain)
-            self.vms[f"{fork_id}-base"] = base
+            base = await self._create_vm(f"{fork_id}-base", f"{self.id}-{fork_id}-base")
             self.tracker.vm_started(base_scope)
             await asyncio.to_thread(vms.load_task, base, self.task)
             await asyncio.to_thread(vms.replay_actions, base, prefix_actions)
@@ -920,15 +935,13 @@ class Batch:
             async with sem:
                 try:
                     try:
-                        vm = await asyncio.to_thread(vms.fork_vm, base, f"{self.id}-{fork_id}-{cid}")
-                        self.vms[f"{fork_id}-{cid}"] = vm
+                        vm = await self._new_vm(f"{fork_id}-{cid}", vms.fork_vm, base, f"{self.id}-{fork_id}-{cid}")
                         self.tracker.vm_started(scope)
                         how = "fork"
                     except Exception as e:  # noqa: BLE001 - fall back to rebuilding by replay
                         logger.warning("fork %s %s: could not fork the base VM (%s: %s); rebuilding it by replay",
                                        fork_id, cid, type(e).__name__, e)
-                        vm = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-{cid}", **self._vm_domain)
-                        self.vms[f"{fork_id}-{cid}"] = vm
+                        vm = await self._create_vm(f"{fork_id}-{cid}", f"{self.id}-{fork_id}-{cid}")
                         # From here, not after the rebuild: the VM is up and billing while it replays.
                         self.tracker.vm_started(scope)
                         await asyncio.to_thread(vms.load_task, vm, self.task)
@@ -973,7 +986,7 @@ class Batch:
                             raise RuntimeError(f"the copy undid the fix: its final {self.domain.fix_output} no longer "
                                                "has the patch as proposed, so it says nothing about the fix")
                     score = await asyncio.to_thread(
-                        score_run, cdir / "outputs", self.task, self.cfg.inflation_threshold
+                        _score, cdir / "outputs", self.task, self.cfg.inflation_threshold
                     )
                     (cdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
                     results[cid] = {"arm": arm, **score.to_dict()}
