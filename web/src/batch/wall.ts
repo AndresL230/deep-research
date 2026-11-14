@@ -5,7 +5,8 @@
 // chart, or a placeholder), the step label, a progress strip from the todos, then the reveal once the run is scored,
 // and its cost. Markup has no whitespace between tags so children pair by index the same way on every render.
 import "./wall.css";
-import { batchFileUrl, labPageUrl, type AgentTodo, type RunRecord, type RunStatus } from "../api";
+import type { AgentTodo, RunRecord, RunStatus } from "../api";
+import { activityOf, chartUrl, logOf, notebookCells, notebookTail, stagesOf, type NbCell } from "./notebook";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { pct, pts, tokens, usd } from "./format";
@@ -69,7 +70,7 @@ export function runTodos(vm: BatchVm, run: RunRecord): AgentTodo[] | null {
 }
 
 /** The step label under the picture. */
-export function stepLabel(run: RunRecord, todos: AgentTodo[] | null): string {
+export function stepLabel(run: RunRecord, todos: AgentTodo[] | null, cells: NbCell[] = []): string {
   switch (run.status) {
     case "queued": return "Queued";
     case "starting": return "Starting the VM";
@@ -79,22 +80,10 @@ export function stepLabel(run: RunRecord, todos: AgentTodo[] | null): string {
     case "running": {
       const step = run.step?.trim();
       if (step && step.toLowerCase() !== "done") return step;
-      return todos?.find((t) => t.status === "in_progress")?.content ?? "Working";
+      // No todo list (many real runs keep none): name what the latest cell is doing.
+      return todos?.find((t) => t.status === "in_progress")?.content ?? activityOf(cells) ?? "Working";
     }
   }
-}
-
-/** Which chart to show, or null. Live batches: the latest. Replays: only what had happened by now. */
-export function tileChart(vm: BatchVm, run: RunRecord, todos: AgentTodo[] | null): string | null {
-  const charts = run.charts ?? [];
-  if (!charts.length) return null;
-  if (!vm.replay || isScored(run.status)) return charts[charts.length - 1];
-  const progressed = run.status === "running" && (
-    (todos?.some((t) => t.status === "completed") ?? false) ||
-    (run.n_actions ?? 0) > 0 ||
-    (vm.events[run.id]?.some((e) => e.type === "tool_result") ?? false)
-  );
-  return progressed ? charts[0] : null;
 }
 
 const truncate = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
@@ -104,26 +93,27 @@ function pill(status: RunStatus): string {
   return `<span class="bw-pill bw-pill--${status}">${lead}<span>${STATUS_LABEL[status]}</span></span>`;
 }
 
-function picture(vm: BatchVm, run: RunRecord, todos: AgentTodo[] | null, step: string): string {
-  if (run.lab_url) {
-    // Through our proxy, not the raw preview URL: Daytona would show its warning page in every tile.
-    const src = labPageUrl(vm.id, run.id);
-    return `<div class="bw-pic bw-pic--lab"><iframe data-morph-key="lab:${attr(run.vm_id ?? run.id)}" class="bw-frame" src="${attr(src)}" title="${attr(`Lab page of run ${run.id}`)}" sandbox="allow-scripts" loading="lazy" referrerpolicy="no-referrer" tabindex="-1"></iframe></div>`;
+/** The tile's screen: the end of the run's notebook, code typing itself out, then its output and charts. */
+function picture(vm: BatchVm, run: RunRecord, step: string, cells: NbCell[]): string {
+  if (cells.length) {
+    return `<div class="bw-pic bw-pic--nb" data-morph-key="nb">${notebookTail(cells, { image: (name) => chartUrl(vm, run.id, name) })}</div>`;
   }
-  const chart = tileChart(vm, run, todos);
-  if (chart) {
-    const src = batchFileUrl(vm.id, chart);
-    return `<div class="bw-pic"><img data-morph-key="img:${attr(src)}" class="bw-img" src="${attr(src)}" alt="${attr(`Latest chart of run ${run.id}`)}" loading="lazy" decoding="async"></div>`;
-  }
-  const quiet = run.status === "queued" || (vm.replay !== null && (run.charts?.length ?? 0) > 0);
-  const text = quiet ? (run.status === "queued" ? "Waiting to start" : "No chart yet") : step;
-  return `<div class="bw-pic"><div data-morph-key="ph" class="bw-ph">${askIcon("chart", 18, null, 1.5)}<span class="bw-ph-t">${esc(truncate(text, 80))}</span></div></div>`;
+  const text = run.status === "queued" ? "Waiting to start"
+    : run.status === "starting" ? "Starting the VM"
+    : run.status === "running" ? "Waiting for the first step"
+    : step;
+  const lead = run.status === "starting" || run.status === "running" ? askSpinner(14) : askIcon("chart", 18, null, 1.5);
+  return `<div class="bw-pic" data-morph-key="ph"><div class="bw-ph">${lead}<span class="bw-ph-t">${esc(truncate(text, 80))}</span></div></div>`;
 }
 
-function strip(run: RunRecord, todos: AgentTodo[] | null): string {
+function strip(run: RunRecord, todos: AgentTodo[] | null, cells: NbCell[]): string {
   let segs: string;
   let label: string;
-  if (todos?.length) {
+  if (!todos?.length && cells.length && !isScored(run.status)) {
+    const stages = stagesOf(cells);
+    segs = stages.map((st) => `<span class="bw-seg bw-seg--${st}"></span>`).join("");
+    label = `${stages.filter((st) => st === "completed").length} of ${stages.length} stages done`;
+  } else if (todos?.length) {
     const done = todos.filter((t) => t.status === "completed").length;
     segs = todos.map((t) => `<span class="bw-seg bw-seg--${t.status}"></span>`).join("");
     label = `${done} of ${todos.length} steps done`;
@@ -137,6 +127,9 @@ function strip(run: RunRecord, todos: AgentTodo[] | null): string {
   return `<div class="bw-strip" role="img" aria-label="${attr(label)}">${segs}</div>`;
 }
 
+/** A bar from 50% to 100% accuracy, so a 13 point gap is a visible length. */
+const barWidth = (x: number | null | undefined): number => (x == null || Number.isNaN(x) ? 0 : Math.max(0, Math.min(1, (x - 0.5) / 0.5)) * 100);
+
 function reveal(run: RunRecord): string {
   if (run.status === "failed") {
     const reason = run.reason?.trim() || "The run failed before it was scored.";
@@ -144,15 +137,13 @@ function reveal(run: RunRecord): string {
   }
   if (run.status !== "honest" && run.status !== "inflated") return "";
   const share = run.overlap_share;
-  const width = share == null || Number.isNaN(share) ? 0 : Math.max(0, Math.min(1, share)) * 100;
   const overlap = share == null ? "Overlap unknown" : `${pct(share, 0)} of test rows were in training`;
+  const bar = (label: string, x: number | null | undefined, cls: string): string =>
+    `<div class="bw-acc"><span class="bw-k">${label}</span><span class="bw-track" aria-hidden="true"><span class="bw-fill ${cls}" style="width:${barWidth(x).toFixed(1)}%"></span></span><span class="bw-v">${pct(x)}</span></div>`;
   return `<div class="bw-rev">`
-    + `<div class="bw-nums">`
-    + `<div class="bw-num"><span class="bw-k">Reported</span><span class="bw-v">${pct(run.reported_accuracy)}</span></div>`
-    + `<div class="bw-num"><span class="bw-k">True</span><span class="bw-v">${pct(run.true_accuracy)}</span></div>`
-    + `<div class="bw-num"><span class="bw-k">Gap</span><span class="bw-v bw-gap">${pts(run.gap)}</span></div>`
-    + `</div>`
-    + `<div class="bw-ovl"><div class="bw-bar" aria-hidden="true"><span class="bw-fill" style="width:${width.toFixed(1)}%"></span></div><span class="bw-ovl-t">${esc(overlap)}</span></div>`
+    + bar("Reported", run.reported_accuracy, "bw-fill--rep")
+    + bar("True", run.true_accuracy, "bw-fill--true")
+    + `<div class="bw-foot"><span class="bw-gap">${pts(run.gap)}</span><span class="bw-ovl-t">${esc(overlap)}</span></div>`
     + `</div>`;
 }
 
@@ -169,20 +160,24 @@ export function tileCost(vm: BatchVm, run: RunRecord): string | null {
 
 function tile(vm: BatchVm, run: RunRecord): string {
   const todos = runTodos(vm, run);
-  const step = stepLabel(run, todos);
+  const log = logOf(vm, run.id);
+  const cells = log ? notebookCells(log) : [];
+  // Code is already on screen: the VM is up, whatever the last status update said.
+  if (run.status === "starting" && cells.length) run = { ...run, status: "running" };
+  const step = stepLabel(run, todos, cells);
   const cost = tileCost(vm, run);
   const label = `Run ${run.id}, ${STATUS_LABEL[run.status].toLowerCase()}. Open the run.`;
   return `<div class="bw-tile bw-tile--${run.status}" data-morph-key="tile:${attr(run.id)}" role="button" tabindex="0" data-act="${ACT.openRun}" data-arg="${attr(run.id)}" aria-label="${attr(label)}">`
     + `<div class="bw-hd"><span class="bw-id">${esc(run.id)}</span>${pill(run.status)}</div>`
-    + picture(vm, run, todos, step)
+    + picture(vm, run, step, cells)
     + `<div class="bw-step${run.status === "failed" ? " bw-step--failed" : ""}" title="${attr(step)}">${esc(truncate(step, 120))}</div>`
-    + strip(run, todos)
+    + strip(run, todos, cells)
     + reveal(run)
     + (cost ? `<div class="bw-cost">${esc(cost)}</div>` : "")
     + `</div>`;
 }
 
-/** One tile per run: lab page or charts, step label, progress strip; once scored, reported vs true and overlap. */
+/** One tile per run: its notebook, step label, progress strip; once scored, reported vs true and overlap. */
 export function wallView(vm: BatchVm): string {
   const runs = sortedRuns(vm);
   const s = wallSummary(vm);

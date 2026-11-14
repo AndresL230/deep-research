@@ -5,7 +5,7 @@ import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import r01Raw from "../../fixtures/demo-batch/runs/r01/events.jsonl?raw";
 import type { AgentEvent, CaseFile, RunRecord } from "../src/api";
 import type { BatchVm } from "../src/batch/model";
-import { runTodos, stepLabel, summaryLine, tileChart, tileCost, wallSummary, wallView } from "../src/batch/wall";
+import { runTodos, stepLabel, summaryLine, tileCost, wallSummary, wallView } from "../src/batch/wall";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
 const jsonl = (raw: string): AgentEvent[] => raw.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as AgentEvent);
@@ -77,7 +77,7 @@ describe("wallView on the finished demo batch", () => {
     expect(r02).toContain("76.0%");
     expect(r02).toContain("+13.2 pts");
     expect(r02).toContain("52% of test rows were in training");
-    expect(r02).toContain("width:52.4%");
+    expect(r02).toContain("width:78.4%");
     const r01 = tileOf(html, "r01");
     expect(r01).toContain("bw-tile--honest");
     expect(r01).toContain("-0.4 pts");
@@ -85,11 +85,30 @@ describe("wallView on the finished demo batch", () => {
     expect(r01).toContain(">Done<");
   });
 
-  it("shows the last chart and the fixture tokens", () => {
+  it("shows the fixture tokens and a placeholder when no log is loaded", () => {
     const r01 = tileOf(html, "r01");
-    expect(r01).toContain(`src="/api/batches/demo-batch/files/runs/r01/live/02_confusion.png"`);
     expect(r01).toContain("37k tokens");
+    expect(r01).not.toContain("nb-cell");
     expect(html).not.toContain("<iframe");
+  });
+
+  it("shows the end of the run's notebook, with the chart its last cell saved", () => {
+    const r01 = tileOf(wallView(vmOf(demo, { events: { r01: r01Events } })), "r01");
+    expect(r01).toContain("bw-pic--nb");
+    expect(r01.match(/class="nb-cell /g)?.length).toBe(3);
+    expect(r01).toContain(`src="/api/batches/demo-batch/files/runs/r01/live/02_confusion.png"`);
+  });
+
+  it("types code out mid-run and draws reported and true as bars once scored", () => {
+    const first = r01Events.find((e) => e.type === "tool_call")!;
+    const logs = { r01: { events: r01Events, times: r01Events.map((e) => e.t), clock: first.t - 0.4, lookahead: true } };
+    const running: CaseFile = { ...demo, runs: { r01: { id: "r01", status: "running" } } };
+    const mid = tileOf(wallView(vmOf(running, { logs })), "r01");
+    expect(mid).toContain("nb-caret");
+    expect(mid).not.toContain("bw-rev");
+    const done = tileOf(html, "r02");
+    expect(done).toContain("bw-fill--rep");
+    expect(done).toContain("bw-fill--true");
   });
 
   it("never writes an em dash", () => {
@@ -98,7 +117,7 @@ describe("wallView on the finished demo batch", () => {
 });
 
 describe("wallView mid-replay", () => {
-  it("moves statuses and hides charts that had not happened yet", () => {
+  it("moves statuses and shows no charts before their cell has run", () => {
     const c = midReplay();
     const vm = vmOf(c, { replay, events: { r06: r01Events.slice(0, 7) } });
     const html = wallView(vm);
@@ -122,15 +141,7 @@ describe("wallView mid-replay", () => {
     expect(r09).toContain("Waiting to start");
     expect(r09).not.toContain("bw-rev");
     const r02 = tileOf(html, "r02");
-    expect(r02).toContain("02_confusion.png");
-  });
-
-  it("picks charts by progress", () => {
-    const run = midReplay().runs.r07;
-    const vm = vmOf(midReplay(), { replay });
-    expect(tileChart(vm, run, null)).toBeNull();
-    expect(tileChart(vm, run, [{ content: "a", status: "completed" }])).toBe("runs/r07/live/01_outcome_counts.png");
-    expect(tileChart(vmOf(midReplay()), run, null)).toBe("runs/r07/live/02_confusion.png");
+    expect(r02).toContain("bw-rev");
   });
 });
 
@@ -158,18 +169,13 @@ describe("tile parts", () => {
     expect(tileCost(vmOf(demo), { id: "x", status: "queued" })).toBeNull();
   });
 
-  it("embeds a live lab page in a sandboxed iframe", () => {
+  it("never embeds the VM's page or its signed URL", () => {
     const c: CaseFile = { ...demo, config: { ...demo.config, simulated: false } as CaseFile["config"], costs: {},
       runs: { r01: { id: "r01", status: "running", lab_url: "https://lab.example/p?a=1&b=2", step: "Train a random forest" } } };
     const html = wallView(vmOf(c, { live: true }));
-    expect(html).toContain(`<iframe`);
-    // Through our proxy, never the raw preview URL (Daytona would show its warning page in the tile).
-    expect(html).toContain(`src="/api/batches/${vmOf(c, { live: true }).id}/runs/r01/lab/"`);
+    expect(html).not.toContain("<iframe");
     expect(html).not.toContain("lab.example");
-    expect(html).toContain(`sandbox="allow-scripts"`);
-    expect(html).toContain(`loading="lazy"`);
-    expect(html).toContain(`referrerpolicy="no-referrer"`);
-    expect(html).toContain(`title="Lab page of run r01"`);
+    expect(html).toContain("Waiting for the first step");
     expect(html).not.toContain("Simulated batch");
     expect(html).toContain("1 of 1 running, 0 scored");
   });
