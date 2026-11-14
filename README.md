@@ -240,7 +240,7 @@ flowchart LR
 | `web/` | Interactive frontend |
 | `fixtures/robot-live-investigation/` | **Real** recorded robot investigation (the demo backup; see "What a real run found") |
 | `fixtures/robot-demo-batch/` | **Simulated** robotics replay data for UI testing |
-| `docs/` | Design notes, development plans, and progress |
+| `docs/` | Design notes and development plans |
 
 ---
 
