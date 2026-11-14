@@ -27,7 +27,7 @@ export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
       ${vm.draft ? domainRow(vm.draft, vm.defaults, vm.starting) : ""}
       ${tabular ? inputs?.html ?? "" : ""}
       ${vm.draft && tabular ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
-      ${vm.draft ? mainRow(vm.draft, trap) : mainSkeleton(defaultsFailed(vm))}
+      ${vm.draft ? mainRow(vm.draft, trap, vm.starting) : mainSkeleton(defaultsFailed(vm))}
       ${advancedBlock(vm)}
       ${footer(vm)}
     </section>
@@ -91,7 +91,7 @@ function batchesSection(b: Loadable<BatchListItem[]>): string {
 // ── the domain ───────────────────────────────────────────────────────────────
 
 /** The domain picker's action, handled in main.ts: `data-act="hm-domain" data-arg="<domain name>"`. */
-export const HM_ACT = { domain: "hm-domain" } as const;
+export const HM_ACT = { domain: "hm-domain", model: "hm-model" } as const;
 
 /** The domain of a config that names none (every batch saved before domains). */
 export const DEFAULT_DOMAIN = "tabular";
@@ -231,6 +231,42 @@ function textField(cfg: BatchConfig, f: Field, label: string): string {
   </div>`;
 }
 
+/** The analyst models the Models control offers, in its order. A model the draft names that is not here shows too. */
+export const MODEL_CHOICES: readonly [string, string][] = [
+  ["anthropic:claude-haiku-5-5", "Haiku 5.5"],
+  ["anthropic:claude-sonnet-5-5", "Sonnet 5.5"],
+];
+
+/** The draft's lineup: `analyst_models`, else `analyst_model` alone. */
+export const draftModels = (c: BatchConfig): string[] => (c.analyst_models?.length ? [...c.analyst_models] : [c.analyst_model]);
+
+/** The draft with `model` added to or taken out of its lineup, kept in the control's order. The last model stays. */
+export function toggleModel(c: BatchConfig, model: string): BatchConfig {
+  const cur = draftModels(c);
+  const on = cur.includes(model);
+  if (on && cur.length === 1) return c;
+  const next = on ? cur.filter((m) => m !== model) : [...cur, model];
+  const order = (m: string) => { const i = MODEL_CHOICES.findIndex(([id]) => id === m); return i < 0 ? MODEL_CHOICES.length : i; };
+  next.sort((a, b) => order(a) - order(b));
+  return { ...c, analyst_models: next };
+}
+
+/** Which analyst models the runs take in turn: one chip per model, at least one on. */
+function modelsField(c: BatchConfig, locked: boolean): string {
+  const cur = draftModels(c);
+  const extra: [string, string][] = cur.filter((m) => !MODEL_CHOICES.some(([id]) => id === m)).map((m) => [m, m]);
+  const chips = [...MODEL_CHOICES, ...extra].map(([id, label]) => {
+    const on = cur.includes(id);
+    // The last model on cannot be turned off: a batch needs one.
+    const last = on && cur.length === 1;
+    return `<button type="button" class="hm-chip" aria-pressed="${on}" data-act="${HM_ACT.model}" data-arg="${attr(id)}" title="${attr(id)}"${locked || last ? " disabled" : ""}>${esc(label)}</button>`;
+  }).join("");
+  return `<div class="hm-field" data-f="analyst_models" role="group" aria-labelledby="${fid("analyst_models")}-l">
+    <span class="hm-lbl" id="${fid("analyst_models")}-l">Models</span>
+    <div class="hm-chips">${chips}</div>
+  </div>`;
+}
+
 /** "8 pts" from 0.08: the threshold as whole accuracy points. */
 const points = (x: number) => `${Math.round(x * 1000) / 10} pts`;
 
@@ -255,12 +291,12 @@ function trapRow(c: BatchConfig, traps: readonly TrapInfo[]): string {
 }
 
 /** The four settings that matter, on one row. The strength slider is named by the chosen trap. Other domains plant
- *  nothing, so they have no strength slider. */
-function mainRow(c: BatchConfig, trap: TrapInfo | null): string {
+ *  nothing, so they have the analyst models in its place. */
+function mainRow(c: BatchConfig, trap: TrapInfo | null, locked = false): string {
   const tabular = isTabular(c);
-  return `<div class="hm-main${tabular ? "" : " hm-main--3"}" data-morph-key="main">
-    ${numberField(c, "n_runs", "Runs", { min: 1, max: 24 })}
-    ${tabular ? rangeField(c, "trap_strength", trap?.strength_label || "Duplicated rows", 0, 1, 0.05, pct(c.trap_strength, 0)) : ""}
+  return `<div class="hm-main${tabular ? "" : " hm-main--models"}" data-morph-key="main">
+    ${numberField(c, "n_runs", "Runs", { min: 1, max: 48 })}
+    ${tabular ? rangeField(c, "trap_strength", trap?.strength_label || "Duplicated rows", 0, 1, 0.05, pct(c.trap_strength, 0)) : modelsField(c, locked)}
     ${choiceField(c, "hint_level", "Hint", [["none", "None"], ["light", "Light"]])}
     ${numberField(c, "budget_usd", "Budget", { min: 0, step: "any", prefix: "$" })}
   </div>`;
@@ -291,7 +327,6 @@ function advancedBlock(vm: HomeVm): string {
       ${rangeField(c, "inflation_threshold", "Inflation threshold", 0.05, 0.5, 0.025, points(c.inflation_threshold))}
       ${numberField(c, "forks_per_choice", "Forks per arm", { min: 1, max: 8 })}
       ${numberField(c, "seed", "Seed", { min: 0 })}
-      ${textField(c, "analyst_model", "Analyst model")}
       ${textField(c, "investigator_model", "Investigator model")}
     </div>
   </div>`;
@@ -361,7 +396,7 @@ export function costGroups(costs: Costs): CostGroup[] {
   const seen = new Set<string>();
   for (const [key, s] of Object.entries(costs.scopes ?? {})) {
     const name = key === "runs" || key.startsWith("run:") ? "Runs" : key === "forks" || key.startsWith("fork:") ? "Forks"
-      : key.startsWith("investigator") ? "Investigator" : key;
+      : key.startsWith("investigator") ? "Investigator" : key === "commentary" ? "Commentary" : key;
     const g = groups.get(name) ?? { name, tokens: 0, usd: null };
     g.tokens += scopeTokens(s);
     if (s.total_usd != null) g.usd = (g.usd ?? 0) + s.total_usd;

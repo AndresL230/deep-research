@@ -119,7 +119,13 @@ def _worker_main(conn) -> None:
             return
         idx, kwargs = msg
         try:
-            result, _ = run_episode(record=False, **kwargs)
+            record_to = kwargs.get("record_to")
+            result, motion = run_episode(record=bool(record_to), **{k: v for k, v in kwargs.items() if k != "record_to"})
+            if record_to and motion is not None and not result.get("success"):
+                from sim.motion import write_motion
+
+                write_motion(motion, record_to)
+                result["motion_path"] = str(record_to)
         except BaseException as exc:  # noqa: BLE001 - run_episode should not raise, but never lose a slot
             result = _failure(kwargs, f"{type(exc).__name__}: {exc}", "exception")
         try:
@@ -305,6 +311,9 @@ def run_jobs(
     controller_timeout: float | None = None,
 ) -> list[dict]:
     """Run `run_episode(**job)` for every job in worker processes; results in job order.
+
+    A job may carry `record_to`, a file path: the episode is then recorded, and when it fails its motion file is
+    written there by the worker and the result gets `motion_path` (sim/domain.py's `trace_run`).
 
     A job that has not finished `timeout` seconds (wall clock) after it was sent to a ready worker is a
     failure with exception "Timeout: ..." and end_reason "timeout"; its worker is killed and replaced. A

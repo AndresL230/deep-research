@@ -472,6 +472,8 @@ export function caseAt(full: CaseFile, events: Record<EventKey, AgentEvent[]>, t
     hypotheses,
     forks,
     verdict: null,
+    // The commentary feed: each item once its run's clock (the timeline, for runs) has passed it.
+    feed: (full.feed ?? []).filter((f) => t >= f.t),
     costs: costsAt(full, s, t),
   };
 }

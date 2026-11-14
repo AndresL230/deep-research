@@ -10,8 +10,8 @@ import type { AgentEvent, CaseFile, ForkExperiment, PendingForks, ProposedFix, R
 import {
   armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, diagnosisView, eventLine, fixSummaryText, fixTestedText, fixView,
   forkView, investigatorView, isProblemPhase, lineWindows,
-  numberLabel, phaseText, pickRuns, planCells, scoreStats, shortArgs, sortedChildren, splitCounts, splitHeadline,
-  splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictView,
+  numberLabel, phaseText, pickRuns, planCells, scoreStats, selfCheckText, shortArgs, sortedChildren, splitCounts, splitHeadline,
+  splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictSplit, verdictView,
 } from "../src/batch/lanes";
 
 // The code is syntax colored (highlight.ts, tested on its own). These tests are about which lines show, so read the
@@ -535,6 +535,29 @@ describe("verdictView", () => {
     expect(html).toContain("Simulated batch");
   });
 
+  it("shows the confidence and the structured split numbers when the verdict has them", () => {
+    const old = verdictView(vmOf());
+    expect(old).not.toContain("ln-conf");
+    expect(old).not.toContain("v-split");
+    const v = { ...demo.verdict!, step: "deduplicate", honest_rate: 1, inflated_rate: 0, n_honest: 6, n_inflated: 6, confidence: "medium" as const };
+    const html = verdictView(vmOf({ verdict: v }));
+    expect(html).toContain("medium confidence");
+    expect(html).toContain("100.0% of 6");
+    expect(html).toContain("0.0% of 6");
+    expect(verdictSplit({ ...v, n_honest: undefined })).toContain("100.0%</dd>");
+  });
+
+  it("says how the rubric check went", () => {
+    const check = (result: string, iteration: number, failing: { name: string; gap: string }[] = []) =>
+      ({ at: iteration, iteration, result, explanation: "", criteria: 5, failing });
+    expect(selfCheckText(undefined)).toBeNull();
+    expect(selfCheckText([check("satisfied", 0)])).toBe("Checked against the rubric: passed.");
+    expect(selfCheckText([check("needs_revision", 0), check("satisfied", 1)])).toBe("Checked against the rubric: passed after 1 revision.");
+    expect(selfCheckText([check("needs_revision", 0), check("needs_revision", 1), check("max_iterations_reached", 2, [{ name: "Cites the placebo arm", gap: "x" }])]))
+      .toBe("Checked against the rubric: still short after 2 revisions: Cites the placebo arm.");
+    expect(verdictView(vmOf({ rubric: [check("satisfied", 0)] }))).toContain("Checked against the rubric: passed.");
+  });
+
   it("falls back to the verdict numbers without a fork", () => {
     const arms = verdictArms({ ...demo, forks: {} })!;
     expect(arms.control!.statuses).toEqual(["inflated", "inflated", "inflated", "honest"]);
@@ -587,6 +610,15 @@ const fixFork: ForkExperiment = {
   },
   arms: { control: armOf(1, 0.45, 1), placebo: armOf(1, 0.45, 1), fixed: armOf(3, 0.72, 0.8) },
 };
+
+describe("diagnosisView: the trace comparison", () => {
+  it("says whether the traced runs share a cause", () => {
+    const html = diagnosisView(vmOf({ trace: [traceEntry], trace_comparison: { at: 1, same: "same", sentence: "r02 and r05 both slip at line 25.", run_ids: ["r02", "r05"] } }));
+    expect(html).toContain("Same cause in every traced run.");
+    expect(html).toContain("r02 and r05 both slip at line 25.");
+    expect(diagnosisView(vmOf({ trace: [traceEntry] }))).not.toContain("ln-dx-cmp");
+  });
+});
 
 describe("diagnosisView", () => {
   it("is empty without a trace, including on case files saved before it existed", () => {
@@ -716,6 +748,17 @@ describe("the fix experiment", () => {
     expect(Object.keys(only)).toEqual(["control", "forced"]);
     expect(only.control!.statuses).toEqual(["inflated", "inflated", "inflated", "honest"]);
     expect(verdictView(vmOf({ forks: { f1: demo.forks.f1, f2: fixFork } }))).not.toContain("v-fixed");
+  });
+});
+
+describe("the notebook link", () => {
+  it("opens the batch domain's notebook, read-only, in a new tab", () => {
+    const tab = investigatorView(vmOf());
+    expect(tab).toContain('href="/api/memory/tabular"');
+    expect(tab).toContain('target="_blank"');
+    const robot = investigatorView(vmOf({ config: { ...demo.config, domain: "robot_arm" } as CaseFile["config"] }));
+    expect(robot).toContain('href="/api/memory/robot_arm"');
+    expect(investigatorView(vmOf({ phase: "config" }))).toBe("");
   });
 });
 

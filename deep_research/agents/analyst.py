@@ -5,12 +5,13 @@ from __future__ import annotations
 from deepagents import create_deep_agent, register_harness_profile
 from deepagents.backends.protocol import BackendProtocol
 from deepagents.profiles import GeneralPurposeSubagentProfile, HarnessProfile
-from langchain.agents.middleware import TodoListMiddleware
+from langchain.agents.middleware import AgentMiddleware, TodoListMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
-SYSTEM_PROMPT = """You are a careful data scientist working alone on a Linux machine.
-Use the `execute` tool to run shell commands and Python. Use the file tools to read and write files.
-Finish the whole task in this session, then reply with a short summary of what you did and the test accuracy you got."""
+from ..domains import ANALYST_SYSTEM_PROMPT
+
+# The tabular analyst's prompt. Each domain has its own (`Domain.analyst_system_prompt`).
+SYSTEM_PROMPT = ANALYST_SYSTEM_PROMPT
 
 _flat_models: set[str] = set()
 
@@ -31,13 +32,32 @@ def _make_flat(model: str) -> None:
     _flat_models.add(model)
 
 
-def build_analyst(backend: BackendProtocol, model: str):
+class NoCompaction(AgentMiddleware):
+    """Takes the summarization middleware's place in the analyst's stack and does nothing.
+
+    `create_deep_agent` adds summarization by default: once the context passes 85% of the model's window (850k
+    tokens for Haiku and Sonnet 5.5, whose window is 1M) it replaces the older history with a summary, and on a
+    context-overflow error it summarizes and retries. A fork rebuilds a run by replaying its exact message history
+    up to a step (forks.cut_history), so a run whose model had seen a summary instead would be forked from a history
+    it never saw. The analyst therefore never compacts. The investigator keeps summarization.
+
+    `HarnessProfile.excluded_middleware` would also drop it, but profiles are keyed by model and the investigator
+    can run on the same model as an analyst. `create_deep_agent` replaces a stack middleware with a passed one of
+    the same `name`, which is per agent. Prompt caching is a separate middleware and stays.
+    """
+
+    @property
+    def name(self) -> str:
+        return "SummarizationMiddleware"
+
+
+def build_analyst(backend: BackendProtocol, model: str, system_prompt: str = SYSTEM_PROMPT):
     _make_flat(model)
     return create_deep_agent(
         model=model,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         backend=backend,
-        middleware=[TodoListMiddleware()],
+        middleware=[TodoListMiddleware(), NoCompaction()],
         checkpointer=InMemorySaver(),
         name="analyst",
     )
