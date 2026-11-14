@@ -506,7 +506,8 @@ def test_the_post_loads_the_batch_and_starts_the_copies(client, tmp_path, monkey
     assert body["id"] == "saved" and body["phase"] == "forking" and body["n_per_arm"] == 3 and body["vm_count"] == 7
     assert body["children"] == ["control-5", "control-6", "control-7", "forced-5", "forced-6", "forced-7"]
     assert started and started[0]["children"] == body["children"]
-    assert {"id": "saved", "kind": "live"} in client.get("/api/batches").json()
+    listed = {b["id"]: b for b in client.get("/api/batches").json()}
+    assert listed["saved"]["kind"] == "live"
     with client.websocket_connect("/api/batches/saved/ws") as ws:
         snap = ws.receive_json()
     assert snap["live"] is True and snap["case"]["forks"]["f1"]["status"] == "rebuilding"
