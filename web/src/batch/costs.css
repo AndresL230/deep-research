@@ -46,6 +46,7 @@
 .cs-chip { padding:1px 7px; border-radius:var(--r-ctl); font-size:11.5px; font-weight:500; line-height:18px; white-space:nowrap; color:var(--fg-70); background:var(--hover); }
 .cs-chip[data-s="honest"] { color:var(--green); background:color-mix(in srgb, var(--green) 16%, transparent); }
 .cs-chip[data-s="inflated"] { color:var(--red); background:color-mix(in srgb, var(--red) 16%, transparent); }
+.cs-chip[data-s="unclear"] { color:var(--fg-70); background:color-mix(in srgb, var(--fg) 7%, transparent); box-shadow:inset 0 0 0 1px var(--border-strong); }
 .cs-chip[data-s="failed"] { color:var(--fg-70); background:color-mix(in srgb, var(--fg) 11%, transparent); }
 .cs-chip[data-s="open"] { font-weight:500; color:var(--fg-55); background:none; box-shadow:inset 0 0 0 1px var(--border-strong); }
 .cs-tag { flex:none; padding:1px 7px; border-radius:var(--r-ctl); font-size:11.5px; font-weight:500; line-height:18px; white-space:nowrap; color:var(--fg-55); background:var(--hover); }

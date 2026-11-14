@@ -66,6 +66,7 @@
 .ov-sw { flex:none; display:block; width:8px; height:8px; border-radius:2px; background:var(--fg-40); }
 .ov-sw--honest { background:var(--ok); }
 .ov-sw--inflated { background:var(--bad); }
+.ov-sw--unclear { background:var(--fg-55); }
 .ov-sw--running, .ov-sw--over { background:var(--pu-hi); }
 .ov-sw--queued { background:none; box-shadow:inset 0 0 0 1.5px var(--border-strong); }
 .ov-sw--true { background:var(--bar-base); }

@@ -12,18 +12,18 @@ from sim.control import GRIPPER_CLOSED, GRIPPER_OPEN, HOME_QPOS, hand_position, 
 PARAMS = {
     "approach_height": 0.2,
     "grasp_height": 0.065,
-    "lift_height": 0.2,
+    "lift_height": 0.12,
     "release_height": 0.075,
     "t_approach": 1.2,
     "t_descend": 0.8,
     "close_time": 0.5,
     "t_lift": 0.8,
-    "t_move": 1.4,
+    "t_move": 2.0,
     "t_lower": 1.0,
     "settle_time": 0.3,
     "open_time": 0.4,
     "t_retreat": 0.8,
-    "down_weight": 0.5,
+    "down_weight": 1.0,
 }
 
 

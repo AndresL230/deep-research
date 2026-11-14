@@ -17,8 +17,11 @@ What a domain adds to the case file (`case.json`), so a fixture or the UI can ma
   or "motion" (the motion files in `runs[id].motion_files`). Absent: "charts".
 - `config.domain_info`: `Domain.public()`, the domain in words. The tabular domain also writes `config.trap_info`.
 - `runs[id].motion_files` and `forks[id].children[cid].motion_files`: the motion files the run saved, as paths
-  relative to the batch folder for the files route, such as `runs/r01/outputs/live/practice.motion.json`.
-  Only set when the run saved any; never set in the tabular domain.
+  relative to the batch folder for the files route, such as `runs/r01/outputs/live/practice.motion.json`, newest
+  last. Only set when the run saved any; never set in the tabular domain. A "motion" run's list grows while it runs:
+  the batch pulls the VM's live folder every `batch.MOTION_POLL_S` seconds (`batch.MotionWatch`) and logs a
+  `{"type": "motion", "path": ...}` event in the run's events.jsonl for each file that arrives, so a replay can
+  show it then. Batches saved before that have no motion events.
 - `runs[id].reported_accuracy`, `true_accuracy`, `gap`, `overlap_share`: the run's claim, the truth, their
   difference and the domain's evidence number, whatever the domain measures (a test accuracy, a success rate).
   The names stay the tabular ones so every saved batch keeps reading the same way.
@@ -65,6 +68,9 @@ class InvestigatorWords:
     anchor: str = "train/test split"
     # The skill the investigator is told to use: a folder in `Domain.skills_dir`.
     skill: str = "method-errors"
+    # Said right after what `honest` and `inflated` mean, for a domain with more run statuses (robot: `unclear`).
+    # Starts with a space when it is set.
+    other_statuses: str = ""
 
 
 @dataclass(frozen=True)
@@ -145,6 +151,17 @@ class Domain:
     case_config: Callable[["BatchConfig"], dict] = lambda cfg: {}
     # check_config(cfg): raise before a batch is started when its settings cannot work (an unreadable dataset).
     check_config: Callable[["BatchConfig"], None] = lambda cfg: None
+
+    # ---- the diagnosis: traceback and fix ----
+    # trace_run(task, run_dir, max_episodes): re-run one run's code where it fails, recording it, and turn each
+    # recording into timestamped symptoms (sim/symptoms.py). Returns a dict for the investigator's `trace_failures`
+    # tool: the numbered source of `fix_output`, a tally, and per failing episode its symptoms and the motion file
+    # saved under `run_dir/trace/`. None: the domain has nothing to replay (tabular).
+    trace_run: Callable[[Any, Path, int], dict] | None = None
+    # The file a proposed fix patches: its path in the VM (`fix_file`) and its name in a run's downloaded outputs
+    # (`fix_output`), where the patch is checked before it is accepted. None: no fix step in this domain.
+    fix_file: str | None = None
+    fix_output: str | None = None
 
     def arm_plan(self, label: str, cfg: "BatchConfig") -> dict[str, dict | None]:
         """The fork experiment's arms for a finding's `label`, in order (forks.arm_plan)."""

@@ -21,6 +21,8 @@ import { attr, esc } from "../ui";
 import { ACT, type BatchVm, type EventKey } from "./model";
 import { duration, pct, pts, tokens, usd } from "./format";
 import { evidenceParts, trapOf } from "./trap";
+import { isMotionBatch, robotView, scoreWords } from "../robot/markup";
+import "../robot/mount";
 
 // ── text helpers ─────────────────────────────────────────────────────────────
 
@@ -238,7 +240,7 @@ export function taskText(vm: BatchVm): string {
 
 type Status = RunRecord["status"] | ForkChild["status"];
 const STATUS_TEXT: Record<string, string> = {
-  queued: "Queued", starting: "Starting", running: "Running", honest: "Honest", inflated: "Inflated", failed: "Failed",
+  queued: "Queued", starting: "Starting", running: "Running", honest: "Honest", inflated: "Inflated", unclear: "Unclear", failed: "Failed",
 };
 
 interface Subject {
@@ -247,6 +249,8 @@ interface Subject {
   score: Partial<Pick<RunRecord, "reported_accuracy" | "true_accuracy" | "gap" | "overlap_share" | "reason">>;
   labUrl: string | null;
   charts: string[];
+  /** A robot run's motion files (`visual` "motion"). */
+  motion: string[];
   durationS: number | null;
   scope: string;
   tokens: { input: number; output: number } | null;
@@ -261,7 +265,7 @@ function subject(vm: BatchVm, key: EventKey): Subject {
     const r = vm.case.runs[key];
     return {
       name: `Run ${key}`, status: r?.status ?? null, score: r ?? {}, labUrl: r?.lab_url ?? null, charts: r?.charts ?? [],
-      durationS: r?.duration_s ?? fromEvents, scope: `run:${key}`, tokens: r?.tokens ?? null, fork: null,
+      motion: r?.motion_files ?? [], durationS: r?.duration_s ?? fromEvents, scope: `run:${key}`, tokens: r?.tokens ?? null, fork: null,
     };
   }
   const forkId = key.slice(0, slash);
@@ -272,7 +276,7 @@ function subject(vm: BatchVm, key: EventKey): Subject {
   const arm = c?.arm ?? (childId.startsWith("forced") ? "forced" : childId.startsWith("control") ? "control" : null);
   return {
     name: `Fork ${forkId}, ${childId.replace(/-(\d+)$/, " $1")}`, status: c?.status ?? null, score: c ?? {}, labUrl: c?.lab_url ?? null,
-    charts: [], durationS: fromEvents, scope: `fork:${forkId}:${childId}`, tokens: null, fork: { exp, child: childId, arm },
+    charts: [], motion: c?.motion_files ?? [], durationS: fromEvents, scope: `fork:${forkId}:${childId}`, tokens: null, fork: { exp, child: childId, arm },
   };
 }
 
@@ -303,7 +307,8 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
   const s = subject(vm, key);
   const status = s.status ?? "queued";
   const scored = status === "honest" || status === "inflated";
-  const tone = status === "honest" ? " is-honest" : status === "inflated" ? " is-inflated" : status === "failed" ? " is-failed" : "";
+  const tone = status === "honest" ? " is-honest" : status === "inflated" ? " is-inflated" : status === "failed" ? " is-failed"
+    : status === "unclear" ? " is-unclear" : "";
   const simulated = (vm.case.config as Partial<BatchConfig>).simulated === true;
 
   const top = `<div class="rn-top">
@@ -326,6 +331,7 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
       : "No change: the agent carried on by itself.";
     note = `<p class="rn-note">${esc(from + what)}</p>`;
   }
+  if (status === "unclear" && s.score.reason) note += `<p class="rn-note">${esc(s.score.reason)}</p>`;
   if (status === "failed" && s.score.reason) note += `<p class="rn-note rn-note--fail">${esc(s.score.reason)}</p>`;
 
   const cost: ScopeCost | undefined = vm.case.costs.scopes?.[s.scope];
@@ -333,17 +339,23 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
   const tout = cost?.output_tokens ?? s.tokens?.output ?? null;
   const money = cost?.total_usd ?? cost?.model_usd ?? null;
   const gapTone = scored ? (status === "inflated" ? " is-inflated" : " is-honest") : "";
+  // Robot batches say "Claimed" and "Hidden test"; tabular ones keep "Reported" and "True".
+  const words = scoreWords(vm.case.config);
   const stats = [
-    stat("Reported", pct(s.score.reported_accuracy), "", "Test accuracy the agent wrote in report.json"),
-    stat("True", pct(s.score.true_accuracy), "", "Accuracy of its predictions on the holdout set"),
-    stat("Gap", pts(s.score.gap), gapTone, "Reported minus true"),
+    stat(words.reported, pct(s.score.reported_accuracy), "", words.reportedTitle),
+    stat(words.true, pct(s.score.true_accuracy), "", words.trueTitle),
+    stat("Gap", pts(s.score.gap) + words.gapSuffix(s.score.gap), gapTone, words.gapTitle),
     overlapStat(s.score.overlap_share, trapOf(vm.case), scored),
     stat("Time", duration(s.durationS)),
     tin != null || tout != null ? stat("Tokens", `${tokens(tin)} in, ${tokens(tout)} out`, " rn-stat--wide") : "",
     money != null ? stat("Cost", usd(money)) : "",
   ].join("");
 
-  const charts = s.charts.length
+  // A robot run shows its episodes in 3D where a tabular run shows its charts.
+  const motion = isMotionBatch(vm.case.config) && (s.motion.length || scored || status === "failed")
+    ? robotView(vm.id, key, s.motion)
+    : "";
+  const charts = motion ? motion : s.charts.length
     ? `<div class="rn-charts" data-morph-list>${s.charts.map((p) => {
       const url = batchFileUrl(vm.id, p);
       const name = chartName(p);

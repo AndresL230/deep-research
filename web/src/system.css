@@ -79,7 +79,7 @@ body { background:#15171b; }
 .ds-badge { display:block; flex:none; overflow:visible; }
 .ds-badge-c { fill:var(--ok); transform-box:fill-box; transform-origin:center; }
 .ds-badge--alert .ds-badge-c { fill:var(--bad); }
-.ds-badge--cross .ds-badge-c { fill:var(--fg-40); }
+.ds-badge--cross .ds-badge-c, .ds-badge--hold .ds-badge-c { fill:var(--fg-40); }
 .ds-badge-p { fill:none; stroke:#fff; stroke-width:1.7; stroke-linecap:square; stroke-linejoin:miter; stroke-dasharray:1; stroke-dashoffset:0; }
 [data-cnpy-theme="dark"] .ds-badge-p { stroke:#0e1013; }
 

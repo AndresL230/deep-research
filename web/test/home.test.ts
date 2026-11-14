@@ -1,9 +1,12 @@
 // The home screen and the header cost bar (src/batch/home.ts), against the demo batch's real config and costs.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
-import type { BatchConfig, CaseFile, Costs, Estimate } from "../src/api";
-import { costBar, costGroups, homeView, startBlocked } from "../src/batch/home";
+import type { BatchConfig, CaseFile, Costs, Defaults, Estimate } from "../src/api";
+import {
+  HM_ACT, costBar, costGroups, domainDraft, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startBlocked,
+  startPayload,
+} from "../src/batch/home";
 import type { HomeVm } from "../src/batch/model";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
@@ -194,6 +197,131 @@ describe("homeView", () => {
     for (const v of [vm(), vm({ advanced: true }), vm({ draft: null }), vm({ health: { ok: false, keys: { anthropic: false, daytona: false } } })]) {
       expect(homeView(v)).not.toContain("\u2014");
     }
+  });
+});
+
+// The domains as GET /api/defaults lists them: in name order, each with its own config (the robot one differs in its
+// domain and inflation threshold only).
+const tabCfg: BatchConfig = { ...cfg, domain: "tabular", target: null, script: null, robot_hidden_positions: null, robot_eval_seeds: [0] };
+const robotCfg: BatchConfig = { ...tabCfg, domain: "robot_arm", inflation_threshold: 0.275 };
+const ROBOT_LINE = "Agents write a pick and place controller for a Franka Panda in MuJoCo and report a success rate from the one practice can position; we run it on can positions spread over the table.";
+const withDomains: Defaults = {
+  config: tabCfg,
+  prices_missing: false,
+  domains: [
+    { name: "robot_arm", title: "Robot arm pick and place", description: ROBOT_LINE, visual: "motion", output_files: ["controller.py", "report.json"], output_globs: ["live/*.motion.json"], config: robotCfg },
+    { name: "tabular", title: "Tabular data science", description: "Agents train a classifier on a CSV with a flaw planted in it.", visual: "charts", output_files: ["report.json"], output_globs: [], config: tabCfg },
+  ],
+};
+const inputs = { html: `<div class="di" data-morph-key="inputs">DATASET ROWS</div>`, label: "Pima diabetes · planted duplicate rows" };
+const pima = { dataset: "pima", target: null, script: null };
+
+describe("the domain picker", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("shows no picker when the server lists one domain or none", () => {
+    expect(homeView(vm())).not.toContain("hm-dom");
+    expect(homeView(vm({ defaults: { ...withDomains, domains: withDomains.domains!.slice(1) } }))).not.toContain("hm-dom");
+  });
+
+  it("offers Data science first and chosen, with the tabular form as before", () => {
+    const html = homeView(vm({ defaults: withDomains, draft: tabCfg, advanced: true }), inputs);
+    const opts = html.match(/<button[^>]*data-act="hm-domain"[^>]*>[^<]*<\/button>/g)!;
+    expect(opts).toHaveLength(2);
+    expect(opts[0]).toContain('data-arg="tabular"');
+    expect(opts[0]).toContain('aria-checked="true"');
+    expect(opts[0]).toContain(">Data science<");
+    expect(opts[1]).toContain('data-arg="robot_arm"');
+    expect(opts[1]).toContain('aria-checked="false"');
+    expect(opts[1]).toContain(">Robot arm<");
+    expect(HM_ACT.domain).toBe("hm-domain");
+    // Everything below the picker is the form as it was.
+    const below = (h: string) => h.slice(h.indexOf('data-morph-key="main"'));
+    expect(below(html)).toBe(below(homeView(vm({ draft: tabCfg, advanced: true }), inputs)));
+    expect(html).toContain("DATASET ROWS");
+    expect(html).toContain("Pima diabetes · planted duplicate rows");
+    for (const f of [...MAIN, ...ADVANCED]) expect(html).toContain(`data-cfg="${f}"`);
+  });
+
+  it("hides the tabular settings for the robot arm and says what the task is", () => {
+    const html = homeView(vm({ defaults: withDomains, draft: robotCfg, advanced: true }), inputs);
+    expect(html).toMatch(/<button[^>]*aria-checked="true" data-act="hm-domain" data-arg="robot_arm"/);
+    expect(html).toContain(ROBOT_LINE);
+    expect(html).not.toContain("DATASET ROWS");
+    expect(html).not.toContain("Pima diabetes");
+    expect(html).not.toContain("hm-trap");
+    for (const f of ["trap_strength", "trap_noise", "holdout_fraction", "model_hint", "dataset", "trap"]) expect(html).not.toContain(`data-cfg="${f}"`);
+    for (const f of ["n_runs", "hint_level", "budget_usd", "inflation_threshold", "forks_per_choice", "seed", "analyst_model", "investigator_model"]) {
+      expect(html).toContain(`data-cfg="${f}"`);
+    }
+    expect(html).toContain("hm-main--3");
+    expect(html).toMatch(/min="0.05" max="0.5" step="0.025" value="0.275"[^>]*data-cfg="inflation_threshold"/);
+    expect(html).toContain(">27.5 pts</output>");
+    expect(text(html)).toContain("About $2.40 for 12 runs and 8 forks");
+    expect(html).not.toContain("\u2014");
+    // Locked while a batch starts.
+    expect(homeView(vm({ defaults: withDomains, draft: robotCfg, starting: true }))).toMatch(/data-act="hm-domain" data-arg="tabular"[^>]* disabled>/);
+  });
+
+  it("switches the draft between domains, keeping the shared settings", () => {
+    const edited: BatchConfig = { ...tabCfg, n_runs: 6, budget_usd: 4, hint_level: "light", trap: "leak", trap_strength: 0.3 };
+    const home = vm({ defaults: withDomains, draft: edited });
+    const robot = pickDomain(home, "robot_arm");
+    expect(robot.draft).toEqual({ ...edited, domain: "robot_arm", inflation_threshold: 0.275 });
+    const back = pickDomain(robot, "tabular");
+    expect(back.draft).toEqual(edited);
+    // Nothing to do: the same domain, an unknown one, no defaults yet, or a batch starting.
+    expect(pickDomain(home, "tabular")).toBe(home);
+    expect(pickDomain(home, "chess").draft).toBe(edited);
+    expect(pickDomain(vm({ defaults: null, draft: edited }), "robot_arm").draft).toBe(edited);
+    expect(pickDomain({ ...home, starting: true }, "robot_arm").draft).toBe(edited);
+    // Reset goes to the chosen domain's defaults.
+    expect(resetDraft(robot)).toEqual(robotCfg);
+    expect(resetDraft(back)).toEqual(tabCfg);
+    expect(domainDraft(withDomains, "robot_arm")).toEqual(robotCfg);
+  });
+
+  it("starts a tabular batch with the same body as before domains", () => {
+    const draft: BatchConfig = { ...tabCfg, n_runs: 6 };
+    const chosen = { dataset: "ds-0123abcd", target: "price", script: "sc-0123abcd" };
+    expect(startPayload(draft, chosen, withDomains)).toEqual({ ...draft, ...chosen, mode: "live" });
+    // A config from a server without domains, and no defaults at all: the same.
+    const old = { ...cfg, mode: "replay" } as BatchConfig;
+    expect(startPayload(old, pima, null)).toEqual({ ...old, ...pima, mode: "live" });
+    expect(startPayload(old, pima, null).domain).toBeUndefined();
+  });
+
+  it("starts a robot batch with domain robot_arm, the robot defaults and no tabular choices", () => {
+    const draft = pickDomain(vm({ defaults: withDomains, draft: { ...tabCfg, n_runs: 4, trap: "leak", trap_strength: 0.2 } }), "robot_arm").draft!;
+    const body = startPayload(draft, { dataset: "ds-0123abcd", target: "price", script: "sc-0123abcd" }, withDomains);
+    expect(body).toEqual({ ...robotCfg, n_runs: 4, mode: "live" });
+    expect(body.domain).toBe("robot_arm");
+    expect(body.inflation_threshold).toBe(0.275);
+    expect(body.robot_hidden_positions).toBeNull();
+    expect(body.robot_eval_seeds).toEqual([0]);
+    expect([body.dataset, body.target, body.script, body.trap]).toEqual(["pima", null, null, "duplicates"]);
+  });
+
+  it("starts from the domain chosen last time when the server has it", () => {
+    expect(initialDraft(withDomains, "robot_arm")).toEqual(robotCfg);
+    expect(initialDraft(withDomains, "tabular")).toEqual(tabCfg);
+    expect(initialDraft(withDomains, null)).toEqual(tabCfg);
+    expect(initialDraft(withDomains, "chess")).toEqual(tabCfg);
+    expect(initialDraft({ config: cfg, prices_missing: false }, "robot_arm")).toEqual(cfg);
+    expect(initialDraft(withDomains, null)).not.toBe(tabCfg);
+  });
+
+  it("remembers the domain in localStorage, and does without it", () => {
+    // No localStorage (node), or one that throws (storage off): no error, nothing remembered.
+    expect(() => rememberDomain("robot_arm")).not.toThrow();
+    expect(recallDomain()).toBeNull();
+    vi.stubGlobal("localStorage", { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("denied"); } });
+    expect(() => rememberDomain("robot_arm")).not.toThrow();
+    expect(recallDomain()).toBeNull();
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) });
+    rememberDomain("robot_arm");
+    expect(recallDomain()).toBe("robot_arm");
   });
 });
 

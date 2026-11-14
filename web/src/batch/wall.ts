@@ -19,22 +19,30 @@ import { chip, count, reveal as revealText, spinner, type ChipMark, type ChipTon
 import { attr, esc } from "../ui";
 import { pct, pts, tokens, usd } from "./format";
 import { ACT, type BatchVm } from "./model";
+import { isMotionBatch, robotThumb, scoreWords } from "../robot/markup";
+import "../robot/mount";
 
 export interface WallSummary {
   total: number;
   honest: number;
   inflated: number;
   failed: number;
+  /** Robot runs between the two thresholds. Only set when there are some. */
+  unclear?: number;
   /** Starting or running. */
   running: number;
   queued: number;
 }
 
-const SCORED: ReadonlySet<RunStatus> = new Set(["honest", "inflated", "failed"]);
-const isScored = (s: RunStatus): boolean => SCORED.has(s);
+/** A status as the wall shows it. "unclear" (robot only: finished, its gap between the domain's two thresholds) is
+ *  named here as well as in the API's RunStatus, so the wall draws it whichever side lands first. */
+type Status = RunStatus | "unclear";
 
-const STATUS_LABEL: Record<RunStatus, string> = {
-  queued: "Queued", starting: "Starting", running: "Running", honest: "Honest", inflated: "Inflated", failed: "Failed",
+const SCORED: ReadonlySet<Status> = new Set(["honest", "inflated", "unclear", "failed"]);
+const isScored = (s: Status): boolean => SCORED.has(s);
+
+const STATUS_LABEL: Record<Status, string> = {
+  queued: "Queued", starting: "Starting", running: "Running", honest: "Honest", inflated: "Inflated", unclear: "Unclear", failed: "Failed",
 };
 
 /** Runs in id order ("r02" before "r10"). */
@@ -46,11 +54,13 @@ export function sortedRuns(vm: BatchVm): RunRecord[] {
 export function wallSummary(vm: BatchVm): WallSummary {
   const s: WallSummary = { total: 0, honest: 0, inflated: 0, failed: 0, running: 0, queued: 0 };
   for (const r of Object.values(vm.case.runs ?? {})) {
+    const st = r.status as Status;
     s.total++;
-    if (r.status === "honest") s.honest++;
-    else if (r.status === "inflated") s.inflated++;
-    else if (r.status === "failed") s.failed++;
-    else if (r.status === "queued") s.queued++;
+    if (st === "honest") s.honest++;
+    else if (st === "inflated") s.inflated++;
+    else if (st === "failed") s.failed++;
+    else if (st === "unclear") s.unclear = (s.unclear ?? 0) + 1;
+    else if (st === "queued") s.queued++;
     else s.running++;
   }
   return s;
@@ -60,9 +70,10 @@ export function wallSummary(vm: BatchVm): WallSummary {
 export function summaryLine(s: WallSummary): string {
   if (s.total === 0) return "No runs yet";
   if (s.running + s.queued === 0) {
-    return `${s.total} ${s.total === 1 ? "run" : "runs"}: ${s.honest} honest, ${s.inflated} inflated, ${s.failed} failed`;
+    const unclear = s.unclear ? `, ${s.unclear} unclear` : "";
+    return `${s.total} ${s.total === 1 ? "run" : "runs"}: ${s.honest} honest, ${s.inflated} inflated${unclear}, ${s.failed} failed`;
   }
-  return `${s.running} of ${s.total} running, ${s.honest + s.inflated + s.failed} scored`;
+  return `${s.running} of ${s.total} running, ${s.honest + s.inflated + (s.unclear ?? 0) + s.failed} scored`;
 }
 
 /** The run's todos: its own, else the latest `todos` event in its loaded log. */
@@ -79,11 +90,13 @@ export function runTodos(vm: BatchVm, run: RunRecord): AgentTodo[] | null {
 
 /** The step label under the picture. */
 export function stepLabel(run: RunRecord, todos: AgentTodo[] | null, cells: NbCell[] = []): string {
-  switch (run.status) {
+  const st = run.status as Status;
+  switch (st) {
     case "queued": return "Queued";
     case "starting": return "Starting the VM";
     case "honest":
-    case "inflated": return "Done";
+    case "inflated":
+    case "unclear": return "Done";
     case "failed": return run.reason?.trim() || "Failed";
     case "running": {
       const step = run.step?.trim();
@@ -97,18 +110,23 @@ export function stepLabel(run: RunRecord, todos: AgentTodo[] | null, cells: NbCe
 const truncate = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 
 /** Each status as a chip: its colour and its mark. Waiting is an amber dot, working a spinner, a result a drawn badge. */
-const CHIP: Record<RunStatus, [ChipTone, ChipMark]> = {
+const CHIP: Record<Status, [ChipTone, ChipMark]> = {
   queued: ["warn", "dot"], starting: ["live", "spin"], running: ["live", "spin"],
-  honest: ["ok", "check"], inflated: ["bad", "alert"], failed: ["idle", "cross"],
+  honest: ["ok", "check"], inflated: ["bad", "alert"], unclear: ["idle", "hold"], failed: ["idle", "cross"],
 };
 
-function pill(status: RunStatus): string {
+function pill(status: Status): string {
   const [tone, mark] = CHIP[status];
   return chip(STATUS_LABEL[status], tone, mark, `bw-pill bw-pill--${status}`);
 }
 
 /** The device's screen: the end of the run's notebook, code typing itself out, then its output and charts. */
 function picture(vm: BatchVm, run: RunRecord, step: string, cells: NbCell[]): string {
+  // A robot run that has recorded its episodes: the arm moving, its last episode on a loop.
+  const motion = run.motion_files ?? [];
+  if (isMotionBatch(vm.case.config) && motion.length) {
+    return `<div class="bw-pic bw-pic--robot" data-morph-key="robot">${robotThumb(vm.id, motion[motion.length - 1])}</div>`;
+  }
   if (cells.length) {
     return `<div class="bw-pic bw-pic--nb" data-morph-key="nb">${notebookTail(cells, { image: (name) => chartUrl(vm, run.id, name) })}</div>`;
   }
@@ -145,21 +163,26 @@ function strip(run: RunRecord, todos: AgentTodo[] | null, cells: NbCell[]): stri
 /** A bar from 50% to 100% accuracy, so a 13 point gap is a visible length. */
 const barWidth = (x: number | null | undefined): number => (x == null || Number.isNaN(x) ? 0 : Math.max(0, Math.min(1, (x - 0.5) / 0.5)) * 100);
 
-/** The result on the device's panel, under the screen: reported and true as meters, the gap, the trap's evidence. */
-function reveal(run: RunRecord, trap: TrapInfo | null): string {
-  if (run.status === "failed") {
+/** The result on the device's panel, under the screen: the two scores as meters, the gap, the trap's evidence. */
+function reveal(run: RunRecord, trap: TrapInfo | null, config: unknown): string {
+  const motion = isMotionBatch(config);
+  const w = scoreWords(config);
+  const st = run.status as Status;
+  if (st === "failed") {
     const reason = run.reason?.trim() || "The run failed before it was scored.";
     return `<div class="bw-rev bw-rev--failed" data-morph-key="rev" title="${attr(reason)}">${esc(truncate(reason, 140))}</div>`;
   }
-  if (run.status !== "honest" && run.status !== "inflated") return "";
+  // An unclear run has its numbers too: they are why it is neither honest nor inflated.
+  if (st !== "honest" && st !== "inflated" && st !== "unclear") return "";
   // The trap's evidence sentence. Left out when the run has no number or the trap has none to give.
-  const ev = evidenceParts(run.overlap_share, trap, "of test rows were in training");
+  // A robot run's overlap share is the share of the can positions it tried that were the practice spot.
+  const ev = evidenceParts(run.overlap_share, trap, motion ? "of tested can positions were the practice spot" : "of test rows were in training");
   // The bars grow one after the other, and each number counts up beside its bar.
-  const bar = (label: string, x: number | null | undefined, cls: string, wait: number): string =>
-    `<div class="bw-acc"><span class="bw-k">${label}</span><span class="bw-track" aria-hidden="true"><span class="bw-fill ${cls} ds-grow-x" style="width:${barWidth(x).toFixed(1)}%;--mo-d:${wait}ms"></span></span><span class="bw-v">${count(x, "pct", pct(x))}</span></div>`;
-  return `<div class="bw-rev" data-morph-key="rev">`
-    + `<div class="bw-meters">${bar("Reported", run.reported_accuracy, "bw-fill--rep", 0)}${bar("True", run.true_accuracy, "bw-fill--true", 150)}</div>`
-    + `<div class="bw-res"><span class="bw-gap">${count(run.gap, "pts", pts(run.gap))}</span>${ev ? `<span class="bw-ovl-t">${esc(`${ev.share} ${ev.text}`)}</span>` : ""}</div>`
+  const bar = (label: string, title: string, x: number | null | undefined, cls: string, wait: number): string =>
+    `<div class="bw-acc" title="${attr(title)}"><span class="bw-k">${esc(label)}</span><span class="bw-track" aria-hidden="true"><span class="bw-fill ${cls} ds-grow-x" style="width:${barWidth(x).toFixed(1)}%;--mo-d:${wait}ms"></span></span><span class="bw-v">${count(x, "pct", pct(x))}</span></div>`;
+  return `<div class="bw-rev${motion ? " bw-rev--robot" : ""}" data-morph-key="rev">`
+    + `<div class="bw-meters">${bar(w.reported, w.reportedTitle, run.reported_accuracy, "bw-fill--rep", 0)}${bar(w.true, w.trueTitle, run.true_accuracy, "bw-fill--true", 150)}</div>`
+    + `<div class="bw-res"><span class="bw-gap" title="${attr(w.gapTitle)}">${count(run.gap, "pts", pts(run.gap))}${w.gapSuffix(run.gap)}</span>${ev ? `<span class="bw-ovl-t">${esc(`${ev.share} ${ev.text}`)}</span>` : ""}</div>`
     + `</div>`;
 }
 
@@ -193,8 +216,8 @@ function tile(vm: BatchVm, run: RunRecord): string {
     + picture(vm, run, step, cells)
     + `</div>`
     // The panel under the screen: the step while the run works; once it is scored or has failed, the result.
-    + `<div class="bw-panel">${reveal(run, trapOf(vm.case)) || `<div class="bw-step ds-swap" data-morph-key="step:${attr(step)}" title="${attr(step)}">${esc(truncate(step, 120))}</div>`}</div>`
-    + `<div class="bw-chin">${strip(run, todos, cells)}${pill(run.status)}<span class="bw-key" aria-hidden="true">${askIcon("arrow", 11, null, 2.2)}</span></div>`
+    + `<div class="bw-panel">${reveal(run, trapOf(vm.case), vm.case.config) || `<div class="bw-step ds-swap" data-morph-key="step:${attr(step)}" title="${attr(step)}">${esc(truncate(step, 120))}</div>`}</div>`
+    + `<div class="bw-chin">${strip(run, todos, cells)}${pill(run.status as Status)}<span class="bw-key" aria-hidden="true">${askIcon("arrow", 11, null, 2.2)}</span></div>`
     + `</div>`
     + `</div>`
     + `</div>`;
@@ -208,6 +231,7 @@ export function wallView(vm: BatchVm): string {
   const head = `<div class="bw-head" data-io>`
     + `<span class="ds-eyebrow">Agents</span>`
     + `<h2 class="bw-sum" aria-live="polite">${revealText(summaryLine(s))}</h2>`
+    + (s.total ? `<p class="bw-explain">${esc(scoreWords(vm.case.config).explainer)}</p>` : "")
     + (simulated ? `<p class="bw-sim"><strong>Simulated batch:</strong> the agents' choices are scripted, the scores and charts are real</p>` : "")
     + `</div>`;
   const grid = runs.length

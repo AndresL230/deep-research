@@ -3,6 +3,7 @@
   "model_id": "panda-can-v1",
   "seed": 7,
   "hint_level": "none",
+  "robot_prompt": "default",
   "practice": {
     "can_xy": [
       0.5,
@@ -22,5 +23,6 @@
     0
   ],
   "max_time": 10.0,
-  "inflation_threshold": 0.275
+  "inflation_threshold": 0.275,
+  "unclear_threshold": 0.12
 }

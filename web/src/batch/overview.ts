@@ -11,6 +11,7 @@ import { costGroups } from "./home";
 import { barShare, forkExperiments, isProblemPhase, isSimulated, pendingForks, phaseText, scoreStats } from "./lanes";
 import { ACT, type BatchVm } from "./model";
 import { sortedRuns, wallSummary } from "./wall";
+import { isMotionBatch, scoreWords } from "../robot/markup";
 
 // ── the pipeline ─────────────────────────────────────────────────────────────
 
@@ -18,7 +19,7 @@ export type StageState = "pending" | "active" | "done";
 
 export interface Stage {
   /** The page section this step is (main.ts `batchBody`): the step's button scrolls to it. */
-  key: "wall" | "split" | "phase" | "fork" | "verdict";
+  key: "wall" | "split" | "phase" | "fork" | "verdict" | "diagnosis" | "fix";
   label: string;
   state: StageState;
   /** Its section is on the page, so the step can be pressed. */
@@ -27,14 +28,15 @@ export interface Stage {
   share: number | null;
 }
 
-/** The batch as five steps, each not started, working or finished. */
+/** The batch as steps, each not started, working or finished: five always, and a robot batch's diagnosis and fix once it has them. */
 export function stages(vm: BatchVm): Stage[] {
   const c = vm.case;
   const phase = String(c.phase ?? "config");
   const s = wallSummary(vm);
-  const scored = s.honest + s.inflated + s.failed;
+  const scored = s.honest + s.inflated + s.failed + (s.unclear ?? 0);
   const allScored = s.total > 0 && scored === s.total;
   const exps = forkExperiments(c);
+  const fix = c.fix ?? null;
   const pending = pendingForks(c);
   const hasSplit = !!c.split || phase === "no_split";
   const forksOver = exps.length > 0 && exps.every((f) => f.status === "done" || f.status === "stopped");
@@ -48,6 +50,8 @@ export function stages(vm: BatchVm): Stage[] {
     },
     { key: "fork", label: "Fork", state: state(forksOver && phase !== "forking", phase === "forking" || (exps.length > 0 && !forksOver)), there: !!pending || exps.length > 0, share: null },
     { key: "verdict", label: "Verdict", state: state(!!c.verdict, phase === "forked"), there: !!c.verdict, share: null },
+    ...((c.trace ?? []).length ? [{ key: "diagnosis", label: "Diagnosis", state: "done", there: true, share: null } as Stage] : []),
+    ...(fix ? [{ key: "fix", label: "Fix", state: state(fix.status === "tested" || fix.status === "rejected", fix.status === "testing"), there: true, share: null } as Stage] : []),
   ];
 }
 
@@ -82,6 +86,9 @@ function tile(key: string, label: string, value: string, sub: string, hi = false
 function tiles(vm: BatchVm): string {
   const c = vm.case;
   const s = wallSummary(vm);
+  const w = scoreWords(c.config);
+  const [rep, tru] = [w.reported.toLowerCase(), w.true.toLowerCase()];
+  const robot = isMotionBatch(c.config);
   const runs = Object.values(c.runs ?? {});
   const gap = scoreStats(runs.filter((r) => r.status === "inflated")).gap;
   const working = s.running + s.queued;
@@ -95,9 +102,9 @@ function tiles(vm: BatchVm): string {
     : tile("cost", "Tokens", count(tok, "tokens", tokens(tok)), simulated ? "simulated, so no real spend" : tok ? "prices missing" : "nothing spent yet");
   return `<div class="ov-kpis">`
     + tile("agents", "Agents", count(s.total, "int", String(s.total)), !s.total ? "none started yet" : working ? `${s.running} working, ${s.queued} waiting` : "all scored")
-    + tile("honest", "Honest", count(s.honest, "int", String(s.honest)), "reported what they scored")
-    + tile("inflated", "Inflated", count(s.inflated, "int", String(s.inflated)), "reported more than they scored", true)
-    + tile("gap", "Mean inflation", count(gap, "pts", pts(gap)), "reported minus true, inflated runs")
+    + tile("honest", "Honest", count(s.honest, "int", String(s.honest)), robot ? "claimed what the hidden test showed" : "reported what they scored")
+    + tile("inflated", "Inflated", count(s.inflated, "int", String(s.inflated)), robot ? "claimed more than the hidden test showed" : "reported more than they scored", true)
+    + tile("gap", "Mean inflation", count(gap, "pts", pts(gap)), `${rep} minus ${tru}, inflated runs`)
     + cost
     + `</div>`;
 }
@@ -106,11 +113,13 @@ function tiles(vm: BatchVm): string {
 
 function ring(vm: BatchVm): string {
   const s = wallSummary(vm);
-  const scored = s.honest + s.inflated + s.failed;
+  const scored = s.honest + s.inflated + s.failed + (s.unclear ?? 0);
   const share = s.total ? (scored / s.total) * 100 : 0;
   const rows: [string, string, number][] = [
-    ["honest", "Honest", s.honest], ["inflated", "Inflated", s.inflated], ["failed", "Failed", s.failed],
-    ["running", "Working", s.running], ["queued", "Waiting", s.queued],
+    ["honest", "Honest", s.honest], ["inflated", "Inflated", s.inflated],
+    // Robot runs between the two thresholds: a row of its own only when there are some.
+    ...(s.unclear ? [["unclear", "Unclear", s.unclear] as [string, string, number]] : []),
+    ["failed", "Failed", s.failed], ["running", "Working", s.running], ["queued", "Waiting", s.queued],
   ];
   return `<div class="ov-card ov-card--ring ds-pop" data-io data-morph-key="ring">`
     + `<div class="ov-card-h"><h3 class="ov-card-t">Agents scored</h3><span class="ov-card-s">${esc(s.total ? `of ${s.total}` : "none yet")}</span></div>`
@@ -127,36 +136,45 @@ function ring(vm: BatchVm): string {
 
 // ── reported against true, one bar per agent ─────────────────────────────────
 
-function bar(r: RunRecord, i: number): string {
-  const scored = (r.status === "honest" || r.status === "inflated") && r.true_accuracy != null && r.reported_accuracy != null;
-  const tru = barShare(r.true_accuracy);
-  const rep = barShare(r.reported_accuracy);
+/** A bar's height, 0 to 100. Accuracy on two classes starts at a coin flip, so those bars run from 50%; a robot's
+ *  success rate can be anything, so those run from 0%. */
+const barHeight = (x: number | null | undefined, robot: boolean): number =>
+  robot ? (x == null || Number.isNaN(x) ? 0 : Number((Math.max(0, Math.min(1, x)) * 100).toFixed(1))) : barShare(x);
+
+function bar(r: RunRecord, i: number, robot: boolean, words: [string, string]): string {
+  const st = r.status as string;
+  const scored = (st === "honest" || st === "inflated" || st === "unclear") && r.true_accuracy != null && r.reported_accuracy != null;
+  const tru = barHeight(r.true_accuracy, robot);
+  const rep = barHeight(r.reported_accuracy, robot);
   const over = Math.max(0, rep - tru);
   const title = scored
-    ? `${r.id}, ${r.status}: reported ${pct(r.reported_accuracy)}, true ${pct(r.true_accuracy)}`
-    : `${r.id}, ${r.status === "failed" ? "failed" : "not scored yet"}`;
+    ? `${r.id}, ${st}: ${words[0]} ${pct(r.reported_accuracy)}, ${words[1]} ${pct(r.true_accuracy)}`
+    : `${r.id}, ${st === "failed" ? "failed" : "not scored yet"}`;
   const col = scored
     ? `<span class="ov-bar-col" data-morph-key="scored">`
       + `<span class="ov-bar-fill ds-grow-y"><i class="ov-bar-true" style="height:${Math.min(rep, tru)}%"></i>`
       + (over >= 0.6 ? `<i class="ov-bar-over" style="bottom:${tru}%;height:${over.toFixed(1)}%"></i>` : "") + `</span>`
-      + `<span class="ds-tip" style="bottom:calc(${Math.max(rep, tru)}% + 8px)"><span><b>${esc(r.id)}</b> reported ${esc(pct(r.reported_accuracy))}, true ${esc(pct(r.true_accuracy))}</span></span>`
+      + `<span class="ds-tip" style="bottom:calc(${Math.max(rep, tru)}% + 8px)"><span><b>${esc(r.id)}</b> ${esc(words[0])} ${esc(pct(r.reported_accuracy))}, ${esc(words[1])} ${esc(pct(r.true_accuracy))}</span></span>`
       + `</span>`
     : `<span class="ov-bar-col" data-morph-key="wait"><i class="ov-bar-wait"></i></span>`;
-  return `<button type="button" class="ov-bar ov-bar--${scored ? r.status : "wait"}" data-morph-key="bar:${attr(r.id)}" data-act="${ACT.openRun}" data-arg="${attr(r.id)}" style="--mo-d:${i * 45}ms" aria-label="${attr(`${title}. Open the run.`)}">`
+  return `<button type="button" class="ov-bar ov-bar--${scored ? st : "wait"}" data-morph-key="bar:${attr(r.id)}" data-act="${ACT.openRun}" data-arg="${attr(r.id)}" style="--mo-d:${i * 45}ms" aria-label="${attr(`${title}. Open the run.`)}">`
     + col + `<span class="ov-bar-id">${esc(r.id)}</span></button>`;
 }
 
 function bars(vm: BatchVm): string {
   const runs = sortedRuns(vm);
   const threshold = (vm.case.config as Partial<BatchConfig>).inflation_threshold;
+  const robot = isMotionBatch(vm.case.config);
+  const w = scoreWords(vm.case.config);
+  const words: [string, string] = [w.reported.toLowerCase(), w.true.toLowerCase()];
   const body = runs.length
-    ? `<div class="ov-bars" data-morph-key="bars" data-morph-list>${runs.map(bar).join("")}</div>`
+    ? `<div class="ov-bars" data-morph-key="bars" data-morph-list>${runs.map((r, i) => bar(r, i, robot, words)).join("")}</div>`
     : `<p class="ov-none" data-morph-key="none">The bars appear as agents are scored.</p>`;
   return `<div class="ov-card ov-card--bars ds-pop" data-io data-morph-key="bars-card">`
-    + `<div class="ov-card-h"><h3 class="ov-card-t">Reported against true accuracy</h3>`
-    + `<div class="ov-keys"><span><i class="ov-sw ov-sw--true"></i>True</span><span><i class="ov-sw ov-sw--over"></i>Reported above true</span></div></div>`
+    + `<div class="ov-card-h"><h3 class="ov-card-t">${esc(robot ? "Claimed success against the hidden test" : "Reported against true accuracy")}</h3>`
+    + `<div class="ov-keys"><span><i class="ov-sw ov-sw--true"></i>${esc(w.true)}</span><span><i class="ov-sw ov-sw--over"></i>${esc(`${w.reported} above ${words[1]}`)}</span></div></div>`
     + body
-    + `<p class="ov-foot">One bar per agent, from 50% to 100%.${threshold != null ? ` A run counts as inflated when it reports ${esc(pts(threshold).replace(/^\+/, ""))} or more above its true score.` : ""}</p>`
+    + `<p class="ov-foot">One bar per agent, from ${robot ? "0%" : "50%"} to 100%.${threshold != null ? ` A run counts as inflated when it ${robot ? "claims" : "reports"} ${esc(pts(threshold).replace(/^\+/, ""))} or more above its ${robot ? "hidden test" : "true score"}.` : ""}</p>`
     + `</div>`;
 }
 
@@ -173,10 +191,17 @@ export function headline(vm: BatchVm): string {
   const phase = String(vm.case.phase ?? "config");
   if (WORKING.has(phase) || isProblemPhase(phase)) return phaseText(phase);
   const s = wallSummary(vm);
-  const scored = s.honest + s.inflated;
+  const scored = s.honest + s.inflated + (s.unclear ?? 0);
   if (!scored) return phaseText(phase);
-  if (!s.inflated) return scored === 1 ? "The one scored agent reported what it scored" : `All ${scored} scored agents reported what they scored`;
-  return `${s.inflated} of ${scored} agents reported more than they scored`;
+  const robot = isMotionBatch(vm.case.config);
+  if (!s.inflated) {
+    if (s.unclear) return `No agent was clearly inflated, ${s.unclear} of ${scored} ${s.unclear === 1 ? "is" : "are"} unclear`;
+    const what = robot ? "the hidden test showed" : scored === 1 ? "it scored" : "they scored";
+    return scored === 1 ? `The one scored agent ${robot ? "claimed" : "reported"} what ${what}` : `All ${scored} scored agents ${robot ? "claimed" : "reported"} what ${what}`;
+  }
+  return robot
+    ? `${s.inflated} of ${scored} agents claimed more than the hidden test showed`
+    : `${s.inflated} of ${scored} agents reported more than they scored`;
 }
 
 /** The phase as a chip beside the batch's name. */

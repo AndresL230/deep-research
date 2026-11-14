@@ -24,6 +24,9 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | GET | `/api/batches/{id}/forks/{fork}/{child}/events` | One fork child's events, `child` like `control-1` or `forced-2` |
 | GET | `/api/batches/{id}/investigator/events` | The investigator's events, each with an `agent` field |
 | GET | `/api/batches/{id}/files/{path}` | A file saved with the batch, such as a run's `charts` entry. Served with a CSP that blocks scripts. The holdout labels are never served |
+| GET | `/api/robot/scene` | The robot scene for the 3D viewer (`deep_research/robot_view.py`): `{"bodies", "meshes", "geoms"}`, every visual geom with its body, type, size, local pose and color, meshes decimated to flat `v`/`f` arrays. About 1.4 MB, 0.45 MB gzipped (sent gzipped when accepted). `503` without mujoco or the panda meshes |
+| GET | `/api/batches/{id}/motion?path=<motion file>` | One motion file as body poses: `{"t", "bodies", "frames": [[x, y, z, qw, qx, qy, qz per body], ...], "static", "result", "can_start", "place_target"}`, from `mj_kinematics` on each frame's qpos. `path` must be under `runs/<run>/outputs/` or `forks/<fork>/<child>/outputs/` (`400` otherwise, never `task/`); `422` when the file is not a motion file |
+| GET | `/api/batches/{id}/motion-summaries?path=...&path=...` | For the viewer's file picker: per path, `{"can_start", "place_target", "duration", "n", "result"}` or `{"error"}` |
 | POST | `/api/batches/{id}/investigate` | Live only. Starts the investigator (phase `ready`) |
 | POST | `/api/batches/{id}/decision` | Live only. `{"approve": bool}` answers `forks.pending` (phase `awaiting_approval`) |
 | POST | `/api/batches/{id}/stop` | Live only. Cancels the work and stops every VM |
@@ -115,7 +118,27 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   `forced` is not the only arm whose history carries an extra tool call, and `show` (`config.show_arm`) tells the
   agent what `forced` fixes and leaves it to decide. A batch saved before these existed has no `arm_steps` and ran
   `control` and `forced` only. `vm_count` is one base VM plus `n_per_arm` per arm.
+
+  `kind` says what the experiment tests: absent or `method` is the experiment above, which step caused the
+  inflation. `fix` is the second experiment, forked from the same moment of the same run, that tests the
+  investigator's proposed patch (`fix` below): its `arm_steps` has `control`, optionally `placebo`, and `fixed`,
+  the run with the patch applied, in place of `forced`; its `arms` summaries read the same way, and what matters
+  in them is `honest` of `scored` and `mean_true` (did the code get better), not the inflation. `forks.pending`
+  carries the same `kind`, so the approval card can say which experiment is being asked for. The verdict always
+  belongs to the method experiment; a fix experiment's result is recorded on `fix`.
 - `verdict`: `{sentence, step_label, numbers}` or null.
+- `trace`: what the investigator's `code-tracer` subagent found, in order: `[]` until it records something (absent on
+  case files saved before it existed; read as `[]`). Each entry has `at` (unix seconds), `run_id` (the run whose
+  code was traced), `symptom` (one sentence read from a recording, with its time and distances), `line` (1-based,
+  in that run's `controller.py`), `excerpt` (that line's text, possibly empty), `why` (why the line causes the
+  symptom) and `motion_file`, the batch-relative path of the recording it was read from
+  (`runs/r02/trace/hidden_07.motion.json`, served by `/api/batches/{id}/files/`), or null when unknown.
+- `fix`: the investigator's proposed patch, or null (absent on older case files; read as null): `run_id` (the run
+  whose controller is patched), `file_path` (in the VM, `/home/daytona/workspace/controller.py`), `line` (the line
+  it targets, or null), `old_string` and `new_string` (the exact text replaced and its replacement), `description`
+  (one line), `why`, `status` (`proposed`, `testing`, `tested`, `rejected`), `proposed_at`, then `fork_id` (the fix
+  experiment's id, `f2`) once it runs and `verdict` (the investigator's one sentence on what that experiment
+  showed) once recorded.
 - `costs`: `budget_usd`, `spent_usd` (null when a price is unknown), `prices_missing`, and `scopes`
   (`run:r01`, `fork:f1:base`, `fork:f1:control-1`, `investigator`), each with input, output, cache read and
   cache write tokens, `model_usd`, `vm_seconds`, `vm_usd`, `total_usd`.

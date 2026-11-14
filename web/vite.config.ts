@@ -8,9 +8,9 @@ export default defineConfig({
     // ws: true so the batch websocket (/api/batches/{id}/ws) works in dev too.
     proxy: { "/api": { target: "http://localhost:8000", changeOrigin: true, ws: true } },
   },
-  // The landing page's 3D scenes (src/landing/scene.ts and devices.ts) are loaded on demand, and both need three.js:
-  // about 550 kB before gzip. It gets a chunk of its own, named for what it is, and the limit only keeps the build
-  // from warning about that one chunk.
+  // three.js is loaded on demand, by the landing page's 3D scenes (src/landing/) and by the robot viewer
+  // (src/robot/viewer.ts): about 550 kB before gzip. It gets a chunk of its own, named for what it is, shared by
+  // both, and the limit only keeps the build from warning about that one chunk.
   build: {
     outDir: "dist",
     emptyOutDir: true,

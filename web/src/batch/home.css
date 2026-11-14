@@ -27,6 +27,17 @@
 .hm-panel-h { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:2px 16px; }
 .hm-fixed { font-size:12.5px; color:var(--fg-55); }
 
+/* the domain picker: what the agents do, as one segmented choice across the panel, with the chosen one's line under it */
+.hm-dom { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.hm-dom-seg { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(0, 1fr); height:36px; padding:2px; gap:2px; box-sizing:border-box; border:1px solid var(--border-strong); border-radius:var(--r-ctl); background:var(--bg); }
+.hm-dom-o { min-width:0; padding:0 12px; border-radius:2px; font-size:13px; font-weight:500; color:var(--fg-55); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:color var(--fx-fast) var(--fx-ease), background var(--fx-fast) var(--fx-ease); }
+.hm-dom-o:hover:not(:disabled) { color:var(--fg); }
+.hm-dom-o[aria-checked="true"] { color:var(--fg); background:var(--surface); box-shadow:0 0 0 1px var(--border-strong); }
+.hm-dom-o:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.hm-dom-o:disabled { cursor:default; }
+.hm-dom-o:disabled:not([aria-checked="true"]) { opacity:.6; }
+.hm-dom-d { font-size:12.5px; line-height:1.5; color:var(--fg-55); }
+
 /* the trap picker: a select, with the chosen trap's one line under it */
 .hm-trap { display:flex; flex-direction:column; gap:6px; min-width:0; }
 .hm-trap > .hm-field { width:240px; max-width:100%; }
@@ -35,6 +46,8 @@
 
 /* fields: a label over a 32px control, so every control in a row sits on one line */
 .hm-main { display:grid; grid-template-columns:88px minmax(0, 1fr) auto 112px; gap:16px 24px; align-items:end; }
+/* no planted flaw, so no strength slider: runs, hint and budget */
+.hm-main--3 { grid-template-columns:88px auto 112px; justify-content:start; }
 .hm-field { display:flex; flex-direction:column; gap:6px; min-width:0; }
 .hm-lbl-row { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
 .hm-lbl { min-width:0; overflow:hidden; text-overflow:ellipsis; font-size:12.5px; font-weight:500; line-height:18px; color:var(--fg-70); white-space:nowrap; }
@@ -120,6 +133,8 @@
   .hm-main > [data-f="budget_usd"] { grid-area:budget; }
   .hm-main > [data-f="trap_strength"] { grid-area:dup; }
   .hm-main > [data-f="hint_level"] { grid-area:hint; width:auto; }
+  .hm-main--3 { grid-template-areas:"runs budget" "hint hint"; }
+  .hm-dom-seg { height:42px; }
   .hm-adv-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px 16px; }
   .hm-adv-grid > .hm-field, .hm-adv-grid > .hm-field[data-w="wide"] { grid-column:span 2; }
   .hm-adv-grid > [data-f="forks_per_choice"], .hm-adv-grid > [data-f="seed"] { grid-column:span 1; }
@@ -140,7 +155,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .hm, .hm-skel, .hm-adv-grid { animation:none !important; }
-  .hm-batch, .hm-input, .hm-seg-o span, .hm-adv-t, .hm-adv-t svg, .hm-go, .hm-cb-fill { transition:none !important; }
+  .hm-batch, .hm-input, .hm-seg-o span, .hm-dom-o, .hm-adv-t, .hm-adv-t svg, .hm-go, .hm-cb-fill { transition:none !important; }
 }
 
 /* A teammate's batch, from the hub: whose machine ran it. */

@@ -6,9 +6,10 @@ import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import forcedEventsRaw from "../../fixtures/demo-batch/forks/f1/forced-1/events.jsonl?raw";
 import r01Raw from "../../fixtures/demo-batch/runs/r01/events.jsonl?raw";
 import r02Raw from "../../fixtures/demo-batch/runs/r02/events.jsonl?raw";
-import type { AgentEvent, CaseFile, ForkExperiment, PendingForks, RunRecord, SplitFinding, StepLabel } from "../src/api";
+import type { AgentEvent, CaseFile, ForkExperiment, PendingForks, ProposedFix, RunRecord, SplitFinding, StepLabel, TraceEntry } from "../src/api";
 import {
-  armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, eventLine, forkView, investigatorView, isProblemPhase, lineWindows,
+  armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, diagnosisView, eventLine, fixSummaryText, fixTestedText, fixView,
+  forkView, investigatorView, isProblemPhase, lineWindows,
   numberLabel, phaseText, pickRuns, planCells, scoreStats, shortArgs, sortedChildren, splitCounts, splitHeadline,
   splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictView,
 } from "../src/batch/lanes";
@@ -448,6 +449,18 @@ describe("forkView", () => {
     expect(forkView(vmOf({ forks: {} }))).toBe("");
   });
 
+  it("gives a robot batch's fork children a looping 3D thumbnail of their last episode", () => {
+    const f = demo.forks.f1 as ForkExperiment;
+    const files = ["forks/f1/forced-1/outputs/live/practice.motion.json", "forks/f1/forced-1/outputs/live/check_far.motion.json"];
+    const children = { ...f.children, "forced-1": { ...f.children["forced-1"], motion_files: files }, "control-1": { ...f.children["control-1"], status: "running" as const, motion_files: [] } };
+    const robot = forkView(vmOf({ config: { ...demo.config, visual: "motion" } as CaseFile["config"], forks: { f1: { ...f, children } as ForkExperiment } }));
+    expect(robot).toContain(`<span class="rb-thumb" data-keep data-robot-thumb data-batch="demo" data-file="${files[1]}"`);
+    expect(robot).toContain("ln-kid-pic--none");
+    expect(robot).not.toContain("<div class=\"rb-thumb\"");
+    // A tabular batch keeps its text tiles.
+    expect(forkView(vmOf({ forks: { f1: { ...f, children } as ForkExperiment } }))).not.toContain("ln-kid-pic");
+  });
+
   it("renders the approval card, enabled only when live and idle", () => {
     const replay = forkView(vmOf({ forks: { pending }, phase: "awaiting_approval" }));
     // 9 VMs for 4 runs an arm is one base plus two arms.
@@ -530,6 +543,185 @@ describe("verdictView", () => {
   });
 });
 
+// ── the diagnosis and the fix (a robot batch: the trace reads recordings, the fix patches controller.py) ──
+
+const traceEntry: TraceEntry = {
+  at: 1700000000,
+  run_id: "r02",
+  symptom: "The can slipped out of the grip at 2.14 s, 0.31 m into a 0.60 m carry, while the hand moved at 0.9 m/s.",
+  line: 25,
+  excerpt: "    t_move=0.4,",
+  why: "A fixed 0.4 s carry <b>never</b> slows down for a long reach.",
+  motion_file: "runs/r02/trace/hidden_07.motion.json",
+};
+
+const proposedFix: ProposedFix = {
+  run_id: "r02",
+  file_path: "/home/daytona/workspace/controller.py",
+  line: 25,
+  old_string: "    t_move=0.4,",
+  new_string: "    t_move=0.4 + 1.2 * dist,",
+  description: "Scale the carry time with the carry distance",
+  why: "The carry takes the same 0.4 s whatever the distance, so a long carry <i>whips</i> the can.",
+  status: "proposed",
+  proposed_at: 1700000100,
+};
+
+const armOf = (honest: number, meanTrue: number, meanReported: number) =>
+  ({ total: 4, scored: 4, inflated: 4 - honest, honest, failed: 0, mean_reported: meanReported, mean_true: meanTrue });
+
+/** The second experiment: control and placebo unchanged, the fixed arm with the patch applied. */
+const fixFork: ForkExperiment = {
+  id: "f2",
+  kind: "fix",
+  status: "done",
+  source_run: "r02",
+  fork_at: 3,
+  label: "deduplicate",
+  intervention: "Apply the proposed fix to controller.py",
+  n_per_arm: 4,
+  arm_steps: { control: null, placebo: "Print the MuJoCo version", fixed: "Apply the proposed fix to controller.py" },
+  children: {
+    "control-1": { arm: "control", status: "inflated", reported_accuracy: 1, true_accuracy: 0.45, how: "fork" },
+    "placebo-1": { arm: "placebo", status: "inflated", reported_accuracy: 1, true_accuracy: 0.45, how: "fork" },
+    "fixed-1": { arm: "fixed", status: "honest", reported_accuracy: 0.8, true_accuracy: 0.72, how: "fork" },
+  },
+  arms: { control: armOf(1, 0.45, 1), placebo: armOf(1, 0.45, 1), fixed: armOf(3, 0.72, 0.8) },
+};
+
+describe("diagnosisView", () => {
+  it("is empty without a trace, including on case files saved before it existed", () => {
+    expect(diagnosisView(vmOf())).toBe("");
+    expect(diagnosisView(vmOf({ trace: [] }))).toBe("");
+  });
+
+  it("renders each entry's run, symptom, line, excerpt and why, escaped", () => {
+    const html = diagnosisView(vmOf({ trace: [traceEntry, { ...traceEntry, at: 1700000005, line: 31, excerpt: "", motion_file: null }] }));
+    expect(html).toContain(">Diagnosis<");
+    expect(html).toContain('data-morph-key="trace-1700000000"');
+    expect(html).toContain('data-morph-key="trace-1700000005"');
+    expect(html).toContain('<span class="ln-tag">r02</span>');
+    expect(html).toContain(traceEntry.symptom);
+    expect(html).toContain('<span class="ln-dx-ln">line 25</span>    t_move=0.4,');
+    expect(html).toContain('<span class="ln-dx-ln">line 31</span></pre>');
+    expect(html).toContain("A fixed 0.4 s carry &lt;b&gt;never&lt;/b&gt; slows down");
+    expect(html).not.toContain("<b>never</b>");
+  });
+
+  it("links the recording only when the entry names one", () => {
+    const linked = diagnosisView(vmOf({ trace: [traceEntry] }));
+    expect(linked).toContain('<a class="ln-dx-link" href="/api/batches/demo/files/runs/r02/trace/hidden_07.motion.json" target="_blank" rel="noopener">recording</a>');
+    const unlinked = diagnosisView(vmOf({ trace: [{ ...traceEntry, motion_file: null }] }));
+    expect(unlinked).not.toContain("ln-dx-link");
+    expect(unlinked).not.toContain("<a ");
+  });
+});
+
+describe("fixView", () => {
+  it("is empty without a fix, including on case files saved before it existed", () => {
+    expect(fixView(vmOf())).toBe("");
+    expect(fixView(vmOf({ fix: null }))).toBe("");
+  });
+
+  it("shows the description, the status, where it patches, and the text before and after", () => {
+    const html = fixView(vmOf({ fix: proposedFix }));
+    expect(html).toContain(">Fix<");
+    // The description arrives a word at a time (motion.ts `reveal`): the whole text is there for a screen reader.
+    expect(html).toContain('<p class="ln-fix-t"><span class="mo-sr">Scale the carry time with the carry distance</span>');
+    // The status is a chip (motion.ts `chip`) that also wears the lane's own tone class.
+    expect(html).toContain('ln-pill ln-pill--muted"');
+    expect(html).toContain("Proposed</span>");
+    expect(html).toContain("run r02 · controller.py line 25");
+    expect(html).toContain(">Before<");
+    expect(html).toContain(">After<");
+    expect(html).toContain('ln-fix-old"><figcaption class="ln-fix-cap">Before</figcaption><pre class="ln-fix-pre">    t_move=0.4,</pre>');
+    expect(html).toContain('ln-fix-new"><figcaption class="ln-fix-cap">After</figcaption><pre class="ln-fix-pre">    t_move=0.4 + 1.2 * dist,</pre>');
+    expect(html).toContain("a long carry &lt;i&gt;whips&lt;/i&gt; the can");
+    expect(html).not.toContain("<i>whips</i>");
+    expect(html).not.toContain("ln-sentence");
+    expect(html).not.toContain("Tested in fork");
+  });
+
+  it("colors the status pill by what the fix is going through", () => {
+    expect(fixView(vmOf({ fix: { ...proposedFix, status: "testing" } }))).toContain('ln-pill ln-pill--running"');
+    expect(fixView(vmOf({ fix: { ...proposedFix, status: "testing" } }))).toContain("Testing</span>");
+    expect(fixView(vmOf({ fix: { ...proposedFix, status: "tested" } }))).toContain('ln-pill ln-pill--muted"');
+    expect(fixView(vmOf({ fix: { ...proposedFix, status: "rejected" } }))).toContain('ln-pill ln-pill--inflated"');
+    expect(fixView(vmOf({ fix: { ...proposedFix, status: "rejected" } }))).toContain("Rejected</span>");
+    // No line: the file alone.
+    expect(fixView(vmOf({ fix: { ...proposedFix, line: null } }))).toContain("run r02 · controller.py</p>");
+  });
+
+  it("reads what the fix experiment showed from its fork's control and fixed arms", () => {
+    const tested = { ...proposedFix, status: "tested" as const, fork_id: "f2", verdict: "Scaling the carry time fixed 3 of the 4 hidden positions." };
+    const html = fixView(vmOf({ forks: { f1: demo.forks.f1, f2: fixFork }, fix: tested }));
+    expect(html).toContain("Tested in fork f2: fixed 3 of 4 succeeded on the hidden positions (mean true 72.0%) against control 1 of 4 (45.0%).");
+    expect(html).toContain('<p class="ln-sentence"><span class="mo-sr">Scaling the carry time fixed 3 of the 4 hidden positions.</span>');
+    expect(fixTestedText(fixFork)).toBe("Tested in fork f2: fixed 3 of 4 succeeded on the hidden positions (mean true 72.0%) against control 1 of 4 (45.0%).");
+    // Not until the fork is done, and not for a fork the case file does not have.
+    const running = { ...fixFork, status: "running" as const, arms: undefined };
+    expect(fixView(vmOf({ forks: { f2: running }, fix: { ...tested, status: "testing" } }))).not.toContain("Tested in fork");
+    expect(fixView(vmOf({ forks: {}, fix: tested }))).not.toContain("Tested in fork");
+    expect(fixTestedText({ ...fixFork, arms: { control: fixFork.arms!.control } })).toBeNull();
+  });
+});
+
+describe("the fix experiment", () => {
+  const pending: PendingForks = { id: "pending", status: "awaiting_approval", kind: "fix", n_per_arm: 4, vm_count: 13, estimate_usd: 2 };
+
+  it("asks to test the fix, naming the patched run", () => {
+    const html = forkView(vmOf({ forks: { pending }, fix: proposedFix, phase: "awaiting_approval" }));
+    expect(html).toContain("The investigator wants to test its fix on run r02: 4 runs in each of 3 arms, 13 VMs.");
+    expect(html).not.toContain("before its split");
+    // A method request keeps its wording.
+    const method = forkView(vmOf({ forks: { pending: { ...pending, kind: undefined, vm_count: 9 } }, fix: proposedFix }));
+    expect(method).toContain("The investigator wants to fork run r02 before its split: 4 runs in each of 2 arms, 9 VMs.");
+  });
+
+  it("renders a Fixed arm and never a forced one, with the fix it tests in the headline", () => {
+    const html = forkView(vmOf({ forks: { f2: fixFork }, fix: { ...proposedFix, status: "tested", fork_id: "f2" } }));
+    expect(armNames(fixFork)).toEqual(["control", "placebo", "fixed"]);
+    expect(armNames({ kind: "fix" })).toEqual(["control", "fixed"]);
+    expect(html).toContain('data-arms="3"');
+    expect(html).toContain('class="ln-arm ln-arm--fixed" data-morph-key="arm-fixed"');
+    expect(html).toContain(">Fixed<");
+    expect(html).not.toContain("arm-forced");
+    expect(html).not.toContain(">Forced<");
+    expect(html).toContain("Fork <b>f2</b> from run <b>r02</b> at the same moment, with the proposed fix applied in the fixed arm. Tests: <b class=\"ln-lit-word\">Scale the carry time with the carry distance</b>.");
+    expect(html).not.toContain("Step under test");
+    expect(html).toContain("Runs first: Apply the proposed fix to controller.py");
+    expect(html).toContain('data-arg="f2/fixed-1"');
+  });
+
+  it("sums each arm by its true success rate and colors the bar by whether it beat control", () => {
+    const html = forkView(vmOf({ forks: { f2: fixFork }, fix: proposedFix }));
+    const control = html.slice(html.indexOf('data-morph-key="arm-control"'), html.indexOf('data-morph-key="arm-placebo"'));
+    const fixed = html.slice(html.indexOf('data-morph-key="arm-fixed"'));
+    expect(fixed).toContain("3 of 4 succeeded on the hidden positions, mean true 72.0% vs control 45.0%");
+    expect(fixed).toContain('class="ln-score ln-score--honest"');
+    expect(control).toContain("1 of 4 succeeded on the hidden positions, mean true 45.0%</p>");
+    expect(control).toContain('class="ln-score ln-score--inflated"');
+    expect(html).not.toContain("inflated, mean reported");
+    expect(fixSummaryText(armOf(2, 0.5, 0.9), armOf(1, 0.45, 1))).toBe("2 of 4 succeeded on the hidden positions, mean true 50.0% vs control 45.0%");
+    expect(fixSummaryText({ ...armOf(2, 0.5, 0.9), failed: 1 })).toBe("2 of 4 succeeded on the hidden positions, 1 failed, mean true 50.0%");
+    // The method experiment reads as before.
+    const method = forkView(vmOf());
+    expect(method).toContain("3 of 4 inflated, mean reported 87.8% vs true 73.5%");
+    expect(method).not.toContain("succeeded");
+  });
+
+  it("is never the verdict's fork", () => {
+    const both = verdictArms({ ...demo, forks: { f1: demo.forks.f1, f2: fixFork } })!;
+    expect(Object.keys(both)).toEqual(["control", "forced"]);
+    expect(both.forced!.inflated).toBe(0);
+    // With only the fix fork there is no experiment to read: the verdict's own numbers.
+    const only = verdictArms({ ...demo, forks: { f2: fixFork } })!;
+    expect(Object.keys(only)).toEqual(["control", "forced"]);
+    expect(only.control!.statuses).toEqual(["inflated", "inflated", "inflated", "honest"]);
+    expect(verdictView(vmOf({ forks: { f1: demo.forks.f1, f2: fixFork } }))).not.toContain("v-fixed");
+  });
+});
+
 describe("investigatorView", () => {
   it("is empty before the batch starts", () => {
     expect(investigatorView(vmOf({ phase: "config" }))).toBe("");
@@ -574,7 +766,11 @@ describe("investigatorView", () => {
 
 describe("copy", () => {
   it("has no em dashes", () => {
-    const all = [splitView(withLogs()), splitView(vmOf({ split: null, phase: "no_split" })), forkView(vmOf()), verdictView(vmOf()), investigatorView(vmOf())].join("");
+    const all = [
+      splitView(withLogs()), splitView(vmOf({ split: null, phase: "no_split" })), forkView(vmOf()), verdictView(vmOf()), investigatorView(vmOf()),
+      forkView(vmOf({ forks: { f2: fixFork }, fix: proposedFix })), diagnosisView(vmOf({ trace: [traceEntry] })),
+      fixView(vmOf({ forks: { f2: fixFork }, fix: { ...proposedFix, fork_id: "f2", status: "tested" } })),
+    ].join("");
     expect(all).not.toContain(String.fromCharCode(0x2014));
   });
 });

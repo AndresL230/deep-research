@@ -11,6 +11,7 @@ import logging
 import shutil
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,7 @@ from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
 from .events import EventLog, current_step, events_from_update, read_events
 from .domains import actions_from_events, build_task, intervention_for, score_run
-from .forks import cut_history, forced_turn
+from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,96 @@ RECURSION_LIMIT = 200
 # money already spent. The budget check is what limits the investigator's spend.
 INVESTIGATOR_RECURSION_LIMIT = 1000
 MAX_PARALLEL_VMS = 12
+# A robot run's motion files are pulled from its VM this often while it runs, so its tile shows it practicing.
+MOTION_POLL_S = 15.0
+# How long the end of a run waits for a pull in flight before it gives up on it.
+MOTION_POLL_STOP_S = 20.0
 
-# Run statuses that mean the run is over.
-SCORED = ("honest", "inflated", "failed")
+# Run statuses that mean the run is over. "unclear" (robot only): scored, but neither honest nor inflated.
+SCORED = ("honest", "inflated", "unclear", "failed")
+
+# The pulls run here, not in the default thread pool the agents' sandbox calls share: 12 runs polling at once must
+# never hold up a run's own tool calls.
+_POLL_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="motion-poll")
+
+
+class MotionWatch:
+    """Pulls a robot run's (or fork child's) motion files from its VM while it runs.
+
+    Every `MOTION_POLL_S` seconds one look at the VM's live folder (`sandboxes.poll_live_files`) saves the new or
+    changed files under the run's `outputs/live/`, where the final download puts them too. Each file that arrives
+    is logged as an event, `{"type": "motion", "t": <run clock>, "path": "runs/r01/outputs/live/x.motion.json"}`, so
+    the websocket pushes it and a saved batch's replay shows the episode when it appeared, and `publish(files)` gets
+    the run's motion files so far (batch-relative, newest last, at most the domain's `max_output_globs`).
+
+    Runs on the event loop as its own task; the pulls run in `_POLL_POOL`. A failing pull is logged and the next one
+    tries again. `stop()` ends it, `finish()` merges in the files the final download found.
+    """
+
+    def __init__(self, sb: Any, outputs: Path, prefix: str, patterns: list[str], limit: int,
+                 log: EventLog, on_event, publish):
+        self.sb, self.outputs, self.prefix, self.patterns, self.limit = sb, outputs, prefix, patterns, limit
+        self.log, self.on_event, self.publish = log, on_event, publish
+        self.files: list[str] = []
+        self.seen: dict[str, tuple] = {}
+        self._stop = asyncio.Event()
+        self._task = asyncio.create_task(self._loop())
+
+    async def _loop(self) -> None:
+        while True:
+            try:
+                await asyncio.wait_for(self._stop.wait(), MOTION_POLL_S)
+                return
+            except asyncio.TimeoutError:
+                pass
+            await self.poll()
+
+    async def poll(self) -> None:
+        try:
+            new = await asyncio.get_running_loop().run_in_executor(
+                _POLL_POOL, vms.poll_live_files, self.sb, self.outputs, self.patterns, self.seen, self.limit)
+        except Exception as e:  # noqa: BLE001 - watching must never break the run
+            logger.warning("pulling motion files for %s failed: %s: %s", self.prefix, type(e).__name__, e)
+            return
+        if not self._stop.is_set():
+            self._arrived(new)
+
+    def _arrived(self, rels: list[str]) -> None:
+        if not rels:
+            return
+        for rel in rels:
+            path = f"{self.prefix}/{rel}"
+            if path in self.files:
+                self.files.remove(path)  # changed: it is the newest episode again
+            self.files.append(path)
+            try:
+                self.on_event(self.log.write({"type": "motion", "path": path}))
+            except Exception as e:  # noqa: BLE001 - the log is closed: the run is over
+                logger.warning("logging motion file %s failed: %r", path, e)
+        self.files = self.files[-self.limit:]
+        self.publish(list(self.files))
+
+    async def stop(self) -> None:
+        """Stop pulling. Waits a little for a pull in flight, so it never writes after the final download."""
+        if self._task.done():
+            return
+        self._stop.set()
+        try:
+            await asyncio.wait_for(asyncio.shield(self._task), MOTION_POLL_STOP_S)
+        except Exception:  # noqa: BLE001 - a pull that hangs, or the task failed: drop it
+            self._task.cancel()
+
+    def finish(self, final: list[str]) -> None:
+        """Merge in the files the final download saved (relative to `outputs`): those not seen yet come last."""
+        self._arrived([rel for rel in final if f"{self.prefix}/{rel}" not in self.files])
+
+
+def _watch_motion(domain, sb: Any, outputs: Path, prefix: str, log: EventLog, on_event, publish) -> MotionWatch | None:
+    """A `MotionWatch` for a run of `domain`, or None when its runs draw no motion (the tabular domain)."""
+    patterns = vms.live_globs(domain.output_globs) if domain.visual == "motion" else []
+    if not patterns:
+        return None
+    return MotionWatch(sb, outputs, prefix, patterns, domain.max_output_globs, log, on_event, publish)
 
 
 def resume_problem(case: dict, batch_dir: Path) -> str | None:
@@ -270,6 +358,7 @@ class Batch:
         scope, rdir = f"run:{run_id}", self.runs_dir / run_id
         log = self._log(rdir / "events.jsonl", run_id)
         self.case.update_run(run_id, status="starting")
+        watch: MotionWatch | None = None
         try:
             sb = await asyncio.to_thread(vms.create_vm, f"{self.id}-{run_id}", **self._vm_domain)
             self.vms[run_id] = sb
@@ -278,23 +367,34 @@ class Batch:
             url = await _try(asyncio.to_thread(vms.start_lab_page, sb))
             self.case.update_run(run_id, status="running", vm_id=sb.id, lab_url=url)
 
+            on_event = self._run_event(run_id)
+            watch = _watch_motion(self.domain, sb, rdir / "outputs", f"runs/{run_id}/outputs", log, on_event,
+                                  lambda files: self.case.update_run(run_id, motion_files=files))
             agent = build_analyst(DaytonaSandbox(sandbox=sb), self.cfg.analyst_model)
             inp = {"messages": [{"role": "user", "content": self.domain.task_prompt(self.cfg)}]}
             msgs = await asyncio.wait_for(
-                self._drive(agent, inp, f"{self.id}-{run_id}", scope, self.cfg.analyst_model, log, self._run_event(run_id)),
+                self._drive(agent, inp, f"{self.id}-{run_id}", scope, self.cfg.analyst_model, log, on_event),
                 RUN_TIMEOUT_S,
             )
             (rdir / "messages.json").write_text(json.dumps(messages_to_dict(msgs)))
+            if watch is not None:
+                await watch.stop()
             motion = await asyncio.to_thread(vms.download_outputs, sb, rdir / "outputs", **self._vm_domain)
             charts = await asyncio.to_thread(vms.download_charts, sb, rdir / "live")
             await self._finish_run(run_id, rdir, log)
             if charts:
                 self.case.update_run(run_id, charts=[f"runs/{run_id}/live/{name}" for name in charts])
-            if motion:
+            if watch is not None:
+                watch.finish(motion or [])
+            elif motion:
                 self.case.update_run(run_id, motion_files=[f"runs/{run_id}/outputs/{path}" for path in motion])
         except Exception as e:  # noqa: BLE001 - one bad run must not sink the batch
+            # The reason keeps one line; the log gets the whole chain (an SDK's "Connection error." hides its cause).
+            logger.warning("run %s of %s failed", run_id, self.id, exc_info=True)
             self.case.update_run(run_id, status="failed", reason=f"{type(e).__name__}: {e}"[:500])
         finally:
+            if watch is not None:
+                await watch.stop()
             log.close()
             # The VM is used once: delete it now, so it stops costing anything. Its lab page goes with it.
             if await self._release(run_id, scope):
@@ -350,10 +450,18 @@ class Batch:
         split = self.case.data.get("split") or {}
         return self.domain.arm_plan(split.get("label") or "", self.cfg)
 
-    def estimate_forks_usd(self, n_per_arm: int) -> float | None:
+    def fix_arm_plan(self) -> dict[str, dict | None]:
+        """The arms of the fix experiment, once a fix is proposed (forks.fix_plan): control, placebo, fixed."""
+        fix = self.case.data.get("fix")
+        if not fix or self.domain.fix_file is None:
+            return {}
+        return fix_plan(fix, self.domain.placebo(), self.cfg.placebo_arm)
+
+    def estimate_forks_usd(self, n_per_arm: int, n_arms: int | None = None) -> float | None:
         avg = self.tracker.average_run_usd()
         # Forks start partway through a run, so this overestimates a little.
-        return None if avg is None else avg * max(2, len(self.arm_plan())) * n_per_arm
+        arms = max(2, len(self.arm_plan()) if n_arms is None else n_arms)
+        return None if avg is None else avg * arms * n_per_arm
 
     def fork_blocker(self) -> str | None:
         """Why the fork experiment cannot run on this batch, or None when it can."""
@@ -365,33 +473,127 @@ class Batch:
         return None
 
     async def run_forks(self, n_per_arm: int) -> str:
-        self._loop = asyncio.get_running_loop()
+        """The method experiment: from the moment before the suspect step, does doing that step change the result?"""
         why_not = self.fork_blocker()
         if why_not:
             return f"error: {why_not}"
         split = self.case.data["split"]
         iv = intervention_for(split["label"], self.cfg)
-        plan = self.arm_plan()
+        return await self._experiment(
+            self.arm_plan(), n_per_arm, kind="method", src=split["fork_run_id"], fork_at=split["fork_at"],
+            record={"label": split["label"], "intervention": iv["description"]}, headline=f"({split['label']})",
+        )
+
+    # ---- the diagnosis: traceback and fix ----
+    async def trace_failures(self, run_id: str, max_episodes: int = 3) -> dict:
+        """Re-run one run's code where it fails, recording it, and describe each failure (`Domain.trace_run`)."""
+        if self.domain.trace_run is None:
+            return {"error": f"the {self.domain.name} domain has no recordings to trace"}
+        if run_id not in self.case.data["runs"]:
+            return {"error": f"unknown run {run_id}"}
+        try:
+            return await asyncio.to_thread(self.domain.trace_run, self.task, self.runs_dir / run_id, int(max_episodes))
+        except Exception as e:  # noqa: BLE001 - the tool reports it instead of ending the investigation
+            logger.warning("trace of %s failed: %s: %s", run_id, type(e).__name__, e)
+            return {"error": f"could not trace {run_id}: {type(e).__name__}: {e}"[:400]}
+
+    def propose_fix(self, run_id: str, old_string: str, new_string: str, description: str, why: str,
+                    line: int | None = None) -> str:
+        """Record a one-place patch to a run's code, checked against that run's file before it is accepted.
+
+        The same rule as the agents' `edit_file`: `old_string` must occur exactly once. The patch is applied to the
+        `fixed` arm's copy in `run_fix_forks`.
+        """
+        if self.domain.fix_file is None or self.domain.fix_output is None:
+            return f"error: the {self.domain.name} domain has no code to fix"
+        if run_id not in self.case.data["runs"]:
+            return f"error: unknown run {run_id}"
+        if not old_string or old_string == new_string:
+            return "error: old_string must be non-empty and differ from new_string"
+        path = self.runs_dir / run_id / "outputs" / self.domain.fix_output
+        if not path.is_file():
+            return f"error: {run_id} has no {self.domain.fix_output} in its outputs"
+        source = path.read_text()
+        n = source.count(old_string)
+        if n != 1:
+            return f"error: old_string occurs {n} times in {run_id}'s {self.domain.fix_output}; it must occur exactly once"
+        if line is None:
+            line = source[: source.index(old_string)].count("\n") + 1
+        self.case.set_fix(
+            {
+                "run_id": run_id,
+                "file_path": self.domain.fix_file,
+                "line": int(line),
+                "old_string": old_string,
+                "new_string": new_string,
+                "description": (description or "").strip()[:200],
+                "why": (why or "").strip()[:1000],
+                "status": "proposed",
+                "proposed_at": time.time(),
+            }
+        )
+        return f"fix proposed for {run_id} at line {line}: call request_fix_test to test it"
+
+    def fix_blocker(self) -> str | None:
+        """Why the fix experiment cannot run, or None when it can."""
+        fix = self.case.data.get("fix")
+        if not fix:
+            return "no fix has been proposed: call propose_fix first"
+        if self.domain.fix_file is None:
+            return f"the {self.domain.name} domain has no code to fix"
+        split = self.case.data.get("split") or {}
+        if not split.get("fork_run_id") and not (self.runs_dir / fix["run_id"] / "messages.json").is_file():
+            return "no run to fork from"
+        return None
+
+    async def run_fix_forks(self, n_per_arm: int) -> str:
+        """The fix experiment: from the same moment of the same run, does the proposed patch make the code work?"""
+        why_not = self.fix_blocker()
+        if why_not:
+            return f"error: {why_not}"
+        fix = self.case.data["fix"]
+        split = self.case.data.get("split") or {}
+        # The same fork point as the method experiment when the fix targets that run: the code exists there.
+        src = fix["run_id"]
+        if split.get("fork_run_id") == src:
+            fork_at = split["fork_at"]
+        else:
+            actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task)
+            fork_at = len(actions)
+        self.case.update_fix(status="testing")
+        out = await self._experiment(
+            self.fix_arm_plan(), n_per_arm, kind="fix", src=src, fork_at=fork_at,
+            record={"label": split.get("label"), "intervention": fix.get("description"), "fix": dict(fix)},
+            headline=f"with the proposed fix applied in the fixed arm: {fix.get('description')}",
+        )
+        if out.startswith("error:"):
+            self.case.update_fix(status="proposed")
+        return out
+
+    async def _experiment(self, plan: dict[str, dict | None], n_per_arm: int, *, kind: str, src: str, fork_at: int,
+                          record: dict, headline: str) -> str:
+        """Fork a run at `fork_at` and continue `n_per_arm` copies in each arm of `plan`. The result as words."""
+        self._loop = asyncio.get_running_loop()
+        if not plan:
+            return "error: there is no experiment to run"
         n_per_arm = max(1, min(int(n_per_arm), 8))
         try:
-            self.tracker.check(self.estimate_forks_usd(n_per_arm), f"{2 * n_per_arm} fork runs")
+            self.tracker.check(self.estimate_forks_usd(n_per_arm, len(plan)), f"{len(plan) * n_per_arm} fork runs")
         except OverBudget as e:
             return f"error: {e}"
 
         fork_id = f"f{sum(k.startswith('f') for k in self.case.data['forks']) + 1}"
-        src = split["fork_run_id"]
         phase_before = self.case.data.get("phase")
         base_scope = f"fork:{fork_id}:base"
         try:
             msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
             actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task)
-            prefix_msgs, n_prefix = cut_history(msgs, split["fork_at"])
+            prefix_msgs, n_prefix = cut_history(msgs, fork_at)
             prefix_actions = actions[:n_prefix]
             self.case.set_phase("forking")
             self.case.update_fork(
-                fork_id, status="rebuilding", source_run=src, fork_at=n_prefix, label=split["label"],
-                intervention=iv["description"], n_per_arm=n_per_arm, children={},
-                arm_steps={a: (step or {}).get("description") for a, step in plan.items()},
+                fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=n_prefix, n_per_arm=n_per_arm,
+                children={}, arm_steps={a: (step or {}).get("description") for a, step in plan.items()}, **record,
             )
             base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base", **self._vm_domain)
             self.vms[f"{fork_id}-base"] = base
@@ -417,6 +619,7 @@ class Batch:
             cid, scope = f"{arm}-{i + 1}", f"fork:{fork_id}:{arm}-{i + 1}"
             cdir = self.forks_dir / fork_id / cid
             log = self._log(cdir / "events.jsonl", f"{fork_id}/{cid}")
+            watch: MotionWatch | None = None
             async with sem:
                 try:
                     try:
@@ -441,25 +644,28 @@ class Batch:
                     step = plan[arm]
                     if step is not None:
                         backend = DaytonaSandbox(sandbox=vm)
-                        res = await asyncio.to_thread(backend.execute, step["command"])
-                        # A sandbox result without an exit code (an older SDK) counts as having succeeded.
-                        exit_code = getattr(res, "exit_code", None)
-                        if exit_code not in (0, None):
+                        try:
+                            output = await asyncio.to_thread(apply_step, backend, step)
+                        except RuntimeError as e:
                             # Nothing was forced here, so this copy must not be scored as a result of its arm.
-                            raise RuntimeError(f"the {arm} step failed with exit code {exit_code}: {res.output[:200]}")
-                        history += forced_turn(step["command"], res.output)
-                        log.write({"type": "forced", "command": step["command"], "output": res.output[:2000]})
+                            raise RuntimeError(f"the {arm} step failed: {e}") from e
+                        history += forced_turn(step, output)
+                        log.write({"type": "forced", "command": step_text(step), "output": output[:2000]})
 
                     agent = build_analyst(DaytonaSandbox(sandbox=vm), self.cfg.analyst_model)
 
                     def on_event(ev: dict) -> None:
                         self._emit({"kind": "fork_event", "fork": fork_id, "child": cid, "event": ev})
 
+                    watch = _watch_motion(self.domain, vm, cdir / "outputs", f"forks/{fork_id}/{cid}/outputs", log,
+                                          on_event, lambda files: self._set_child(fork_id, cid, motion_files=files))
                     await asyncio.wait_for(
                         self._drive(agent, {"messages": history}, f"{self.id}-{fork_id}-{cid}", scope,
                                     self.cfg.analyst_model, log, on_event),
                         RUN_TIMEOUT_S,
                     )
+                    if watch is not None:
+                        await watch.stop()
                     motion = await asyncio.to_thread(vms.download_outputs, vm, cdir / "outputs", **self._vm_domain)
                     charts = await asyncio.to_thread(vms.download_charts, vm, cdir / "live")
                     score = await asyncio.to_thread(
@@ -468,13 +674,17 @@ class Batch:
                     (cdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
                     results[cid] = {"arm": arm, **score.to_dict()}
                     extra = {"charts": [f"forks/{fork_id}/{cid}/live/{name}" for name in charts]} if charts else {}
-                    if motion:
+                    if watch is None and motion:
                         extra["motion_files"] = [f"forks/{fork_id}/{cid}/outputs/{path}" for path in motion]
                     self._set_child(fork_id, cid, **results[cid], **extra)
+                    if watch is not None:
+                        watch.finish(motion or [])
                 except Exception as e:  # noqa: BLE001
                     results[cid] = {"arm": arm, "status": "failed", "reason": f"{type(e).__name__}: {e}"[:300]}
                     self._set_child(fork_id, cid, **results[cid])
                 finally:
+                    if watch is not None:
+                        await watch.stop()
                     log.close()
                     if await self._release(f"{fork_id}-{cid}", scope):
                         self._set_child(fork_id, cid, lab_url=None)
@@ -494,13 +704,21 @@ class Batch:
         self.case.update_fork(fork_id, status="done", arms=arms)
         self.case.set_phase("forked")
         lines = [
-            f"Fork {fork_id} from run {src} before action {n_prefix} ({split['label']}). "
+            f"Fork {fork_id} from run {src} before action {n_prefix} {headline}. "
             f"Every arm starts from the same moment of the same run. Failed copies are not counted."
         ]
         for arm, step in plan.items():
             a = arms[arm]
             what = "continues unchanged" if step is None else step["description"]
-            lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
+            if kind == "fix":
+                rate = "unknown" if a["mean_true"] is None else f"{a['mean_true']:.0%}"
+                lines.append(f"{arm.capitalize()}: mean true success rate {rate} over {a['scored']} copies "
+                             f"({what}; {a['failed']} failed).")
+            else:
+                lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
+        if kind == "fix":
+            self.case.update_fix(status="tested", fork_id=fork_id,
+                                 result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
         return " ".join(lines)
 
     def _set_child(self, fork_id: str, cid: str, **fields: Any) -> None:
@@ -561,17 +779,20 @@ class Batch:
             self.push_costs(force=True)
 
     def _on_interrupt(self, interrupts) -> None:
-        n = 4
+        n, kind = 4, "method"
         self._pending_requests = 1
         try:
             requests = interrupts[0].value["action_requests"]
             self._pending_requests = max(1, len(requests))
             n = int(requests[0]["args"].get("n_per_arm", 4))
+            if requests[0].get("name") == "request_fix_test":
+                kind = "fix"
         except Exception:  # noqa: BLE001
             pass
-        est = self.estimate_forks_usd(n)
+        n_arms = max(2, len(self.fix_arm_plan() if kind == "fix" else self.arm_plan()))
+        est = self.estimate_forks_usd(n, n_arms)
         self.case.update_fork(
-            "pending", status="awaiting_approval", n_per_arm=n, vm_count=max(2, len(self.arm_plan())) * n + 1,
+            "pending", status="awaiting_approval", kind=kind, n_per_arm=n, vm_count=n_arms * n + 1,
             estimate_usd=None if est is None else round(est, 2),
         )
         self.case.set_phase("awaiting_approval")
@@ -586,7 +807,10 @@ class Batch:
 
 
 def _arm_summary(rows: list[dict]) -> dict:
+    """An arm's counts. `scored` is honest plus inflated: an unclear child (robot only) is counted on its own and
+    left out of the rate, like a failed one. The `unclear` key is there only when some child is unclear."""
     scored = [r for r in rows if r.get("status") in ("honest", "inflated")]
+    unclear = sum(r.get("status") == "unclear" for r in rows)
 
     def mean(key: str) -> float | None:
         vals = [r[key] for r in scored if r.get(key) is not None]
@@ -597,7 +821,8 @@ def _arm_summary(rows: list[dict]) -> dict:
         "scored": len(scored),
         "inflated": sum(r["status"] == "inflated" for r in scored),
         "honest": sum(r["status"] == "honest" for r in scored),
-        "failed": len(rows) - len(scored),
+        **({"unclear": unclear} if unclear else {}),
+        "failed": len(rows) - len(scored) - unclear,
         "mean_reported": mean("reported_accuracy"),
         "mean_true": mean("true_accuracy"),
     }

@@ -6,6 +6,7 @@ Run from the repo root: `uv run uvicorn deep_research.api:app --reload --port 80
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import logging
 import mimetypes
@@ -18,7 +19,7 @@ from pathlib import Path
 
 import httpx
 from dotenv import dotenv_values, load_dotenv
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -27,7 +28,7 @@ from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
-from . import datasets, domains, hub, traps, user_scripts  # noqa: E402
+from . import datasets, domains, hub, robot_view, traps, user_scripts  # noqa: E402
 from .batch import Batch, resume_problem  # noqa: E402 - needs the environment loaded first
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
@@ -522,6 +523,82 @@ def batch_file(batch_id: str, path: str):
     if root not in full.parents or not full.is_file() or any(s in full.name for s in secret):
         raise HTTPException(404, "no such file")
     return FileResponse(full, headers=FILE_HEADERS)
+
+
+# ---- the robot viewer (robot_view.py): the 3D scene and each motion file's poses ----
+
+# Where a run or fork child keeps its outputs: the only places a motion file is read from (never task/).
+MOTION_PATH = re.compile(r"^(runs/[A-Za-z0-9._-]+|forks/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/outputs/[A-Za-z0-9._/ -]+\.json$")
+
+
+def _gzipped_json(packed: bytes, request: Request, cache: str) -> Response:
+    """Send JSON that is already gzipped: as it is when the client takes gzip, else unpacked."""
+    headers = {"Vary": "Accept-Encoding", "Cache-Control": cache}
+    if "gzip" in request.headers.get("accept-encoding", "").lower():
+        return Response(packed, media_type="application/json", headers={**headers, "Content-Encoding": "gzip"})
+    return Response(gzip.decompress(packed), media_type="application/json", headers=headers)
+
+
+def _robot_unavailable(e: Exception) -> HTTPException:
+    return HTTPException(503, f"the robot viewer needs mujoco and the panda meshes (`uv run python -m sim.fetch_assets`): {type(e).__name__}")
+
+
+@app.get("/api/robot/scene")
+def robot_scene(request: Request):
+    """The pick-and-place scene for the 3D viewer: every visual geom, its body, pose and color, and the meshes."""
+    try:
+        _, packed = robot_view.scene()
+    except (ImportError, OSError, ValueError) as e:
+        raise _robot_unavailable(e) from e
+    return _gzipped_json(packed, request, "public, max-age=3600")
+
+
+@app.get("/api/batches/{batch_id}/motion")
+def batch_motion(batch_id: str, path: str, request: Request):
+    """One motion file of a run or fork child as body poses per frame (robot_view.poses), for the 3D replay.
+
+    `path` is batch-relative, as in `motion_files`. Only a run's or a fork child's outputs are read, never task/ (the
+    hidden can positions live there) or anything a domain keeps secret."""
+    full = _motion_file(_batch_dir(batch_id).resolve(), path)
+    try:
+        packed = robot_view.motion_poses(full)
+    except robot_view.MotionError as e:
+        raise HTTPException(422, f"cannot replay this file: {e}") from e
+    except (ImportError, FileNotFoundError) as e:
+        raise _robot_unavailable(e) from e
+    return _gzipped_json(packed, request, "no-cache")
+
+
+MAX_SUMMARIES = 60
+
+
+@app.get("/api/batches/{batch_id}/motion-summaries")
+def batch_motion_summaries(batch_id: str, path: list[str] = Query(default=[])):
+    """For the viewer's file picker: each motion file's can start, place target, length and result, without frames.
+
+    `?path=...&path=...`, the same paths as `/motion`. A file that cannot be read has `error` instead."""
+    root = _batch_dir(batch_id).resolve()
+    out: dict[str, dict] = {}
+    for p in path[:MAX_SUMMARIES]:
+        try:
+            out[p] = robot_view.motion_summary(_motion_file(root, p))
+        except HTTPException as e:
+            out[p] = {"error": str(e.detail)}
+        except robot_view.MotionError as e:
+            out[p] = {"error": str(e)}
+    return out
+
+
+def _motion_file(root: Path, path: str) -> Path:
+    """The motion file at batch-relative `path`: only under a run's or fork child's outputs, never a secret."""
+    rel = path.strip()
+    if ".." in rel.split("/") or not MOTION_PATH.match(rel):
+        raise HTTPException(400, "not a motion file path: it must be under runs/<run>/outputs or forks/<fork>/<child>/outputs")
+    secret = ("holdout_labels", *domains.secret_files())
+    full = (root / rel).resolve()
+    if root not in full.parents or not full.is_file() or any(s in full.name for s in secret):
+        raise HTTPException(404, "no such motion file")
+    return full
 
 
 def _case(batch_id: str) -> dict:

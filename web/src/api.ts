@@ -7,7 +7,7 @@
 // ── the case file ────────────────────────────────────────────────────────────
 
 /** The case file's sections, in order. */
-export const CASE_SECTIONS = ["config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "costs"] as const;
+export const CASE_SECTIONS = ["config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "costs"] as const;
 export type CaseSection = (typeof CASE_SECTIONS)[number];
 
 /** Phases in the order a batch moves through them. Also `stopped`, `blocked: <why>` and `error: <why>`. */
@@ -77,6 +77,10 @@ export interface BatchConfig {
   visual?: Visual;
   /** In a case file only: the batch's domain, described. */
   domain_info?: DomainInfo;
+  /** robot_arm only: what the agent's controller.py holds at the start, the template ("blank") or a colleague's
+   *  working controller ("colleague"). Sent back as the server gave it. */
+  robot_start?: "blank" | "colleague";
+  robot_prompt?: "default" | "practice";
   /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
   dataset: string;
   /** The column to predict. Needed for an uploaded dataset; absent or null means Pima's `outcome`. */
@@ -89,23 +93,33 @@ export interface BatchConfig {
   trap_info?: TrapInfo;
   trap_strength: number;
   trap_noise: number;
+  /** Share of the planted copies that get the noise. Sent back as the server gave it. */
+  trap_hidden_share?: number;
   hint_level: "none" | "light";
   model_hint: "random_forest" | "any";
   holdout_fraction: number;
   n_runs: number;
   forks_per_choice: number;
+  /** The fork experiment's extra arms (forks.arm_plan). Sent back as the server gave them. */
+  placebo_arm?: boolean;
+  show_arm?: boolean;
   analyst_model: string;
   investigator_model: string;
   budget_usd: number;
   inflation_threshold: number;
   mode: "live" | "replay";
   seed: number;
+  /** robot_arm only: how many hidden can positions a controller is scored on (the first n); null means all. */
+  robot_hidden_positions?: number | null;
+  /** robot_arm only: the seeds each hidden position is run with (one to five). */
+  robot_eval_seeds?: number[];
   /** Only on fixtures made by scripts/make_fixture.py: the agents' choices are scripted. */
   simulated?: boolean;
 }
 
 /** A run's score (deep_research/scoring.py RunScore). */
-export type ScoreStatus = "honest" | "inflated" | "failed";
+/** "unclear" (robot only): the gap is between the domain's unclear and inflation thresholds; left out of the split. */
+export type ScoreStatus = "honest" | "inflated" | "unclear" | "failed";
 export interface RunScore {
   status: ScoreStatus;
   reported_accuracy: number | null;
@@ -118,7 +132,7 @@ export interface RunScore {
   reason: string;
 }
 
-export const RUN_STATUSES = ["queued", "starting", "running", "honest", "inflated", "failed"] as const;
+export const RUN_STATUSES = ["queued", "starting", "running", "honest", "inflated", "unclear", "failed"] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
 export interface AgentTodo { content: string; status: "pending" | "in_progress" | "completed" }
@@ -141,7 +155,8 @@ export interface RunRecord extends Partial<Omit<RunScore, "status">> {
   /** The charts the run saved, oldest first, as paths for `batchFileUrl`. Set once the run has finished. */
   charts?: string[];
   /** The motion files the run saved (`visual` "motion"), as paths for `batchFileUrl`, such as
-   *  `runs/r01/outputs/live/practice.motion.json`. Set once the run has finished; absent in the tabular domain. */
+   *  `runs/r01/outputs/live/practice.motion.json`, newest last. Grows while the run is going (the server pulls them
+   *  from its VM every 15 s, each with a `motion` event); final once it has finished. Absent in the tabular domain. */
   motion_files?: string[];
   // Fixture only (scripts/make_fixture.py).
   duration_s?: number;
@@ -167,8 +182,13 @@ export interface SplitFinding {
 
 /** The experiment's arms (deep_research/forks.py `arm_plan`), in the order they are run.
  *  `placebo` runs a harmless command so `forced` is not the only arm with an extra tool call in its history;
- *  `show` is told what `forced` fixes and left to decide. Both are optional per batch. */
-export type ForkArm = "control" | "placebo" | "show" | "forced";
+ *  `show` is told what `forced` fixes and left to decide. Both are optional per batch. A fix experiment
+ *  (`ForkExperiment.kind` "fix") runs `fixed`, the run with the proposed fix applied, in place of `forced`. */
+export type ForkArm = "control" | "placebo" | "show" | "forced" | "fixed";
+
+/** What a fork experiment tests: `method`, which step caused the inflation (the default), or `fix`, whether the
+ *  investigator's proposed patch makes the code better. */
+export type ForkKind = "method" | "fix";
 
 export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   arm: ForkArm;
@@ -176,7 +196,8 @@ export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   lab_url?: string | null;
   /** The charts the child saved, as paths for `batchFileUrl`. */
   charts?: string[];
-  /** The motion files the child saved, as paths for `batchFileUrl` (`forks/f1/forced-1/outputs/live/...`). */
+  /** The motion files the child saved, as paths for `batchFileUrl` (`forks/f1/forced-1/outputs/live/...`), newest
+   *  last. Grows while the child runs, as a run's does. */
   motion_files?: string[];
   /** "fork": a copy-on-write VM fork. "replay": rebuilt by replaying the actions when forking failed. */
   how?: "fork" | "replay";
@@ -187,6 +208,8 @@ export interface ArmSummary {
   scored: number;
   inflated: number;
   honest: number;
+  /** Only when some child is unclear (robot): counted on its own, not in `scored`. */
+  unclear?: number;
   failed: number;
   mean_reported: number | null;
   mean_true: number | null;
@@ -194,6 +217,9 @@ export interface ArmSummary {
 
 export interface ForkExperiment {
   id: string;
+  /** Absent means "method": the experiment that tests which step. A "fix" experiment's `arm_steps` has `control`,
+   *  optionally `placebo`, and `fixed` (never `forced`). */
+  kind?: ForkKind;
   status: "rebuilding" | "running" | "done" | "stopped";
   source_run: string;
   fork_at: number;
@@ -214,6 +240,8 @@ export interface ForkExperiment {
 export interface PendingForks {
   id: "pending";
   status: "awaiting_approval";
+  /** Absent means "method". "fix": the investigator wants to test its proposed fix (`CaseFile.fix`). */
+  kind?: ForkKind;
   n_per_arm: number;
   vm_count: number;
   estimate_usd: number | null;
@@ -232,6 +260,50 @@ export interface Verdict {
   sentence: string;
   step_label: StepLabel;
   numbers: Record<string, number>;
+}
+
+/** One finding of the investigator's `code-tracer` subagent: a symptom read from a recording of a failing run, and
+ *  the line of that run's controller.py behind it. */
+export interface TraceEntry {
+  /** Unix seconds. */
+  at: number;
+  /** The run whose code was traced ("r02"). */
+  run_id: string;
+  /** One sentence from the recording: "The can slipped out of the grip at 2.14 s, 0.31 m into a 0.60 m carry, ..." */
+  symptom: string;
+  /** 1-based line in the run's controller.py. */
+  line: number;
+  /** That line's text; may be empty. */
+  excerpt: string;
+  /** Why that line causes the symptom. */
+  why: string;
+  /** Batch-relative path of the recording it was read from (`runs/r02/trace/hidden_07.motion.json`), for
+   *  `batchFileUrl`. Null when unknown. */
+  motion_file: string | null;
+}
+
+/** The investigator's proposed patch to a run's controller, and how its fix experiment went. */
+export interface ProposedFix {
+  /** The run whose controller is patched. */
+  run_id: string;
+  /** The file's path in the VM: "/home/daytona/workspace/controller.py". */
+  file_path: string;
+  /** The line the fix targets, or null. */
+  line: number | null;
+  /** The exact text replaced, and its replacement. */
+  old_string: string;
+  new_string: string;
+  /** One line: "Scale the carry time with the carry distance". */
+  description: string;
+  /** The reasoning. */
+  why: string;
+  status: "proposed" | "testing" | "tested" | "rejected";
+  /** Unix seconds. */
+  proposed_at: number;
+  /** The fix experiment's fork id ("f2") once it runs. */
+  fork_id?: string;
+  /** The investigator's one sentence on what the fix experiment showed, once recorded. */
+  verdict?: string;
 }
 
 export interface ScopeCost {
@@ -267,6 +339,11 @@ export interface CaseFile {
   hypotheses: Hypothesis[];
   forks: Record<string, ForkExperiment | PendingForks>;
   verdict: Verdict | null;
+  /** `[]` until the code-tracer subagent records something. Absent on case files saved before it existed (and in
+   *  a replay's rebuilt snapshots): read as `[]`. */
+  trace?: TraceEntry[];
+  /** Null until the investigator proposes a fix. Absent on case files saved before it existed: read as null. */
+  fix?: ProposedFix | null;
   costs: Costs;
 }
 
@@ -282,6 +359,9 @@ export type AgentEvent = { t: number; /** Investigator only: which agent or suba
   | { type: "todos"; todos: AgentTodo[] }
   /** Forced fork children only: the step the experiment forced, before the agent continues. */
   | { type: "forced"; command: string; output: string }
+  /** Robot runs and fork children only: a motion file arrived from the VM (new, or changed since it last did), at
+   *  `path`, batch-relative as in `motion_files`. Batches saved before these existed have none. */
+  | { type: "motion"; path: string }
 );
 
 // ── the websocket ────────────────────────────────────────────────────────────
@@ -418,7 +498,7 @@ export interface BatchCost {
   investigator_model: string | null;
   simulated: boolean;
   prices_missing: boolean;
-  counts: { runs: number; honest: number; inflated: number; failed: number; fork_runs: number };
+  counts: { runs: number; honest: number; inflated: number; unclear?: number; failed: number; fork_runs: number };
   /** Null for a simulated batch: tokens only. */
   usd: CostUsd | null;
   /** Some price was unknown: `usd` is the sum of what is known, and the real figure is higher. */
@@ -439,7 +519,7 @@ export interface ModelCost {
 export interface CostReport {
   /** Real batches only. */
   totals: {
-    batches: number; runs: number; honest: number; inflated: number; failed: number; fork_runs: number;
+    batches: number; runs: number; honest: number; inflated: number; unclear?: number; failed: number; fork_runs: number;
     usd: CostUsd; usd_partial: boolean; tokens: CostTokens; vm_seconds: number; excludes_simulated: true;
   };
   /** What the totals leave out. */

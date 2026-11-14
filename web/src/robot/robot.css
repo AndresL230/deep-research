@@ -1,0 +1,90 @@
+/* The 3D robot replay: the run page's player (.rb) and a run tile's thumbnail (.rb-thumb). */
+
+.rb { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.rb.is-error, .rb-thumb.is-error { color:var(--fg-55); font-size:12.5px; }
+.rb-none { padding:12px 14px; border:1px dashed var(--border-strong); border-radius:var(--r-card); color:var(--fg-55); font-size:13px; }
+
+.rb-stage { position:relative; aspect-ratio:16 / 10; min-height:240px; overflow:hidden; border:1px solid var(--border); border-radius:var(--r-card); background:#eeeeec; outline:none; }
+[data-cnpy-theme="dark"] .rb-stage { background:#16191d; }
+.rb-stage:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.rb-canvas { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
+.rb-canvas:active { cursor:grabbing; }
+.rb-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; text-align:center; font-size:13px; color:var(--fg-55); pointer-events:none; }
+.rb-loading[hidden] { display:none; }
+.rb-hint { position:absolute; left:10px; right:48px; top:8px; line-height:1.4; font-family:var(--label); font-size:11px; color:var(--fg-40); pointer-events:none; }
+
+.rb-result { display:flex; align-items:center; flex-wrap:wrap; gap:4px 10px; min-height:22px; min-width:0; font-size:13px; }
+.rb-result-n { font-weight:500; color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+.rb-result-t { font-weight:500; color:var(--fg); }
+.rb-result-f { font-family:var(--label); font-size:11.5px; color:var(--fg-55); }
+.rb-result-f::before { content:"·"; margin-right:10px; color:var(--fg-40); }
+.rb-tag { padding:1px 7px; border-radius:var(--r-ctl); font-family:var(--label); font-size:11px; font-weight:500; letter-spacing:.02em; background:var(--hover); color:var(--fg-70); }
+.rb-tag--ok { color:var(--green); background:var(--ok-bg); }
+.rb-tag--bad { color:var(--red); background:var(--bad-bg); }
+
+.rb-icon { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex:none; border-radius:var(--r-ctl); color:var(--fg-70); cursor:pointer; transition:background .12s ease, color .12s ease; }
+.rb-icon:hover { background:var(--hover); color:var(--fg); }
+.rb-icon:focus-visible, .rb-speed:focus-visible, .rb-file:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.rb-reset { position:absolute; right:8px; top:8px; background:color-mix(in srgb, var(--bg) 70%, transparent); }
+
+.rb-bar { display:flex; align-items:center; gap:8px; min-width:0; }
+.rb-play { background:var(--accent-soft); color:var(--accent); }
+.rb-play:hover { background:color-mix(in srgb, var(--accent) 20%, transparent); color:var(--accent); }
+.rb-loop[aria-pressed="true"] { color:var(--accent); }
+.rb-seek { flex:1; min-width:60px; height:4px; margin:0 4px; appearance:none; -webkit-appearance:none; border-radius:2px; cursor:pointer;
+  background:linear-gradient(to right, var(--accent) var(--rb-p, 0%), color-mix(in srgb, var(--fg) 14%, transparent) var(--rb-p, 0%)); }
+.rb-seek::-webkit-slider-thumb { -webkit-appearance:none; width:12px; height:12px; border-radius:50%; background:var(--accent); border:2px solid var(--bg); }
+.rb-seek::-moz-range-thumb { width:10px; height:10px; border-radius:50%; background:var(--accent); border:2px solid var(--bg); }
+.rb-time { font-family:var(--label); font-size:12px; color:var(--fg-55); font-variant-numeric:tabular-nums; white-space:nowrap; min-width:84px; text-align:right; }
+.rb-speeds { display:inline-flex; padding:2px; border-radius:var(--r-ctl); background:var(--hover); }
+.rb-speed { padding:3px 8px; border-radius:var(--r-ctl); font-family:var(--label); font-size:11.5px; font-weight:500; color:var(--fg-55); cursor:pointer; }
+.rb-speed[aria-pressed="true"] { background:var(--bg); color:var(--fg); box-shadow:0 1px 2px rgb(0 0 0 / 10%); }
+
+.rb-files-h { margin-top:4px; font-family:var(--label); font-size:11.5px; color:var(--fg-55); }
+.rb-files-h span { color:var(--fg-40); }
+.rb-files { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:6px; max-height:236px; overflow:auto; }
+.rb-files:has(> :only-child) { display:none; }
+.rb-file { display:grid; grid-template-columns:auto 1fr; align-items:center; column-gap:7px; row-gap:1px; padding:6px 9px; border:1px solid var(--border); border-radius:var(--r-ctl); text-align:left; cursor:pointer; min-width:0; transition:border-color .12s ease, background .12s ease; }
+.rb-file:hover { background:var(--hover); }
+.rb-file[aria-selected="true"] { border-color:color-mix(in srgb, var(--accent) 55%, var(--border)); background:var(--accent-soft); }
+.rb-file-n { font-size:12.5px; font-weight:500; color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rb-file-m { grid-column:2; font-family:var(--label); font-size:11px; color:var(--fg-55); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rb-dot { width:7px; height:7px; flex:none; border-radius:2px; background:var(--fg-40); }
+.rb-dot--ok { background:var(--ok); }
+.rb-dot--bad { background:var(--bad); }
+
+/* a run tile's looping thumbnail */
+.rb-thumb { position:absolute; inset:0; background:#eeeeec; }
+[data-cnpy-theme="dark"] .rb-thumb { background:#16191d; }
+.rb-thumb-c { position:absolute; inset:0; width:100%; height:100%; display:block; }
+.rb-thumb-l { position:absolute; left:6px; right:6px; bottom:6px; display:flex; align-items:center; gap:5px; min-width:0; padding:3px 7px; border-radius:var(--r-ctl); background:color-mix(in srgb, var(--bg) 80%, transparent); font-family:var(--label); font-size:10.5px; color:var(--fg-70); white-space:nowrap; overflow:hidden; }
+.rb-thumb-r { margin-left:auto; padding-left:6px; color:var(--fg-55); overflow:hidden; text-overflow:ellipsis; }
+
+@media (max-width: 560px) {
+  .rb-stage { aspect-ratio:4 / 3; }
+  .rb-hint { display:none; }
+  .rb-bar { flex-wrap:wrap; row-gap:6px; }
+  .rb-seek { flex:1 1 100%; order:-1; margin:6px 4px 2px; }
+  .rb-time { min-width:0; margin-right:auto; text-align:left; font-size:11.5px; }
+  /* five speeds, the play and loop buttons and the time on one row at phone width */
+  .rb-bar { column-gap:4px; }
+  .rb-speed { padding:3px 5px; }
+}
+
+/* the can's end mark's label (viewer.ts placeEnd): under the dot, centered on it */
+.rb-endl { position:absolute; transform:translate(-50%, 14px); padding:2px 7px; border-radius:var(--r-ctl); font-family:var(--label); font-size:11.5px; font-weight:500; white-space:nowrap; pointer-events:none; color:#fff; background:#6b7480; box-shadow:0 1px 3px rgb(0 0 0 / 20%); }
+.rb-endl[data-tone="ok"] { background:#15803d; }
+.rb-endl[data-tone="bad"] { background:#dc2626; }
+.rb-endl[data-side="right"] { transform:translate(12px, -50%); }
+.rb-endl[data-side="left"] { transform:translate(calc(-100% - 12px), -50%); }
+.rb-endl[hidden] { display:none; }
+/* the legend under the player: what the green ring means */
+.rb-legend { display:flex; align-items:flex-start; gap:8px; margin:0; font-size:12px; line-height:1.45; color:var(--fg-55); }
+.rb-legend-ring { flex:none; width:12px; height:12px; margin-top:2px; border-radius:50%; border:2px solid #0b6b35; box-sizing:border-box; }
+[data-cnpy-theme="dark"] .rb-legend-ring { border-color:#5be38f; }
+/* without WebGL (viewer.ts): the message and the episode's result line in place of the 3D view */
+.rb-nogl { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:10px; text-align:center; }
+.rb-nogl-t { font-size:12.5px; font-weight:500; color:var(--fg-55); }
+.rb-nogl-r { display:inline-flex; align-items:center; flex-wrap:wrap; justify-content:center; gap:4px 7px; max-width:100%; font-family:var(--label); font-size:11.5px; color:var(--fg-70); }
+.rb-nogl-r > span:last-child:not(.rb-dot) { color:var(--fg-55); }
+.rb-stage.rb-stage--nogl { min-height:160px; aspect-ratio:auto; }

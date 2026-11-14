@@ -67,10 +67,12 @@ const BADGE_PATH = {
   check: "M4.7 8.3 7 10.5 11.3 5.7",
   alert: "M8 4.2v4.6M8 11v.9",
   cross: "M5.4 5.4l5.2 5.2M10.6 5.4l-5.2 5.2",
+  // Neither one thing nor the other: a level line.
+  hold: "M4.8 8h6.4",
 } as const;
 export type BadgeKind = keyof typeof BADGE_PATH;
 
-/** A finished thing's mark: a disc with a check, an alert or a cross drawn on it. */
+/** A finished thing's mark: a disc with a check, an alert, a cross or a level line drawn on it. */
 export function badge(kind: BadgeKind, size = 14): string {
   return `<svg class="ds-badge ds-badge--${kind}" width="${size}" height="${size}" viewBox="0 0 16 16" aria-hidden="true">`
     + `<circle class="ds-badge-c" cx="8" cy="8" r="8"></circle><path class="ds-badge-p" pathLength="1" d="${BADGE_PATH[kind]}"></path></svg>`;
