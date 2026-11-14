@@ -82,7 +82,10 @@ describe("wallView on the finished demo batch", () => {
     expect(r01).toContain("bw-tile--honest");
     expect(r01).toContain("-0.4 pts");
     expect(r01).toContain("0% of test rows were in training");
-    expect(r01).toContain(">Done<");
+    // Scored: the panel under the screen shows the result in place of the step, and the screen shows only the VM.
+    expect(r01).not.toContain("bw-step");
+    expect(r01.indexOf("bw-rev")).toBeGreaterThan(r01.indexOf("bw-panel"));
+    expect(r01.indexOf("bw-panel")).toBeGreaterThan(r01.indexOf("bw-scr"));
   });
 
   it("shows the fixture tokens and a placeholder when no log is loaded", () => {

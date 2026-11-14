@@ -2,8 +2,8 @@
 //
 // One device per run, in id order, inside a keyed list so morph.ts keeps each one as the element it was while statuses
 // move. A device, front to back: the screen (the run's id, its cost, and the end of its notebook typing itself out),
-// the step it is on, a row of lights (one per todo or stage) and its status key. Once the run is scored the result
-// shows on the screen itself, beside the notebook: the gap, reported vs true, the overlap. The drawing is all in wall.css
+// the step it is on, a row of lights (one per todo or stage) and its status key. The screen shows only what the VM
+// shows. Once the run is scored, its result is printed on the panel under the screen. The drawing is all in wall.css
 // (CSS 3D, no canvas), so the notebook in the screen is the real DOM. Markup has no whitespace between tags so
 // children pair by index the same way on every render.
 import "./wall.css";
@@ -133,6 +133,7 @@ function strip(run: RunRecord, todos: AgentTodo[] | null, cells: NbCell[]): stri
 /** A bar from 50% to 100% accuracy, so a 13 point gap is a visible length. */
 const barWidth = (x: number | null | undefined): number => (x == null || Number.isNaN(x) ? 0 : Math.max(0, Math.min(1, (x - 0.5) / 0.5)) * 100);
 
+/** The result on the device's panel, under the screen: reported and true as meters, the gap, the overlap. */
 function reveal(run: RunRecord): string {
   if (run.status === "failed") {
     const reason = run.reason?.trim() || "The run failed before it was scored.";
@@ -144,10 +145,8 @@ function reveal(run: RunRecord): string {
   const bar = (label: string, x: number | null | undefined, cls: string): string =>
     `<div class="bw-acc"><span class="bw-k">${label}</span><span class="bw-track" aria-hidden="true"><span class="bw-fill ${cls}" style="width:${barWidth(x).toFixed(1)}%"></span></span><span class="bw-v">${pct(x)}</span></div>`;
   return `<div class="bw-rev">`
-    + `<div class="bw-top"><span class="bw-gap">${pts(run.gap)}</span><span class="bw-gap-k">reported vs true</span></div>`
-    + bar("Reported", run.reported_accuracy, "bw-fill--rep")
-    + bar("True", run.true_accuracy, "bw-fill--true")
-    + `<div class="bw-ovl-t">${esc(overlap)}</div>`
+    + `<div class="bw-meters">${bar("Reported", run.reported_accuracy, "bw-fill--rep")}${bar("True", run.true_accuracy, "bw-fill--true")}</div>`
+    + `<div class="bw-res"><span class="bw-gap">${pts(run.gap)}</span><span class="bw-ovl-t">${esc(overlap)}</span></div>`
     + `</div>`;
 }
 
@@ -179,16 +178,17 @@ function tile(vm: BatchVm, run: RunRecord): string {
     + `<div class="bw-body">`
     + `<div class="bw-scr">`
     + `<div class="bw-hd"><span class="bw-id"><span class="bw-lamp" aria-hidden="true"></span>${esc(run.id)}${vmId}</span>${cost ? `<span class="bw-cost">${esc(cost)}</span>` : ""}</div>`
-    + `<div class="bw-view">${picture(vm, run, step, cells)}${reveal(run)}</div>`
+    + picture(vm, run, step, cells)
     + `</div>`
-    + `<div class="bw-step${run.status === "failed" ? " bw-step--failed" : ""}" title="${attr(step)}">${esc(truncate(step, 120))}</div>`
+    // The panel under the screen: the step while the run works; once it is scored or has failed, the result.
+    + `<div class="bw-panel">${reveal(run) || `<div class="bw-step" title="${attr(step)}">${esc(truncate(step, 120))}</div>`}</div>`
     + `<div class="bw-chin">${strip(run, todos, cells)}${pill(run.status)}<span class="bw-key" aria-hidden="true">${askIcon("arrow", 11, null, 2.2)}</span></div>`
     + `</div>`
     + `</div>`
     + `</div>`;
 }
 
-/** One device per run: its notebook on the screen, step, lights; once scored, a readout on the screen with reported vs true. */
+/** One device per run: the VM's notebook on the screen; on the panel under it the step, or once scored the result. */
 export function wallView(vm: BatchVm): string {
   const runs = sortedRuns(vm);
   const s = wallSummary(vm);

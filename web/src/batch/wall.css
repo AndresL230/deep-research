@@ -1,7 +1,7 @@
 /* The wall of runs (wall.ts): one small machine per sandbox VM. Prefix bw-.
    Each device is drawn in CSS 3D (no canvas), so the notebook on its screen is the real DOM: a body with two plates
    behind it for thickness, a screen, a chin of lights and keys, a foot and a floor grid. A scored run's
-   result is a readout on the screen. The device's own colors are the --dv-* tokens below; everything else uses the app's tokens. */
+   result is printed on the panel under the screen. The device's own colors are the --dv-* tokens below; everything else uses the app's tokens. */
 
 .bw { container-type:inline-size; display:flex; flex-direction:column; gap:26px; min-width:0;
   --dv-display:"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
@@ -67,8 +67,7 @@
 .bw-tile--inflated .bw-lamp { background:var(--red); }
 .bw-cost { flex:none; font-variant-numeric:tabular-nums; white-space:nowrap; }
 
-/* what the screen shows: the notebook's tail, or a waiting note; beside it, once scored, the result */
-.bw-view { flex:1; display:flex; min-width:0; min-height:0; }
+/* what the screen shows: only what the VM shows, the notebook's tail, or a waiting note */
 .bw-pic { position:relative; flex:1; min-width:0; min-height:0; overflow:hidden; }
 .bw-pic--nb { padding:2px 13px 11px 7px; }
 .bw-ph { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; padding:0 12px 14px; color:var(--fg-40); text-align:center; }
@@ -89,8 +88,11 @@
 .bw-scr .bw-pic--nb .nb--tail { -webkit-mask-image:linear-gradient(to bottom, transparent, #000 14px); mask-image:linear-gradient(to bottom, transparent, #000 14px); }
 
 /* the chin: the step it is on, then lights and keys */
-.bw-step { padding:2px 6px 0; font-size:13.5px; font-weight:500; line-height:18px; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.bw-tile--queued .bw-step, .bw-step--failed { color:var(--fg-55); font-weight:400; }
+/* The panel under the screen: the step while the run works, the result once it is scored. One fixed height, so a row of
+   devices never jumps when one finishes. */
+.bw-panel { display:flex; align-items:center; height:42px; min-width:0; padding:0 7px; }
+.bw-step { min-width:0; font-size:13.5px; font-weight:500; line-height:18px; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bw-tile--queued .bw-step { color:var(--fg-55); font-weight:400; }
 .bw-chin { display:flex; align-items:center; gap:10px; min-width:0; padding:0 4px 0 7px; }
 
 /* the lights: one per todo (or stage) */
@@ -126,32 +128,31 @@
     linear-gradient(90deg, var(--dv-grid) 1px, transparent 1px) 50% 0 / 26px 100%;
   -webkit-mask-image:radial-gradient(closest-side, #000 25%, transparent 100%); mask-image:radial-gradient(closest-side, #000 25%, transparent 100%); }
 
-/* The result, once the run is scored: a readout card on the screen itself, beside the notebook. */
-.bw-rev { flex:none; align-self:stretch; width:44%; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:8px; margin:2px 11px 11px 0; padding:10px 12px; border-radius:10px; background:var(--dv-paper); box-shadow:0 0 0 1px var(--dv-edge), 0 1px 2px var(--dv-scr-in); animation:bw-readout .45s cubic-bezier(.2,.75,.2,1) both; }
-@keyframes bw-readout { from { opacity:0; transform:translateX(8px); } to { opacity:1; transform:none; } }
-.bw-top { display:flex; flex-direction:column; gap:1px; min-width:0; }
-.bw-gap { font-size:22px; font-weight:600; line-height:1.15; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.bw-tile--honest .bw-gap { color:var(--green); }
-.bw-tile--inflated .bw-gap { color:var(--red); }
-.bw-gap-k { font-size:10.5px; line-height:1.3; color:var(--fg-55); }
-/* A measure: its name and value on one line, its bar under them, so it works at any card width. */
-.bw-acc { display:grid; grid-template-columns:1fr auto; grid-template-areas:"k v" "t t"; align-items:baseline; gap:4px 8px; min-width:0; }
-.bw-k { grid-area:k; font-size:11px; color:var(--fg-55); }
-.bw-v { grid-area:v; font-size:12px; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right; }
-.bw-track { grid-area:t; height:5px; border-radius:3px; background:color-mix(in srgb, var(--fg) 8%, transparent); overflow:hidden; }
-.bw-fill { display:block; height:100%; border-radius:3px; background:var(--fg-40); transition:width var(--fx-slow) var(--fx-ease); }
+/* The result, once the run is scored: printed on the panel under the screen, like the device's own gauges. The
+   screen is left to the VM. */
+.bw-rev { flex:1; display:flex; align-items:center; gap:16px; min-width:0; animation:bw-readout .45s cubic-bezier(.2,.75,.2,1) both; }
+@keyframes bw-readout { from { opacity:0; } to { opacity:1; } }
+.bw-meters { flex:1; display:flex; flex-direction:column; gap:5px; min-width:0; }
+.bw-acc { display:grid; grid-template-columns:56px minmax(0, 1fr) 42px; align-items:center; gap:8px; }
+.bw-k { font-size:11px; font-weight:500; color:var(--fg-55); }
+.bw-v { font-size:12px; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right; }
+.bw-track { height:4px; border-radius:2px; background:var(--dv-recess); box-shadow:inset 0 0 0 1px var(--dv-edge); overflow:hidden; }
+.bw-fill { display:block; height:100%; border-radius:2px; background:var(--fg-40); transition:width var(--fx-slow) var(--fx-ease); }
 .bw-fill--true { background:var(--fg-55); }
 .bw-tile--honest .bw-fill--rep { background:var(--green); }
 .bw-tile--inflated .bw-fill--rep { background:var(--red); }
-.bw-ovl-t { font-size:10.5px; line-height:1.35; color:var(--fg-55); min-width:0; }
-.bw-rev--failed { justify-content:flex-start; font-size:11.5px; line-height:1.45; color:var(--fg-55); overflow:hidden; overflow-wrap:anywhere; }
+.bw-res { flex:none; width:38%; display:flex; flex-direction:column; gap:2px; min-width:0; }
+.bw-gap { font-size:19px; font-weight:600; line-height:1.1; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.bw-tile--honest .bw-gap { color:var(--green); }
+.bw-tile--inflated .bw-gap { color:var(--red); }
+.bw-ovl-t { font-size:10.5px; line-height:1.3; color:var(--fg-55); min-width:0; }
+.bw-rev--failed { font-size:12px; line-height:1.4; color:var(--fg-55); overflow:hidden; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
 
 /* A narrow device (two across on a small window, or a phone): a taller screen and a tighter readout, so both fit. */
 @container bwdev (max-width: 400px) {
-  .bw-scr { aspect-ratio:4 / 3.2; }
-  .bw-scr .bw-pic--nb .nb-img { max-height:80px; }
-  .bw-rev { width:46%; gap:6px; margin:2px 9px 9px 0; padding:8px 10px; }
-  .bw-gap { font-size:18px; }
+  .bw-rev { gap:12px; }
+  .bw-acc { grid-template-columns:50px minmax(0, 1fr) 40px; gap:6px; }
+  .bw-gap { font-size:16px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
