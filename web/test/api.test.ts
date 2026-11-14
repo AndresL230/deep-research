@@ -7,7 +7,7 @@ import runEventsRaw from "../../fixtures/demo-batch/runs/r02/events.jsonl?raw";
 import forcedEventsRaw from "../../fixtures/demo-batch/forks/f1/forced-1/events.jsonl?raw";
 import {
   ApiError, CASE_SECTIONS, PHASES, RUN_STATUSES, STEP_LABELS, applyMessage, batchFileUrl, batchSocketUrl, fetchBatches,
-  fetchCase, isPendingForks, postDecision, type AgentEvent, type CaseFile, type ForkExperiment,
+  fetchCase, isPendingForks, labPageUrl, postDecision, type AgentEvent, type CaseFile, type ForkExperiment,
 } from "../src/api";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
@@ -109,5 +109,12 @@ describe("REST", () => {
     await expect(fetchCase("x")).rejects.toThrow(/Is it running on port 8000/);
     stubFetch(new TypeError("fetch failed"));
     await expect(fetchCase("x")).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("labPageUrl", () => {
+  it("points runs and fork children at the server's proxy, with the trailing slash", () => {
+    expect(labPageUrl("b 1", "r01")).toBe("/api/batches/b%201/runs/r01/lab/");
+    expect(labPageUrl("b1", "f1/control-1")).toBe("/api/batches/b1/forks/f1/control-1/lab/");
   });
 });

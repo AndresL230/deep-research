@@ -7,6 +7,8 @@ dependencies = [
     "daytona>=0.231",
     "deepagents>=0.7.38",
     "fastapi>=0.162.7",
+    # The lab page proxy (deep_research/api.py).
+    "httpx>=0.28.1",
     "langchain-anthropic>=1.7.10",
     "langchain-daytona>=0.0.9",
     "pandas",
@@ -17,7 +19,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     # scripts/make_fixture.py draws the fixture's charts.
     "matplotlib",
     "pytest>=9.2.0",

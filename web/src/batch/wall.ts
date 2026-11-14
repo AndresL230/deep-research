@@ -5,7 +5,7 @@
 // chart, or a placeholder), the step label, a progress strip from the todos, then the reveal once the run is scored,
 // and its cost. Markup has no whitespace between tags so children pair by index the same way on every render.
 import "./wall.css";
-import { batchFileUrl, type AgentTodo, type RunRecord, type RunStatus } from "../api";
+import { batchFileUrl, labPageUrl, type AgentTodo, type RunRecord, type RunStatus } from "../api";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { pct, pts, tokens, usd } from "./format";
@@ -106,7 +106,9 @@ function pill(status: RunStatus): string {
 
 function picture(vm: BatchVm, run: RunRecord, todos: AgentTodo[] | null, step: string): string {
   if (run.lab_url) {
-    return `<div class="bw-pic bw-pic--lab"><iframe data-morph-key="lab:${attr(run.lab_url)}" class="bw-frame" src="${attr(run.lab_url)}" title="${attr(`Lab page of run ${run.id}`)}" sandbox="allow-scripts" loading="lazy" referrerpolicy="no-referrer" tabindex="-1"></iframe></div>`;
+    // Through our proxy, not the raw preview URL: Daytona would show its warning page in every tile.
+    const src = labPageUrl(vm.id, run.id);
+    return `<div class="bw-pic bw-pic--lab"><iframe data-morph-key="lab:${attr(run.vm_id ?? run.id)}" class="bw-frame" src="${attr(src)}" title="${attr(`Lab page of run ${run.id}`)}" sandbox="allow-scripts" loading="lazy" referrerpolicy="no-referrer" tabindex="-1"></iframe></div>`;
   }
   const chart = tileChart(vm, run, todos);
   if (chart) {

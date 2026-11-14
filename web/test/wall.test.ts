@@ -163,7 +163,9 @@ describe("tile parts", () => {
       runs: { r01: { id: "r01", status: "running", lab_url: "https://lab.example/p?a=1&b=2", step: "Train a random forest" } } };
     const html = wallView(vmOf(c, { live: true }));
     expect(html).toContain(`<iframe`);
-    expect(html).toContain(`src="https://lab.example/p?a=1&amp;b=2"`);
+    // Through our proxy, never the raw preview URL (Daytona would show its warning page in the tile).
+    expect(html).toContain(`src="/api/batches/${vmOf(c, { live: true }).id}/runs/r01/lab/"`);
+    expect(html).not.toContain("lab.example");
     expect(html).toContain(`sandbox="allow-scripts"`);
     expect(html).toContain(`loading="lazy"`);
     expect(html).toContain(`referrerpolicy="no-referrer"`);

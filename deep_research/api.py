@@ -10,10 +10,12 @@ import json
 import logging
 import mimetypes
 import os
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from dotenv import dotenv_values, load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,10 +46,36 @@ FILE_HEADERS = {
 }
 
 
+# The lab pages run inside the VMs behind Daytona's signed preview URLs. Opened directly in a browser (an iframe
+# included) Daytona first shows a "preview URL" warning page that needs a click, once per VM. Fetching them through
+# this server lets us send the header that skips it, and keeps every tile on our own origin.
+LAB_SKIP_WARNING = {"X-Daytona-Skip-Preview-Warning": "true"}
+# Only what lab_page/server.py serves: the page, its state, and the charts in the live folder.
+LAB_PATH = re.compile(r"^(|index\.html|state\.json|live/[A-Za-z0-9._ -]{1,200})$")
+# The page is agent-adjacent content on our origin: the CSP sandbox gives it an opaque origin even when it is opened
+# outside the iframe, so it can never reach this app's cookies, storage or API as us.
+LAB_HTML_HEADERS = {
+    "Content-Security-Policy": "sandbox allow-scripts",
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-store",
+}
+LAB_FILE_HEADERS = {**FILE_HEADERS, "Cache-Control": "no-store"}
+_lab_client: httpx.AsyncClient | None = None
+
+
+def lab_client() -> httpx.AsyncClient:
+    global _lab_client
+    if _lab_client is None:
+        _lab_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0), headers=LAB_SKIP_WARNING, follow_redirects=False)
+    return _lab_client
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
     await close_all()
+    if _lab_client is not None:
+        await _lab_client.aclose()
 
 
 app = FastAPI(title="deep-research", lifespan=lifespan)
@@ -213,6 +241,47 @@ def batch_file(batch_id: str, path: str):
     if root not in full.parents or not full.is_file() or "holdout_labels" in full.name:
         raise HTTPException(404, "no such file")
     return FileResponse(full, headers=FILE_HEADERS)
+
+
+def _case(batch_id: str) -> dict:
+    b = BATCHES.get(batch_id)
+    return b.case.read() if b is not None else get_case(batch_id)
+
+
+async def _proxy_lab(lab_url: str | None, path: str) -> Response:
+    if not lab_url:
+        raise HTTPException(404, "this run has no lab page")
+    if not LAB_PATH.match(path):
+        raise HTTPException(404, "no such file")
+    base, _, query = lab_url.partition("?")
+    target = f"{base.rstrip('/')}/{path}" + (f"?{query}" if query else "")
+    try:
+        res = await lab_client().get(target)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"the lab page did not answer ({type(e).__name__})") from e
+    if res.status_code != 200:
+        raise HTTPException(502 if res.status_code >= 300 else res.status_code, f"the lab page answered HTTP {res.status_code}")
+    ctype = res.headers.get("content-type", "application/octet-stream")
+    if path in ("", "index.html"):
+        return Response(res.content, media_type="text/html; charset=utf-8", headers=LAB_HTML_HEADERS)
+    if path == "state.json":
+        return Response(res.content, media_type="application/json", headers=LAB_FILE_HEADERS)
+    if not ctype.startswith("image/"):
+        raise HTTPException(404, "no such file")
+    return Response(res.content, media_type=ctype.split(";")[0], headers=LAB_FILE_HEADERS)
+
+
+@app.get("/api/batches/{batch_id}/runs/{run_id}/lab/{path:path}")
+async def run_lab(batch_id: str, run_id: str, path: str):
+    """A run's lab page through this server, without Daytona's preview warning. Use the trailing slash."""
+    run = _case(batch_id).get("runs", {}).get(run_id) or {}
+    return await _proxy_lab(run.get("lab_url"), path)
+
+
+@app.get("/api/batches/{batch_id}/forks/{fork_id}/{child}/lab/{path:path}")
+async def fork_lab(batch_id: str, fork_id: str, child: str, path: str):
+    fork = _case(batch_id).get("forks", {}).get(fork_id) or {}
+    return await _proxy_lab((fork.get("children") or {}).get(child, {}).get("lab_url"), path)
 
 
 @app.post("/api/batches/{batch_id}/investigate")

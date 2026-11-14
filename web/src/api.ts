@@ -268,6 +268,17 @@ export const isAbort = (e: unknown): boolean => (e as { name?: string } | null)?
 
 const batchPath = (id: string): string => `/api/batches/${encodeURIComponent(id)}`;
 
+/** A run's (`"r01"`) or fork child's (`"f1/control-1"`) lab page, proxied by our server so Daytona's preview-URL
+ *  warning never shows. Only meaningful when that record has a `lab_url`. The trailing slash matters: the page loads
+ *  `state.json` and `live/<chart>` relative to it. */
+export function labPageUrl(batchId: string, key: string): string {
+  const slash = key.indexOf("/");
+  const tail = slash < 0
+    ? `runs/${encodeURIComponent(key)}`
+    : `forks/${encodeURIComponent(key.slice(0, slash))}/${encodeURIComponent(key.slice(slash + 1))}`;
+  return `${batchPath(batchId)}/${tail}/lab/`;
+}
+
 /** The URL of a file saved with a batch, such as a run's `charts` entry. Holdout labels are never served. */
 export const batchFileUrl = (batchId: string, path: string): string =>
   `${batchPath(batchId)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;

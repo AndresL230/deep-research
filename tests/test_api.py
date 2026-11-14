@@ -120,3 +120,63 @@ def test_batch_close_stops_every_vm(tmp_path, monkeypatch):
     asyncio.run(b.close())
     assert sorted(stopped) == ["vm-base", "vm-child", "vm-run"]
     assert json.loads((tmp_path / "t" / "case" / "case.json").read_text())["config"]["n_runs"] == 1
+
+
+# ---- the lab page proxy ----
+
+LAB = "https://8080-signed.proxy.daytona.example"
+
+
+@pytest.fixture
+def lab(client, tmp_path, monkeypatch):
+    """A saved batch whose run r01 and fork child f1/control-1 have lab pages, and a fake Daytona proxy."""
+    import httpx
+
+    case_dir = tmp_path / "batches" / "lab-batch" / "case"
+    case_dir.mkdir(parents=True)
+    (case_dir / "case.json").write_text(json.dumps({
+        "config": {}, "phase": "running", "step_labels": {}, "split": None, "hypotheses": [], "verdict": None, "costs": {},
+        "runs": {"r01": {"id": "r01", "status": "running", "lab_url": f"{LAB}?tkn=abc"}, "r02": {"id": "r02", "status": "queued"}},
+        "forks": {"f1": {"id": "f1", "children": {"control-1": {"arm": "control", "status": "running", "lab_url": LAB}}}},
+    }))
+    seen = []
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        if req.url.path in ("/", "/index.html"):
+            return httpx.Response(200, html="<html>lab</html>")
+        if req.url.path == "/state.json":
+            return httpx.Response(200, json={"charts": [], "report": None})
+        if req.url.path == "/live/01_counts.png":
+            return httpx.Response(200, content=b"\x89PNG", headers={"content-type": "image/png"})
+        if req.url.path == "/live/page.html":
+            return httpx.Response(200, html="<script>bad()</script>")
+        return httpx.Response(404)
+
+    monkeypatch.setattr(api, "_lab_client", httpx.AsyncClient(transport=httpx.MockTransport(handle), headers=api.LAB_SKIP_WARNING))
+    return seen
+
+
+def test_lab_proxy_skips_the_preview_warning(client, lab):
+    res = client.get("/api/batches/lab-batch/runs/r01/lab/")
+    assert res.status_code == 200 and res.text == "<html>lab</html>"
+    assert res.headers["content-security-policy"] == "sandbox allow-scripts"
+    req = lab[0]
+    assert req.headers["x-daytona-skip-preview-warning"] == "true"
+    assert str(req.url) == f"{LAB}/?tkn=abc"  # the signed token is kept
+
+
+def test_lab_proxy_serves_state_and_charts(client, lab):
+    assert client.get("/api/batches/lab-batch/runs/r01/lab/state.json").json() == {"charts": [], "report": None}
+    img = client.get("/api/batches/lab-batch/runs/r01/lab/live/01_counts.png")
+    assert img.status_code == 200 and img.headers["content-type"] == "image/png"
+    assert client.get("/api/batches/lab-batch/forks/f1/control-1/lab/state.json").status_code == 200
+
+
+def test_lab_proxy_refuses_other_paths_and_content(client, lab):
+    assert client.get("/api/batches/lab-batch/runs/r01/lab/live/page.html").status_code == 404  # not an image
+    assert client.get("/api/batches/lab-batch/runs/r01/lab/etc/passwd").status_code == 404
+    assert client.get("/api/batches/lab-batch/runs/r01/lab/live/../../x").status_code == 404
+    assert client.get("/api/batches/lab-batch/runs/r02/lab/").status_code == 404  # no lab page yet
+    assert client.get("/api/batches/lab-batch/runs/r01/lab/live/missing.png").status_code == 502
+    assert len([r for r in lab if r.url.path.startswith("/etc")]) == 0

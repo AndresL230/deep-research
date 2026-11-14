@@ -812,6 +812,7 @@ dependencies = [
     { name = "daytona" },
     { name = "deepagents" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "langchain-anthropic" },
     { name = "langchain-daytona" },
     { name = "pandas" },
@@ -822,7 +823,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "matplotlib" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -833,6 +833,7 @@ requires-dist = [
     { name = "daytona", specifier = ">=0.231" },
     { name = "deepagents", specifier = ">=0.7.38" },
     { name = "fastapi", specifier = ">=0.162.7" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain-anthropic", specifier = ">=1.7.10" },
     { name = "langchain-daytona", specifier = ">=0.0.9" },
     { name = "pandas" },
@@ -843,7 +844,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "matplotlib" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "pytest-asyncio", specifier = ">=1.5.0" },

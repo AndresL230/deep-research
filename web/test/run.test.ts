@@ -214,7 +214,8 @@ describe("runSummaryView", () => {
     } as CaseFile;
     const html = runSummaryView(vmOf({ live: true, case: live }), "r01");
     expect(html).toContain("Open lab page");
-    expect(html).toContain("https://lab.example/r01?t=&lt;x&gt;");
+    expect(html).toMatch(/href="\/api\/batches\/[^"]+\/runs\/r01\/lab\/"/);
+    expect(html).not.toContain("lab.example");
     expect(html).toContain('class="rn-pill"');
     expect(html).toContain("1k in, 300 out");
     expect(html).toContain("&lt;$0.01");

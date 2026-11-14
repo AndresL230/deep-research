@@ -13,7 +13,7 @@
 // `runSummaryView` is the strip above it: back, which run, status, score, cost, charts.
 
 import "./run.css";
-import { batchFileUrl, type AgentEvent, type AgentTodo, type BatchConfig, type ForkChild, type ForkExperiment, type RunRecord, type ScopeCost } from "../api";
+import { batchFileUrl, labPageUrl, type AgentEvent, type AgentTodo, type BatchConfig, type ForkChild, type ForkExperiment, type RunRecord, type ScopeCost } from "../api";
 import type { AskActivityIcon, AskEvent } from "../ask-core";
 import { foldAskEvent, newTurn, type AskConvo, type AskTurn } from "../ask-stream";
 import { askIcon } from "../ask-icons";
@@ -334,7 +334,7 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
 
   const live = status === "running" || status === "starting";
   const lab = s.labUrl && live
-    ? `<a class="rn-lab" href="${attr(s.labUrl)}" target="_blank" rel="noopener">${askIcon("external", 12, null, 2)}<span>Open lab page</span></a>`
+    ? `<a class="rn-lab" href="${attr(labPageUrl(vm.id, key))}" target="_blank" rel="noopener">${askIcon("external", 12, null, 2)}<span>Open lab page</span></a>`
     : "";
 
   return `<section class="rn" data-morph-key="rn:${attr(key)}">${top}${head}${note}<dl class="rn-stats">${stats}</dl>${charts}${lab}</section>`;
