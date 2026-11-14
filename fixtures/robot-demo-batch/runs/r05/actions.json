@@ -57,7 +57,8 @@
       "command": "cd /home/daytona/workspace && python3 -m sim.run --controller controller.py --can 0.7,0.1 --place 0.45,-0.3 --out live/far_reach.motion.json"
     },
     "labels": [
-      "vary_positions"
+      "vary_positions",
+      "test_table_edges"
     ]
   },
   {
@@ -76,7 +77,8 @@
       "command": "cd /home/daytona/workspace && python3 test_positions.py"
     },
     "labels": [
-      "vary_positions"
+      "vary_positions",
+      "test_table_edges"
     ]
   },
   {

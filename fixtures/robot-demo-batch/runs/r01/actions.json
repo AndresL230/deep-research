@@ -76,7 +76,8 @@
       "command": "cd /home/daytona/workspace && python3 test_positions.py"
     },
     "labels": [
-      "vary_positions"
+      "vary_positions",
+      "test_table_edges"
     ]
   },
   {
@@ -99,7 +100,8 @@
       "command": "cd /home/daytona/workspace && python3 test_positions.py"
     },
     "labels": [
-      "vary_positions"
+      "vary_positions",
+      "test_table_edges"
     ]
   },
   {

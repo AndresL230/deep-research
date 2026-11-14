@@ -57,7 +57,8 @@
       "command": "cd /home/daytona/workspace && python3 -m sim.run --controller controller.py --can 0.7,-0.2 --place 0.45,-0.3 --out live/check.motion.json"
     },
     "labels": [
-      "vary_positions"
+      "vary_positions",
+      "test_table_edges"
     ]
   },
   {
@@ -67,7 +68,8 @@
       "command": "cd /home/daytona/workspace && for p in 0.65,0.15 0.35,-0.2 0.55,0.35 0.7,-0.2 0.4,0.3 0.6,-0.35; do python3 -m sim.run --controller controller.py --can $p | grep '\"success\"'; done"
     },
     "labels": [
-      "vary_positions"
+      "vary_positions",
+      "test_table_edges"
     ]
   },
   {
@@ -90,7 +92,8 @@
       "command": "cd /home/daytona/workspace && for p in 0.65,0.15 0.35,-0.2 0.55,0.35 0.7,-0.2 0.4,0.3 0.6,-0.35; do python3 -m sim.run --controller controller.py --can $p | grep '\"success\"'; done"
     },
     "labels": [
-      "vary_positions"
+      "vary_positions",
+      "test_table_edges"
     ]
   },
   {
@@ -100,7 +103,8 @@
       "command": "cd /home/daytona/workspace && python3 -m sim.run --controller controller.py --can 0.7,-0.2 --place 0.45,-0.3 --out live/check_tuned.motion.json"
     },
     "labels": [
-      "test_one_position"
+      "test_one_position",
+      "test_table_edges"
     ]
   },
   {

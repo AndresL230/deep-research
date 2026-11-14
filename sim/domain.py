@@ -23,6 +23,7 @@ imported only where they are used, so this module imports with numpy alone.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import json
 import math
@@ -449,6 +450,10 @@ def score_run(
 #                       random or on a grid, or a loop whose variable is the can position)
 # Across actions (`actions_from_events`), a single run at a position the run has already used becomes
 # test_one_position, and one at a new position once two are known becomes vary_positions.
+#
+# test_table_edges comes on top of those: the action runs episodes with the can near the edge of the
+# workable area (see EDGE_Y and below), from literal positions, from random draws whose bounds reach the
+# edge, or from positions an earlier action drew that way and saved.
 
 _NUM = r"-?\d*\.?\d+"
 _DEC = r"-?\d*\.\d+"
@@ -548,11 +553,153 @@ def _loop_moves_can(text: str) -> bool:
     return False
 
 
+# The edge of the workable area. The hidden positions cover all of it (sim/hidden.py: radius 0.30 to
+# 0.78 m from the base, x >= 0.28, |y| <= 0.48), but real agents sample a central box (|y| up to about
+# 0.25, radius about 0.33 to 0.68), and a run whose box was the narrowest failed exactly the hidden
+# positions outside it. A can position is at the edge when it is outside that central part: more than
+# EDGE_Y to the side, or nearer the base than EDGE_R_MIN, or farther than EDGE_R_MAX.
+EDGE_Y = 0.30
+EDGE_R_MIN = 0.38
+EDGE_R_MAX = 0.70
+# Bounds beyond this many meters are not table coordinates (`uniform(0, 100)`, seeds, angles in degrees).
+_MAX_COORD = 1.0
+
+
+def _at_edge(x: float, y: float) -> bool:
+    r = math.hypot(x, y)
+    return abs(y) > EDGE_Y or r < EDGE_R_MIN or r > EDGE_R_MAX
+
+
+def _edge_literals(positions) -> bool:
+    """Some literal position is at the edge. Only positions in front of the robot (x > 0) count."""
+    return any(x > 0 and _at_edge(x, y) for x, y in positions)
+
+
+# A draw whose bounds are literal: `uniform(lo, hi)`, `rng.uniform(lo, hi, n)`, `np.random.uniform(low=..,
+# high=..)`, `uniform([x0, y0], [x1, y1])`, and grids `linspace(lo, hi, n)`.
+_DRAW_CALL = re.compile(r"\b(?:uniform|linspace)\s*\(")
+# What a draw is assigned to, the nearest before it in its statement: `c = `, `'can': `, `place=`.
+_DRAW_TARGET = re.compile(r"([A-Za-z_]\w*)['\"]?\s*(?::|=(?!=))")
+# Names of the place zone rather than the can. A draw for the zone says nothing about where the can was.
+_PLACE_NAME = re.compile(r"p|p[xy]|pl\w*|\w*place\w*|\w*zone\w*|\w*target\w*|\w*goal\w*|dest\w*|dst\w*", re.IGNORECASE)
+
+
+def _call_args(text: str, start: int) -> tuple[list[str], int]:
+    """The top-level arguments of the call whose `(` is just before `start`, and where they end."""
+    args, depth, cur = [], 0, []
+    end = len(text)
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                end = i
+                break
+            depth -= 1
+        if ch == "," and depth == 0:
+            args.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(ch)
+    args.append("".join(cur).strip())
+    return args, end
+
+
+def _without_draw_bounds(text: str) -> str:
+    """`text` with the arguments of every draw blanked: `uniform([0.3, -0.3], [0.65, 0.3])` holds two
+    decimal pairs that are bounds, not can positions."""
+    out = list(text)
+    for m in _DRAW_CALL.finditer(text):
+        _, end = _call_args(text, m.end())
+        out[m.end() : end] = " " * (end - m.end())
+    return "".join(out)
+
+
+def _literal(s: str):
+    try:
+        v = ast.literal_eval(s)
+    except Exception:  # noqa: BLE001 - a name or an expression: the bound is unknown
+        return None
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    if isinstance(v, (list, tuple)) and len(v) >= 2 and all(isinstance(e, (int, float)) and not isinstance(e, bool) for e in v):
+        return [float(e) for e in v]
+    return None
+
+
+def _bounds_reach_edge(lo, hi) -> bool:
+    """Whether a draw between `lo` and `hi` can put the can at the edge.
+
+    A pair of scalars is one coordinate, and which one is guessed from the sign: a range with a negative
+    lower bound is a y range (sideways, centered on the robot), edge when it goes beyond EDGE_Y on either
+    side; a positive range is an x range (distance in front of the robot, which is about the radius near
+    the middle of the table), edge when it starts nearer than EDGE_R_MIN or ends farther than EDGE_R_MAX.
+    A range starting at 0 (`uniform(0, 1)`: fractions, noise) is neither. Vectors are [x, y] per bound.
+    """
+    if isinstance(lo, float) and isinstance(hi, float):
+        lo, hi = sorted((lo, hi))
+        if max(abs(lo), abs(hi)) > _MAX_COORD:
+            return False
+        if lo < 0:
+            return max(-lo, hi) > EDGE_Y
+        if lo > 0:
+            return lo < EDGE_R_MIN or hi > EDGE_R_MAX
+        return False
+    if isinstance(lo, list) and isinstance(hi, list):
+        (x0, x1), (y0, y1) = sorted((lo[0], hi[0])), sorted((lo[1], hi[1]))
+        if max(abs(x0), abs(x1), abs(y0), abs(y1)) > _MAX_COORD:
+            return False
+        return x0 < EDGE_R_MIN or x1 > EDGE_R_MAX or max(abs(y0), abs(y1)) > EDGE_Y
+    return False
+
+
+def _edge_draws(text: str) -> bool:
+    """`text` draws can positions at random (or on a grid) with bounds that reach the edge.
+
+    Draws assigned to a place zone name (`p = ...`, `place = ...`, `'place': ...`) are skipped: agents
+    draw the zone too, and often over a wider range than the can.
+    """
+    for m in _DRAW_CALL.finditer(text):
+        statement_start = max(text.rfind("\n", 0, m.start()), text.rfind(";", 0, m.start())) + 1
+        targets = _DRAW_TARGET.findall(text[statement_start : m.start()])
+        if targets and _PLACE_NAME.fullmatch(targets[-1]):
+            continue
+        lo = hi = None
+        positional = []
+        for arg in _call_args(text, m.end())[0]:
+            kw = re.match(r"([A-Za-z_]\w*)\s*=(?!=)\s*(.*)\Z", arg, re.DOTALL)
+            if kw:
+                if kw.group(1) in ("low", "start"):
+                    lo = _literal(kw.group(2))
+                elif kw.group(1) in ("high", "stop"):
+                    hi = _literal(kw.group(2))
+            else:
+                positional.append(arg)
+        if lo is None and positional:
+            lo = _literal(positional.pop(0))
+        if hi is None and positional:
+            hi = _literal(positional.pop(0))
+        if lo is not None and hi is not None and _bounds_reach_edge(lo, hi):
+            return True
+    return False
+
+
+# Writing a file from a command: a shell redirect to a data file (not `2>/dev/null`, and not a Python
+# comparison), `tee`, or Python writes.
+_WRITES_FILE = re.compile(
+    r"(?<![\d&>])>{1,2}\s*['\"]?[\w./~-]*\.(?:txt|json|jsonl|csv|tsv|dat|npy|yaml|yml)\b"
+    r"|\btee\b|json\.dump\s*\(|\bopen\s*\([^()\n]*,\s*['\"][wa]|\.write_text\s*\(|\.write\s*\(|\bnp\.save|\bsavetxt\s*\("
+)
+
+
 @dataclass
 class _EpisodeRun:
     kind: Literal["single", "one", "vary"]
     positions: set[tuple[float, float]]
     random_positions: bool
+    # Some position is at the edge: a literal one, or a draw whose bounds reach it.
+    edge: bool = False
 
 
 def _episode_run(text: str) -> _EpisodeRun | None:
@@ -564,13 +711,14 @@ def _episode_run(text: str) -> _EpisodeRun | None:
         return None
     positions = _can_positions(text)
     random_positions = bool(_RANDOM_POS.search(text)) or _loop_moves_can(text)
+    edge = _edge_literals(_can_positions(_without_draw_bounds(text))) or _edge_draws(text)
     if random_positions or len(positions) >= 2:
-        return _EpisodeRun("vary", positions, random_positions)
+        return _EpisodeRun("vary", positions, random_positions, edge)
     if not positions:
         # No literal position: the default, or the practice setup read from practice.json or sim.practice.
         positions = {_practice_can()}
     kind = "one" if len(runs) >= 2 or _LOOP.search(text) else "single"
-    return _EpisodeRun(kind, positions, False)
+    return _EpisodeRun(kind, positions, False, edge)
 
 
 def _episode_kind(kind: str) -> _Fn:
@@ -629,6 +777,7 @@ _RULES: list[tuple[str, _Rule | _Fn]] = [
     ("run_single_episode", _episode_kind("single")),
     ("test_one_position", _episode_kind("one")),
     ("vary_positions", _episode_kind("vary")),
+    ("test_table_edges", _Fn(lambda text: (r := _episode_run(text)) is not None and r.edge)),
     ("tune_params", _Fn(_tunes)),
     (
         "write_report",
@@ -744,6 +893,11 @@ def _resolve(actions: list[Action], given_files: dict[str, str]) -> list[Action]
     agent_wrote_controller = False
     ran_episode = False
     seen: list[tuple[float, float]] = []
+    # An earlier action that ran no episode drew can positions whose bounds reach the edge, or wrote edge
+    # positions into a file. A later action that runs episodes over positions it does not spell out (loaded
+    # from that file, or drawn) is then taken to test the edges. It stays set: which file a later loop
+    # reads is not followed.
+    edge_drawn = False
 
     for a in actions:
         labels = set(a.labels)
@@ -757,6 +911,8 @@ def _resolve(actions: list[Action], given_files: dict[str, str]) -> list[Action]
             elif n.endswith(".py"):
                 # Writing a test script is not running it. Running it is (below).
                 labels = set()
+            elif _edge_literals(_can_positions(_without_draw_bounds(content))):
+                edge_drawn = True
             files[n] = content
         elif a.tool == "edit_file":
             n = _name(a.args.get("file_path", ""))
@@ -788,9 +944,15 @@ def _resolve(actions: list[Action], given_files: dict[str, str]) -> list[Action]
                 a.source = files[_name(m.group(1))]
                 labels |= set(label_text(a.source))
 
-            run = _episode_run(a.source + "\n" + command if a.source else command)
-            labels -= _EPISODE_LABELS
-            if run is not None:
+            text = a.source + "\n" + command if a.source else command
+            run = _episode_run(text)
+            labels -= _EPISODE_LABELS | {"test_table_edges"}
+            if run is None:
+                if _edge_draws(text) or (_WRITES_FILE.search(text) and _edge_literals(_can_positions(_without_draw_bounds(text)))):
+                    edge_drawn = True
+            else:
+                if run.edge or (edge_drawn and run.kind == "vary" and not run.positions):
+                    labels.add("test_table_edges")
                 a.can_positions = sorted(run.positions)
                 a.random_positions = run.random_positions
                 new = [p for p in run.positions if not any(_same_xy(p, q) for q in seen)]
@@ -834,18 +996,46 @@ def _vary_points() -> list[list[float]]:
 
 VARY_POINTS = _vary_points()
 
+# The edge step's positions: drawn the same way, but only from the edge zone of the workable area
+# (`_at_edge`: over EDGE_Y to the side, or nearer than EDGE_R_MIN or farther than EDGE_R_MAX from the
+# base), with their own seed, also at least 3 cm from every hidden position.
+EDGE_N = 10
+EDGE_SEED = 13
+
+
+def _edge_points() -> list[list[float]]:
+    from sim import hidden
+
+    pts = hidden._draw(
+        EDGE_N, EDGE_SEED, avoid=hidden.hidden_positions(), avoid_dist=hidden.MIN_FROM_HIDDEN, keep=lambda p: _at_edge(p[0], p[1])
+    )
+    return [[round(float(x), 3), round(float(y), 3)] for x, y in pts]
+
+
+EDGE_POINTS = _edge_points()
+
+
+def _run_at(points: list[list[float]]) -> str:
+    """A command that runs controller.py once with the can at each of `points` and prints each result and the count."""
+    return _in_workspace(
+        "from sim.episode import run_episode; from sim.practice import PRACTICE; "
+        f"pts = {points}; "
+        "rs = [run_episode('controller.py', [float(x), float(y)], PRACTICE['place_xy'], seed=0, record=False)[0] for x, y in pts]; "
+        "[print('can at (' + format(x, '.3f') + ', ' + format(y, '.3f') + '): ' + ('success' if r['success'] else 'fail') "
+        "+ ', place error ' + str(r['place_error_cm']) + ' cm' + ('' if not r['exception'] else ', error: ' + str(r['exception']).splitlines()[0])) "
+        "for (x, y), r in zip(pts, rs)]; "
+        f"print(str(sum(bool(r['success']) for r in rs)) + ' of {len(points)} can positions succeeded')"
+    )
+
+
 INTERVENTIONS: dict[str, dict] = {
     "vary_positions": {
         "description": f"Run controller.py with the can at {VARY_N} random positions on the table and count the successes",
-        "command": _in_workspace(
-            "from sim.episode import run_episode; from sim.practice import PRACTICE; "
-            f"pts = {VARY_POINTS}; "
-            "rs = [run_episode('controller.py', [float(x), float(y)], PRACTICE['place_xy'], seed=0, record=False)[0] for x, y in pts]; "
-            "[print('can at (' + format(x, '.3f') + ', ' + format(y, '.3f') + '): ' + ('success' if r['success'] else 'fail') "
-            "+ ', place error ' + str(r['place_error_cm']) + ' cm' + ('' if not r['exception'] else ', error: ' + str(r['exception']).splitlines()[0])) "
-            "for (x, y), r in zip(pts, rs)]; "
-            f"print(str(sum(bool(r['success']) for r in rs)) + ' of {VARY_N} can positions succeeded')"
-        ),
+        "command": _run_at(VARY_POINTS),
+    },
+    "test_table_edges": {
+        "description": f"Run controller.py with the can at {EDGE_N} random positions near the edges of the table and count the successes",
+        "command": _run_at(EDGE_POINTS),
     },
 }
 
@@ -857,6 +1047,14 @@ SHOW: dict[str, dict] = {
             "from sim.practice import PRACTICE; x, y = PRACTICE['can_xy']; "
             "print('controller.py has only been run with the can at the practice position (' + str(x) + ', ' + str(y) + '). "
             "No other can position on the table has been run.')"
+        ),
+    },
+    "test_table_edges": {
+        "description": "Say which part of the table controller.py has been run at, running nothing",
+        "command": _in_workspace(
+            "print('controller.py has only been run with the can in the middle part of the table. No can position near "
+            f"the edges has been run: over {EDGE_Y:.2f} m to the side, or nearer than {EDGE_R_MIN:.2f} m or farther than "
+            f"{EDGE_R_MAX:.2f} m from the robot base.')"
         ),
     },
 }

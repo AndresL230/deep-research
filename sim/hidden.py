@@ -66,15 +66,18 @@ def _area_samples(rng: np.random.Generator, count: int) -> np.ndarray:
     return np.array(out)
 
 
-def _draw(n: int, seed: int, avoid=(), avoid_dist: float = 0.0) -> list[list[float]]:
+def _draw(n: int, seed: int, avoid=(), avoid_dist: float = 0.0, keep=None) -> list[list[float]]:
     """`n` positions that cover the area evenly: one random position from each of `n` cells of about
     equal area (k-means cells of a dense uniform sample). Stratifying like this keeps a set of 20
     representative of the whole area, so its success rate is close to the area average instead of
     swinging with which corners a plain random draw happened to hit. A position closer than
     `avoid_dist` to a point in `avoid` is never picked. Shuffled, so a prefix is a random subset of
-    the cells. Deterministic in `seed`."""
+    the cells. `keep(p)`, when given, limits the draw to the part of the area where it is true. Deterministic
+    in `seed`."""
     rng = np.random.default_rng(seed)
     pts = _area_samples(rng, max(4000, 200 * n))
+    if keep is not None:
+        pts = pts[[bool(keep(p)) for p in pts]]
     centers = pts[rng.choice(len(pts), size=n, replace=False)]
     for _ in range(60):
         label = np.argmin(((pts[:, None, :] - centers[None, :, :]) ** 2).sum(-1), axis=1)

@@ -76,13 +76,15 @@
         ],
         [],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [
           "tune_params"
         ],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [
           "test_one_position"
@@ -230,19 +232,23 @@
           "run_single_episode"
         ],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [
           "tune_params"
         ],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [
-          "test_one_position"
+          "test_one_position",
+          "test_table_edges"
         ],
         [
           "write_report"
@@ -287,11 +293,13 @@
           "run_single_episode"
         ],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [
           "write_report"
@@ -376,13 +384,15 @@
         ],
         [],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [
           "tune_params"
         ],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ]
       ],
       "step": "done",
@@ -471,20 +481,24 @@
           "run_single_episode"
         ],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [
           "tune_params"
         ],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [
-          "test_one_position"
+          "test_one_position",
+          "test_table_edges"
         ],
         [
           "write_report"
@@ -569,20 +583,24 @@
           "run_single_episode"
         ],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [
           "tune_params"
         ],
         [
-          "vary_positions"
+          "vary_positions",
+          "test_table_edges"
         ],
         [
-          "test_one_position"
+          "test_one_position",
+          "test_table_edges"
         ],
         [
           "write_report"

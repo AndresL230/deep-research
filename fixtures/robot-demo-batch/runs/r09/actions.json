@@ -57,7 +57,8 @@
       "command": "cd /home/daytona/workspace && python3 -m sim.run --controller controller.py --can 0.65,0.35 --place 0.45,-0.3 --out live/corner.motion.json"
     },
     "labels": [
-      "vary_positions"
+      "vary_positions",
+      "test_table_edges"
     ]
   },
   {
@@ -76,7 +77,8 @@
       "command": "cd /home/daytona/workspace && python3 test_positions.py"
     },
     "labels": [
-      "vary_positions"
+      "vary_positions",
+      "test_table_edges"
     ]
   },
   {
@@ -99,7 +101,8 @@
       "command": "cd /home/daytona/workspace && python3 test_positions.py"
     },
     "labels": [
-      "vary_positions"
+      "vary_positions",
+      "test_table_edges"
     ]
   },
   {
@@ -109,7 +112,8 @@
       "command": "cd /home/daytona/workspace && python3 -m sim.run --controller controller.py --can 0.65,0.35 --place 0.45,-0.3 --out live/corner_tuned.motion.json"
     },
     "labels": [
-      "test_one_position"
+      "test_one_position",
+      "test_table_edges"
     ]
   },
   {
