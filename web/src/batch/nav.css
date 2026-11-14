@@ -1,0 +1,86 @@
+/* The app's top bar (nav.ts): the links beside the logo, the menu that holds them on a narrow screen, and "+ New
+   batch". Prefix nv-. The bar itself is .pg-hdr (page.css). */
+
+.nv-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+
+/* ── the links in the bar: full height, the current one underlined like a tab ── */
+.nv { align-self:stretch; display:flex; flex:none; margin-left:14px; }
+.nv-list { display:flex; margin:0; padding:0; list-style:none; }
+.nv-list--bar { gap:2px; }
+.nv-list--bar > li { display:flex; }
+.nv-list--bar .nv-a { position:relative; display:inline-flex; align-items:center; gap:7px; padding:0 10px; font-size:13.5px; font-weight:500; color:var(--fg-55); text-decoration:none; white-space:nowrap; transition:color var(--fx-fast) var(--fx-ease); }
+.nv-list--bar .nv-a::after { content:""; position:absolute; left:10px; right:10px; bottom:0; height:2px; border-radius:2px 2px 0 0; background:transparent; transition:background var(--fx-fast) var(--fx-ease); }
+.nv-list--bar .nv-a:hover { color:var(--fg); }
+.nv-list--bar .nv-a:hover::after { background:var(--border-strong); }
+.nv-list--bar .nv-a[aria-current="page"] { color:var(--fg); }
+.nv-list--bar .nv-a[aria-current="page"]::after { background:var(--accent); }
+.nv-a:focus-visible { outline:2px solid var(--focus); outline-offset:-2px; border-radius:var(--r-ctl); }
+
+/* the count of batches waiting on the person */
+.nv-n { display:inline-grid; place-items:center; min-width:18px; height:18px; padding:0 5px; box-sizing:border-box; border-radius:9px; background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:600; line-height:1; font-variant-numeric:tabular-nums; }
+.nv-a[aria-current="page"] .nv-n { background:var(--accent); color:var(--accent-fg); }
+
+/* ── the breadcrumb of a batch's pages, after the links ── */
+.pg-crumbs { display:flex; align-items:center; gap:10px; min-width:0; overflow:hidden; }
+/* Short of room, the batch's id gives way before the page in it (a run's "r02"). */
+.pg-crumbs > .ask-crumb-sep, .pg-crumbs > .ask-crumb-sep ~ .pg-crumb { flex:none; }
+.pg-crumbs::before { content:""; flex:none; width:1px; height:18px; margin:0 6px 0 4px; background:var(--border-strong); }
+
+/* ── "+ New batch": the one filled button, in the accent ── */
+.nv-new { flex:none; display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 13px 0 10px; border-radius:var(--r-ctl); background:var(--accent); color:var(--accent-fg); font-size:13px; font-weight:500; white-space:nowrap; box-shadow:0 1px 2px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.12); transition:background var(--fx-fast) var(--fx-ease), transform var(--fx-fast) var(--fx-ease); }
+/* Hover and press move the purple toward the ink: darker on white, lighter on black. */
+.nv-new:hover { background:color-mix(in srgb, var(--accent) 86%, var(--fg)); }
+.nv-new:active { background:color-mix(in srgb, var(--accent) 74%, var(--fg)); transform:translateY(1px); }
+.nv-new:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.nv-new[aria-expanded="true"] { background:color-mix(in srgb, var(--accent) 80%, var(--fg)); }
+
+/* ── the menu: a button and the links it unfolds (narrow screens only) ── */
+.nv-menu { position:static; display:none; flex:none; }
+.nv-menu-b { position:relative; display:grid; place-items:center; width:34px; height:34px; border-radius:var(--r-ctl); color:var(--fg-70); transition:color var(--fx-fast) var(--fx-ease), background var(--fx-fast) var(--fx-ease); }
+.nv-menu-b:hover, .nv-menu-b[aria-expanded="true"] { color:var(--fg); background:var(--hover); }
+.nv-menu-b:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+.nv-dot { position:absolute; top:6px; right:6px; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 2px var(--bg); }
+.nv-panel { position:absolute; z-index:30; top:calc(100% + 6px); right:max(var(--pg-pad), calc((100% - var(--pg-w)) / 2 + var(--pg-pad))); width:240px; max-width:calc(100% - 2 * var(--pg-pad)); box-sizing:border-box; padding:6px; border:1px solid var(--border-strong); border-radius:var(--r-card, 8px); background:var(--surface); box-shadow:var(--menu-shadow); animation:nv-drop .16s var(--ease-out, ease) both; }
+.nv-panel[hidden] { display:none; }
+@keyframes nv-drop { from { opacity:0; transform:translateY(-4px); } }
+.nv-list--menu { flex-direction:column; gap:2px; }
+.nv-list--menu .nv-a { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:44px; padding:0 12px; border-radius:var(--r-ctl); font-size:14px; font-weight:500; color:var(--fg-70); text-decoration:none; }
+.nv-list--menu .nv-a:hover { color:var(--fg); background:var(--hover); }
+.nv-list--menu .nv-a[aria-current="page"] { color:var(--fg); }
+.nv-list--menu .nv-a[aria-current="page"] .nv-l { text-decoration:underline; text-decoration-color:var(--accent); text-decoration-thickness:2px; text-underline-offset:6px; }
+/* What a phone's bar has no room for: the theme switch and the hub badge, each on a row of its own. */
+.nv-panel-x { display:none; flex-direction:column; gap:6px; margin-top:6px; padding:8px 6px 2px 12px; border-top:1px solid var(--border); }
+.nv-row { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:36px; font-size:13px; color:var(--fg-55); }
+.nv-panel .hb-t { display:inline; }
+
+/* ── when the links fold into the menu ──
+   Any page under 1024px; a batch's pages, whose bar also holds the breadcrumb and the cost bar, under 1360px. */
+@media (max-width: 1023px) {
+  .nv { display:none; }
+  .nv-menu { display:block; }
+}
+@media (max-width: 1359px) {
+  .app-root:is([data-view="batch"], [data-view="run"], [data-view="child"]) .nv { display:none; }
+  .app-root:is([data-view="batch"], [data-view="run"], [data-view="child"]) .nv-menu { display:block; }
+}
+
+/* ── phones: "+ New", and the theme switch moves into the menu ── */
+@media (max-width: 640px) {
+  .nv-new { height:32px; padding:0 11px 0 8px; }
+  .nv-new-x { display:none; }
+  .pg-hdr-r > .th-switch, .pg-hdr-r > .hb { display:none; }
+  /* A batch's pages: the cost bar keeps its figure and drops its meter, for the breadcrumb's sake. */
+  .pg-hdr-r > .hm-cb .hm-cb-meter { display:none; }
+  .nv-panel-x { display:flex; }
+  .pg-hdr { gap:8px; }
+  .pg-hdr-r { gap:6px; }
+  /* A batch's pages: the tile alone, so the breadcrumb has the room. */
+  .app-root:is([data-view="batch"], [data-view="run"], [data-view="child"]) .pg-home .ask-h1 { display:none; }
+  /* No links between the logo and the breadcrumb here: the logo is its first step again. */
+  .pg-crumbs::before { content:"›"; width:auto; height:auto; margin:0; background:none; color:var(--fg-40); font-size:15px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nv-panel { animation:none; }
+  .nv-new, .nv-a, .nv-a::after, .nv-menu-b { transition:none; }
+}

@@ -16,6 +16,8 @@ export interface SmoothScroll {
   top(): void;
   /** Jump to the very end, with no glide. */
   end(): void;
+  /** Stop (or resume) scrolling the page, while a dialog is open over it. */
+  lock(on: boolean): void;
 }
 
 /** A glide's length in seconds and its curve: fast away, a long settle. */
@@ -43,6 +45,10 @@ export function smoothScroll(scroller: HTMLElement): SmoothScroll {
     },
     end() {
       lenis.scrollTo(scroller.scrollHeight, { immediate: true, force: true });
+    },
+    lock(on) {
+      if (on) lenis.stop();
+      else lenis.start();
     },
   };
 }

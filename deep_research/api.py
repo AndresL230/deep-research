@@ -29,11 +29,12 @@ from .config import ROOT_DIR
 load_dotenv(ROOT_DIR / ".env")
 
 from . import controllers, datasets, domains, hub, notebook, robot_view, traps, user_scripts  # noqa: E402
-from .batch import Batch, resume_problem  # noqa: E402 - needs the environment loaded first
+from .batch import Batch, Refused, more_pairs_problem, more_pairs_quote, resume_problem  # noqa: E402 - needs the environment loaded first
+from .batch_summary import summarize  # noqa: E402
 from .case_file import with_evidence  # noqa: E402
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
-from .costs import OverBudget, estimate_batch_usd, run_rate  # noqa: E402
+from .costs import CostTracker, OverBudget, estimate_batch_usd, run_rate  # noqa: E402
 from .events import read_events  # noqa: E402
 from .gateway_guard import GatewayGuard  # noqa: E402
 
@@ -417,6 +418,53 @@ def _resumable(batch_id: str) -> bool:
     return resume_problem(case, d) is None
 
 
+# The home table's summaries (batch_summary.py), kept while their case file is unchanged: a saved batch's by its
+# file's (mtime, size), a hub batch's by the hub's revision. A live batch's is worked out from memory each time.
+_DISK_SUMMARIES: dict[Path, tuple[tuple, dict | None]] = {}
+_HUB_SUMMARIES: dict[str, tuple[object, dict | None]] = {}
+
+
+def _disk_summary(batch_id: str, path: Path, fixture: bool) -> dict | None:
+    """A saved batch's or a fixture's summary from its case file, or None when the file cannot be read."""
+    b = BATCHES.get(batch_id)
+    try:
+        if b is not None:
+            # Fixtures carry no date: their files' times are the checkout's, not the batch's (as in /api/costs).
+            return summarize(batch_id, b.case.read(), None if fixture else path.stat().st_mtime)
+        st = path.stat()
+        key = (st.st_mtime_ns, st.st_size)
+        hit = _DISK_SUMMARIES.get(path)
+        if hit and hit[0] == key:
+            return hit[1]
+        summary = summarize(batch_id, json.loads(path.read_text()), None if fixture else st.st_mtime)
+    except (OSError, ValueError):
+        return None
+    _DISK_SUMMARIES[path] = (key, summary)
+    return summary
+
+
+def _hub_summaries(rows: list[dict]) -> dict[str, dict | None]:
+    """Summaries of the hub's batches. The list says each batch's revision; the case files (one bigger read, shared
+    with the cost screen) are fetched only when a revision is new to this server."""
+    out: dict[str, dict | None] = {}
+    need = []
+    for row in rows:
+        hit = _HUB_SUMMARIES.get(row["id"])
+        if hit and row.get("revision") is not None and hit[0] == row.get("revision"):
+            out[row["id"]] = hit[1]
+        else:
+            need.append(row)
+    if need:
+        cases = {c["id"]: c for c in _hub_cached("cases", hub.all_cases) or [] if isinstance(c, dict) and "id" in c}
+        for row in need:
+            c = cases.get(row["id"])
+            summary = summarize(row["id"], c.get("case"), None, c.get("started_at") or row.get("started_at")) if c else None
+            out[row["id"]] = summary
+            if c and c.get("revision") is not None:
+                _HUB_SUMMARIES[row["id"]] = (c["revision"], summary)
+    return out
+
+
 @app.get("/api/batches")
 def list_batches():
     out = []
@@ -425,16 +473,23 @@ def list_batches():
     for root in (BATCHES_DIR, FIXTURES_DIR):
         if root.exists():
             for d in sorted(root.iterdir()):
-                if (d / "case" / "case.json").exists():
+                path = d / "case" / "case.json"
+                if path.exists():
                     item = {"id": d.name, "kind": "live" if _running(d.name) else "replay"}
                     if root is BATCHES_DIR and _resumable(d.name):
                         item["resumable"] = True
+                    if root is FIXTURES_DIR:
+                        item["fixture"] = True
+                    item["summary"] = _disk_summary(d.name, path, root == FIXTURES_DIR)
                     out.append(item)
     # Batches other machines ran, from the team hub. They open as replays, read from the hub.
     seen = {b["id"] for b in out}
-    for row in (_hub_cached("batches", hub.list_batches) if hub.enabled() else None) or []:
-        if isinstance(row, dict) and row.get("id") not in seen:
-            out.append({"id": row["id"], "kind": "replay", "machine": row.get("machine"), "remote": True})
+    rows = [r for r in (_hub_cached("batches", hub.list_batches) if hub.enabled() else None) or []
+            if isinstance(r, dict) and isinstance(r.get("id"), str) and r["id"] not in seen]
+    summaries = _hub_summaries(rows) if rows else {}
+    for row in rows:
+        out.append({"id": row["id"], "kind": "replay", "machine": row.get("machine"), "remote": True,
+                    "summary": summaries.get(row["id"])})
     return out
 
 
@@ -501,6 +556,72 @@ async def _resume(batch_id: str, investigate: bool) -> dict:
     if investigate and b.case.data.get("phase") == "ready" and (task is None or task.done()):
         _spawn(b.id, b.investigate())
     return {"id": b.id, "phase": b.case.data.get("phase")}
+
+
+# ---- more pairs: more copies per arm for a verdict whose evidence is still open ----
+
+
+def _more_pairs_case(batch_id: str) -> dict:
+    """The saved case file of a batch of ours that more pairs could run on, or 404/409 with the reason it cannot."""
+    if not (BATCHES_DIR / batch_id / "case" / "case.json").is_file():
+        if (FIXTURES_DIR / batch_id / "case" / "case.json").is_file():
+            raise HTTPException(409, "cannot run more pairs: this is a fixture, a saved example with no real runs to fork")
+        raise HTTPException(404, f"no batch {batch_id}")
+    b, task = _running(batch_id), TASKS.get(batch_id)
+    if b is not None or (task is not None and not task.done()):
+        phase = b.case.data.get("phase") if b is not None else "closing"
+        raise HTTPException(409, f"cannot run more pairs: this batch is running something else (phase {phase}); "
+                                 f"one experiment at a time")
+    try:
+        case = with_evidence(json.loads((BATCHES_DIR / batch_id / "case" / "case.json").read_text()))
+    except (OSError, ValueError) as e:
+        raise HTTPException(409, f"cannot run more pairs: the case file cannot be read ({type(e).__name__})") from e
+    problem = more_pairs_problem(case, BATCHES_DIR / batch_id)
+    if problem:
+        raise HTTPException(409, f"cannot run more pairs: {problem}")
+    return case
+
+
+def _n_per_arm(n: int | None) -> int | None:
+    if n is not None and n < 1:
+        raise HTTPException(422, "n must be 1 or more")
+    return n
+
+
+@app.get("/api/batches/{batch_id}/more-pairs")
+def more_pairs_estimate(batch_id: str, n: int | None = None):
+    """What `POST .../more-pairs?n=` would run and cost, for the confirmation: nothing is started or loaded.
+
+    `n` (copies per arm) defaults to what reaches the needed pairs, at least 1, and is held to at most 8. 409 with the
+    reason when more pairs cannot run on this batch; a budget that cannot cover it is `over_budget` here (the POST
+    refuses it)."""
+    case = _more_pairs_case(batch_id)
+    tracker = CostTracker(budget_usd=float((case.get("config") or {}).get("budget_usd") or BatchConfig().budget_usd))
+    tracker.restore(case.get("costs") or {})
+    try:
+        return more_pairs_quote(case, tracker, _n_per_arm(n))
+    except Refused as e:
+        raise HTTPException(409, f"cannot run more pairs: {e}") from e
+
+
+@app.post("/api/batches/{batch_id}/more-pairs")
+async def more_pairs(batch_id: str, n: int | None = None):
+    """Run `n` more copies per arm of the fork experiment an open verdict rests on, then update the verdict.
+
+    Loads the saved batch back into this server the way `/resume` does, claims it (phase `forking`) and starts the
+    copies; the live websocket then shows them as it shows a first experiment. Returns the quote with the new
+    children's ids. 409 with the reason when it cannot run, the budget included."""
+    async with _RESUME_LOCKS.setdefault(batch_id, asyncio.Lock()):
+        _more_pairs_case(batch_id)
+        n = _n_per_arm(n)
+        try:
+            b = await asyncio.to_thread(Batch.reopen, batch_id, BATCHES_DIR)
+            job = b.reserve_more_pairs(n)
+        except Refused as e:
+            raise HTTPException(409, f"cannot run more pairs: {e}") from e
+        BATCHES[b.id] = b
+        _spawn(b.id, b.run_more_pairs(reserved=job))
+        return {"id": b.id, "phase": b.case.data.get("phase"), **job}
 
 
 @app.post("/api/batches")

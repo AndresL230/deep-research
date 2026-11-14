@@ -6,11 +6,16 @@
 /* The header and the replay bar sit on the same column as the content under them (its width varies by screen). */
 .app-root { --pg-w:1240px; --pg-pad:24px; }
 .app-root[data-view="run"], .app-root[data-view="child"] { --pg-w:960px; }
-.app-root[data-view="home"] { --pg-w:808px; }
+.app-root[data-view="home"] { --pg-w:1240px; }
 .app-root[data-view="costs"] { --pg-w:1040px; }
 .pg-hdr, .pg-sub { padding-inline:max(var(--pg-pad), calc((100% - var(--pg-w)) / 2 + var(--pg-pad))); }
-.pg-hdr { gap:12px; }
-.pg-hdr-l { min-width:0; flex:1; overflow:hidden; }
+/* Above the page under it, so the menu (nav.css) unfolds over it. The bar keeps the widest column on every page (a
+   run's narrower one too), so its links and buttons stay in the same place from page to page. */
+.pg-hdr { --pg-w:1240px; position:relative; z-index:20; gap:12px; background:var(--bg); }
+.pg-hdr-l { align-self:stretch; min-width:0; flex:1; overflow:hidden; }
+.pg-hdr-l > .pg-home { flex:none; }
+/* The page behind the New batch dialog does not scroll (new-batch-dialog.ts). */
+.app-root[data-modal] .pg-scroll { overflow:hidden; }
 .pg-hdr-r { display:flex; align-items:center; gap:10px; flex:none; }
 .pg-home { display:inline-flex; align-items:center; gap:10px; padding:0; min-width:0; color:inherit; }
 .pg-home .ask-h1 { overflow:hidden; text-overflow:ellipsis; }
