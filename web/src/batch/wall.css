@@ -9,6 +9,8 @@
 /* ── the line above the grid ── */
 .bw-head { display:flex; flex-direction:column; align-items:flex-start; gap:12px; padding-top:20px; }
 .bw-sum { margin:0; font-size:clamp(24px, 2.7cqi, 32px); font-weight:400; line-height:1.15; letter-spacing:-0.028em; color:var(--fg); font-variant-numeric:tabular-nums; text-wrap:balance; }
+/* A batch on more than one analyst model: how each model's runs came out. */
+.bw-sum-models { margin:-4px 0 0; font-size:13.5px; color:var(--fg-70); font-variant-numeric:tabular-nums; }
 .bw-explain { margin:0; max-width:72ch; font-size:13.5px; line-height:1.5; color:var(--fg-55); text-wrap:pretty; }
 .bw-sim { margin:0; max-width:100%; padding:5px 9px; border-radius:var(--r-ctl); background:var(--warn-bg); font-size:12.5px; line-height:1.45; color:var(--fg-70); }
 .bw-sim strong { font-weight:500; color:var(--amber); }
@@ -28,6 +30,10 @@
 
 .bw-body { position:relative; display:flex; flex-direction:column; gap:4px; padding:6px 6px 8px; border-radius:var(--r-card); background:var(--muted); transition:background var(--t-hover) ease; }
 .bw-tile:hover .bw-body { background:var(--muted-2); }
+/* The run's analyst model, only in a batch on more than one: quiet, right after the id. */
+.bw-model { flex:none; padding:0 5px; border:1px solid var(--border); border-radius:2px; font-size:10.5px; font-weight:500; line-height:16px; color:var(--fg-55); white-space:nowrap; }
+/* The live commentary's latest line about the run, between the screen and the panel. */
+.bw-body > .cm-cap { margin:2px 0 0; padding:0 8px; }
 
 /* the screen */
 .bw-scr { position:relative; display:flex; flex-direction:column; aspect-ratio:16 / 10; min-width:0; overflow:hidden; border:1px solid var(--border); border-radius:var(--r-ctl); background:var(--surface); }

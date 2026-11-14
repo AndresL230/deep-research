@@ -32,3 +32,11 @@ export function duration(s: number | null | undefined): string {
   const t = Math.max(0, Math.round(s));
   return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${String(t % 60).padStart(2, "0")}s`;
 }
+
+/** A model's short name for badges: "anthropic:claude-haiku-5-5" -> "Haiku", "openai:gpt-x" -> "Gpt". */
+export function modelShort(model: string | null | undefined): string {
+  if (!model) return DASH;
+  const name = model.slice(model.indexOf(":") + 1).replace(/^claude-/, "");
+  const word = name.split(/[-_.]/)[0] || name;
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}

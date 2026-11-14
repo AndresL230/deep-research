@@ -29,16 +29,17 @@ import {
   type AgentEvent, type HubStatus, type BatchConfig, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, BATCH_STEPS, STEP_LABEL, childKey, parseRoute, routeHash, type BatchStep, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
-import { HM_ACT, costBar, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload } from "./batch/home";
+import { HM_ACT, costBar, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload, toggleModel } from "./batch/home";
 import { hubBadge } from "./batch/hub-badge";
 import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { notYetView, overviewView, pageHeadView, pagerView } from "./batch/overview";
 import { wallView } from "./batch/wall";
+import { feedView, notebookWithCaptions, wallWithFeed } from "./batch/commentary";
 import { diagnosisView, fixView, forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, runSummaryView, taskText } from "./batch/run";
 import { agentTimes, caseAt, eventsAt, replayBar, replayDuration, replaySchedule } from "./batch/replay";
-import { LABEL_PATTERNS, chartUrl, logOf, notebookCells, notebookView } from "./batch/notebook";
+import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook";
 import { fetchCosts, type CostReport } from "./api";
 import type { Loadable } from "./batch/model";
 import { costsLink, costsView } from "./batch/costs";
@@ -89,6 +90,8 @@ interface AppState {
   lastStep: { id: string; step: BatchStep } | null;
   /** This server's link to the team hub, for the header badge (refreshed every half minute). */
   hub: HubStatus | null;
+  /** The batch page's live feed is unfolded (narrow screens only: on a wide one it is always open). */
+  feedOpen: boolean;
 }
 
 const S: AppState = {
@@ -105,6 +108,7 @@ const S: AppState = {
   costsBack: { name: "home" },
   lastStep: null,
   hub: null,
+  feedOpen: false,
 };
 
 const DEFAULT_SPEED = 4;
@@ -247,13 +251,14 @@ const STEP_VIEW: Record<Exclude<BatchStep, "wall">, (vm: BatchVm) => string> = {
 };
 
 /**
- * A batch, a page at a time instead of one long scroll. The first page is where the batch stands and its agents; each
- * stage after them (where the runs split, the investigator, the fork, the verdict, and a robot batch's diagnosis and
- * fix) is a page of its own. Every page ends in Back / Next (overview.ts `pagerView`).
+ * A batch, a page at a time instead of one long scroll. The first page is where the batch stands and its agents, with
+ * the live feed of notable moments beside them (commentary.ts); each stage after them (where the runs split, the
+ * investigator, the fork, the verdict, and a robot batch's diagnosis and fix) is a page of its own. Every page ends in
+ * Back / Next (overview.ts `pagerView`).
  */
 function batchBody(vm: BatchVm, step: BatchStep): string {
   const sections: [string, string][] = step === "wall"
-    ? [["overview", overviewView(vm)], ["wall", wallView(vm)]]
+    ? [["overview", overviewView(vm)], ["wall", wallWithFeed(wallView(vm), feedView(vm, S.feedOpen))]]
     : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || notYetView(vm, step)]];
   // The bar is a new element on every page, so it arrives with the page.
   sections.push([`pager:${step}`, pagerView(vm, step)]);
@@ -274,7 +279,7 @@ function runBody(vm: BatchVm, key: EventKey): string {
     const cells = log ? notebookCells(log) : [];
     const label = vm.case.split?.label;
     const body = cells.length
-      ? notebookView(cells, { image: (name) => chartUrl(vm, key, name), mark: trapMark(trapOf(vm.case), label) ?? (label ? LABEL_PATTERNS[label] ?? null : null) })
+      ? notebookWithCaptions(cells, log, { image: (name) => chartUrl(vm, key, name), mark: trapMark(trapOf(vm.case), label) ?? (label ? LABEL_PATTERNS[label] ?? null : null) })
       : `<p class="pg-note">Nothing has run yet.</p>`;
     return `${summary}<div class="pg-nb" data-morph-key="nb:${attr(key)}">${body}</div>`;
   }
@@ -717,7 +722,11 @@ root.addEventListener("click", (e) => {
       if (next !== S.home) { S.home = next; rememberDomain(arg); paint(); scheduleEstimate(); }
       return;
     }
+    case HM_ACT.model:
+      if (S.home.draft && !S.home.starting) { S.home = { ...S.home, draft: toggleModel(S.home.draft, arg), error: null }; paint(); scheduleEstimate(); }
+      return;
     case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
+    case ACT.toggleFeed: S.feedOpen = !S.feedOpen; paint(); return;
     case ACT.resetConfig:
       if (S.home.defaults) { S.home = { ...S.home, draft: resetDraft(S.home), error: null }; paint(); scheduleEstimate(); }
       return;

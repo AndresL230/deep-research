@@ -262,3 +262,12 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
   .ln-ask { animation:none !important; }
   .ln-kid, .ln-col-h, .ln-run, .ln-ev { transition:none !important; }
 }
+
+/* The investigator's notebook link, the verdict's confidence and its rubric check. */
+.ln-nb-link { margin-left:auto; font-size:11.5px; color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.ln-nb-link:hover { border-bottom-color:var(--accent); }
+.ln-nb-link:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:2px; }
+.ln-conf { font-family:inherit; }
+.ln-conf--low { color:var(--amber); border-color:color-mix(in srgb, var(--amber) 45%, transparent); }
+.ln-vsplit { border-top:none; padding-top:0; }
+.ln-selfcheck { font-size:12px; }
