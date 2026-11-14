@@ -811,6 +811,11 @@ async function call<T>(path: string, init?: RequestInit & { json?: unknown }): P
     if (isAbort(e)) throw e;
     throw new ApiError("Couldn't reach the server. Is it running on port 8000?", 0);
   }
+  // Behind the Cloudflare gateway: not signed in. Go to sign-in and come back to this page.
+  if (res.status === 401) {
+    location.assign(`/auth/login?return=${encodeURIComponent(location.hash || "#/start")}`);
+    throw new ApiError("Sign in to use Orro.", 401);
+  }
   if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
   return (await res.json()) as T;
 }

@@ -49,6 +49,7 @@ import { syncLanding } from "./landing/mount";
 import { syncMotion } from "./motion";
 import { refreshMotion } from "./robot/mount";
 import { smoothScroll } from "./scroll";
+import { mountAccount } from "./account";
 import { isMotionBatch } from "./robot/markup";
 
 // ── state ────────────────────────────────────────────────────────────────────
@@ -951,3 +952,6 @@ void refreshHub();
 setInterval(() => { void refreshHub(); }, 30_000);
 
 onRoute();
+
+// Who is signed in, their plan and credits (only behind the Cloudflare gateway).
+void mountAccount();
