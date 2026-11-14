@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAX_DATASET_BYTES, uploadDataset, uploadScript, type ControllerInfo, type DatasetInfo, type ScriptInfo } from "../src/api";
-import { homeView } from "../src/batch/home";
+import { newBatchView } from "../src/batch/home";
 import type { HomeVm } from "../src/batch/model";
 import {
   DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, selectedTarget, uploadAfterEdit, withUpload,
@@ -66,16 +66,16 @@ describe("the data rows of a new batch", () => {
     expect(inputsView({ ...initialDatasetUi(), loadError: "The server did not answer." })).toContain("The server did not answer.");
   });
 
-  it("sits inside the New batch panel, above the settings", () => {
+  it("sits inside the New batch form, above the settings", () => {
     const vm: HomeVm = { batches: { state: "ready", value: [] }, health: null, defaults: null, draft: null, estimate: null, starting: false, error: null };
     const s = ready({ selected: mine.id });
-    const html = homeView(vm, { html: inputsView(s), label: inputsLabel(s) });
+    const html = newBatchView(vm, { html: inputsView(s), label: inputsLabel(s) });
     expect(html).toContain("predicting label · planted duplicate rows");
     expect(html.indexOf(`data-morph-key="inputs"`)).toBeGreaterThan(html.indexOf("New batch"));
     expect(html.indexOf(`data-morph-key="inputs"`)).toBeLessThan(html.indexOf(`data-morph-key="foot"`));
-    // Without the rows the panel is as it was.
-    expect(homeView(vm)).toContain("Pima diabetes · planted duplicate rows");
-    expect(homeView(vm)).not.toContain(`data-morph-key="inputs"`);
+    // Without the rows the form is as it was.
+    expect(newBatchView(vm)).toContain("Pima diabetes · planted duplicate rows");
+    expect(newBatchView(vm)).not.toContain(`data-morph-key="inputs"`);
   });
 
   it("tells datasets from scripts and refuses the rest before sending them", () => {

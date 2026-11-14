@@ -1,8 +1,8 @@
 /* The home screen's "Needs you" list (needs-you.ts). Prefix ny-. Tokens only, so both themes work. The rows sit in
-   the same muted card as the batch table under them; on a phone each row stacks, its buttons under its words. */
+   the same surface card as the batch table under them (overview.css .ov-card); on a phone each row stacks, its buttons under its words. */
 
 .ny-sec { gap:10px; }
-.ny { margin:0; padding:0; list-style:none; border-radius:var(--r-card); background:var(--muted); }
+.ny { margin:0; padding:0; list-style:none; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); }
 
 /* a row: a dot for its kind, the batch, what it needs, and its buttons */
 .ny-row { display:grid; grid-template-columns:8px 148px minmax(0, 1fr) auto; grid-template-areas:"dot name body acts"; align-items:center; gap:4px 14px; min-height:56px; padding:10px 16px; box-sizing:border-box; border-top:1px solid var(--border); }

@@ -1,4 +1,5 @@
-// OWNER: subagent A. The home screen (the batch table from batch-table.ts, the new batch panel with its estimate and Start) and the header cost bar.
+// OWNER: subagent A. The home screen (Needs you from needs-you.ts, the batch table from batch-table.ts), the New batch
+// form with its estimate and Start (shown in a dialog, new-batch-dialog.ts), and the header cost bar.
 import "./home.css";
 import type { BatchConfig, BatchListItem, ControllerInfo, Costs, Defaults, Health, ScopeCost, TrapInfo } from "../api";
 import { askIcon, askSpinner } from "../ask-icons";
@@ -15,9 +16,23 @@ import { DEFAULT_PLANTED, chosenTrap } from "./trap";
  *  the robot arm domain's controller row with the uploaded controller it shows, if any. */
 export interface HomeInputs { html: string; label: string; controllerHtml?: string; controller?: ControllerInfo | null }
 
-/** The home screen: what needs a person, the batches to open, then one panel to start a new one. Labels only, no
- *  prose. */
-export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
+/** The home screen: what needs a person, then the batches to open. A new batch starts from the header's "+ New batch"
+ *  (`newBatchView`, in a dialog). Labels only, no prose. */
+export function homeView(vm: HomeVm): string {
+  return `<div class="hm" data-morph-key="home">
+    ${needsView(vm.batches, vm.needs)}
+    ${batchesSection(vm.batches, vm.table)}
+  </div>`;
+}
+
+/** The id of the New batch dialog's title, which the <dialog> names itself by (`aria-labelledby`). */
+export const NEW_BATCH_TITLE = "nbd-title";
+
+/**
+ * The New batch form, as the inside of its dialog (main.ts, new-batch-dialog.ts): the title and what the batch runs
+ * on, the form, then the estimate and Start in a footer that stays in view while the form scrolls.
+ */
+export function newBatchView(vm: HomeVm, inputs?: HomeInputs): string {
   const trap = chosenTrap(vm.defaults, vm.draft?.trap);
   // What the batch runs on, the trap and its strength only mean something in the tabular domain.
   const tabular = isTabular(vm.draft);
@@ -25,22 +40,21 @@ export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
   const summary = tabular
     ? summaryLabel(inputs?.label ?? `Pima diabetes · ${DEFAULT_PLANTED}`, trap)
     : controller ? `Starting from ${controller.name}` : "";
-  return `<div class="hm" data-morph-key="home">
-    ${needsView(vm.batches, vm.needs)}
-    ${batchesSection(vm.batches, vm.table)}
-    <section class="hm-panel" data-morph-key="new" aria-labelledby="hm-new-h">
-      <div class="hm-panel-h" data-morph-key="head">
-        <h2 class="hm-h2" id="hm-new-h">New batch</h2>
+  return `<div class="nbd-h" data-morph-key="nbd-head">
+      <div class="nbd-t">
+        <h2 class="hm-h2" id="${NEW_BATCH_TITLE}">New batch</h2>
         ${summary ? `<span class="hm-fixed">${esc(summary)}</span>` : ""}
       </div>
+      <button type="button" class="nbd-x" data-act="${ACT.closeNewBatch}" aria-label="Close" title="Close">${askIcon("close", 16)}</button>
+    </div>
+    <div class="nbd-body" data-morph-key="nbd-body">
       ${vm.draft ? domainRow(vm.draft, vm.defaults, vm.starting) : ""}
       ${tabular ? inputs?.html ?? "" : inputs?.controllerHtml ?? ""}
       ${vm.draft && tabular ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
       ${vm.draft ? mainRow(vm.draft, trap, vm.starting) : mainSkeleton(defaultsFailed(vm))}
       ${advancedBlock(vm, controller)}
-      ${footer(vm)}
-    </section>
-  </div>`;
+    </div>
+    ${footer(vm)}`;
 }
 
 /** The panel's one-line summary, saying what the chosen trap plants. The summary is written for the default trap. */
