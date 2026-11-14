@@ -176,6 +176,7 @@ def test_defaults_and_estimate_cover_both_domains(tmp_path, monkeypatch):
         assert by_name["robot_arm"]["visual"] == "motion" and by_name["tabular"]["visual"] == "charts"
         robot = by_name["robot_arm"]["config"]
         assert robot["domain"] == "robot_arm" and robot["inflation_threshold"] == pytest.approx(sim_domain.inflated_threshold())
+        assert robot["robot_prompt"] == "default"
         assert client.post("/api/estimate", json=d["config"]).json()["avg_run_usd"] == 0.1
         est = client.post("/api/estimate", json=robot).json()
         assert est["domain"] == "robot_arm" and est["avg_run_usd"] is None and est["basis"] == "no earlier runs yet"
@@ -184,9 +185,20 @@ def test_defaults_and_estimate_cover_both_domains(tmp_path, monkeypatch):
 def test_cli_runs_takes_a_domain(monkeypatch):
     seen = {}
 
-    async def runs(n, strength, hint, noise, hidden, budget, domain="tabular"):
-        seen["runs"] = (n, domain)
+    async def runs(n, strength, hint, noise, hidden, budget, domain="tabular", robot_prompt="default"):
+        seen["runs"] = (n, domain, robot_prompt)
 
     monkeypatch.setattr(cli, "runs", runs)
     cli.main(["runs", "--domain", "robot_arm", "--n", "1"])
-    assert seen["runs"] == (1, "robot_arm")
+    assert seen["runs"] == (1, "robot_arm", "default")
+    cli.main(["runs", "--domain", "robot_arm", "--n", "2", "--robot-prompt", "practice"])
+    assert seen["runs"] == (2, "robot_arm", "practice")
+
+
+async def test_the_practice_prompt_reaches_the_agent_and_the_task(tmp_path, monkeypatch):
+    b, sb, _ = _robot_batch(tmp_path, monkeypatch, robot_prompt="practice")
+    assert b.case.data["config"]["robot_prompt"] == "practice"
+    assert json.loads((b.dir / "task" / "meta.json").read_text())["robot_prompt"] == "practice"
+    prompt = b.domain.task_prompt(b.cfg)
+    assert "Make sure your controller works on the practice setup in `practice.json`" in prompt
+    assert "measure how reliably" not in prompt

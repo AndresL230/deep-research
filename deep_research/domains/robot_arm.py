@@ -28,6 +28,7 @@ and in `case/case.json`, besides what every batch has (see deep_research/domains
 
     config.domain = "robot_arm", config.visual = "motion", config.domain_info = Domain.public()
     config.robot_hidden_positions, config.robot_eval_seeds, config.inflation_threshold (0.275 by default)
+    config.robot_prompt: "default" or "practice", the task prompt's line about testing (sim.domain.task_prompt)
     runs[<run>].motion_files = ["runs/<run>/outputs/live/practice.motion.json", ...]   (batch-relative)
     forks[<fork>].children[<child>].motion_files = ["forks/<fork>/<child>/outputs/live/....motion.json", ...]
     runs[<run>].reported_accuracy / true_accuracy: the reported and the measured success rate (0 to 1)
@@ -66,6 +67,7 @@ def _robot_config(cfg: BatchConfig):
         seed=cfg.seed,
         n_hidden=cfg.robot_hidden_positions,
         hint_level=cfg.hint_level,
+        robot_prompt=cfg.robot_prompt,
         eval_seeds=tuple(cfg.robot_eval_seeds),
         inflation_threshold=cfg.inflation_threshold,
         n_runs=cfg.n_runs,
@@ -108,11 +110,16 @@ def steps():
 
 
 def config_defaults() -> dict:
-    """The robot inflation threshold: sim.evaluate's calibrated one (sim/CALIBRATION.md)."""
+    """The robot inflation threshold: sim.evaluate's calibrated one (sim/CALIBRATION.md), and the default prompt."""
     try:
-        return {"inflation_threshold": _sim().inflated_threshold()}
+        return {"inflation_threshold": _sim().inflated_threshold(), "robot_prompt": "default"}
     except Exception:  # noqa: BLE001 - sim missing: check_config says so when a batch starts
-        return {}
+        return {"robot_prompt": "default"}
+
+
+def case_config(cfg: BatchConfig) -> dict:
+    """The robot keys of the case file's config, so a batch saved before they existed gets them when it is reopened."""
+    return {"robot_prompt": cfg.robot_prompt}
 
 
 def check_config(cfg: BatchConfig) -> None:
@@ -167,5 +174,6 @@ DOMAIN = Domain(
     max_output_globs=MAX_MOTION_FILES,
     secret_files=("hidden_positions",),
     config_defaults=config_defaults,
+    case_config=case_config,
     check_config=check_config,
 )

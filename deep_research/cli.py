@@ -4,6 +4,7 @@
     python -m deep_research.cli runs --n 12         # a full batch, then the split finding
     python -m deep_research.cli runs --n 6 --budget 3
     python -m deep_research.cli runs --domain robot_arm --n 1   # another domain (deep_research/domains/)
+    python -m deep_research.cli runs --domain robot_arm --robot-prompt practice --n 12
     python -m deep_research.cli forks <batch_id> --n 4
     python -m deep_research.cli investigate <batch_id>                  # asks before each experiment
     python -m deep_research.cli investigate <batch_id> --auto-approve   # unattended, small budgets only
@@ -58,10 +59,10 @@ def _reopen(batch_id: str) -> Batch:
 
 
 async def runs(n: int, strength: float, hint: str, noise: float, hidden: float, budget: float,
-               domain: str = domains.DEFAULT) -> None:
+               domain: str = domains.DEFAULT, robot_prompt: str = "default") -> None:
     b = Batch(
         BatchConfig(domain=domain, n_runs=n, trap_strength=strength, hint_level=hint, trap_noise=noise,
-                    trap_hidden_share=hidden, budget_usd=budget),
+                    trap_hidden_share=hidden, budget_usd=budget, robot_prompt=robot_prompt),
         root=BATCHES_DIR,
     )
     print("batch", b.id)
@@ -159,6 +160,8 @@ def main(argv: list[str] | None = None) -> None:
                    help="share of the copies the noise hides from an exact duplicate check")
     r.add_argument("--budget", type=float, default=BatchConfig.model_fields["budget_usd"].default,
                    help="the batch's budget in US dollars")
+    r.add_argument("--robot-prompt", choices=["default", "practice"], default="default",
+                   help="robot_arm only: 'practice' asks the agent to make the controller work on the practice setup")
     f = sub.add_parser("forks")
     f.add_argument("batch_id")
     f.add_argument("--n", type=int, default=4)
@@ -176,6 +179,8 @@ def main(argv: list[str] | None = None) -> None:
     elif a.cmd == "runs":
         # The domain is named only when it is not the default one, so a plain `runs` calls `runs` as before.
         on = {} if a.domain == domains.DEFAULT else {"domain": a.domain}
+        if a.robot_prompt != "default":
+            on["robot_prompt"] = a.robot_prompt
         asyncio.run(runs(a.n, a.strength, a.hint, a.noise, a.hidden, a.budget, **on))
     elif a.cmd == "forks":
         asyncio.run(forks(a.batch_id, a.n))
