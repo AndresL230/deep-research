@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import type { BatchConfig, CaseFile, Costs, Defaults, Estimate } from "../src/api";
 import {
-  HM_ACT, costBar, costGroups, domainDraft, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startBlocked,
+  FORM_DOMAIN, HM_ACT, costBar, costGroups, domainDraft, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startBlocked,
   startPayload,
 } from "../src/batch/home";
 import type { HomeVm } from "../src/batch/model";
@@ -216,16 +216,16 @@ const withDomains: Defaults = {
 const inputs = { html: `<div class="di" data-morph-key="inputs">DATASET ROWS</div>`, label: "Pima diabetes · planted duplicate rows" };
 const pima = { dataset: "pima", target: null, script: null };
 
-describe("the domain picker", () => {
+describe("the domain picker (FORM_DOMAIN null)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("shows no picker when the server lists one domain or none", () => {
-    expect(homeView(vm())).not.toContain("hm-dom");
-    expect(homeView(vm({ defaults: { ...withDomains, domains: withDomains.domains!.slice(1) } }))).not.toContain("hm-dom");
+    expect(homeView(vm(), undefined, null)).not.toContain("hm-dom");
+    expect(homeView(vm({ defaults: { ...withDomains, domains: withDomains.domains!.slice(1) } }), undefined, null)).not.toContain("hm-dom");
   });
 
   it("offers Data science first and chosen, with the tabular form as before", () => {
-    const html = homeView(vm({ defaults: withDomains, draft: tabCfg, advanced: true }), inputs);
+    const html = homeView(vm({ defaults: withDomains, draft: tabCfg, advanced: true }), inputs, null);
     const opts = html.match(/<button[^>]*data-act="hm-domain"[^>]*>[^<]*<\/button>/g)!;
     expect(opts).toHaveLength(2);
     expect(opts[0]).toContain('data-arg="tabular"');
@@ -237,14 +237,14 @@ describe("the domain picker", () => {
     expect(HM_ACT.domain).toBe("hm-domain");
     // Everything below the picker is the form as it was.
     const below = (h: string) => h.slice(h.indexOf('data-morph-key="main"'));
-    expect(below(html)).toBe(below(homeView(vm({ draft: tabCfg, advanced: true }), inputs)));
+    expect(below(html)).toBe(below(homeView(vm({ draft: tabCfg, advanced: true }), inputs, null)));
     expect(html).toContain("DATASET ROWS");
     expect(html).toContain("Pima diabetes · planted duplicate rows");
     for (const f of [...MAIN, ...ADVANCED]) expect(html).toContain(`data-cfg="${f}"`);
   });
 
   it("hides the tabular settings for the robot arm and says what the task is", () => {
-    const html = homeView(vm({ defaults: withDomains, draft: robotCfg, advanced: true }), inputs);
+    const html = homeView(vm({ defaults: withDomains, draft: robotCfg, advanced: true }), inputs, null);
     expect(html).toMatch(/<button[^>]*aria-checked="true" data-act="hm-domain" data-arg="robot_arm"/);
     expect(html).toContain(ROBOT_LINE);
     expect(html).not.toContain("DATASET ROWS");
@@ -260,7 +260,7 @@ describe("the domain picker", () => {
     expect(text(html)).toContain("About $2.40 for 12 runs and 8 forks");
     expect(html).not.toContain("\u2014");
     // Locked while a batch starts.
-    expect(homeView(vm({ defaults: withDomains, draft: robotCfg, starting: true }))).toMatch(/data-act="hm-domain" data-arg="tabular"[^>]* disabled>/);
+    expect(homeView(vm({ defaults: withDomains, draft: robotCfg, starting: true }), undefined, null)).toMatch(/data-act="hm-domain" data-arg="tabular"[^>]* disabled>/);
   });
 
   it("switches the draft between domains, keeping the shared settings", () => {
@@ -303,12 +303,12 @@ describe("the domain picker", () => {
   });
 
   it("starts from the domain chosen last time when the server has it", () => {
-    expect(initialDraft(withDomains, "robot_arm")).toEqual(robotCfg);
-    expect(initialDraft(withDomains, "tabular")).toEqual(tabCfg);
-    expect(initialDraft(withDomains, null)).toEqual(tabCfg);
-    expect(initialDraft(withDomains, "chess")).toEqual(tabCfg);
-    expect(initialDraft({ config: cfg, prices_missing: false }, "robot_arm")).toEqual(cfg);
-    expect(initialDraft(withDomains, null)).not.toBe(tabCfg);
+    expect(initialDraft(withDomains, "robot_arm", null)).toEqual(robotCfg);
+    expect(initialDraft(withDomains, "tabular", null)).toEqual(tabCfg);
+    expect(initialDraft(withDomains, null, null)).toEqual(tabCfg);
+    expect(initialDraft(withDomains, "chess", null)).toEqual(tabCfg);
+    expect(initialDraft({ config: cfg, prices_missing: false }, "robot_arm", null)).toEqual(cfg);
+    expect(initialDraft(withDomains, null, null)).not.toBe(tabCfg);
   });
 
   it("remembers the domain in localStorage, and does without it", () => {
@@ -373,5 +373,33 @@ describe("costBar", () => {
     const html = costBar({}, { simulated: false });
     expect(html).toContain("No cost yet");
     expect(html).not.toContain("NaN");
+  });
+});
+
+describe("a start form locked to one domain (FORM_DOMAIN)", () => {
+  it("offers the robot arm alone in the demo build", () => {
+    expect(FORM_DOMAIN).toBe("robot_arm");
+  });
+
+  it("starts on the form's domain, whatever was remembered", () => {
+    expect(initialDraft(withDomains, null)).toEqual(robotCfg);
+    expect(initialDraft(withDomains, "tabular")).toEqual(robotCfg);
+    expect(initialDraft(withDomains, "robot_arm", "robot_arm")).toEqual(robotCfg);
+    // A server that does not offer it: as before, the remembered domain or the defaults.
+    expect(initialDraft({ config: cfg, prices_missing: false }, null, "robot_arm")).toEqual(cfg);
+    expect(initialDraft({ ...withDomains, domains: withDomains.domains!.slice(1) }, null, "robot_arm")).toEqual(tabCfg);
+  });
+
+  it("shows the domain's line and no picker", () => {
+    const html = homeView(vm({ defaults: withDomains, draft: robotCfg }), inputs, "robot_arm");
+    expect(html).not.toContain('data-act="hm-domain"');
+    expect(html).toContain(ROBOT_LINE);
+    expect(html).not.toContain("DATASET ROWS");
+    expect(homeView(vm({ defaults: withDomains, draft: robotCfg }), inputs)).not.toContain('data-act="hm-domain"');
+  });
+
+  it("falls back to the picker when the server does not offer the domain", () => {
+    const html = homeView(vm({ defaults: withDomains, draft: tabCfg }), inputs, "chess");
+    expect(html.match(/data-act="hm-domain"/g)).toHaveLength(2);
   });
 });

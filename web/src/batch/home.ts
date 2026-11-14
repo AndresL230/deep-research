@@ -13,7 +13,7 @@ import { DEFAULT_PLANTED, chosenTrap } from "./trap";
 export interface HomeInputs { html: string; label: string }
 
 /** The home screen: the batches to open, then one panel to start a new one. Labels only, no prose. */
-export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
+export function homeView(vm: HomeVm, inputs?: HomeInputs, formDomain: string | null = FORM_DOMAIN): string {
   const trap = chosenTrap(vm.defaults, vm.draft?.trap);
   // What the batch runs on, the trap and its strength only mean something in the tabular domain.
   const tabular = isTabular(vm.draft);
@@ -24,7 +24,7 @@ export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
         <h2 class="hm-h2" id="hm-new-h">New batch</h2>
         ${tabular ? `<span class="hm-fixed">${esc(summaryLabel(inputs?.label ?? `Pima diabetes · ${DEFAULT_PLANTED}`, trap))}</span>` : ""}
       </div>
-      ${vm.draft ? domainRow(vm.draft, vm.defaults, vm.starting) : ""}
+      ${vm.draft ? domainRow(vm.draft, vm.defaults, vm.starting, formDomain) : ""}
       ${tabular ? inputs?.html ?? "" : ""}
       ${vm.draft && tabular ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
       ${vm.draft ? mainRow(vm.draft, trap) : mainSkeleton(defaultsFailed(vm))}
@@ -96,6 +96,17 @@ export const HM_ACT = { domain: "hm-domain" } as const;
 /** The domain of a config that names none (every batch saved before domains). */
 export const DEFAULT_DOMAIN = "tabular";
 
+/**
+ * The one domain the start form offers, with no picker: the demo is the robot arm. Saved batches, replays and the cli
+ * are unaffected, and so is the tabular domain itself. null: a picker over every domain the server lists, as before.
+ * When the server does not offer this domain the form falls back to the picker.
+ */
+export const FORM_DOMAIN: string | null = "robot_arm";
+
+/** Whether the server's defaults offer domain `name`. */
+const offered = (d: Defaults | null, name: string | null): name is string =>
+  !!name && (name === DEFAULT_DOMAIN || !!d?.domains?.some((x) => x.name === name));
+
 export const domainOf = (c: Pick<BatchConfig, "domain"> | null | undefined): string => c?.domain || DEFAULT_DOMAIN;
 const isTabular = (c: BatchConfig | null | undefined): boolean => domainOf(c) === DEFAULT_DOMAIN;
 
@@ -131,8 +142,12 @@ export function domainDraft(d: Defaults, name: string, from?: BatchConfig | null
   return out as unknown as BatchConfig;
 }
 
-/** The first draft once the defaults load: the remembered domain's when the server has it, else the defaults. */
-export function initialDraft(d: Defaults, remembered: string | null): BatchConfig {
+/**
+ * The first draft once the defaults load: the form's one domain when it has one and the server offers it, else the
+ * remembered domain's when the server has it, else the defaults.
+ */
+export function initialDraft(d: Defaults, remembered: string | null, formDomain: string | null = FORM_DOMAIN): BatchConfig {
+  if (offered(d, formDomain)) return domainDraft(d, formDomain) ?? { ...d.config };
   const known = remembered && remembered !== DEFAULT_DOMAIN && d.domains?.some((x) => x.name === remembered);
   return (known && domainDraft(d, remembered)) || { ...d.config };
 }
@@ -176,11 +191,18 @@ export function rememberDomain(name: string): void {
 /** Short names for the picker. A domain added later shows its own title. */
 const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm" };
 
-/** The choice of domain, with the chosen one's line under it. Only when the server offers more than one. */
-function domainRow(c: BatchConfig, d: Defaults | null, locked: boolean): string {
+/**
+ * The choice of domain, with the chosen one's line under it. Only when the server offers more than one. With a form
+ * domain the server offers: that domain's line alone, no picker.
+ */
+function domainRow(c: BatchConfig, d: Defaults | null, locked: boolean, formDomain: string | null): string {
   // The default domain first, as the form was before there was a choice; the others in the server's order.
   const list = [...(d?.domains ?? [])].sort((x, y) => Number(y.name === DEFAULT_DOMAIN) - Number(x.name === DEFAULT_DOMAIN));
   if (list.length < 2) return "";
+  if (offered(d, formDomain)) {
+    const only = list.find((x) => x.name === formDomain);
+    return only?.description ? `<div class="hm-dom" data-morph-key="domain"><span class="hm-dom-d">${esc(only.description)}</span></div>` : "";
+  }
   const cur = domainOf(c);
   const chosen = list.find((x) => x.name === cur);
   const opts = list.map((x) => {
