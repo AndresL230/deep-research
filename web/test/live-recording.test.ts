@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import caseRaw from "../../fixtures/robot-live-investigation/case/case.json?raw";
 import type { AgentEvent, CaseFile } from "../src/api";
-import { fixView, forkView, verdictView } from "../src/batch/lanes";
+import { fixView, forkView, investigatorView, verdictView } from "../src/batch/lanes";
 import type { BatchVm } from "../src/batch/model";
 
 const live = JSON.parse(caseRaw) as CaseFile & { config: { recording?: { kind: string } } };
@@ -57,5 +57,22 @@ describe("the live recording's forced arm", () => {
     const html = forkView(vm);
     expect(html).toContain("The robot got better by 30.0 pts. Its claim is honest now.");
     expect(html).not.toContain("can change the report more than the controller");
+  });
+});
+
+describe("the live recording's Investigator page", () => {
+  // It threw on h3, a code hypothesis with no step label and no quoted actions, so the page never rendered.
+  it("renders every competing hypothesis, the code one included", () => {
+    const hs = live.hypotheses;
+    expect(hs.map((h) => h.id)).toEqual(["h1", "h2", "h3"]);
+    expect(hs[2].step_label).toBeNull();
+    let html = "";
+    expect(() => { html = investigatorView(vm); }).not.toThrow();
+    for (const id of ["h1", "h2", "h3"]) expect(html).toContain(`Hypothesis ${id}`);
+    expect(html).toContain("A defect in run r06&#39;s code");
+    expect(html).toContain("Predicts: ");
+    expect(html).toContain("Falsified if: ");
+    // No empty "No example" boxes for hypotheses that never quoted actions.
+    expect(html).not.toContain("No example");
   });
 });

@@ -1721,6 +1721,16 @@ const STOPPABLE = new Set(["running", "investigating", "forking"]);
 const RECENT = 8;
 
 /** The investigator: what it is doing (its events, hypotheses) and the live-only Investigate / Stop actions. */
+/** A hypothesis's title: its step in plain words, or, for a code hypothesis (no step label), the run whose code it
+ *  blames. */
+function hypTitle(h: Hypothesis, words: DomainWords, trap: TrapInfo | null): string {
+  if (h.step_label) {
+    return `<b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b>`;
+  }
+  const what = h.kind === "code" ? (h.run_id ? `A defect in run ${h.run_id}'s code` : "A defect in the code") : "No step named";
+  return `<b class="ln-lit-word">${esc(what)}</b>`;
+}
+
 export function investigatorView(vm: BatchVm): string {
   const c = vm.case;
   const phase = String(c.phase ?? "config");
@@ -1758,9 +1768,15 @@ export function investigatorView(vm: BatchVm): string {
   const hypHtml = hyps.length
     ? `<div class="ln-hyps" data-morph-list>${hyps.map((h, i) =>
       `<div class="ln-card ln-hyp" data-morph-key="hyp-${attr(String(h.at ?? i))}">` +
-      `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis</span><b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b></div>` +
+      `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis${h.id ? ` ${esc(h.id)}` : ""}</span>${hypTitle(h, words, trap)}</div>` +
+      (h.sentence && h.id ? `<p class="ln-hyp-e">${esc(h.sentence)}</p>` : "") +
       `<p class="ln-hyp-e">${esc(h.evidence)}</p>` +
-      `<div class="ln-cmp ln-cmp--sm">${code("Honest", h.honest_action, "honest")}${code("Inflated", h.inflated_action, "inflated")}</div>` +
+      (h.prediction ? `<p class="ln-note">Predicts: ${esc(h.prediction)}</p>` : "") +
+      (h.falsified_if ? `<p class="ln-note">Falsified if: ${esc(h.falsified_if)}</p>` : "") +
+      // Competing hypotheses (h1, h2, ...) carry no quoted actions; older single hypotheses always do.
+      (h.honest_action || h.inflated_action
+        ? `<div class="ln-cmp ln-cmp--sm">${code("Honest", h.honest_action ?? null, "honest")}${code("Inflated", h.inflated_action ?? null, "inflated")}</div>`
+        : "") +
       `</div>`).join("")}</div>`
     : "";
 
