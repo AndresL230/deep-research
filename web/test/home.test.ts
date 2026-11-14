@@ -22,9 +22,13 @@ const vm = (over: Partial<HomeVm> = {}): HomeVm => ({
 });
 
 const startTag = (html: string) => html.match(/<button[^>]*data-act="start"[^>]*>/)![0];
+/** The markup's visible text: tags dropped, whitespace collapsed. */
+const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+const MAIN = ["n_runs", "trap_strength", "hint_level", "budget_usd"];
+const ADVANCED = ["trap_noise", "model_hint", "holdout_fraction", "seed", "forks_per_choice", "inflation_threshold", "analyst_model", "investigator_model"];
 
 describe("homeView", () => {
-  it("lists batches with their kind and open actions", () => {
+  it("shows batches as cards with their kind and open actions", () => {
     const html = homeView(vm());
     expect(html).toContain('data-act="open-batch" data-arg="demo-batch"');
     expect(html).toContain('data-morph-key="b-20261114"');
@@ -33,71 +37,157 @@ describe("homeView", () => {
     expect(html).toContain("data-morph-list");
   });
 
-  it("shows loading, empty and error states for the list", () => {
+  it("shows loading, empty and error states for the batches", () => {
     expect(homeView(vm({ batches: { state: "loading" } }))).toContain("Loading batches");
     expect(homeView(vm({ batches: { state: "ready", value: [] } }))).toContain("No batches yet");
     const err = homeView(vm({ batches: { state: "error", message: "Couldn't reach the server <x>" } }));
     expect(err).toContain('data-act="home"');
+    expect(err).toContain(">Retry<");
     expect(err).toContain("&lt;x&gt;");
   });
 
-  it("renders a data-cfg input for every editable config field, with the draft's values", () => {
-    const html = homeView(vm());
-    for (const f of ["trap_strength", "trap_noise", "hint_level", "model_hint", "n_runs", "forks_per_choice", "analyst_model",
-      "investigator_model", "budget_usd", "inflation_threshold", "holdout_fraction", "seed"]) {
-      expect(html).toContain(`data-cfg="${f}"`);
+  it("has no lead, no help paragraphs and no prose: labels and readouts only", () => {
+    for (const html of [homeView(vm()), homeView(vm({ advanced: true }))]) {
+      expect(html).not.toContain("hm-lead");
+      expect(html).not.toContain("hm-help");
+      // The only paragraphs are the one-line estimate and status lines in the footer.
+      for (const p of html.match(/<p\b[^>]*>/g) ?? []) expect(p).toMatch(/class="hm-(est|warn|errtext)"/);
+      expect(html).not.toMatch(/<(fieldset|legend|details)\b/);
     }
+    expect(text(homeView(vm({ advanced: true })))).toBe(
+      "Batches demo-batch Replay b-20261114 Live New batch Pima diabetes · planted duplicate rows "
+      + "Runs Duplicated rows 50% Hint None Light Budget $ "
+      + "Advanced Reset Trap noise 0.00 Holdout fraction 20% Inflation threshold 8 pts Model hint Random forest Any "
+      + "Forks per arm Seed Analyst model Investigator model "
+      + "About $2.40 for 12 runs and 8 forks Start batch");
+  });
+
+  it("shows the four main settings with the draft's values, and the dataset and trap as one fixed line", () => {
+    const html = homeView(vm());
+    for (const f of MAIN) expect(html).toContain(`data-cfg="${f}"`);
+    expect(html).toMatch(/type="number"[^>]*min="1" max="24"[^>]*value="12" data-cfg="n_runs"/);
+    expect(html).toMatch(/type="range" min="0" max="1" step="0.05" value="0.5"[^>]*data-cfg="trap_strength"/);
+    expect(html).toContain(">50%</output>");
+    expect(html).toContain('<input type="radio" name="hint_level" data-cfg="hint_level" value="none" checked>');
+    expect(html).toContain('<input type="radio" name="hint_level" data-cfg="hint_level" value="light">');
+    expect(html).toMatch(/value="10" data-cfg="budget_usd"/);
+    expect(html).toContain("Pima diabetes");
+    expect(html).toContain("planted duplicate rows");
     expect(html).not.toContain('data-cfg="dataset"');
-    expect(html).toContain("50% of rows duplicated");
-    expect(html).toContain("8 pts");
-    expect(html).toContain(`value="${cfg.analyst_model}"`);
-    expect(html).toMatch(/<option value="random_forest" selected>/);
-    expect(html).toContain("A run counts as inflated when reported accuracy beats true accuracy by more than this");
+    expect(html).not.toContain('data-cfg="trap"');
+    expect(homeView(vm({ draft: { ...cfg, hint_level: "light", trap_strength: 0.35 } })))
+      .toContain('<input type="radio" name="hint_level" data-cfg="hint_level" value="light" checked>');
+    expect(homeView(vm({ draft: { ...cfg, trap_strength: 0.35 } }))).toContain(">35%</output>");
+  });
+
+  it("hides the advanced settings until vm.advanced, behind a toggle", () => {
+    const closed = homeView(vm());
+    expect(closed).toMatch(/<button[^>]*data-act="toggle-advanced" aria-expanded="false"[^>]*>/);
+    for (const f of ADVANCED) expect(closed).not.toContain(`data-cfg="${f}"`);
+    expect(closed).not.toContain('data-act="reset-config"');
+    expect(homeView(vm({ advanced: false }))).toBe(closed);
+
+    const open = homeView(vm({ advanced: true }));
+    expect(open).toMatch(/<button[^>]*data-act="toggle-advanced" aria-expanded="true"[^>]*>/);
+    for (const f of [...MAIN, ...ADVANCED]) expect(open).toContain(`data-cfg="${f}"`);
+    expect(open).toContain('data-act="reset-config"');
+    expect(open).toContain("8 pts");
+    expect(open).toContain(`value="${cfg.analyst_model}"`);
+    expect(open).toContain(`value="${cfg.investigator_model}"`);
+    expect(open).toContain('<input type="radio" name="model_hint" data-cfg="model_hint" value="random_forest" checked>');
+    expect(open).toMatch(/min="1" max="8"[^>]*data-cfg="forks_per_choice"/);
   });
 
   it("shows a skeleton while the defaults load", () => {
-    const html = homeView(vm({ draft: null, defaults: null, estimate: null }));
-    expect(html).toContain("Loading the defaults");
+    const html = homeView(vm({ batches: { state: "loading" }, draft: null, defaults: null, estimate: null, advanced: true }));
+    expect(html).toContain("hm-skel");
+    expect(html).toContain("Loading defaults");
     expect(html).not.toContain("data-cfg=");
+    expect(html).toMatch(/<button[^>]*data-act="toggle-advanced" aria-expanded="false"[^>]* disabled>/);
     expect(startTag(html)).toContain("disabled");
+    // The list has settled without defaults: they failed, so nothing keeps spinning.
+    const failed = homeView(vm({ batches: { state: "error", message: "down" }, draft: null, defaults: null, estimate: null }));
+    expect(failed).toContain("Defaults did not load");
+    expect(failed).not.toContain("Loading defaults");
+    expect(startTag(failed)).toContain("disabled");
   });
 
-  it("shows the estimate, and no estimate without earlier runs", () => {
-    const html = homeView(vm());
-    expect(html).toContain("$1.44");
-    expect(html).toContain("$2.40");
-    expect(html).toContain("average of earlier runs");
+  it("shows the estimate as one line", () => {
+    expect(text(homeView(vm()))).toContain("About $2.40 for 12 runs and 8 forks");
+    expect(homeView(vm())).not.toContain('data-tone="bad"');
+    expect(text(homeView(vm({ draft: { ...cfg, n_runs: 1, forks_per_choice: 2 } })))).toContain("for 1 run and 4 forks");
     const none = homeView(vm({ estimate: { state: "ready", value: { ...est, avg_run_usd: null, runs_usd: null, forks_usd: null, total_usd: null, basis: "no earlier runs yet" } } }));
-    expect(none).toContain("no earlier runs to estimate from");
+    expect(none).toContain("No earlier runs to estimate from");
+    expect(homeView(vm({ estimate: { state: "loading" } }))).toContain("Estimating");
+    expect(homeView(vm({ estimate: null }))).toContain("Estimating");
+    const failed = homeView(vm({ estimate: { state: "error", message: "HTTP 500 <oops>" } }));
+    expect(failed).toContain("No estimate. HTTP 500 &lt;oops&gt;");
+    expect(startTag(failed)).not.toContain("disabled");
+    for (const html of [homeView(vm()), none, failed]) expect(html.match(/class="hm-est"/g)).toHaveLength(1);
   });
 
-  it("warns that the cap cannot be enforced when prices are missing", () => {
-    expect(homeView(vm({ defaults: { config: cfg, prices_missing: true } }))).toContain("budget cap cannot be enforced");
-    expect(homeView(vm())).not.toContain("cannot be enforced");
+  it("shows one short line when prices are missing", () => {
+    expect(homeView(vm({ defaults: { config: cfg, prices_missing: true } }))).toContain("Prices missing, budget not enforced");
+    expect(homeView(vm())).not.toContain("Prices missing");
+  });
+
+  it("names a key only when it is missing", () => {
+    const ok = homeView(vm());
+    expect(ok).not.toContain("key missing");
+    expect(ok).not.toContain("key set");
+    expect(ok).not.toContain("hm-why");
+    expect(homeView(vm({ health: null }))).not.toContain("key missing");
+
+    const noDaytona = homeView(vm({ health: { ok: true, keys: { anthropic: true, daytona: false } } }));
+    expect(noDaytona).toContain("Daytona key missing");
+    expect(noDaytona).not.toContain("Anthropic key missing");
+    const noAnthropic = homeView(vm({ health: { ok: true, keys: { anthropic: false, daytona: true } } }));
+    expect(noAnthropic).toContain("Anthropic key missing");
+    expect(noAnthropic).not.toContain("Daytona key missing");
+    const neither = homeView(vm({ health: { ok: false, keys: { anthropic: false, daytona: false } } }));
+    expect(neither).toContain("Anthropic key missing");
+    expect(neither).toContain("Daytona key missing");
   });
 
   it("enables Start only when keys are set, the estimate fits and nothing is in flight", () => {
     expect(startBlocked(vm())).toBeNull();
     expect(startTag(homeView(vm()))).not.toContain("disabled");
+    expect(startTag(homeView(vm({ health: null })))).not.toContain("disabled");
 
     const over = vm({ estimate: { state: "ready", value: { ...est, total_usd: 12, over_budget: true } } });
-    expect(startBlocked(over)).not.toBeNull();
-    expect(homeView(over)).toContain("Over the $10.0 budget");
+    expect(startBlocked(over)).toBe("Over budget");
+    expect(startTag(homeView(over))).toContain("disabled");
+    expect(homeView(over)).toContain('<span class="hm-why" data-morph-key="why">Over budget</span>');
+    expect(homeView(over)).toMatch(/<p class="hm-est"[^>]*data-tone="bad"/);
+    expect(text(homeView(over))).toContain("About $12.0 for 12 runs and 8 forks");
 
     const noKey = vm({ health: { ok: true, keys: { anthropic: true, daytona: false } } });
+    expect(startBlocked(noKey)).toBe("Daytona key missing");
     expect(startTag(homeView(noKey))).toContain("disabled");
-    expect(homeView(noKey)).toContain("Daytona key missing");
-    expect(homeView(noKey)).toContain("Live batches cannot start");
+    expect(homeView(noKey)).toContain('<span class="hm-why" data-morph-key="why">Daytona key missing</span>');
 
-    const starting = homeView(vm({ starting: true, error: "HTTP 500 & more" }));
+    const starting = homeView(vm({ starting: true, advanced: true }));
+    expect(startBlocked(vm({ starting: true }))).not.toBeNull();
     expect(startTag(starting)).toContain("disabled");
-    expect(starting).toContain("HTTP 500 &amp; more");
-    expect(starting).toContain('data-act="reset-config"');
+    expect(starting).toContain(">Starting<");
+    expect(starting).not.toContain("hm-why");
+    expect(starting).toMatch(/<button[^>]*data-act="reset-config" disabled>/);
+    expect(homeView(vm({ advanced: true }))).toMatch(/<button[^>]*data-act="reset-config">/);
+
+    expect(startBlocked(vm({ draft: null }))).not.toBeNull();
+  });
+
+  it("shows the start error near Start", () => {
+    const html = homeView(vm({ error: "HTTP 500 & more" }));
+    expect(html).toContain('role="alert">HTTP 500 &amp; more</p>');
+    expect(html.indexOf("HTTP 500")).toBeGreaterThan(html.indexOf('data-act="start"'));
+    expect(homeView(vm())).not.toContain('role="alert"');
   });
 
   it("never uses an em dash", () => {
-    expect(homeView(vm())).not.toContain("\u2014");
-    expect(homeView(vm({ draft: null }))).not.toContain("\u2014");
+    for (const v of [vm(), vm({ advanced: true }), vm({ draft: null }), vm({ health: { ok: false, keys: { anthropic: false, daytona: false } } })]) {
+      expect(homeView(v)).not.toContain("\u2014");
+    }
   });
 });
 
