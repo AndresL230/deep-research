@@ -103,6 +103,21 @@ export function claimHeadline(c: Pick<CaseFile, "runs" | "config">): string | nu
   return `${lead} ${wholePct(claimed)}. ${truth}`;
 }
 
+/**
+ * "Starting point: controller.py as handed to every run, before any agent changed it. Measured 50% (10 of 20)."
+ * The code the runs started from, scored unchanged: what a run's own measured rate is an improvement on, or not.
+ * Null when the batch has no baseline (the runs start from nothing, or it was saved before baselines existed).
+ */
+export function baselineLine(c: Pick<CaseFile, "baseline" | "config">): string | null {
+  const b = c.baseline;
+  if (!b) return null;
+  const lead = `Starting point: ${b.name} as handed to every run, before any agent changed it.`;
+  if (b.status === "scoring") return `${lead} Being measured.`;
+  if (b.status === "failed" || b.true_accuracy == null) return `${lead} It could not be measured${b.reason ? `: ${cleanReason(b.reason)}` : "."}`;
+  const counts = b.successes != null && b.n != null ? ` (${b.successes} of ${b.n})` : "";
+  return `${lead} ${domainWords(c.config).truth_label} ${wholePct(b.true_accuracy)}${counts}.`;
+}
+
 /** The analyst models the batch's runs use, in run order, or [] when it used one (or names none). */
 export function batchModels(vm: BatchVm): string[] {
   const models = [...new Set(sortedRuns(vm).map((r) => r.model).filter((m): m is string => !!m))];
@@ -259,8 +274,10 @@ export function wallView(vm: BatchVm): string {
   const multiModel = batchModels(vm).length > 0;
   // Once every run is in: the claim against the truth on top, the counts under it as a quieter line.
   const headline = claimHeadline(vm.case);
+  const baseline = baselineLine(vm.case);
   const head = `<div class="bw-head">`
     + (headline ? `<p class="bw-headline" data-morph-key="headline">${esc(headline)}</p>` : "")
+    + (baseline ? `<p class="bw-baseline" data-morph-key="baseline">${esc(baseline)}</p>` : "")
     + `<p class="bw-sum${headline ? " bw-sum--quiet" : ""}" aria-live="polite">${esc(summaryLine(s))}</p>`
     + (byModel ? `<p class="bw-sum-models" data-morph-key="by-model">${esc(byModel)}</p>` : "")
     + (s.total ? `<div class="bw-mix" aria-hidden="true">${(["honest", "inflated", "unclear", "failed", "running", "queued"] as const)

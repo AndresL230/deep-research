@@ -8,6 +8,8 @@
 .bw-headline { margin:0; font-size:22px; line-height:1.3; font-weight:600; letter-spacing:-0.015em; color:var(--fg); text-wrap:pretty; font-variant-numeric:tabular-nums; }
 .bw-sum { margin:0; font-size:15px; font-weight:600; letter-spacing:-0.01em; color:var(--fg); font-variant-numeric:tabular-nums; }
 .bw-sum--quiet { font-size:13px; font-weight:500; letter-spacing:0; color:var(--fg-70); }
+/* The code the runs started from, scored unchanged: the number each run's own rate is read against. */
+.bw-baseline { margin:0; font-size:13px; font-weight:500; color:var(--fg-70); font-variant-numeric:tabular-nums; text-wrap:pretty; }
 @container (max-width: 480px) { .bw-headline { font-size:18px; } }
 /* The mix of runs as one bar: honest, inflated, failed, still running, not started. */
 .bw-mix { display:flex; gap:2px; height:6px; margin:2px 0 4px; border-radius:3px; overflow:hidden; }

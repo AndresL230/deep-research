@@ -159,6 +159,19 @@ def score_run(outputs_dir: Path, task: Any, inflation_threshold: float, evaluate
                        record_dir=folder, motion_prefix=prefix, printed_positions=printed)
 
 
+def score_code(task: Any, code: Path, evaluate_fn=None) -> dict:
+    """One controller file on the hidden positions, with no agent (sim.domain.score_controller). Nothing is recorded."""
+    return _sim().score_controller(task, code, evaluate_fn=evaluate_fn)
+
+
+def baseline_code(cfg: BatchConfig, task: Any) -> tuple[Path, str] | None:
+    """The controller the agents were handed, when the batch starts from one: the upload or the colleague's."""
+    if cfg.robot_start == "blank":
+        return None
+    name = _sim().read_meta(task).get("controller_name") if cfg.robot_start == "uploaded" else None
+    return task.controller, name or "controller.py"
+
+
 def steps():
     from ..analysis import Steps
 
@@ -293,4 +306,6 @@ DOMAIN = Domain(
     trace_run=lambda task, run_dir, n: _sim().trace_run(task, run_dir, n),
     fix_file=f"{VM_WORKSPACE}/controller.py",
     fix_output="controller.py",
+    score_code=score_code,
+    baseline_code=baseline_code,
 )

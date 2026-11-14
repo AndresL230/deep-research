@@ -25,7 +25,7 @@ describe("the demo case file matches the types", () => {
   it("has every section and a known phase", () => {
     // The demo was saved before the diagnosis, the trace comparison, the rubric and the commentary existed: those are absent and read
     // as empty.
-    const later = ["trace", "fix", "trace_comparison", "rubric", "feed"];
+    const later = ["trace", "fix", "trace_comparison", "rubric", "feed", "baseline"];
     const saved = CASE_SECTIONS.filter((s) => !later.includes(s));
     expect(Object.keys(demo).sort()).toEqual([...saved].sort());
     for (const k of Object.keys(demo)) expect(CASE_SECTIONS).toContain(k);

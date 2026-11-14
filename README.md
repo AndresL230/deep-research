@@ -17,7 +17,8 @@ HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amaz
 | Split finder | Labels each action, finds the label honest runs do before the split and inflated runs skip | `analysis.py` |
 | Fork experiment | Rebuild the run just before its split, fork the VM, then run N copies in each arm: `control` unchanged, `forced` with the step done for it, and by default `placebo` (a harmless command, so `forced` is not the only arm with an extra tool call in its history) and `show` (told what `forced` fixes, left to decide) | `batch.py`, `forks.py` |
 | Investigator | Deepagent with `step-tagger` and `hypothesis` subagents, the `method-errors` skill, and an approval gate on `request_forks` | `agents/investigator.py` |
-| Diagnosis and fix | The investigator's `code-tracer` subagent re-runs a failing run's controller on the hidden positions with recording on, turns each recording into timestamped symptoms (`sim/symptoms.py`) and names the line of `controller.py` behind them; the investigator then proposes a patch and a second fork experiment (`control`, `placebo`, `fixed`) tests it from the same moment of the same run | `agents/investigator.py`, `sim/symptoms.py`, `forks.py` |
+| Diagnosis and fix | The investigator's `code-tracer` subagent re-runs a failing run's controller on the hidden positions with recording on, turns each recording into timestamped symptoms (`sim/symptoms.py`) and names the line of `controller.py` behind them; the investigator then proposes a patch, and the patched controller is run on the hidden positions next to the unpatched one, on the server with no agent in between (a fork copy's agent may undo an edit it did not make) | `agents/investigator.py`, `sim/symptoms.py`, `batch.py` |
+| Baseline | A robot batch that hands the agents a controller (the colleague's or an upload) runs that controller unchanged on the hidden positions, so each run's measured rate can be read against where it started | `batch.py`, `sim/domain.py` |
 | Case file | One JSON file per batch with everything the investigator knows. It is also the UI's data source | `case_file.py` |
 | Costs | Tokens from every model response, VM time, budget guard | `costs.py`, `prices.json` |
 | Lab page | Tiny web page inside each VM showing the agent's latest chart. The server proxies it (no Daytona preview warning); the UI reads a live run's charts through it | `lab_page/server.py` |
@@ -341,6 +342,7 @@ Every arm starts from the same moment of the same run and differs only in what i
 runs three arms. Only `deduplicate` has an intervention today: a batch that splits on any other step reports the
 finding and the fork experiment refuses with its reason. A fix experiment (`forks[*].kind == "fix"`, the one that
 tests the investigator's proposed patch) has a `fixed` arm, the run with the patch applied, in place of `forced`.
+Only a domain that cannot score code without a run uses it: a robot batch measures the patched controller directly.
 
 ## Next
 
