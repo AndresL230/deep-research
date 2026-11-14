@@ -30,6 +30,8 @@ from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
 from .events import EventLog, current_step, events_from_update, read_events
+from .evidence import describe as describe_evidence
+from .evidence import verdict_evidence
 from .domains import actions_from_events, build_task, intervention_for, score_run
 from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
 
@@ -189,6 +191,7 @@ class Batch:
         self.dir = root / self.id
         self.runs_dir = self.dir / "runs"
         self.forks_dir = self.dir / "forks"
+        self.case_view = self.dir / "case" / "view" / "case.json"
         fresh = not self.dir.exists()
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         if resume:
@@ -202,7 +205,8 @@ class Batch:
                 if fresh:
                     shutil.rmtree(self.dir, ignore_errors=True)
                 raise
-        self.case = CaseFile(self.dir / "case" / "case.json", labels=self.domain.labels())
+        # The investigator reads the case through `case/view/case.json` (case_file.investigator_view), never case.json.
+        self.case = CaseFile(self.dir / "case" / "case.json", labels=self.domain.labels(), view_path=self.case_view)
         self.tracker = CostTracker(budget_usd=cfg.budget_usd)
         # A reopened batch (Batch.resume, cli forks, cli investigate) has spend on record already.
         self.tracker.restore(self.case.data.get("costs") or {})
@@ -800,6 +804,10 @@ class Batch:
                              f"({what}; {a['failed']} failed).")
             else:
                 lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
+        if kind != "fix" and "control" in arms and "forced" in arms:
+            # How strong this is, so the verdict's words can follow it (evidence.py).
+            lines.append(describe_evidence(verdict_evidence(
+                {a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]} for a in ("control", "forced")})))
         if kind == "fix":
             self.case.update_fix(status="tested", fork_id=fork_id,
                                  result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})

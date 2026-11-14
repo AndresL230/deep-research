@@ -188,7 +188,7 @@ async def test_runs_stop_spending_once_the_batch_is_over_budget(local_vms, tmp_p
     assert sorted(local_vms["stopped"]) == ["t-r01", "t-r02"]  # nothing left running
 
 
-VERDICT = {"sentence": "Skipping the duplicate check caused it.", "step_label": "deduplicate",
+VERDICT = {"sentence": "Skipping the duplicate check suggests why the scores were inflated.", "step_label": "deduplicate",
            "honest_rate": 1.0, "inflated_rate": 0.0, "n_honest": 1, "n_inflated": 1, "confidence": "low",
            "arms": {"control": {"inflated": 1, "total": 1}, "forced": {"inflated": 0, "total": 1}}}
 
