@@ -1,49 +1,50 @@
-/** Orro's logo: the wordmark and the symbol, drawn as geometry (no font), so they are the same at every size.
+/** Orro's logo: the Fault symbol and the wordmark, as outlines (no font), so they are the same at every size.
  *
- *  Units are hundredths of the letter height. The wordmark ("Soft" in the logo study): two circular o's whose top
- *  and bottom run 10% thinner than their sides, two r's with a stroke of 24 and an arm on a circle of radius 21 that
- *  ends in a round cap just past the top. The symbol ("two o's, linked"): two rings of radius 24 (centreline) and
- *  stroke 17, 34 apart, linked like a chain; the left ring passes over at the top, the right one at the bottom, and
- *  each pass cuts the ring under it by a 5.5 gap. It is baked into one outline (no SVG mask, so no ids to keep
- *  unique), shown on a purple tile. Both take their colour from `currentColor`. */
+ *  The symbol: a run's steps drawn as three bars, broken by a 60° fault where the far side slipped exactly one layer.
+ *  A fault is an error; one layer is an off-by-one; three bars cut by a slash read as ≢, not identical. On a 256 grid:
+ *  bars 44.6 high, gaps 15.9 (between bars and at the fault), the slip one pitch (60.5) along the fault. At 24 px and
+ *  below the small cut is used: its gaps are wider so they stay open.
+ *  The wordmark: drawn from scratch, x-height 100 units: squarish o's with thinner tops and bottoms, and a small spur
+ *  where each r's arm leaves its stem.
+ *  In a lockup the symbol is twice the x-height tall and the gap is 0.41 x-height (one bar), the word centred on it.
+ *  Everything takes its colour from `currentColor`. The full kit and guidelines: ~/Desktop/orro-identity-kit. */
 import "./brand.css";
 
-const f = (n: number): number => Math.round(n * 100) / 100;
+const FAULT = "M202.43 15.00L223.44 15.00L223.44 59.56L176.70 59.56ZM32.56 120.04L32.56 75.48L149.13 75.48L123.41 120.04ZM223.44 120.04L141.78 120.04L167.51 75.48L223.44 75.48ZM32.56 180.52L32.56 135.96L114.22 135.96L88.49 180.52ZM223.44 180.52L106.87 180.52L132.59 135.96L223.44 135.96ZM53.57 241.00L32.56 241.00L32.56 196.44L79.30 196.44Z";
+const FAULT_BOX = "32.56 15.00 190.88 226.00";
+const FAULT_SMALL = "M206.45 12.00L227.38 12.00L227.38 55.09L181.58 55.09ZM28.62 118.06L28.62 74.97L147.14 74.97L122.26 118.06ZM227.38 118.06L145.22 118.06L170.10 74.97L227.38 74.97ZM28.62 181.03L28.62 137.94L110.78 137.94L85.90 181.03ZM227.38 181.03L108.86 181.03L133.74 137.94L227.38 137.94ZM49.55 244.00L28.62 244.00L28.62 200.91L74.42 200.91Z";
+const FAULT_SMALL_BOX = "28.62 12.00 198.76 232.00";
+const WORD = "M50.00 -1.50C81.00 -1.50 100.00 18.07 100.00 50.00C100.00 81.93 81.00 101.50 50.00 101.50C19.00 101.50 0.00 81.93 0.00 50.00C0.00 18.07 19.00 -1.50 50.00 -1.50ZM50.00 18.00C67.36 18.00 78.00 30.16 78.00 50.00C78.00 69.84 67.36 82.00 50.00 82.00C32.64 82.00 22.00 69.84 22.00 50.00C22.00 30.16 32.64 18.00 50.00 18.00ZM112 100V0H134V12C139 3 147 -1.5 158 -1.5H172V18H160C145 18 134 27 134 44V100ZM180 100V0H202V12C207 3 215 -1.5 226 -1.5H240V18H228C213 18 202 27 202 44V100ZM294.00 -1.50C325.00 -1.50 344.00 18.07 344.00 50.00C344.00 81.93 325.00 101.50 294.00 101.50C263.00 101.50 244.00 81.93 244.00 50.00C244.00 18.07 263.00 -1.50 294.00 -1.50ZM294.00 18.00C311.36 18.00 322.00 30.16 322.00 50.00C322.00 69.84 311.36 82.00 294.00 82.00C276.64 82.00 266.00 69.84 266.00 50.00C266.00 30.16 276.64 18.00 294.00 18.00Z";
+/** The wordmark's box: 344 wide, the x-height of 100 plus 1.5 of overshoot on the round letters, top and bottom. */
+const WORD_BOX = "0 -1.5 344 103";
+/** Width over height of the symbol's box. */
+const FAULT_RATIO = 0.8446;
 
-/** An o: an outer circle with an inner ellipse 10% taller than a circle, so the horizontals read thinner. */
-function ring(cx: number, r: number, w: number): string {
-  const rx = r - w, ry = r - w * 0.9;
-  return `<path fill-rule="evenodd" d="M${f(cx - r)} 50a${r} ${r} 0 1 0 ${f(2 * r)} 0a${r} ${r} 0 1 0 ${f(-2 * r)} 0Z M${f(cx - rx)} 50a${f(rx)} ${f(ry)} 0 1 0 ${f(2 * rx)} 0a${f(rx)} ${f(ry)} 0 1 0 ${f(-2 * rx)} 0Z"/>`;
-}
+const r2 = (n: number): number => Math.round(n * 100) / 100;
 
-/** An r: a flat-bottomed stem whose centre is at x `a`, then an arm on a circle of radius `r` that touches the top,
- *  swept 10 degrees past the top and ended with a round cap. */
-function arr(a: number, w: number, r: number): string {
-  const cy = w / 2 + r, t = (280 * Math.PI) / 180;
-  const ex = a + r + r * Math.cos(t), ey = cy + r * Math.sin(t);
-  const line = `fill="none" stroke="currentColor" stroke-width="${w}"`;
-  return `<path d="M${a} 100V${cy}" ${line}/><path d="M${a} ${cy}A${r} ${r} 0 0 1 ${f(ex)} ${f(ey)}" ${line} stroke-linecap="round"/>`;
-}
-
-const WORD_BODY = ring(51.5, 51.5, 24) + arr(124, 24, 21) + arr(176, 24, 21) + ring(266.5, 51.5, 24);
-/** The wordmark's box: 318 wide by 103 tall (the o's overshoot the baseline and the top by 1.5). */
-const WORD_BOX = "0 -1.5 318 103";
-
-/** The linked o's as one outline, centred in 0.5..99.5. Generated from the geometry above (shapely: the two rings,
- *  minus each over-pass widened by the gap, plus the over-passes). */
-const LINKED = "M36.03 34.80L35.27 34.67L34.33 34.56L33.38 34.50L32.43 34.51L31.48 34.57L30.54 34.70L29.60 34.88L28.68 35.11L27.78 35.41L26.89 35.75L26.03 36.16L25.19 36.61L24.39 37.11L23.61 37.66L22.87 38.26L22.17 38.91L21.51 39.59L20.90 40.31L20.33 41.07L19.80 41.87L19.33 42.69L18.91 43.55L18.54 44.42L18.22 45.32L17.96 46.23L17.76 47.16L17.62 48.10L17.53 49.05L17.50 50L17.53 50.95L17.62 51.90L17.76 52.84L17.88 53.40L18.01 53.95L18.17 54.50L18.34 55.04L18.54 55.58L18.75 56.11L18.99 56.63L19.24 57.14L19.51 57.64L19.80 58.13L20.11 58.61L20.44 59.08L20.78 59.54L21.14 59.98L21.77 60.69L22.31 61.23L22.87 61.74L23.46 62.22L24.07 62.67L24.71 63.10L25.36 63.49L25.86 63.76L26.54 64.09L27.24 64.39L27.96 64.66L28.68 64.89L29.42 65.08L30.16 65.24L30.91 65.36L31.67 65.44L32.30 65.48L32.79 66.54L33.36 67.67L33.94 68.74L34.53 69.74L35.20 70.81L35.89 71.82L36.63 72.84L37.34 73.76L38.12 74.70L38.96 75.65L39.76 76.49L40.62 77.36L41.55 78.22L42.42 78.98L43.37 79.76L44.30 80.47L43.19 80.86L42.43 81.10L40.90 81.53L39.34 81.88L37.77 82.15L36.18 82.34L34.59 82.46L33 82.50L31.40 82.46L30.21 82.38L29.42 82.30L27.84 82.09L26.27 81.80L24.72 81.43L23.18 80.98L21.68 80.46L20.19 79.87L18.74 79.21L17.68 78.66L16.63 78.08L15.61 77.46L14.61 76.80L13.32 75.86L12.38 75.12L11.47 74.35L10.59 73.54L9.74 72.70L8.65 71.53L7.88 70.62L7.13 69.68L6.43 68.71L5.76 67.72L5.12 66.71L4.34 65.32L3.79 64.26L3.29 63.17L2.82 62.07L2.40 60.95L2.02 59.82L1.68 58.67L1.29 57.12L1.05 55.95L0.85 54.77L0.66 53.19L0.56 51.99L0.51 50.80L0.50 49.60L0.54 48.41L0.62 47.21L0.74 46.02L0.91 44.84L1.12 43.66L1.47 42.10L1.78 40.95L2.27 39.43L2.68 38.30L3.13 37.20L3.62 36.10L4.15 35.03L4.72 33.98L5.33 32.95L5.98 31.94L6.66 30.96L7.38 30L8.39 28.77L9.19 27.88L10.02 27.02L10.88 26.19L11.77 25.39L13 24.38L13.96 23.66L14.94 22.98L15.95 22.33L16.98 21.72L18.03 21.15L19.10 20.62L20.56 19.97L21.68 19.54L22.80 19.14L23.95 18.79L25.49 18.38L26.66 18.12L27.84 17.91L28.62 17.80L29.81 17.66L31.01 17.56L32.20 17.51L33 17.50L34.20 17.52L35.39 17.59L36.58 17.70L37.77 17.85L38.94 18.05L39.73 18.20L40.74 18.44L41.80 18.72L42.79 19.01L43.86 19.37L44.89 19.75L45.94 20.19L46.97 20.66L47.90 21.12L48.90 21.65L49.84 22.21L50.80 22.81L51.66 23.39L52.54 24.03L53.44 24.73L54.23 25.39L55.05 26.12L55.87 26.91L56.59 27.64L57.33 28.45L58.06 29.31L58.68 30.09L59.28 30.88L59.85 31.69L60.40 32.52L60.92 33.37L61.41 34.23L61.90 35.14L62.34 36.03L62.75 36.93L63.14 37.84L63.50 38.77L63.86 39.80L64.16 40.75L64.42 41.71L64.67 42.71L64.88 43.68L65.06 44.65L65.20 45.64L65.32 46.62L65.41 47.61L65.47 48.60L65.50 49.60L65.49 50.59L65.46 51.59L65.38 52.79L65.30 53.58L65.20 54.37L65.02 55.56L64.79 56.73L64.62 57.51L64.32 58.67L64.06 59.56L63.37 59.32L62.65 59.01L62.04 58.68L61.37 58.27L60.74 57.80L60.15 57.28L59.60 56.72L59.15 56.19L58.68 55.56L58.32 54.96L57.95 54.27L57.65 53.54L57.40 52.80L57.23 52.12L57.09 51.35L57.02 50.63L51.51 50.50L51.55 51.22L51.61 51.89L51.71 52.56L51.84 53.22L51.98 53.82L52.16 54.47L52.34 55.05L52.55 55.62L52.78 56.18L53.04 56.73L53.31 57.28L53.61 57.81L53.93 58.33L54.26 58.83L54.62 59.33L55.04 59.86L55.43 60.32L55.85 60.77L56.28 61.20L56.73 61.61L57.19 62L57.67 62.38L58.16 62.74L58.67 63.07L59.19 63.39L59.72 63.69L60.26 63.96L60.88 64.24L61.51 64.49L62.08 64.70L62.66 64.88L63.25 65.04L63.97 65.20L64.54 65.30L65.10 65.38L65.67 65.44L66.62 65.50L67.38 65.50L68.33 65.44L69.27 65.33L70.21 65.16L70.95 64.99L71.86 64.72L72.75 64.39L73.63 64.01L74.31 63.67L75.13 63.20L75.92 62.67L76.53 62.22L77.27 61.61L77.96 60.96L78.61 60.27L79.10 59.69L79.67 58.93L80.19 58.13L80.67 57.31L81.09 56.45L81.39 55.76L81.72 54.86L81.99 53.95L82.20 53.02L82.33 52.27L82.44 51.33L82.49 50.38L82.49 49.43L82.42 48.48L82.30 47.54L82.16 46.79L81.94 45.87L81.78 45.32L81.59 44.78L81.39 44.24L81.17 43.72L80.93 43.20L80.67 42.69L80.39 42.20L80.09 41.71L79.78 41.23L79.45 40.77L78.86 40.02L78.48 39.59L78.09 39.18L77.55 38.64L76.98 38.14L76.38 37.66L75.77 37.22L75.13 36.80L74.47 36.42L73.97 36.16L73.28 35.83L72.58 35.54L71.86 35.28L71.13 35.06L70.58 34.92L69.84 34.76L69.08 34.64L68.33 34.56L67.70 34.52L67.21 33.46L66.64 32.33L66.09 31.31L65.47 30.26L64.79 29.19L64.14 28.23L63.43 27.24L62.65 26.24L61.91 25.34L61.11 24.43L60.24 23.51L59.37 22.64L58.53 21.85L57.57 21.02L56.63 20.24L55.70 19.53L56.80 19.14L57.56 18.90L58.33 18.68L59.49 18.38L60.27 18.20L61.44 17.98L62.23 17.85L63.42 17.70L64.21 17.62L65.40 17.54L67 17.50L67.80 17.51L68.99 17.56L69.79 17.62L70.98 17.74L71.77 17.85L72.95 18.05L73.73 18.20L74.90 18.47L75.67 18.68L76.81 19.02L78.32 19.54L79.80 20.13L80.89 20.62L81.61 20.97L82.32 21.34L83.36 21.92L84.05 22.33L85.05 22.98L86.36 23.90L87.31 24.63L88.53 25.65L89.70 26.74L90.81 27.88L91.61 28.77L92.62 30L93.34 30.96L94.24 32.28L94.87 33.29L95.66 34.68L96.38 36.10L97.02 37.56L97.46 38.68L97.86 39.81L98.32 41.33L98.71 42.88L99.02 44.44L99.20 45.63L99.38 47.21L99.46 48.41L99.50 50L99.46 51.59L99.38 52.79L99.20 54.37L99.02 55.56L98.71 57.12L98.32 58.67L97.86 60.19L97.32 61.70L96.71 63.17L96.21 64.26L95.47 65.67L94.67 67.05L93.80 68.39L92.86 69.68L91.87 70.92L90.81 72.12L89.70 73.26L88.53 74.35L87.31 75.37L86.04 76.34L84.72 77.24L83.36 78.08L81.97 78.85L80.53 79.55L79.07 80.18L77.57 80.73L76.05 81.21L74.51 81.62L72.95 81.95L71.37 82.20L69.79 82.38L68.20 82.48L66.60 82.50L65.01 82.44L63.42 82.30L61.84 82.09L60.27 81.80L58.71 81.42L57.21 80.99L56.44 80.74L55.63 80.45L54.15 79.85L52.74 79.20L51.38 78.50L50.03 77.72L48.81 76.93L47.54 76.03L46.31 75.07L45.13 74.04L44 72.97L42.95 71.87L41.93 70.69L41.03 69.54L40.12 68.28L39.28 66.97L38.51 65.65L37.80 64.26L37.15 62.85L36.56 61.40L36.13 60.16L35.72 58.84L35.40 57.61L35.12 56.32L34.88 54.96L34.71 53.66L34.58 52.29L34.51 50.97L34.50 49.70L34.54 48.41L34.62 47.21L34.79 45.63L34.98 44.44L35.29 42.88L35.57 41.72L35.94 40.44L36.62 40.68L37.34 40.99L38.04 41.36L38.63 41.73L39.26 42.20L39.79 42.66L40.34 43.21L40.85 43.81L41.26 44.37L41.68 45.04L42.04 45.73L42.35 46.46L42.60 47.20L42.77 47.88L42.91 48.65L42.98 49.37L48.49 49.50L48.46 48.85L48.39 48.18L48.30 47.51L48.19 46.91L48.05 46.32L47.88 45.66L47.70 45.08L47.47 44.45L47.24 43.88L46.96 43.27L46.65 42.66L46.35 42.13L46 41.56L45.62 41L45.25 40.51L44.83 39.99L44.38 39.48L43.96 39.04L43.47 38.57L43.01 38.17L42.54 37.79L42 37.38L41.44 37L40.87 36.64L40.28 36.31L39.73 36.04L39.18 35.79L38.55 35.53L37.92 35.30L37.34 35.12L36.68 34.94Z";
-
-/** The wordmark, `height` px tall (the letter height; the box adds the overshoot). */
+/** The wordmark, its x-height `height` px (the box adds the overshoot). */
 export function wordmark(height: number, cls = ""): string {
-  return `<svg class="brand-word${cls ? ` ${cls}` : ""}" viewBox="${WORD_BOX}" height="${f(height * 1.03)}" fill="currentColor" aria-hidden="true" focusable="false">${WORD_BODY}</svg>`;
+  return `<svg class="brand-word${cls ? ` ${cls}` : ""}" viewBox="${WORD_BOX}" width="${r2(height * 3.44)}" height="${r2(height * 1.03)}" fill="currentColor" aria-hidden="true" focusable="false"><path fill-rule="evenodd" d="${WORD}"/></svg>`;
 }
 
-/** The symbol alone, in `currentColor`. */
+/** The symbol on its own, `height` px tall, cropped to the mark (for lockups beside the wordmark). */
+export function mark(height: number, cls = ""): string {
+  const small = height <= 24;
+  return `<svg class="brand-mark${cls ? ` ${cls}` : ""}" viewBox="${small ? FAULT_SMALL_BOX : FAULT_BOX}" width="${r2(height * FAULT_RATIO)}" height="${height}" fill="currentColor" aria-hidden="true" focusable="false"><path fill-rule="evenodd" d="${small ? FAULT_SMALL : FAULT}"/></svg>`;
+}
+
+/** The symbol in a `size` px square (the 256 grid, with its margins), for icons. */
 export function symbol(size: number): string {
-  return `<svg class="brand-sym" viewBox="0.5 0.5 99 99" width="${size}" height="${size}" fill="currentColor" aria-hidden="true" focusable="false"><path fill-rule="evenodd" d="${LINKED}"/></svg>`;
+  const small = size <= 24;
+  return `<svg class="brand-sym" viewBox="0 0 256 256" width="${size}" height="${size}" fill="currentColor" aria-hidden="true" focusable="false"><path fill-rule="evenodd" d="${small ? FAULT_SMALL : FAULT}"/></svg>`;
 }
 
-/** The symbol on its purple tile, `size` px square. */
+/** The symbol on its tile, `size` px square: the small marks inside buttons, pills and chips. */
 export function symbolTile(size: number, cls = ""): string {
-  return `<span class="brand-tile${cls ? ` ${cls}` : ""}" style="--brand-tile:${size}px">${symbol(Math.round(size * 0.64))}</span>`;
+  return `<span class="brand-tile${cls ? ` ${cls}` : ""}" style="--brand-tile:${size}px">${symbol(Math.round(size * 0.78))}</span>`;
+}
+
+/** The horizontal lockup at x-height `xh` px: symbol twice the x-height, a one-bar gap, then the word. */
+export function logo(xh: number, cls = ""): string {
+  return `<span class="brand-lock${cls ? ` ${cls}` : ""}" style="--xh:${xh}px">${mark(xh * 2)}${wordmark(xh)}</span>`;
 }
