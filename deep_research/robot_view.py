@@ -1,10 +1,13 @@
 """What the web UI needs to draw a robot run in 3D: the scene's shapes, and where each body is in every frame.
 
-The browser has no MuJoCo, so the kinematics happen here. `scene()` describes the compiled pick-and-place model
-(sim/scene.py) once: every visual geom with its body, shape, local pose and color, and the meshes it uses, made small
-by vertex clustering (the panda's visual OBJ files are about 33 MB; the JSON is about 1.4 MB, 0.45 MB gzipped).
-`motion_poses(path)` loads one motion file (sim/MOTION_FORMAT.md) and runs `mj_kinematics` on every frame's qpos,
-giving each moving body's world position and orientation per frame.
+The browser has no MuJoCo, so the kinematics happen here. `scene(model_id)` describes a compiled model once: every
+visual geom with its body, shape, local pose and color, and the meshes it uses, made small by vertex clustering (the
+panda's visual OBJ files are about 33 MB; the JSON is about 1.4 MB, 0.45 MB gzipped). Two models are known (MODELS):
+the pick-and-place scene (sim/scene.py, "panda-can-v1", the default) and the push recovery scene (sim/humanoid/scene.py,
+"g1-push-v1"). Each scene also says how to look at it (`view`: the camera, and for the humanoid the body a push hits).
+`motion_poses(path)` loads one motion file (sim/MOTION_FORMAT.md) of either format, builds the model its
+`header.model_id` names, and runs `mj_kinematics` on every frame's qpos, giving each moving body's world position and
+orientation per frame.
 
 mujoco and sim are imported inside the functions, so importing this module (the API does) never needs them.
 Both results are cached in memory as gzipped JSON, ready to send.
@@ -34,9 +37,25 @@ MOTION_CACHE_SIZE = 64
 GEOM_TYPES = {0: "plane", 2: "sphere", 3: "capsule", 5: "cylinder", 6: "box", 7: "mesh"}
 
 _lock = threading.Lock()
-_model = None
-_scene_cache: tuple[dict, bytes] | None = None
+_models: dict[str, Any] = {}
+_scene_cache: dict[str, tuple[dict, bytes]] = {}
 _motion_cache: OrderedDict[tuple, bytes] = OrderedDict()
+
+PANDA = "panda-can-v1"
+G1 = "g1-push-v1"
+DEFAULT_MODEL = PANDA
+# How the viewer looks at each scene: where the camera looks (`target`), where it starts (`camera`, `thumb_camera`),
+# the fog's near and far distances, and for the humanoid the body a push hits (`push_body`, for the arrow). The arm's
+# numbers are the ones web/src/robot/viewer.ts had before scenes carried them.
+VIEWS: dict[str, dict] = {
+    PANDA: {"target": [0.36, -0.06, 0.24], "camera": [1.45, -1.02, 0.8], "thumb_camera": [1.5, -1.08, 0.86], "fog": [2.2, 4.6]},
+    G1: {"target": [0.0, 0.0, 0.62], "camera": [2.3, -1.9, 1.25], "thumb_camera": [2.5, -2.1, 1.35], "fog": [3.6, 7.5],
+         "push_body": "torso_link"},
+}
+MODELS = tuple(VIEWS)
+# A coarser vertex grid for a bigger robot: the G1 is 1.3 m tall, and at 6 mm its 35 meshes come to about the panda's
+# size (0.45 MB gzipped instead of 0.63 MB at CELL_M).
+CELLS = {G1: 0.006}
 
 
 class MotionError(ValueError):
@@ -47,23 +66,32 @@ def _r(values, decimals: int) -> list[float]:
     return [round(float(v), decimals) + 0.0 for v in values]
 
 
-def model():
-    """The scene model, compiled once (nominal can and place positions: each motion file brings its own)."""
-    global _model
+def model(model_id: str | None = None):
+    """The model `model_id` names (one of MODELS; None: the arm), compiled once. The arm's has nominal can and place
+    positions: each motion file brings its own."""
+    mid = model_id or DEFAULT_MODEL
+    if mid not in VIEWS:
+        raise MotionError(f"unknown model {mid!r}")
     with _lock:
-        if _model is None:
-            from sim.scene import build_model  # needs mujoco and the panda meshes
+        if mid not in _models:
+            if mid == G1:
+                from sim.humanoid.scene import build_model as build_g1  # needs mujoco and the G1 meshes
 
-            _model = build_model([0.5, 0.0], [0.45, -0.3])
-        return _model
+                _models[mid] = build_g1()
+            else:
+                from sim.scene import build_model  # needs mujoco and the panda meshes
+
+                _models[mid] = build_model([0.5, 0.0], [0.45, -0.3])
+        return _models[mid]
 
 
-def _decimate(verts, faces):
+def _decimate(verts, faces, cell_m: float | None = None):
     """Vertex clustering: snap vertices to a grid, merge each cell into its mean, drop collapsed and repeated faces."""
     import numpy as np
 
     extent = float((verts.max(0) - verts.min(0)).max()) if len(verts) else 0.0
-    cell = min(CELL_M, extent / MIN_CELLS) if extent > 0 else CELL_M
+    cell_m = CELL_M if cell_m is None else cell_m
+    cell = min(cell_m, extent / MIN_CELLS) if extent > 0 else cell_m
     keys = np.floor((verts - verts.min(0)) / cell).astype(np.int64)
     _, inverse, counts = np.unique(keys, axis=0, return_inverse=True, return_counts=True)
     inverse = inverse.reshape(-1)
@@ -82,14 +110,13 @@ def _decimate(verts, faces):
     return new_verts[used], remap[f]
 
 
-def build_scene() -> dict:
+def build_scene(model_id: str | None = None) -> dict:
     """The scene as plain data: bodies, meshes (decimated, flat arrays) and visual geoms. See `scene()`."""
     import mujoco
     import numpy as np
 
-    from sim.scene import MODEL_ID
-
-    m = model()
+    model_id = model_id or DEFAULT_MODEL
+    m = model(model_id)
     name = lambda kind, i: mujoco.mj_id2name(m, kind, i) or ""  # noqa: E731
     meshes: dict[str, dict] = {}
     geoms: list[dict] = []
@@ -120,18 +147,25 @@ def build_scene() -> dict:
                 if not vn or float((verts.max(0) - verts.min(0)).max()) < MIN_EXTENT_M:
                     meshes[key] = {}
                 else:
-                    v, f = _decimate(verts, faces)
+                    v, f = _decimate(verts, faces, CELLS.get(model_id))
                     meshes[key] = {"v": _r(v.reshape(-1), POS_DECIMALS), "f": [int(x) for x in f.reshape(-1)]} if len(f) else {}
             if not meshes[key]:
                 continue
             geom["mesh"] = key
         geoms.append(geom)
     bodies = sorted({gm["body"] for gm in geoms})
+    view = dict(VIEWS[model_id])
+    if "push_body" in view:
+        bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, view["push_body"])
+        view["push_body_id"] = int(bid)
+        if bid not in bodies:
+            bodies = sorted([*bodies, int(bid)])
     return {
-        "model_id": MODEL_ID,
+        "model_id": model_id,
         "bodies": [{"id": b, "name": name(mujoco.mjtObj.mjOBJ_BODY, b)} for b in bodies],
         "meshes": {k: v for k, v in meshes.items() if v},
         "geoms": geoms,
+        "view": view,
     }
 
 
@@ -139,19 +173,48 @@ def _pack(data: dict) -> bytes:
     return gzip.compress(json.dumps(data, separators=(",", ":"), allow_nan=False).encode(), compresslevel=6)
 
 
-def scene() -> tuple[dict, bytes]:
-    """The static scene for the viewer, and the same as gzipped JSON. Built on the first call, then cached.
+def scene(model_id: str | None = None) -> tuple[dict, bytes]:
+    """The static scene of `model_id` (one of MODELS; None: the arm) for the viewer, and the same as gzipped JSON.
+    Built on the first call, then cached.
 
     {"model_id", "bodies": [{"id", "name"}], "meshes": {"<mesh id>": {"v": [x, y, z, ...], "f": [i, j, k, ...]}},
      "geoms": [{"body", "type": "mesh" | "cylinder" | "plane" | ..., "name", "size", "pos", "quat" (w, x, y, z),
-                "rgba", "mesh"?}]}
+                "rgba", "mesh"?}],
+     "view": {"target", "camera", "thumb_camera": [x, y, z], "fog": [near, far], "push_body"?, "push_body_id"?}}
     Positions are meters in the body's frame; the world body (0) holds the floor.
     """
-    global _scene_cache
-    if _scene_cache is None:
-        data = build_scene()
-        _scene_cache = (data, _pack(data))
-    return _scene_cache
+    mid = model_id or DEFAULT_MODEL
+    if mid not in VIEWS:
+        raise MotionError(f"unknown model {mid!r}")
+    if mid not in _scene_cache:
+        data = build_scene(mid)
+        _scene_cache[mid] = (data, _pack(data))
+    return _scene_cache[mid]
+
+
+def _model_id_of(motion: dict) -> str:
+    """The model a motion file was recorded with: `header.model_id`, or the arm for a file that does not say."""
+    header = motion.get("header") if isinstance(motion.get("header"), dict) else {}
+    mid = header.get("model_id")
+    if mid is None:
+        return DEFAULT_MODEL
+    if mid not in VIEWS:
+        raise MotionError(f"no viewer model for {mid!r}")
+    return mid
+
+
+def _push(header: dict, result: dict) -> dict | None:
+    """A humanoid episode's push, {"angle_deg", "force_n", "time_s", "duration_s"}, or None."""
+    p = header.get("push") or result.get("push")
+    if not isinstance(p, dict):
+        return None
+    out = {}
+    for k in ("angle_deg", "force_n", "time_s", "duration_s"):
+        v = p.get(k)
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return None
+        out[k] = round(float(v), 4)
+    return out
 
 
 def _moving_bodies(m) -> list[int]:
@@ -162,9 +225,10 @@ def _moving_bodies(m) -> list[int]:
 def poses(motion: dict) -> dict:
     """Each frame's world pose of every moving body: `mj_kinematics` on the frame's qpos.
 
-    {"fps", "can_start", "place_target", "result", "n": frames, "t": [...], "bodies": [body ids],
+    {"model_id", "fps", "can_start", "place_target", "push", "result", "n": frames, "t": [...], "bodies": [body ids],
      "frames": [[x, y, z, qw, qx, qy, qz for each body in `bodies`], ...],
      "static": {"<body id>": [x, y, z, qw, qx, qy, qz]} (bodies that never move; the place zone where this file has it)}
+    `can_start` and `place_target` are the arm's (None for the humanoid), `push` the humanoid's (None for the arm).
     """
     import mujoco
     import numpy as np
@@ -172,7 +236,8 @@ def poses(motion: dict) -> dict:
     if not isinstance(motion, dict) or not isinstance(motion.get("frames"), list) or not motion["frames"]:
         raise MotionError("not a motion file: no frames")
     header = motion.get("header") if isinstance(motion.get("header"), dict) else {}
-    m = model()
+    model_id = _model_id_of(motion)
+    m = model(model_id)
     d = mujoco.MjData(m)
     moving = _moving_bodies(m)
     times: list[float] = []
@@ -206,9 +271,11 @@ def poses(motion: dict) -> dict:
             pose = [round(float(place[0]), 4), round(float(place[1]), 4), 0.0, 1.0, 0.0, 0.0, 0.0]
         static[str(b)] = pose
     return {
+        "model_id": model_id,
         "fps": header.get("fps", 30),
         "can_start": can_start if _xy(can_start) else None,
         "place_target": place if _xy(place) else None,
+        "push": _push(header, result),
         "result": _public_result(result),
         "n": len(frames),
         "t": times,
@@ -225,6 +292,8 @@ def _xy(v) -> bool:
 RESULT_KEYS = (
     "success", "place_error_cm", "upright", "dropped", "max_height_cm", "time_taken", "exception", "end_reason",
     "resting", "released", "tipped", "tilt_deg", "seed",
+    # The humanoid's (sim/humanoid/episode.py).
+    "outcome", "fell", "stumbled", "fall_time", "touched", "max_tilt_deg", "max_foot_shift_cm",
 )
 
 
@@ -265,7 +334,7 @@ _summary_cache: OrderedDict[tuple, dict] = OrderedDict()
 def motion_summary(path: Path) -> dict:
     """What the viewer's file picker shows for a motion file, without the frames: no mujoco needed.
 
-    {"can_start", "place_target", "duration" (seconds), "n" (frames), "result"}"""
+    {"can_start", "place_target", "push", "duration" (seconds), "n" (frames), "result"}"""
     st = path.stat()
     if st.st_size > MAX_MOTION_BYTES:
         raise MotionError("the file is too large to be a motion file")
@@ -289,6 +358,7 @@ def motion_summary(path: Path) -> dict:
     out = {
         "can_start": can_start if _xy(can_start) else None,
         "place_target": place if _xy(place) else None,
+        "push": _push(header, result),
         "duration": round(float(t), 3) if isinstance(t, (int, float)) and not isinstance(t, bool) else None,
         "n": len(motion["frames"]),
         "result": _public_result(result),
