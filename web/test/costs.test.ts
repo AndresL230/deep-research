@@ -2,8 +2,9 @@
 
 import { describe, expect, it } from "vitest";
 import type { BatchCost, CostReport, CostTokens, CostUsd } from "../src/api";
-import { batchRow, costsLink, costsView, groupParts, modelName, money, outcomeChips, share, stackedBar, vmTime, whenLabel } from "../src/batch/costs";
-import { parseRoute, routeHash } from "../src/batch/model";
+import { batchRow, costsView, groupParts, modelName, money, outcomeChips, share, stackedBar, vmTime, whenLabel } from "../src/batch/costs";
+import { parseRoute, routeHash, type Route } from "../src/batch/model";
+import { navBar } from "../src/batch/nav";
 
 const HAIKU = "anthropic:claude-haiku-5-5";
 const SONNET = "anthropic:claude-sonnet-5-5";
@@ -283,11 +284,9 @@ describe("costsView", () => {
     expect(empty).not.toContain("cs-total");
   });
 
-  it("has a way back, to the batch it was opened from or home", () => {
-    expect(text(costsView({ report: { state: "loading" }, back: null }))).toContain("Back to batches");
-    const from = costsView({ report: { state: "loading" }, back: "1114-<b>" });
-    expect(from).toContain('data-act="back"');
-    expect(from).toContain("Back to 1114-&lt;b&gt;");
+  it("has no back button: the navbar has Batches", () => {
+    expect(text(costsView({ report: { state: "loading" }, back: null }))).not.toContain("Back to");
+    expect(costsView({ report: { state: "loading" }, back: "1114-x" })).not.toContain('data-act="back"');
   });
 
   it("uses no em dashes", () => {
@@ -297,9 +296,12 @@ describe("costsView", () => {
 
 describe("the header link and the route", () => {
   it("links to the cost screen from every screen and marks it when there", () => {
-    expect(costsLink(false)).toContain('data-act="open-costs"');
-    expect(costsLink(false)).not.toContain("aria-current");
-    expect(costsLink(true)).toContain('aria-current="page"');
+    const link = (r: Route) => navBar(r, null).match(/<a [^>]*data-nav="costs"[^>]*>/)![0];
+    for (const r of [{ name: "home" }, { name: "batch", id: "b1" }, { name: "run", id: "b1", run: "r01" }] as Route[]) {
+      expect(link(r)).toContain('href="#/costs"');
+      expect(link(r)).not.toContain("aria-current");
+    }
+    expect(link({ name: "costs" })).toContain('aria-current="page"');
   });
 
   it("parses and writes #/costs", () => {

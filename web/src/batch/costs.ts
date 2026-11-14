@@ -5,7 +5,7 @@
 // Model spend against VM time is the other way to cut the same total, so it uses no hue: solid ink and a hatch.
 import "./costs.css";
 import type { BatchCost, CostReport, CostTokens, ModelCost } from "../api";
-import { askIcon, askSpinner } from "../ask-icons";
+import { askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { duration, tokens, usd } from "./format";
 import { ACT, type Loadable } from "./model";
@@ -202,11 +202,6 @@ function notCounted(items: string[]): string {
 
 // ── the screen ───────────────────────────────────────────────────────────────
 
-/** The header link to this screen, shown on every screen. */
-export function costsLink(current: boolean): string {
-  return `<button type="button" class="ask-ghostbtn cs-link" data-morph-key="costs-link" data-act="${ACT.openCosts}"${current ? ` aria-current="page"` : ""}>Costs</button>`;
-}
-
 function body(r: CostReport): string {
   if (!r.batches.length) {
     return `<div class="cs-empty" data-morph-key="empty"><h2>No batches yet</h2><p>Start a batch and what it costs shows up here.</p></div>`;
@@ -234,7 +229,6 @@ function body(r: CostReport): string {
 
 /** The cost screen: the grand total, where it went, tokens, models, then every batch. */
 export function costsView(vm: CostsVm): string {
-  const back = `<button type="button" class="cs-back" data-morph-key="back" data-act="${ACT.back}">${askIcon("chevLeft", 14)}<span>${vm.back ? `Back to ${esc(vm.back)}` : "Back to batches"}</span></button>`;
   const rep = vm.report;
   let inner: string;
   if (rep.state === "loading") {
@@ -245,5 +239,6 @@ export function costsView(vm: CostsVm): string {
   } else {
     inner = body(rep.value);
   }
-  return `<div class="cs" data-morph-key="costs">${back}${inner}</div>`;
+  // No back button: the navbar links to Batches, and the browser goes back to a batch.
+  return `<div class="cs" data-morph-key="costs">${inner}</div>`;
 }
