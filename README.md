@@ -19,7 +19,7 @@ HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amaz
 | Costs | Tokens from every model response, VM time, budget guard | `costs.py`, `prices.json` |
 | Lab page | Tiny web page inside each VM showing the agent's latest chart, embedded via a signed preview URL | `lab_page/server.py` |
 | API | FastAPI plus a websocket per batch; also serves the web UI | `api.py` |
-| Web UI | Vite + TypeScript, Trov Ask styling. Batch screens are next; `web/src/api.ts` is the typed client | `web/` |
+| Web UI | Vite + TypeScript, Trov Ask styling. Home and config, the wall of runs, split lanes, fork experiment, verdict, each run as a conversation, and a replay player for saved batches | `web/src/main.ts`, `web/src/batch/` |
 
 ### Who can write what
 
@@ -63,7 +63,8 @@ budget guard off and the UI shows token counts only.
 uv run uvicorn deep_research.api:app --reload --port 8000
 ```
 
-That serves the API and the built UI at http://localhost:8000. For UI work, also run `cd web && npm run dev`
+That serves the API and the built UI at http://localhost:8000. Open a batch to watch it; a saved batch replays on a
+timeline (play, pause, 1x/4x/16x, scrub, skip to end). Add `?end` to the URL to open a replay at its end. For UI work, also run `cd web && npm run dev`
 (Vite on 5173, proxying `/api` and the websocket to 8000).
 
 Without the UI:
@@ -147,5 +148,5 @@ Measured on Pima with scikit-learn, averaged over 5 seeds:
 ## Next
 
 1. Milestone 1 and 2 with real keys. Confirm a mix of honest and inflated runs; adjust `trap_strength`, `trap_noise` or `hint_level` if not.
-2. Frontend: config screen, cost bar, wall of lab pages, lane chart, fork approval, verdict, and one run's events in the conversation view. Build against `fixtures/demo-batch` first.
+2. Frontend: built against `fixtures/demo-batch`. Still to check on a real batch: lab pages in the tile iframes, live websocket updates, and the fork approval round trip.
 3. One live fork wired to the approval button.

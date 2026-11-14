@@ -1,0 +1,38 @@
+/* The page frame around the batch views (main.ts): header, the replay bar under it, the scrolling body. The views
+   themselves style their own content (home.css, wall.css, lanes.css, run.css, replay.css). */
+
+.pg-hdr { gap:12px; }
+.pg-hdr-l { min-width:0; flex:1; overflow:hidden; }
+.pg-hdr-r { display:flex; align-items:center; gap:10px; flex:none; }
+.pg-home { display:inline-flex; align-items:center; gap:10px; padding:0; min-width:0; color:inherit; }
+.pg-home .ask-h1 { overflow:hidden; text-overflow:ellipsis; }
+.pg-home:hover .ask-h1-t.is-parent { color:var(--fg-70); }
+.pg-crumb { padding:2px 4px; margin:0 -4px; border-radius:6px; font-size:15px; font-weight:600; letter-spacing:-0.01em; color:var(--fg-55); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+button.pg-crumb:hover { color:var(--fg); background:var(--hover); }
+.pg-crumb.is-cur { color:var(--fg); }
+button.pg-crumb.is-cur:hover { background:none; cursor:default; }
+
+.pg-sub { flex:none; border-bottom:1px solid var(--border); padding:6px 24px; background:var(--bg); }
+.pg-sub[hidden] { display:none; }
+
+.pg-scroll { flex:1; min-height:0; overflow-y:auto; overflow-anchor:none; display:flex; flex-direction:column; }
+.pg-batch { width:100%; max-width:1240px; margin:0 auto; padding:20px 24px 64px; display:flex; flex-direction:column; gap:28px; }
+.pg-sec { min-width:0; scroll-margin-top:16px; animation:ask-fade-in var(--fx-base) var(--fx-ease) both; }
+
+/* A run: the summary strip, then the conversation column (ask-conversation.ts). */
+.pg-runsum { width:100%; max-width:960px; margin:0 auto; padding:16px 28px 0; box-sizing:border-box; }
+.pg-scroll[data-view="run"] .ask-col, .pg-scroll[data-view="child"] .ask-col { max-width:960px; }
+
+.pg-note { max-width:720px; margin:24px auto; padding:0 28px; color:var(--fg-55); font-size:13px; }
+.pg-msg { margin:auto; padding:40px 28px; max-width:520px; text-align:center; }
+.pg-msg h2 { margin:0 0 6px; font-size:20px; font-weight:600; letter-spacing:-0.02em; }
+.pg-msg p { margin:0 0 14px; color:var(--fg-55); font-size:13.5px; }
+
+@media (max-width: 640px) {
+  .pg-hdr { padding:0 14px; }
+  .pg-hdr .ask-h1 { display:none; }
+  .pg-sub { padding:6px 14px; }
+  .pg-batch { padding:16px 14px 48px; gap:22px; }
+  .pg-runsum { padding:12px 16px 0; }
+}
+@media (prefers-reduced-motion: reduce) { .pg-sec { animation:none; } }
