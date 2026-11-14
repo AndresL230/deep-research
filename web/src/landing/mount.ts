@@ -12,7 +12,7 @@ import type { Finder } from "./finder";
 import { LANDING, demoRuns } from "./landing";
 import type { HeroScene } from "./scene";
 
-let hero: { host: HTMLElement; scene: Promise<HeroScene | null> } | null = null;
+let hero: { host: HTMLElement; tone: "dark" | "light"; scene: Promise<HeroScene | null> } | null = null;
 
 const tone = (host: HTMLElement): "dark" | "light" => (host.closest<HTMLElement>(".lp")?.dataset.lpTone === "light" ? "light" : "dark");
 
@@ -22,6 +22,8 @@ const NEAR = "600px 0px";
 
 interface Mounted<T> {
   host: HTMLElement;
+  /** The palette it was built in: switching between white and black mode builds it again. */
+  tone: "dark" | "light";
   /** Watches for the element coming near the screen, until it does. */
   near: IntersectionObserver;
   /** Null until then. */
@@ -35,7 +37,7 @@ function later<T extends { dispose(): void }>(selector: string, load: (host: HTM
   return {
     sync(root) {
       const host = root.querySelector<HTMLElement>(selector);
-      if (mounted && mounted.host !== host) {
+      if (mounted && (mounted.host !== host || (host && mounted.tone !== tone(host)))) {
         const gone = mounted;
         mounted = null;
         gone.near.disconnect();
@@ -44,6 +46,7 @@ function later<T extends { dispose(): void }>(selector: string, load: (host: HTM
       if (host && !mounted) {
         const entry: Mounted<T> = {
           host,
+          tone: tone(host),
           scene: null,
           near: new IntersectionObserver((entries) => {
             if (!entries.some((e) => e.isIntersecting) || entry.scene) return;
@@ -90,7 +93,7 @@ const factory = later<Factory>("[data-lp-floor]", (host, root) =>
  *  changed does nothing. */
 export function syncLanding(root: ParentNode): void {
   const sceneHost = root.querySelector<HTMLElement>("[data-lp-scene]");
-  if (hero && hero.host !== sceneHost) {
+  if (hero && (hero.host !== sceneHost || (sceneHost && hero.tone !== tone(sceneHost)))) {
     const gone = hero;
     hero = null;
     void gone.scene.then((scene) => scene?.dispose());
@@ -99,6 +102,7 @@ export function syncLanding(root: ParentNode): void {
     const page = sceneHost.closest<HTMLElement>(".lp");
     hero = {
       host: sceneHost,
+      tone: tone(sceneHost),
       scene: import("./scene")
         .then((m) => m.mountHeroScene(sceneHost, {
           tone: tone(sceneHost),

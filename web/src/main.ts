@@ -20,6 +20,7 @@ import { askIcon } from "./ask-icons";
 import { morphInner } from "./morph";
 import { AWAY_PX, conversationView, initialConversationUi, jumpButton, stickAfterScroll, thinkingLabel, type ConversationUi } from "./ask-conversation";
 import { scheduleOrbs } from "./thinking-orb";
+import { PAGE_BACKGROUND, readStoredTheme, resolveTheme, storeTheme, themeChoice, themeSwitch, type Theme, type ThemeChoice } from "./theme";
 import {
   applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
   fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, uploadDataset, uploadScript, startInvestigation, stopBatch,
@@ -105,10 +106,11 @@ const message = (e: unknown, fallback: string): string => (e instanceof Error ? 
 const app = document.getElementById("app")!;
 const params = new URLSearchParams(location.search);
 const themeQ = matchMedia("(prefers-color-scheme: dark)");
-const forcedTheme = params.get("theme");
-// Dark unless asked, on the same black as the landing page. `?theme=light` forces light, `?theme=system` follows the OS.
-const theme = (): "light" | "dark" => (forcedTheme === "light" ? "light" : forcedTheme === "system" && !themeQ.matches ? "light" : "dark");
-const syncPageTheme = (): void => { document.documentElement.style.colorScheme = theme(); document.body.style.background = theme() === "dark" ? "#15171b" : "#fbfbfc"; };
+// Black mode unless asked: the switch in the header (kept in this browser), or `?theme=light|dark|system`
+// (theme.ts). The landing page follows the same setting.
+let themePick: ThemeChoice = themeChoice(params.get("theme"), readStoredTheme());
+const theme = (): Theme => resolveTheme(themePick, themeQ.matches);
+const syncPageTheme = (): void => { document.documentElement.style.colorScheme = theme(); document.body.style.background = PAGE_BACKGROUND[theme()]; };
 syncPageTheme();
 app.innerHTML = `<div class="app-root" data-cnpy-theme="${theme()}">
   <header class="cnpy-hdr pg-hdr" data-region="header"></header>
@@ -119,7 +121,15 @@ const root = app.firstElementChild as HTMLElement;
 const headerEl = root.querySelector<HTMLElement>("[data-region=header]")!;
 const subEl = root.querySelector<HTMLElement>("[data-region=sub]")!;
 const scrollEl = root.querySelector<HTMLElement>("[data-region=scroll]")!;
-themeQ.addEventListener("change", () => { root.dataset.cnpyTheme = theme(); syncPageTheme(); scheduleOrbs(); });
+const applyTheme = (): void => { root.dataset.cnpyTheme = theme(); syncPageTheme(); scheduleOrbs(); paint(); };
+themeQ.addEventListener("change", () => { if (themePick === "system") applyTheme(); });
+/** The switch: white or black, kept in this browser. */
+function pickTheme(t: Theme): void {
+  if (t === theme() && themePick !== "system") return;
+  themePick = t;
+  storeTheme(t);
+  applyTheme();
+}
 
 // ── view models ──────────────────────────────────────────────────────────────
 
@@ -214,7 +224,7 @@ function headerView(vm: BatchVm | null): string {
     ${crumbs.map((c) => `<span class="ask-crumb-sep">›</span>${c}`).join("")}
   </div>`;
   const bar = vm ? costBar(vm.case.costs ?? {}, { simulated: !!(vm.case.config as BatchConfig).simulated }) : "";
-  const right = `<div class="pg-hdr-r">${bar}${hubBadge(S.hub)}${costsLink(r.name === "costs")}</div>`;
+  const right = `<div class="pg-hdr-r">${bar}${hubBadge(S.hub)}${costsLink(r.name === "costs")}${themeSwitch(theme())}</div>`;
   return left + right;
 }
 
@@ -263,12 +273,11 @@ function render(): void {
   const b = S.batch;
   const vm = "id" in r && b?.full ? batchVm(b, b.full) : null;
 
-  // The landing page brings its own nav and its own palette, whatever the app's theme is: dark, or its light
-  // version when `?theme=light` asks for it.
+  // The landing page brings its own nav, and its own palettes in the app's two themes.
   const landing = r.name === "landing";
-  const landingTone = forcedTheme === "light" ? "light" : "dark";
+  const landingTone = theme();
   headerEl.hidden = landing;
-  root.dataset.cnpyTheme = landing ? landingTone : theme();
+  root.dataset.cnpyTheme = theme();
   morphInner(headerEl, headerView(vm));
   const showReplay = !!(vm && vm.replay);
   subEl.hidden = !showReplay;
@@ -669,6 +678,9 @@ root.addEventListener("click", (e) => {
   // The landing page's list: pressing an item's title opens it.
   const item = (e.target as Element | null)?.closest<HTMLElement>("[data-lp-item]");
   if (item) { S.landingItem = Number(item.dataset.lpItem) || 0; paint(); return; }
+  // The white / black switch, in the header and on the landing page.
+  const pick = (e.target as Element | null)?.closest<HTMLElement>("[data-theme-pick]")?.dataset.themePick;
+  if (pick === "light" || pick === "dark") { pickTheme(pick); return; }
   const el = (e.target as Element | null)?.closest<HTMLElement>("[data-act]");
   if (!el || (el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") return;
   if (el.tagName === "A") return; // real links (charts, lab pages) open on their own

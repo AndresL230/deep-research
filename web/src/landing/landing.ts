@@ -8,11 +8,12 @@
 // Like the batch views this is a pure function that returns markup. Nothing on the page depends on the server:
 // the only state is which item of the list is open, and main.ts holds it.
 //
-// The page is dark. `tone` picks its light version instead (main.ts passes it for `?theme=light`); the stylesheet
-// and the scenes both read it from `data-lp-tone`.
+// The page comes in black mode and white mode, the app's two themes: `tone` says which (main.ts passes the app's),
+// and the stylesheet and the scenes both read it from `data-lp-tone`. The switch between them is in the nav.
 import "./landing.css";
 import { routeHash } from "../batch/model";
 import { attr, esc } from "../ui";
+import { themeSwitch } from "../theme";
 import type { SceneTone } from "./kit";
 
 /** A piece of an item's paragraph: plain words, or a path or address drawn on a chip. */
@@ -164,6 +165,7 @@ export function landingView(tone: SceneTone = "dark", open = 0): string {
           <a class="lp-link" href="${start}">Batches</a>
           <a class="lp-link" href="${demo}">Demo replay</a>
         </nav>
+        ${themeSwitch(tone)}
         <a class="lp-cta" href="${start}">Start a batch</a>
       </header>
       <section class="lp-hero" aria-labelledby="lp-title">

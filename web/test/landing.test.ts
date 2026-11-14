@@ -9,6 +9,7 @@ import { BENCH_LOOP, BENCH_RESET, HELD, ROWS, SHEET, TWINS, benchAt, benchDone }
 import { CHAPTER, REVEAL_SOFT, chapterAt, chapterPoster, clockAt } from "../src/landing/chapter";
 import { clamp01, easeInOutCubic, easeOutCubic, easeOutQuad, smooth } from "../src/landing/ease";
 import { fitScene, type FitInput } from "../src/landing/fit";
+import { themeSwitch } from "../src/theme";
 import {
   LEAST_WIDTH, STATIONS, TILE, TRAIL_CELLS, TRAIL_FADE, Trail, VIEW, WAYPOINTS, cardAt, lookAt, progressAt, standOff, stopFor,
 } from "../src/landing/floorplan";
@@ -77,11 +78,11 @@ describe("landingView", () => {
     expect(html).toContain("data-lp-nav");
   });
 
-  it("is dark unless its light version is asked for", () => {
+  it("is in black mode unless white mode is asked for", () => {
     expect(html).toContain('<div class="lp" data-lp-tone="dark"');
     expect(landingView("light")).toContain('<div class="lp" data-lp-tone="light"');
-    // Only the tone differs: the words and the links are the same page.
-    expect(landingView("light").replace('data-lp-tone="light"', 'data-lp-tone="dark"')).toBe(html);
+    // Only the tone differs (and which side of the switch is pressed): the words and the links are the same page.
+    expect(landingView("light").replace('data-lp-tone="light"', 'data-lp-tone="dark"').replace(themeSwitch("light"), themeSwitch("dark"))).toBe(html);
   });
 
   it("has one label for each line of the scene and one icon for each step", () => {
