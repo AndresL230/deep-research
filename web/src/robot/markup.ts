@@ -12,8 +12,11 @@ import { domainWords } from "../batch/words";
 /** The batch draws its runs as robot motion. */
 export const isMotionBatch = (config: unknown): boolean => (config as { visual?: unknown } | null)?.visual === "motion";
 
-/** "runs/r01/outputs/live/far_left_tuned.motion.json" -> "far_left_tuned". */
+/** "runs/r01/outputs/live/far_left_tuned.motion.json" -> "far_left_tuned". A hidden episode's recording
+ *  ("runs/r02/hidden/07-s1.motion.json", sim/evaluate.py, positions counted from 0) -> "Hidden position 8, seed 1". */
 export function motionName(path: string): string {
+  const hidden = /(?:^|\/)hidden\/(\d+)-s(\d+)\.motion\.json$/i.exec(path);
+  if (hidden) return `Hidden position ${Number(hidden[1]) + 1}${hidden[2] !== "0" ? `, seed ${hidden[2]}` : ""}`;
   const base = path.split("/").at(-1) ?? path;
   return base.replace(/\.motion\.json$/i, "").replace(/\.json$/i, "") || base;
 }

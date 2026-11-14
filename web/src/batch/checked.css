@@ -25,7 +25,7 @@
 .ck-table { fill:color-mix(in srgb, var(--fg) 4%, var(--surface)); stroke:var(--border-strong); stroke-width:.5; vector-effect:non-scaling-stroke; }
 .ck-zone { fill:color-mix(in srgb, var(--green) 16%, transparent); stroke:var(--green); stroke-width:1.5; stroke-dasharray:3 2; vector-effect:non-scaling-stroke; }
 .ck-base { fill:color-mix(in srgb, var(--fg) 14%, var(--surface)); stroke:var(--fg-55); stroke-width:1; vector-effect:non-scaling-stroke; }
-.ck-t { font-family:var(--label); font-size:3.6px; fill:var(--fg-55); }
+.ck-t { font-family:var(--label); font-size:3.6px; fill:var(--fg-55); paint-order:stroke; stroke:color-mix(in srgb, var(--fg) 4%, var(--surface)); stroke-width:.9; stroke-linejoin:round; }
 .ck-t--checked { fill:var(--blue); font-weight:600; }
 .ck-checked-ring { fill:none; stroke:var(--blue); stroke-width:2; vector-effect:non-scaling-stroke; }
 .ck-checked-dot { fill:var(--blue); }

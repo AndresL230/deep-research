@@ -187,10 +187,13 @@ function tableSvg(checked: [number, number][], checkedWord: string): string {
   return `<svg class="ck-svg" viewBox="0 0 ${n2(W)} ${n2(H)}" preserveAspectRatio="none" aria-hidden="true" focusable="false">`
     + `<rect class="ck-table" x="0.5" y="0.5" width="${n2(W - 1)}" height="${n2(H - 1)}" rx="3"/>`
     + `<circle class="ck-zone" cx="${n2(zone.sx)}" cy="${n2(zone.sy)}" r="${n2(ZONE_R * 100)}"/>`
-    + `<text class="ck-t" x="${n2(zone.sx)}" y="${n2(zone.sy + ZONE_R * 100 + 4.4)}" text-anchor="middle">Place zone</text>`
     + `<circle class="ck-base" cx="${n2(base.sx)}" cy="${n2(base.sy)}" r="6.5"/>`
-    + `<text class="ck-t" x="${n2(base.sx)}" y="${n2(base.sy + 10.6)}" text-anchor="middle">Robot</text>`
-    + marks + label
+    + marks
+    // The words over the marks, with a halo (checked.css), so a spot the run ran next to them never hides them.
+    + `<text class="ck-t" x="${n2(zone.sx)}" y="${n2(zone.sy + ZONE_R * 100 + 4.4)}" text-anchor="middle">Place zone</text>`
+    // Beside the base, not under it: the base sits near the table's bottom edge.
+    + `<text class="ck-t" x="${n2(base.sx + 8.5)}" y="${n2(base.sy + 1.3)}" text-anchor="start">Robot</text>`
+    + label
     + `</svg>`;
 }
 
