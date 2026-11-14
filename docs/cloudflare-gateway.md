@@ -105,12 +105,13 @@ S=$(openssl rand -hex 32); printf %s "$S" | wrangler secret put GATEWAY_SECRET; 
 
 ## Deploying from GitHub
 
-Pushes to `main` deploy on their own once this is set up:
+Pushes to `main` deploy through GitHub Actions. Each workflow needs one repository secret, which only a repository
+admin can add. Until a secret is set, its job skips with a notice.
 
-- **Cloudflare (web app + gateway):** Workers Builds, connected to this repository in the dashboard (Workers &
-  Pages → orro → Settings → Builds). Settings: branch `main`, root directory `gateway`, build command
-  `npm ci && cd ../web && npm ci && npm run build`, deploy command `npx wrangler deploy`. D1 migrations are not run
-  by the build: apply new ones with `npm run migrate` in `gateway/`.
-- **Fly.io (Python server):** `.github/workflows/fly-deploy.yml`, when files the server runs change. It needs the
-  repository secret `FLY_API_TOKEN` (`fly tokens create deploy -a orro-research | gh secret set FLY_API_TOKEN`),
-  which only a repository admin can add.
+- **Cloudflare (web app + gateway):** `.github/workflows/cloudflare-deploy.yml`, when `web/` or `gateway/` change.
+  Secret `CLOUDFLARE_API_TOKEN`: in the dashboard, Workers & Pages → orro → Settings → Builds → API token for
+  external CI/CD → Create token. D1 migrations are not applied by the workflow: run `npm run migrate` in `gateway/`.
+  (Workers Builds, Cloudflare's own Git integration, cannot be used while the repository is under a personal GitHub
+  account other than the Cloudflare account owner's.)
+- **Fly.io (Python server):** `.github/workflows/fly-deploy.yml`, when files the server runs change.
+  Secret `FLY_API_TOKEN`: `fly tokens create deploy -a orro-research | gh secret set FLY_API_TOKEN -R AndresL230/deep-research`.
