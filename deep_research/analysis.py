@@ -50,6 +50,8 @@ class Action:
     tool: str
     args: dict
     labels: list[str] = field(default_factory=list)
+    # For `python3 x.py`: the content of the script it runs, when the run wrote that script with the file tools.
+    script: str = ""
 
     @property
     def text(self) -> str:
@@ -80,17 +82,32 @@ def actions_from_events(events: list[dict]) -> list[Action]:
 
 
 def _resolve_script_runs(actions: list[Action]) -> list[Action]:
-    """`python3 analysis.py` says nothing by itself. Give it the labels of the file it runs."""
-    written: dict[str, list[str]] = {}
+    """`python3 analysis.py` says nothing by itself. Give it the labels, and the text, of the file it runs.
+
+    The file's content is followed through `write_file` and `edit_file`, so a run of the script is
+    labeled by what the script held at that moment.
+    """
+    scripts: dict[str, str] = {}
     for a in actions:
-        if a.tool == "write_file":
-            written[a.args.get("file_path", "").rsplit("/", 1)[-1]] = a.labels
-            # Writing a script is not doing the work. Running it is.
+        if a.tool in ("write_file", "edit_file"):
+            name = a.args.get("file_path", "").rsplit("/", 1)[-1]
+            if a.tool == "write_file":
+                scripts[name] = a.args.get("content", "")
+            else:
+                old, new, before = a.args.get("old_string", ""), a.args.get("new_string", ""), scripts.get(name, "")
+                if old and old in before:
+                    scripts[name] = before.replace(old, new) if a.args.get("replace_all") else before.replace(old, new, 1)
+                else:
+                    # The file was not written with the file tool (a heredoc, say): keep the part we can see.
+                    scripts[name] = f"{before}\n{new}"
+            # Writing or editing a script is not doing the work. Running it is.
             a.labels = []
         elif a.tool == "execute":
             m = re.search(r"python3?\s+(\S+\.py)", a.args.get("command", ""))
-            if m and m.group(1).rsplit("/", 1)[-1] in written:
-                a.labels = sorted(set(a.labels) | set(written[m.group(1).rsplit("/", 1)[-1]]), key=LABELS.index)
+            name = m.group(1).rsplit("/", 1)[-1] if m else None
+            if name in scripts:
+                a.script = scripts[name]
+                a.labels = sorted(set(a.labels) | set(label_text(a.script)), key=LABELS.index)
     return actions
 
 
@@ -99,8 +116,9 @@ def _did_before_split(actions: list[Action], label: str) -> bool:
         if label in a.labels and "split" not in a.labels:
             return True
         if "split" in a.labels:
-            # Same action can dedupe and then split, as in one script.
-            return label in a.labels and _order_in_text(a.text, label, "split")
+            # Same action can dedupe and then split, as in one script. The order is read from the
+            # command and from the script it runs.
+            return label in a.labels and _order_in_text(f"{a.text}\n{a.script}", label, "split")
     return False
 
 

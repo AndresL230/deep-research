@@ -63,6 +63,9 @@ budget guard off and the UI shows token counts only.
 uv run uvicorn deep_research.api:app --reload --port 8000
 ```
 
+For a real, paid batch start the server without `--reload`. With it, saving any `.py` file restarts the server,
+which stops the batch's VMs and loses a pending approval.
+
 That serves the API and the built UI at http://localhost:8000. Open a batch to watch it; a saved batch replays on a
 timeline (play, pause, 1x/4x/16x, scrub, skip to end). Add `?end` to the URL to open a replay at its end. For UI work, also run `cd web && npm run dev`
 (Vite on 5173, proxying `/api` and the websocket to 8000).

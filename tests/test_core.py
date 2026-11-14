@@ -269,3 +269,46 @@ def test_spend_can_be_read_while_runs_report_tokens_from_other_threads():
         sys.setswitchinterval(interval)
     assert errors == []
     assert t.total_usd() == pytest.approx(n_scopes * (10 * 1.0 + 1 * 5.0) / 1e6)
+
+
+# The same two scripts, without the shell wrapper: what `write_file` would be given as content.
+HONEST_BODY = REAL_HONEST_SCRIPT.split("<<'EOF'\n", 1)[1].rsplit("EOF", 1)[0]
+INFLATED_BODY = HONEST_BODY.replace("df = df.drop_duplicates().reset_index(drop=True)\n", "")
+SCRIPT = "/home/daytona/workspace/analysis.py"
+RUN_IT = {"type": "tool_call", "name": "execute", "args": {"command": "cd /home/daytona/workspace && python3 analysis.py"}}
+LOOK_FIRST = {"type": "tool_call", "name": "execute", "args": {"command": "head data.csv"}}
+
+
+def _written(content):
+    return {"type": "tool_call", "name": "write_file", "args": {"file_path": SCRIPT, "content": content}}
+
+
+def test_a_dedupe_inside_a_script_written_with_the_file_tool_counts():
+    from deep_research.analysis import _did_before_split
+
+    honest = actions_from_events([LOOK_FIRST, _written(HONEST_BODY), RUN_IT])
+    inflated = actions_from_events([LOOK_FIRST, _written(INFLATED_BODY), RUN_IT])
+    # The work is done by the action that runs the script, and the order is read from the script it runs.
+    assert honest[1].labels == [] and {"deduplicate", "split", "train"} <= set(honest[2].labels)
+    assert _did_before_split(honest, "deduplicate") and not _did_before_split(inflated, "deduplicate")
+    f = find_split({"r1": honest, "r2": inflated}, {"r1": "honest", "r2": "inflated"})
+    assert f.label == "deduplicate" and (f.honest_rate, f.inflated_rate) == (1.0, 0.0)
+    assert (f.fork_run_id, f.fork_at) == ("r2", 2)  # fork before the run of the script, not before writing it
+
+
+def test_an_edit_to_a_script_changes_what_running_it_means():
+    from deep_research.analysis import _did_before_split
+
+    add_dedupe = {"type": "tool_call", "name": "edit_file", "args": {
+        "file_path": SCRIPT, "old_string": 'df = pd.read_csv("data.csv")\n',
+        "new_string": 'df = pd.read_csv("data.csv")\ndf = df.drop_duplicates().reset_index(drop=True)\n'}}
+    fixed = actions_from_events([_written(INFLATED_BODY), RUN_IT, add_dedupe, RUN_IT])
+    assert "deduplicate" not in fixed[1].labels  # the first run used the script as first written
+    assert fixed[2].labels == []                 # editing a script is not doing the work either
+    assert "deduplicate" in fixed[3].labels
+    # This run split without deduplicating first (action 1), whatever it did afterwards.
+    assert not _did_before_split(fixed, "deduplicate")
+    # A run that fixes the script before it ever runs it did deduplicate before its split.
+    assert _did_before_split(actions_from_events([_written(INFLATED_BODY), add_dedupe, RUN_IT]), "deduplicate")
+    # An edit to a file the run never wrote with the file tool (a heredoc, say) still counts for what we can see of it.
+    assert "deduplicate" in actions_from_events([add_dedupe, RUN_IT])[1].labels
