@@ -12,3 +12,9 @@ dist/
 
 # Batch outputs written by real runs (fixtures/ is committed)
 /batches/
+
+# CSV files uploaded through the UI
+/datasets/
+
+# Training scripts uploaded through the UI
+/user_scripts/

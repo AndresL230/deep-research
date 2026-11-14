@@ -24,7 +24,12 @@ export const STEP_LABELS = [
 export type StepLabel = (typeof STEP_LABELS)[number];
 
 export interface BatchConfig {
-  dataset: "pima";
+  /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
+  dataset: string;
+  /** The column to predict. Needed for an uploaded dataset; absent or null means Pima's `outcome`. */
+  target?: string | null;
+  /** An uploaded training script's id (`ScriptInfo.id`): the agents start from it instead of from nothing. */
+  script?: string | null;
   trap: "duplicates";
   trap_strength: number;
   trap_noise: number;
@@ -66,7 +71,8 @@ export interface RunRecord extends Partial<Omit<RunScore, "status">> {
   id: string;
   status: RunStatus;
   vm_id?: string;
-  /** Signed preview URL of the lab page inside the VM. Null when it could not start, or in replays. */
+  /** Signed preview URL of the lab page inside the VM. Null when it could not start, in replays, and once the run
+   *  has ended (the VM is deleted then; see `charts`). */
   lab_url?: string | null;
   todos?: AgentTodo[];
   /** The todo in progress. */
@@ -250,6 +256,40 @@ export function batchSocketUrl(batchId: string, loc: Pick<Location, "protocol" |
 // ── REST ─────────────────────────────────────────────────────────────────────
 
 export interface BatchListItem { id: string; kind: "live" | "replay" }
+
+export interface DatasetColumn {
+  name: string;
+  kind: "number" | "text";
+  n_unique: number;
+  missing: number;
+  /** Why this column cannot be the target, or null when it can. */
+  target_problem: string | null;
+}
+/** A dataset a batch can run on (deep_research/datasets.py). */
+export interface DatasetInfo {
+  id: string;
+  name: string;
+  builtin: boolean;
+  rows: number;
+  columns: DatasetColumn[];
+  /** The built-in dataset's target, or the suggested one for an upload. */
+  target: string | null;
+}
+/** The server refuses larger files (datasets.py MAX_UPLOAD_BYTES). */
+export const MAX_DATASET_BYTES = 20 * 1024 * 1024;
+
+/** An uploaded training script (deep_research/user_scripts.py). The server parses it and never runs it. */
+export interface ScriptInfo {
+  id: string;
+  name: string;
+  lines: number;
+  /** Third-party packages the script imports. */
+  imports: string[];
+  /** The ones not installed in the agents' VMs. */
+  missing_packages: string[];
+}
+/** The server refuses larger scripts (user_scripts.py MAX_UPLOAD_BYTES). */
+export const MAX_SCRIPT_BYTES = 200 * 1024;
 export interface Health { ok: boolean; keys: { anthropic: boolean; daytona: boolean } }
 export interface Defaults { config: BatchConfig; prices_missing: boolean }
 export interface Estimate {
@@ -322,6 +362,17 @@ type Opts = { signal?: AbortSignal };
 export const fetchHealth = (o: Opts = {}) => call<Health>("/api/health", o);
 export const fetchDefaults = (o: Opts = {}) => call<Defaults>("/api/defaults", o);
 export const postEstimate = (cfg: BatchConfig, o: Opts = {}) => call<Estimate>("/api/estimate", { ...o, json: cfg });
+export const fetchDatasets = (o: Opts = {}) => call<DatasetInfo[]>("/api/datasets", o);
+/** Upload a CSV file. The body is the file itself; the server answers with its columns and a suggested target. */
+export const uploadDataset = (file: Blob & { name?: string }, o: Opts = {}) =>
+  call<DatasetInfo>(`/api/datasets?name=${encodeURIComponent(file.name ?? "dataset.csv")}`, {
+    ...o, method: "POST", body: file, headers: { "content-type": "text/csv" },
+  });
+/** Upload a Python training script. The body is the file itself. */
+export const uploadScript = (file: Blob & { name?: string }, o: Opts = {}) =>
+  call<ScriptInfo>(`/api/scripts?name=${encodeURIComponent(file.name ?? "train.py")}`, {
+    ...o, method: "POST", body: file, headers: { "content-type": "text/x-python" },
+  });
 export const fetchBatches = (o: Opts = {}) => call<BatchListItem[]>("/api/batches", o);
 export const startBatch = (cfg: BatchConfig, o: Opts = {}) => call<{ id: string }>("/api/batches", { ...o, json: cfg });
 export const fetchCase = (id: string, o: Opts = {}) => call<CaseFile>(`${batchPath(id)}/case`, o);

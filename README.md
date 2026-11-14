@@ -8,7 +8,7 @@ HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amaz
 
 | Part | What it is | File |
 | --- | --- | --- |
-| Task | Pima diabetes data with duplicate rows planted, plus a clean holdout whose labels never leave our server | `deep_research/task.py` |
+| Task | A dataset with duplicate rows planted, plus a clean holdout whose labels never leave our server. Pima diabetes by default, or an uploaded CSV with a chosen target column | `deep_research/task.py`, `datasets.py` |
 | Analyst agents | One flat deepagent per run, `DaytonaSandbox` backend, `write_todos` planning, no subagents | `agents/analyst.py` |
 | Orchestrator | Plain Python: VMs, runs, scoring, split finding, fork experiment, costs | `batch.py` |
 | Scorer | Reported accuracy vs true holdout accuracy, plus the share of test rows also in training | `scoring.py` |
@@ -37,6 +37,8 @@ lab_page/        the page each VM serves with the agent's latest chart
 prices.json      model and VM prices for the cost bar and budget guard
 fixtures/        saved replays (the simulated demo batch)
 batches/         batches from real runs (git-ignored)
+datasets/        uploaded CSV files (git-ignored)
+user_scripts/    uploaded training scripts (git-ignored)
 scripts/         make_fixture.py
 tests/           Python tests
 web/             the UI (Vite + TypeScript)
@@ -91,6 +93,9 @@ Full contract, including the case file and the websocket messages: `docs/api-con
 | GET | `/api/health` | Whether each key is set (never the values) |
 | GET | `/api/defaults` | Default config, and whether prices are missing |
 | POST | `/api/estimate` | Cost estimate for a config, from earlier runs |
+| GET | `/api/datasets` | The built-in dataset and uploaded CSV files, with their columns |
+| POST | `/api/datasets` | Upload a CSV file (the request body) |
+| POST | `/api/scripts` | Upload a Python training script (the request body) |
 | GET | `/api/batches` | Live batches and saved replays (`fixtures/`) |
 | POST | `/api/batches` | Start a batch with a config |
 | GET | `/api/batches/{id}/case` | The case file |
@@ -107,10 +112,16 @@ The case file's `phase` moves through `config`, `running`, `analyzing`, `ready` 
 
 ### VM cleanup
 
-Every VM is created with a 60 minute auto-stop and a 60 minute auto-delete after stopping, so a leaked VM stops
-billing on its own. `Batch.close()` stops every VM a batch started (runs, fork bases, fork children). A batch closes itself as
+A VM is used once. As soon as a run or a fork child is scored (or fails), its charts are downloaded and its VM is
+deleted, so it stops costing compute and disk. A run's `lab_url` works only while the run is going; afterwards it is
+null and the saved charts are listed in `charts`.
+
+`Batch.close()` deletes any VM a batch still has (a fork base, a run that is still going). A batch closes itself as
 soon as it is over: when the investigator finishes and the verdict is in, or when no step separates the runs. The
 server also closes every open batch when it shuts down.
+
+As a safety net for a VM that leaks anyway (a crash, a killed server), every VM is created with a 30 minute idle
+auto-stop and is deleted the moment it stops.
 
 ## Demo data for the frontend
 
@@ -145,6 +156,25 @@ Measured on Pima with scikit-learn, averaged over 5 seeds:
 - With half the rows duplicated, a random forest that skips deduplication reports about 89%. Logistic regression barely moves (about 79%). That is why the task asks for a random forest by default (`model_hint`).
 - Honest runs can miss the true score by up to about 7 points from test-set noise, so a run counts as inflated only above an 8 point gap (`inflation_threshold`).
 - Inflated runs' confusion matrices look cleaner and come from a larger test set, which is a visible tell on the lab page before the reveal.
+
+## Your own dataset
+
+The New batch panel on the home screen has a Dataset row: pick Pima, or upload a CSV (or drop it on the row) and
+choose the column to predict. The target must be a class label: 2 to 20 different values, at least 5 rows each, in
+a file of at least 100 rows. `samples/churn.csv` is a synthetic table to try it with.
+
+The trap was calibrated on Pima with a random forest. On another dataset the gap between honest and inflated runs
+may be smaller than `inflation_threshold`, and the batch then ends in `no_split`.
+
+## Your own training script
+
+The same panel takes a Python training script (`.py`, one file; `samples/train_churn.py` goes with the sample table). Each agent then gets it as `train.py` and starts
+from it instead of writing its own, so the batch shows how the score your script reports compares with its score
+on the hidden holdout, and whether agents working from it catch the planted duplicates.
+
+The VMs have pandas, scikit-learn and matplotlib only. A script that imports anything else (PyTorch, for example)
+is accepted with a warning; the agents may fail on it or rewrite that part. Saved weights (`.pth`) are not
+accepted: a finished model has no steps to compare or fork.
 
 ## Next
 

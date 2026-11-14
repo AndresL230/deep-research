@@ -149,13 +149,25 @@ class Batch:
             self.case.update_run(run_id, status="failed", reason=f"{type(e).__name__}: {e}"[:500])
         finally:
             log.close()
+            # The VM is used once: delete it now, so it stops costing anything. Its lab page goes with it.
+            if await self._release(run_id, scope):
+                self.case.update_run(run_id, lab_url=None)
+
+    async def _release(self, key: str, scope: str) -> bool:
+        """Delete the VM stored under `key`, if there is one, and stop counting its time."""
+        sb = self.vms.pop(key, None)
+        try:
+            if sb is not None:
+                await asyncio.to_thread(vms.delete_vm, sb)
+        finally:
             self.tracker.vm_stopped(scope)
             self.push_costs(force=True)
+        return sb is not None
 
     def _finish_run(self, run_id: str, rdir: Path, log: EventLog) -> None:
         score = score_run(rdir / "outputs", self.task, self.cfg.inflation_threshold)
         (rdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
-        actions = actions_from_events(read_events(log.path))
+        actions = actions_from_events(read_events(log.path), self.task.given_files())
         (rdir / "actions.json").write_text(
             json.dumps([{"index": a.index, "tool": a.tool, "args": a.args, "labels": a.labels} for a in actions], indent=2)
         )
@@ -169,7 +181,7 @@ class Batch:
         for r in statuses:
             p = self.runs_dir / r / "events.jsonl"
             if p.exists():
-                runs[r] = actions_from_events(read_events(p))
+                runs[r] = actions_from_events(read_events(p), self.task.given_files())
         finding = find_split(runs, statuses)
         if finding is None:
             self.case.set_split(None)
@@ -204,7 +216,7 @@ class Batch:
         fork_id = f"f{sum(k.startswith('f') for k in self.case.data['forks']) + 1}"
         src = split["fork_run_id"]
         msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
-        actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"))
+        actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task.given_files())
         prefix_msgs, n_prefix = cut_history(msgs, split["fork_at"])
         prefix_actions = actions[:n_prefix]
         self.case.set_phase("forking")
@@ -217,8 +229,12 @@ class Batch:
         base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base")
         self.vms[f"{fork_id}-base"] = base
         self.tracker.vm_started(base_scope)
-        await asyncio.to_thread(vms.load_task, base, self.task)
-        await asyncio.to_thread(vms.replay_actions, base, prefix_actions)
+        try:
+            await asyncio.to_thread(vms.load_task, base, self.task)
+            await asyncio.to_thread(vms.replay_actions, base, prefix_actions)
+        except BaseException:
+            await self._release(f"{fork_id}-base", base_scope)
+            raise
         self.case.update_fork(fork_id, status="running")
 
         sem = asyncio.Semaphore(MAX_PARALLEL_VMS)
@@ -273,12 +289,13 @@ class Batch:
                     self._set_child(fork_id, cid, **results[cid])
                 finally:
                     log.close()
-                    self.tracker.vm_stopped(scope)
-                    self.push_costs(force=True)
+                    if await self._release(f"{fork_id}-{cid}", scope):
+                        self._set_child(fork_id, cid, lab_url=None)
 
-        await asyncio.gather(*(child(arm, i) for arm in ("control", "forced") for i in range(n_per_arm)))
-        self.tracker.vm_stopped(base_scope)
-        await asyncio.to_thread(vms.stop_vm, base)
+        try:
+            await asyncio.gather(*(child(arm, i) for arm in ("control", "forced") for i in range(n_per_arm)))
+        finally:
+            await self._release(f"{fork_id}-base", base_scope)
 
         arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in ("control", "forced")}
         self.case.update_fork(fork_id, status="done", arms=arms)
@@ -349,11 +366,11 @@ class Batch:
         self.case.set_phase("awaiting_approval")
 
     async def close(self) -> None:
-        """Stop every VM this batch started: runs, fork bases and fork children. Safe to call again."""
-        stopping, self.vms = self.vms, {}
-        if not stopping:
+        """Delete every VM this batch still has: runs, fork bases and fork children. Safe to call again."""
+        left, self.vms = self.vms, {}
+        if not left:
             return
-        await asyncio.gather(*(asyncio.to_thread(vms.stop_vm, sb) for sb in stopping.values()))
+        await asyncio.gather(*(asyncio.to_thread(vms.delete_vm, sb) for sb in left.values()))
         # The lab pages went with the VMs. Charts were saved when each run finished.
         for run_id, run in list(self.case.data["runs"].items()):
             if run.get("lab_url"):
