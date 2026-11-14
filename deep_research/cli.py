@@ -31,8 +31,8 @@ def _print_case(b: Batch) -> None:
     print("batch dir:", b.dir)
 
 
-async def runs(n: int, strength: float, hint: str) -> None:
-    b = Batch(BatchConfig(n_runs=n, trap_strength=strength, hint_level=hint))
+async def runs(n: int, strength: float, hint: str, noise: float, hidden: float) -> None:
+    b = Batch(BatchConfig(n_runs=n, trap_strength=strength, hint_level=hint, trap_noise=noise, trap_hidden_share=hidden))
     print("batch", b.id)
     try:
         await b.run_all()
@@ -75,6 +75,9 @@ def main() -> None:
     r.add_argument("--n", type=int, default=1)
     r.add_argument("--strength", type=float, default=0.5)
     r.add_argument("--hint", choices=["none", "light"], default="none")
+    r.add_argument("--noise", type=float, default=BatchConfig.model_fields["trap_noise"].default)
+    r.add_argument("--hidden", type=float, default=BatchConfig.model_fields["trap_hidden_share"].default,
+                   help="share of the copies the noise hides from an exact duplicate check")
     f = sub.add_parser("forks")
     f.add_argument("batch_id")
     f.add_argument("--n", type=int, default=4)
@@ -86,7 +89,7 @@ def main() -> None:
     elif a.cmd == "cleanup":
         cleanup()
     elif a.cmd == "runs":
-        asyncio.run(runs(a.n, a.strength, a.hint))
+        asyncio.run(runs(a.n, a.strength, a.hint, a.noise, a.hidden))
     else:
         asyncio.run(forks(a.batch_id, a.n))
 

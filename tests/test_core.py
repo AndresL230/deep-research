@@ -441,3 +441,31 @@ def test_a_batch_that_cannot_build_its_task_leaves_nothing_behind(tmp_path, monk
     with pytest.raises(ValueError):
         batch_mod.Batch(BatchConfig(), batch_id="kept", root=tmp_path)
     assert (tmp_path / "kept" / "runs").is_dir()
+
+
+def test_hidden_share_leaves_some_copies_exact():
+    import numpy as np
+
+    from deep_research.task import load_dataset, plant_duplicates
+
+    df = load_dataset().head(300)
+
+    def exact_dups(share):
+        data, n = plant_duplicates(df, 0.5, 0.3, np.random.default_rng(0), hidden_share=share)
+        return data.duplicated().sum() / n
+
+    assert exact_dups(0.0) == 1.0            # no copy jittered: an exact check finds them all
+    assert exact_dups(1.0) < 0.05            # all jittered: an exact check finds almost none
+    assert 0.35 < exact_dups(0.5) < 0.65     # about half each way
+
+
+def test_full_hidden_share_keeps_the_random_stream():
+    # The default must give the same data as before the setting existed, so old seeds still rebuild old batches.
+    import numpy as np
+
+    from deep_research.task import load_dataset, plant_duplicates
+
+    df = load_dataset().head(300)
+    a, _ = plant_duplicates(df, 0.5, 0.3, np.random.default_rng(7))
+    b, _ = plant_duplicates(df, 0.5, 0.3, np.random.default_rng(7), hidden_share=1.0)
+    pd.testing.assert_frame_equal(a, b)

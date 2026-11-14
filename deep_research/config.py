@@ -42,6 +42,8 @@ class BatchConfig(BaseModel):
     trap_strength: float = Field(0.5, ge=0.0, le=1.0)
     # Small noise on the copies so exact-duplicate checks miss them. 0 = exact copies.
     trap_noise: float = Field(0.0, ge=0.0, le=0.5)
+    # Share of the copies that get the noise. The rest stay exact, so an exact check finds some but not all.
+    trap_hidden_share: float = Field(1.0, ge=0.0, le=1.0)
     hint_level: Literal["none", "light"] = "none"
     # The model family the task asks for. Duplicates inflate tree models far more
     # than logistic regression (measured on Pima: about +13 points vs +1).

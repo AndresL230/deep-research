@@ -64,18 +64,27 @@ def read_meta(task: TaskFiles) -> dict:
 
 
 def plant_duplicates(
-    df: pd.DataFrame, strength: float, noise: float, rng: np.random.Generator, noisy: list[str] | None = None
+    df: pd.DataFrame,
+    strength: float,
+    noise: float,
+    rng: np.random.Generator,
+    noisy: list[str] | None = None,
+    hidden_share: float = 1.0,
 ) -> tuple[pd.DataFrame, int]:
-    """Copy a share of rows once more and shuffle. Returns the new frame and the copy count."""
+    """Copy a share of rows once more and shuffle. Returns the new frame and the copy count.
+
+    With noise > 0, `hidden_share` of the copies are jittered so an exact duplicate check misses them.
+    """
     n_copies = int(round(len(df) * strength))
     if n_copies == 0:
         return df.sample(frac=1, random_state=int(rng.integers(1 << 31))).reset_index(drop=True), 0
     idx = rng.choice(len(df), size=n_copies, replace=False)
     copies = df.iloc[idx].copy()
     if noise > 0:
+        hidden = rng.random(len(copies)) < hidden_share if hidden_share < 1 else np.ones(len(copies), dtype=bool)
         for col in NOISY_COLUMNS if noisy is None else noisy:
             factor = 1 + rng.normal(0, noise * 0.05, size=len(copies))
-            copies[col] = (copies[col] * factor).round(3)
+            copies.loc[hidden, col] = (copies.loc[hidden, col] * factor[hidden]).round(3)
     out = pd.concat([df, copies], ignore_index=True)
     out = out.sample(frac=1, random_state=int(rng.integers(1 << 31))).reset_index(drop=True)
     return out, n_copies
@@ -95,7 +104,9 @@ def build_task(cfg: BatchConfig, out_dir: Path) -> TaskFiles:
         )
     except ValueError as e:
         raise datasets.DatasetError(f"could not set a holdout aside: {e}") from e
-    data, n_copies = plant_duplicates(work.reset_index(drop=True), cfg.trap_strength, cfg.trap_noise, rng, noisy)
+    data, n_copies = plant_duplicates(
+        work.reset_index(drop=True), cfg.trap_strength, cfg.trap_noise, rng, noisy, cfg.trap_hidden_share
+    )
 
     script_name = None
     if cfg.script:
@@ -120,6 +131,7 @@ def build_task(cfg: BatchConfig, out_dir: Path) -> TaskFiles:
                 "unique_rows_before_trap": len(work),
                 "planted_copies": n_copies,
                 "trap_noise": cfg.trap_noise,
+                "trap_hidden_share": cfg.trap_hidden_share,
                 "holdout_rows": len(holdout),
             },
             indent=2,
@@ -167,6 +179,8 @@ When you are done, write these files in `{VM_WORKSPACE}`:
 - `train.csv` and `test.csv`: the exact rows you trained and tested on, with all columns.
 - `report.json`: {{"test_accuracy": <float between 0 and 1>, "model": "<what you used>", "notes": "<one or two sentences>"}}
 - `predictions.csv`: {prediction}, one row per row of `{VM_WORKSPACE}/holdout_features.csv`, in the same order.
+
+Work in small steps: one short command per step, and read its output before you run the next. Do not write the whole workflow as one script.
 
 Save any charts you make as PNG files in `{VM_LIVE_DIR}/`. Plan your work with the todo list and keep it updated as you go.
 Run Python with `python3`. pandas, scikit-learn and matplotlib are installed.
