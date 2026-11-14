@@ -69,6 +69,11 @@ class BatchConfig(BaseModel):
     inflation_threshold: float = Field(0.08, gt=0)
     mode: Literal["live", "replay"] = "live"
     seed: int = 0
+    # robot_arm only (deep_research/domains/robot_arm.py). How many of the hidden can positions the controller is
+    # scored on (the first n of sim/hidden.py); None: all of them.
+    robot_hidden_positions: int | None = Field(None, ge=1, le=100)
+    # The seeds each hidden position is run with: more seeds, a steadier true success rate, a slower score.
+    robot_eval_seeds: list[int] = Field(default_factory=lambda: [0], min_length=1, max_length=5)
 
     @field_validator("trap")
     @classmethod

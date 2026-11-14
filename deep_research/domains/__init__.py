@@ -45,6 +45,10 @@ DEFAULT = "tabular"
 Visual = Literal["charts", "motion"]
 
 
+class ConfigError(ValueError):
+    """A batch's settings cannot work in its domain on this server (`Domain.check_config`)."""
+
+
 @dataclass(frozen=True)
 class InvestigatorWords:
     """The parts of the investigator's prompts that name the domain. The defaults are the tabular wording."""

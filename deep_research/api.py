@@ -437,7 +437,7 @@ async def start_batch(cfg: BatchConfig):
         # Check the settings (for tabular: the dataset, target and script) before anything is written or started.
         await asyncio.to_thread(domains.get(cfg.domain).check_config, cfg)
         b = await asyncio.to_thread(Batch, cfg)
-    except (datasets.DatasetError, user_scripts.ScriptError) as e:
+    except (datasets.DatasetError, user_scripts.ScriptError, domains.ConfigError) as e:
         raise HTTPException(422, str(e)) from e
     BATCHES[b.id] = b
 
