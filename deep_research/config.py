@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # The repo root: data/, skills/, lab_page/, prices.json, batches/, fixtures/ and web/ live here.
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -31,6 +31,8 @@ LAB_PAGE_PORT = 8080
 class BatchConfig(BaseModel):
     """Everything set on the config screen."""
 
+    # The kind of task: the name of a domain in `deep_research/domains/` ("tabular": a classifier on a CSV).
+    domain: str = "tabular"
     # "pima" (built in) or the id of an uploaded CSV (datasets.py).
     dataset: str = Field("pima", pattern=r"^(pima|ds-[0-9a-f]{8})$")
     # The column to predict. Needed for an uploaded dataset; Pima defaults to `outcome`.
@@ -75,6 +77,29 @@ class BatchConfig(BaseModel):
 
         traps.get(name)
         return name
+
+    @field_validator("domain")
+    @classmethod
+    def _known_domain(cls, name: str) -> str:
+        from . import domains  # here, not at the top: the domains import this module
+
+        domains.get(name)
+        return name
+
+    @model_validator(mode="before")
+    @classmethod
+    def _domain_defaults(cls, data):
+        """A domain's own defaults (`Domain.config_defaults`) for the fields the caller left out."""
+        if isinstance(data, dict):
+            from . import domains
+
+            try:
+                own = domains.get(data.get("domain")).config_defaults()
+            except ValueError:
+                return data  # `_known_domain` says what is wrong
+            if own:
+                return {**own, **data}
+        return data
 
 
 def load_prices() -> dict:
