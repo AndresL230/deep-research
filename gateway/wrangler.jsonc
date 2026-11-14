@@ -1,0 +1,42 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // Orro's front door: serves the web app, signs users in with WorkOS, checks their plan and credits in D1, and
+  // forwards the API to the Python server on Fly.io. See docs/cloudflare-gateway.md.
+  "name": "orro",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+  // The site's address. www.orrolab.dev and the old orro.josecruz.workers.dev redirect to it (src/index.ts).
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "orrolab.dev", "custom_domain": true },
+    { "pattern": "www.orrolab.dev", "custom_domain": true }
+  ],
+  // The built web app (cd web && npm run build). The Worker runs first for every request, so it can send the old
+  // addresses to orrolab.dev; everything that is not /api, /auth or /admin is served from these files.
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "orro-gateway",
+      "database_id": "e0d7b332-8491-4a03-9cd9-6ba915716acd",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    // The Python server. Only this Worker can call it (ORRO_GATEWAY_SECRET on both sides).
+    "FLY_ORIGIN": "https://orro-research.fly.dev",
+    // WorkOS AuthKit (public client id; sign-in uses PKCE, so no WorkOS API key is needed here).
+    "WORKOS_CLIENT_ID": "client_01M7E1DADCB6H2JHDQEN6Q9D67"
+  },
+  // Settles finished batches (charges actual spend, returns the rest) and refills monthly credits.
+  "triggers": { "crons": ["*/10 * * * *"] }
+  // Secrets (wrangler secret put NAME): GATEWAY_SECRET, the same value as ORRO_GATEWAY_SECRET on Fly, and
+  // ADMIN_EMAILS, comma-separated emails that get the admin plan on sign-in (a secret so they stay out of git).
+}
