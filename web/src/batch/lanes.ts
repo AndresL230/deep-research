@@ -7,7 +7,7 @@
 import "./lanes.css";
 import {
   batchFileUrl, isPendingForks, notebookUrl, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
-  type FixMeasured, type ForkExperiment, type MeasuredRate, type PendingForks, type ProposedFix, type RubricCheck, type RunRecord, type SplitFinding, type TrapInfo,
+  type FixEvidence, type FixMeasured, type ForkExperiment, type Hypothesis, type MeasuredRate, type PendingForks, type ProposedFix, type RubricCheck, type RunRecord, type SplitFinding, type TrapInfo,
   type Verdict,
 } from "../api";
 import { askIcon } from "../ask-icons";
@@ -734,7 +734,9 @@ function approvalCard(p: PendingForks, vm: BatchVm): string {
   const btn = (act: string, label: string, primary: boolean): string =>
     `<button type="button" class="${primary ? "ask-btn ln-approve ds-primary" : "ask-ghostbtn ask-ghostbtn--outline"}" data-act="${act}"${disabled ? " disabled" : ""}>` +
     `${vm.busy === act ? spinner(13) : ""}${esc(label)}${primary ? GO : ""}</button>`;
-  const size = `${p.n_per_arm} ${p.n_per_arm === 1 ? "run" : "runs"} in each of ${armCount(p)} arms, ${p.vm_count} VMs.`;
+  const size = p.direct
+    ? "scored on this server on the held-out setups, no VMs and no model calls; the patched code is executed."
+    : `${p.n_per_arm} ${p.n_per_arm === 1 ? "run" : "runs"} in each of ${armCount(p)} arms, ${p.vm_count} VMs.`;
   const fixing = isFixFork(p);
   const ask = fixing
     ? `The investigator wants to test its fix on run ${esc(c.fix?.run_id ?? src ?? "?")}: ${size}`
@@ -742,12 +744,17 @@ function approvalCard(p: PendingForks, vm: BatchVm): string {
   // What a person is approving, in three plain lines with no controls in them: what runs, the most this request can
   // show, and why the investigator is waiting.
   const more: string[] = [];
+  if (p.hypothesis_id) {
+    more.push(`Tests ${p.hypothesis_id}${p.hypothesis ? `: ${p.hypothesis}` : ""}`);
+    if (p.prediction) more.push(`Predicted, saved before it runs: ${p.prediction}`);
+    if (p.falsified_if) more.push(`Falsified if: ${p.falsified_if}`);
+  }
   if (fixing) {
     const fx = c.fix;
     if (fx) more.push(`Fixed arm applies: ${fx.description} at ${fx.file_path}${fx.line != null ? `:${fx.line}` : ""}.`);
   } else {
     const cfg = c.config as Partial<BatchConfig>;
-    const iv = c.split?.intervention;
+    const iv = p.hypothesis_id ? null : c.split?.intervention;
     const arms = ["control", ...(cfg.placebo_arm ? ["placebo"] : []), ...(cfg.show_arm ? ["show"] : []), "forced"];
     const which = armCount(p) === arms.length ? `Arms: ${arms.join(", ")}.` : `${armCount(p)} arms.`;
     more.push(`${iv ? `Forced arm runs first: ${iv}. ` : ""}${which}`);
@@ -844,14 +851,23 @@ function question(f: ForkExperiment, vm: BatchVm): string {
   const q = fixing
     ? "With the proposed fix applied, does the measured success rate rise?"
     : `If a copy is made to do one step first (${lowerFirst(f.intervention)}), does the gap between what it claims and what is measured shrink?`;
-  const hyp = [...(c.hypotheses ?? [])].filter((h) => h.step_label === f.label).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).pop();
+  const hyp = (f.hypothesis_id ? (c.hypotheses ?? []).find((h) => h.id === f.hypothesis_id) : undefined) ??
+    [...(c.hypotheses ?? [])].filter((h) => h.step_label === f.label).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).pop();
   // The quote, then who said it on the line under it, the way the verdict attributes the investigator's sentence.
   const hypRow = hyp
-    ? `<div class="ln-q-row"><span class="ln-q-k">Hypothesis</span><div class="ln-q-x"><q class="ln-q-quote">${esc(hyp.evidence)}</q>` +
-      `<span class="ln-q-by">${whoTag("llm", "hypothesis subagent")}</span></div></div>` : "";
+    ? `<div class="ln-q-row"><span class="ln-q-k">Hypothesis${hyp.id ? ` ${esc(hyp.id)}` : ""}</span><div class="ln-q-x"><q class="ln-q-quote">${esc(hyp.sentence ?? hyp.evidence)}</q>` +
+      (hyp.sentence ? `<span class="ln-note">Evidence for it: ${esc(hyp.evidence)}</span>` : "") +
+      `<span class="ln-q-by">${whoTag("llm", hyp.id ? "investigator" : "hypothesis subagent")}</span></div></div>` : "";
+  const rivals = competingRow(c.hypotheses ?? [], hyp?.id);
+  const falsified = f.falsified_if ?? hyp?.falsified_if;
+  const falsifiedRow = falsified ? `<div class="ln-q-row"><span class="ln-q-k">Falsified if</span><span class="ln-q-x">${esc(falsified)}</span></div>` : "";
+  const outcomeRow = f.outcome
+    ? `<div class="ln-q-row"><span class="ln-q-k">Outcome</span><span class="ln-q-x">${pill(f.outcome, OUTCOME_WORDS[f.outcome] ?? f.outcome, f.outcome === "supported" ? "honest" : "muted")} ` +
+      `${whoTag("py", "computed from the counts")}</span></div>` : "";
   const prediction = f.prediction;
+  const planned = prediction === "smaller_gap" || prediction === "larger_gap";
   const expect = prediction
-    ? `Saved before any copy ran: ${prediction.replace(/_/g, " ")}`
+    ? `Saved before any copy ran: ${planned ? prediction.replace(/_/g, " ") : prediction}`
     : fixing
       ? "Expected: a higher measured rate in the fixed arm"
       : "Expected: a smaller gap in the forced arm. Implied by the design (the forced step is what honest runs did); no prediction was saved before the copies ran.";
@@ -860,7 +876,24 @@ function question(f: ForkExperiment, vm: BatchVm): string {
     `<h3 class="ln-q-t">${reveal(q, "word")}</h3>` +
     hypRow +
     `<div class="ln-q-row"><span class="ln-q-k">Prediction</span><span class="ln-q-x">${esc(expect)}</span></div>` +
+    falsifiedRow + outcomeRow + rivals +
     `</div>`;
+}
+
+/** A hypothesis's state in words. */
+const OUTCOME_WORDS: Record<string, string> = {
+  untested: "untested", testing: "testing", supported: "supported", contradicted: "contradicted",
+  inconclusive: "inconclusive", no_data: "no data",
+};
+
+/** Every competing hypothesis the investigator recorded before testing, with its state; the tested one marked. */
+export function competingRow(hs: Hypothesis[], tested?: string): string {
+  const listed = hs.filter((h) => h.id);
+  if (listed.length < 2) return "";
+  const li = (h: Hypothesis): string =>
+    `<li${h.id === tested ? ' class="ln-hyp-tested"' : ""}><b>${esc(h.id ?? "")}</b> ${esc(h.kind ?? "")} · ${esc(h.sentence ?? h.evidence)} ` +
+    `${pill(h.status ?? "untested", OUTCOME_WORDS[h.status ?? "untested"] ?? String(h.status), h.status === "supported" ? "honest" : "muted")}</li>`;
+  return `<div class="ln-q-row"><span class="ln-q-k">Competing</span><ul class="ln-q-x ln-hyps">${listed.map(li).join("")}</ul></div>`;
 }
 
 /** F3: where the copies were cut from the source run, and how they were made. */
@@ -1597,6 +1630,8 @@ function limits(c: CaseFile, f: ForkExperiment | null, cmp: Comparison | null, e
     out.push(`${cmp.n} ${cmp.n === 1 ? "pair" : "pairs"} per comparison.`);
     if (!f.pairs) out.push("Pairs matched by copy number after the run, not assigned before it.");
     if (!f.prediction) out.push("No prediction was saved before the copies ran; the expected direction is a smaller gap.");
+    if (f.built) out.push(`Copies built by VM fork: ${f.built.fork}; by replaying the run on a fresh VM: ${f.built.replay}${f.built.none ? `; never built: ${f.built.none}` : ""}.`);
+    if (f.measures === "reporting_accuracy") out.push("This experiment measures whether the reports became accurate, not whether the controller works better.");
     const failed = Object.values(f.children ?? {}).filter((k) => k.status === "failed").length;
     if (failed) out.push(`${failed} ${failed === 1 ? "copy" : "copies"} failed and ${failed === 1 ? "was" : "were"} left out.`);
     if (typeof f.score !== "number") out.push("The sequential score and the permutation p are computed in the browser by MASTER_PLAN 6.4, as measures; they do not set the level.");
@@ -1812,7 +1847,21 @@ function fixMeasuredView(m: FixMeasured): string {
     `<p class="ln-gap"><b class="ln-gap-n">${esc(pts(delta))}</b><span class="ln-gap-w">${word}</span></p></div>` +
     `<p class="ln-note">${esc(fixMeasuredText(m))}</p>` +
     (m.exceptions.length ? `<p class="ln-note ln-fix-raised">The patched code raised: ${m.exceptions.map((e) => `<code>${esc(e)}</code>`).join(" ")}</p>` : "") +
+    (m.evidence ? `<p class="ln-note ln-fix-evidence">${fixEvidenceText(m.evidence)} ${whoTag("py", "computed from the paired cases")}</p>` : "") +
     `</div>`;
+}
+
+const FIX_LEVEL: Record<FixEvidence["level"], string> = {
+  improved: "Improved", worse: "Worse", no_detectable_change: "No detectable change", unpaired: "Cannot be paired",
+};
+
+/** "No detectable change: 2 setups gained, 0 lost, one-sided exact sign test p = 0.250 (below 0.05 needed). This
+ *  measures the controller on held-out setups, not the accuracy of any report." */
+export function fixEvidenceText(e: FixEvidence): string {
+  const p = e.p_value == null ? "n/a" : e.p_value.toFixed(3);
+  const counts = e.gained != null && e.lost != null ? ` ${e.gained} setups gained, ${e.lost} lost,` : "";
+  return `${esc(FIX_LEVEL[e.level] ?? e.level)}:${esc(counts)} one-sided exact sign test p = ${esc(p)} (below ${esc(String(e.alpha))} needed). ` +
+    "This measures the controller on held-out setups, not the accuracy of any report.";
 }
 
 /**

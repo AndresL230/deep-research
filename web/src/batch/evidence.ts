@@ -32,7 +32,8 @@ export type Prediction = "smaller_gap" | "larger_gap";
 /** The fields the server may add to forks.<id> (MASTER_PLAN 6.1). Read through this so the module works before and
  *  after api.ts has them. A level recorded there is not read: the level is the evidence rule's. */
 interface Planned {
-  prediction?: Prediction;
+  /** A planned direction, or (the server) the tested hypothesis's prediction in words: read as "smaller_gap" unless it is "larger_gap". */
+  prediction?: Prediction | string;
   pairs?: { i: number; control_gap: number; changed_gap: number; agree: boolean }[];
   score?: number;
   p_exact?: number;
