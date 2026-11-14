@@ -182,7 +182,7 @@ async def test_cli_investigate_asks_a_person_without_auto_approve(offline, tmp_p
 
     case = json.loads((tmp_path / "t" / "case" / "case.json").read_text())
     # The question carries what the investigator really asked for, read from the interrupt, and what it would cost.
-    assert len(asked) == 1 and "3 runs in each of 4 arms (control, placebo, show, forced), 13 VMs" in asked[0]
+    assert len(asked) == 1 and "to test h1 (forced copies come out inflated less often than control copies): 3 runs per arm, 13 VMs" in asked[0]
     assert "$9.03" in asked[0]  # 12 fork runs at the saved runs' average cost
     assert calls == []  # declined: nothing ran, nothing was spent
     assert case["verdict"] is None and "pending" not in case["forks"]
