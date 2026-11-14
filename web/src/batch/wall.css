@@ -14,11 +14,11 @@
   --dv-key:#ffffff; --dv-recess:#eceef2; --dv-paper:#ffffff; --dv-slit:#24262e;
 }
 [data-cnpy-theme="dark"] .bw {
-  --dv-top:#3a3630; --dv-bot:#2c2924; --dv-rim:rgba(255,255,255,0.07); --dv-edge:rgba(0,0,0,0.5);
-  --dv-side1:#211f1b; --dv-side2:#161411;
-  --dv-scr:#14120f; --dv-scr-line:rgba(237,233,226,0.022); --dv-scr-in:rgba(0,0,0,0.6);
-  --dv-shadow:rgba(0,0,0,0.55); --dv-grid:rgba(237,233,226,0.07);
-  --dv-key:#45413a; --dv-recess:#24211d; --dv-paper:#37332d; --dv-slit:#0c0b09;
+  --dv-top:#353a41; --dv-bot:#2a2e34; --dv-rim:rgba(255,255,255,0.08); --dv-edge:rgba(0,0,0,0.55);
+  --dv-side1:#202328; --dv-side2:#17191d;
+  --dv-scr:#101215; --dv-scr-line:rgba(242,243,243,0.022); --dv-scr-in:rgba(0,0,0,0.6);
+  --dv-shadow:rgba(0,0,0,0.6); --dv-grid:rgba(242,243,243,0.06);
+  --dv-key:#3e444b; --dv-recess:#202328; --dv-paper:#31363c; --dv-slit:#0b0c0e;
 }
 
 /* ── the line above the grid ── */

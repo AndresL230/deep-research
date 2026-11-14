@@ -83,10 +83,9 @@ const app = document.getElementById("app")!;
 const params = new URLSearchParams(location.search);
 const themeQ = matchMedia("(prefers-color-scheme: dark)");
 const forcedTheme = params.get("theme");
-// Light unless asked: the devices on the wall are drawn for a bright room. `?theme=dark` forces dark, `?theme=system`
-// follows the OS.
-const theme = (): "light" | "dark" => (forcedTheme === "dark" ? "dark" : forcedTheme === "system" && themeQ.matches ? "dark" : "light");
-const syncPageTheme = (): void => { document.documentElement.style.colorScheme = theme(); document.body.style.background = theme() === "dark" ? "#1c1a16" : "#fbfbfc"; };
+// Dark unless asked, on a cool near-black. `?theme=light` forces light, `?theme=system` follows the OS.
+const theme = (): "light" | "dark" => (forcedTheme === "light" ? "light" : forcedTheme === "system" && !themeQ.matches ? "light" : "dark");
+const syncPageTheme = (): void => { document.documentElement.style.colorScheme = theme(); document.body.style.background = theme() === "dark" ? "#15171b" : "#fbfbfc"; };
 syncPageTheme();
 app.innerHTML = `<div class="app-root" data-cnpy-theme="${theme()}">
   <header class="cnpy-hdr pg-hdr" data-region="header"></header>
