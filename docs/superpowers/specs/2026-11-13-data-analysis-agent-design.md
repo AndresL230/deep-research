@@ -2,6 +2,10 @@
 
 Date: 2026-11-13
 
+> **Superseded (2026-11-14).** The chat app this spec describes (`server/`, `/api/ask`) was retired when the repo
+> was unified around the batch experiment. Its look lives on in `web/`. See `README.md` and `docs/api-contract.md`;
+> the code is in git history at 828cd79.
+
 ## Intent
 
 A basic, working deep agent built on LangChain's `deepagents` library that analyzes data: you hand it a CSV
