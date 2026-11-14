@@ -106,6 +106,7 @@ Full contract, including the case file and the websocket messages: `docs/api-con
 | POST | `/api/scripts` | Upload a Python training script (the request body) |
 | GET | `/api/batches` | Live batches and saved replays (`fixtures/`) |
 | POST | `/api/batches` | Start a batch with a config |
+| GET | `/api/costs` | Spend across every batch: totals, by model, and one row per batch |
 | GET | `/api/batches/{id}/case` | The case file |
 | GET | `/api/batches/{id}/runs/{run}/events` | One run's event log |
 | GET | `/api/batches/{id}/forks/{fork}/{child}/events` | One fork child's event log |
