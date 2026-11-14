@@ -39,6 +39,8 @@ describe("the live robot recording", () => {
     expect([h3.kind, h3.step_label, h3.run_id]).toEqual(["code", null, "r06"]);
     const html = investigatorView(vm);
     for (const id of ["h1", "h2", "h3"]) expect(html).toContain(`Hypothesis ${id}`);
+    // The fold that holds them counts them.
+    expect(html).toContain("its log and 3 hypotheses");
     for (const s of ["Predicts", "Falsified if", "Inconclusive", "Untested", "Contradicted", "Fork f1", "The measured fix"]) expect(html).toContain(s);
     // Competing hypotheses have no example commands: no empty code boxes.
     expect(html).not.toContain("No example");

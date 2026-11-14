@@ -1945,7 +1945,7 @@ export function investigatorView(vm: BatchVm): string {
     `</div>` +
     // The approval card shows the error itself while a fork request is pending.
     (vm.error && !pendingForks(c) ? `<p class="ln-err" role="alert">${esc(vm.error)}</p>` : "") +
-    (detail ? foldButton("inv", open, hypHtml ? "its log and hypothesis" : "its log") + (open ? detail : "") : "") +
+    (detail ? foldButton("inv", open, hypHtml ? (hyps.length === 1 ? "its log and hypothesis" : `its log and ${hyps.length} hypotheses`) : "its log") + (open ? detail : "") : "") +
     `</section>`;
 }
 
