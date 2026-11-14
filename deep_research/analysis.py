@@ -46,6 +46,7 @@ def _rules() -> list[tuple[str, str]]:
 _RULES: list[tuple[str, re.Pattern]] = [(label, re.compile(pattern)) for label, pattern in _rules()]
 # Every step label, in order. The case file and the investigator's prompt take the list from here.
 LABELS = [label for label, _ in _RULES]
+_TRAP_LABELS = {t.label for t in traps.registered()}
 # Steps that can be part of the split itself (see `Trap.at_split`).
 _AT_SPLIT = {t.label for t in traps.registered() if t.at_split}
 
@@ -77,7 +78,13 @@ class Action:
 
 
 def label_text(text: str) -> list[str]:
-    return [label for label, rx in _RULES if rx.search(text)]
+    """The step labels whose pattern is in `text`.
+
+    A trap's step has to be in the code itself: a script that imports `GroupShuffleSplit` and then
+    splits at random has not grouped anything.
+    """
+    code = _without_imports(text)
+    return [label for label, rx in _RULES if rx.search(code if label in _TRAP_LABELS else text)]
 
 
 def actions_from_events(events: list[dict], given_files: dict[str, str] | None = None) -> list[Action]:
@@ -152,6 +159,19 @@ _IMPORT_BLOCK = re.compile(r"^[ \t]*from\s+[\w.]+\s+import\s*\([^)]*\)", re.MULT
 def _blank(m: re.Match) -> str:
     """Spaces for everything but the line breaks, so positions after it do not move."""
     return re.sub(r"[^\n]", " ", m.group())
+
+
+# One import statement: at the start of a line, after a `;`, or opening a `python3 -c "..."` one-liner.
+# It ends at the line's end or the next `;`, so the code after it on the same line stays.
+_IMPORT_STATEMENT = re.compile(
+    r"""(^|;|-c\s+["'])([ \t]*(?:from\s+[\w.]+\s+import|import)\s[^;\n"']*)""", re.MULTILINE
+)
+
+
+def _without_imports(text: str) -> str:
+    """`text` with its import statements blanked and everything else where it was."""
+    text = _IMPORT_BLOCK.sub(_blank, text)
+    return _IMPORT_STATEMENT.sub(lambda m: m.group(1) + re.sub(r"[^\n]", " ", m.group(2)), text)
 
 
 def _order_in_text(text: str, first: str, second: str) -> bool:
