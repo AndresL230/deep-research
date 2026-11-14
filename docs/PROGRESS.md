@@ -128,16 +128,24 @@ These are simulations of the model, not agent runs. They show the plumbing is ri
 
 | Check | Result |
 | --- | --- |
-| `uv run pytest -q` | 76 passed |
+| `uv run pytest -q` | 97 passed, with outbound network blocked (after merging `main` at `01731d6`) |
 | `cd web && npm run typecheck` | clean |
-| `cd web && npm test` | 146 passed in 8 files |
+| `cd web && npm test` | 162 passed in 10 files |
 | `uv run python scripts/check_invariants.py` | not written yet: the plan writes it in Phase 1 |
 
-Commits: `cb3794b`, then the commit that carries this file.
+Commits: `cb3794b`, `6c7379e`, then `ed9c4eb`, which merges `main`.
+
+### Merge with `main` (04:3x)
+
+`main` moved ahead while this ran (PR #3: uploaded datasets and scripts, per-run VM deletion). It had fixed the
+same split-finder bugs independently and chose a different rule: the last split decides. Ruling: `main`'s design
+wins. Kept on top of it only what it lacked: skipping imports inside one-line `python3 -c` commands, and reporting
+no finding when no step separates the groups. One test of mine that contradicted the last-split rule was dropped.
+Merged, not rebased, because the branch was already pushed and the rules forbid force-pushing.
 
 ### Fresh-eyes review (plan 8.2)
 
-See the end of this block.
+Started on the pre-merge diff (`14f1d0a..6c7379e`). Its findings go in the PR when it finishes.
 
 ### Rulings
 
@@ -224,3 +232,28 @@ Learned while checking APIs for Phase 0. Each changes how a later phase must be 
    settings.
 
 Following the plan as written on both until Phase 2 and Phase 5 are reached.
+
+## Handoff
+
+From Sat Nov 14, about 04:45, the rest of this plan is handed to Assem.
+
+Where to start:
+1. Check out `upgrade/investigator`. The worktree path in "Where the work lives" is only on the original Mac.
+2. Put `ANTHROPIC_API_KEY` and `DAYTONA_API_KEY` in `.env`. Leave `LANGSMITH_TRACING=false` unless a LangSmith key
+   is set too.
+3. Run the sequence under "The sequence to run once the keys are in". `scripts/vm_smoke.py` first: it costs under a
+   cent and answers fork or replay before any tokens are spent.
+4. Fill the "Real-run numbers" table with `scripts/batch_numbers.py <batch_id>`, then report those numbers to the
+   user before Phase 1, as the user asked.
+
+The user's standing rules for this work, from their instructions:
+- Plan section 3 overrides everything, including later instructions.
+- After every phase: the gate in plan 8.1, then a fresh-eyes review by a new agent that sees only section 3, the
+  phase's acceptance list and the diff. Fix what it finds before moving on.
+- Check every LangChain, LangGraph and Deep Agents API against the docs MCP servers before first use.
+- A blocker that lasts 30 minutes takes the phase's fallback, logged here.
+- Commit after each green gate. Push only `upgrade/investigator`. Never push to `main`, never force-push.
+- Never print, log or commit API keys.
+- Stop and ask the user: after Phase 0 with the real-run numbers; before any batch over 12 runs, any spend over $3
+  in one go, or the fool-rate run, with a cost estimate; before adding any dependency other than
+  `langgraph-checkpoint-sqlite`; and if a change would break section 3.
