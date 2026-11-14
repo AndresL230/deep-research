@@ -29,7 +29,7 @@ import { costBar, homeView } from "./batch/home";
 import { hubBadge } from "./batch/hub-badge";
 import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { wallView } from "./batch/wall";
-import { forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
+import { diagnosisView, fixView, forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, runSummaryView, taskText } from "./batch/run";
 import { agentTimes, caseAt, eventsAt, replayBar, replayDuration, replaySchedule } from "./batch/replay";
@@ -217,6 +217,8 @@ function batchBody(vm: BatchVm): string {
     ["phase", investigatorView(vm)],
     ["fork", forkView(vm)],
     ["verdict", verdictView(vm)],
+    ["diagnosis", diagnosisView(vm)],
+    ["fix", fixView(vm)],
   ];
   return `<div class="pg-batch" data-morph-key="batch:${attr(vm.id)}" data-morph-list>${sections
     .filter(([, html]) => html)

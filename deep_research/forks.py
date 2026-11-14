@@ -111,10 +111,75 @@ def cut_history(messages: list[BaseMessage], fork_at: int) -> tuple[list[BaseMes
     return list(messages), seen
 
 
-def forced_turn(command: str, output: str) -> list[BaseMessage]:
-    """A synthetic tool call plus its real result, appended to the history."""
+def fix_plan(fix: dict, placebo_step: dict, placebo: bool = True) -> dict[str, dict | None]:
+    """The arms of the fix experiment: does the one change the investigator proposed make the code work?
+
+    `control` continues unchanged, `fixed` continues after the patch is applied to the file in its copy of
+    the VM, and `placebo` (optional) runs the harmless command, for the same reason as in `arm_plan`.
+    `fix` is the case file's `fix` section: `file_path`, `old_string`, `new_string`, `description`.
+    """
+    plan: dict[str, dict | None] = {"control": None}
+    if placebo:
+        plan["placebo"] = placebo_step
+    plan["fixed"] = {
+        "kind": "edit",
+        "description": fix.get("description") or f"Apply the proposed fix to {fix['file_path']}",
+        "file_path": fix["file_path"],
+        "old_string": fix["old_string"],
+        "new_string": fix["new_string"],
+    }
+    return plan
+
+
+def step_kind(step: dict) -> str:
+    """"command" (a shell command, the default) or "edit" (replace a string in a file)."""
+    return step.get("kind") or "command"
+
+
+def step_text(step: dict) -> str:
+    """The step as the event log and the UI show it: the command, or the edit in one line."""
+    if step_kind(step) == "edit":
+        return f"edit_file {step['file_path']}: replace {step['old_string']!r} with {step['new_string']!r}"
+    return step["command"]
+
+
+def apply_step(backend, step: dict) -> str:
+    """Run `step` in a fork child's VM through its agent backend and return what the agent will see as the result.
+
+    Raises RuntimeError when the step did not take: a failed command or an edit whose text was not found. The
+    copy is then a failed child, never a result of its arm.
+    """
+    if step_kind(step) == "edit":
+        res = backend.edit(step["file_path"], step["old_string"], step["new_string"], False)
+        error = getattr(res, "error", None)
+        if error:
+            raise RuntimeError(f"the fix could not be applied: {error}"[:300])
+        n = getattr(res, "occurrences", None)
+        return f"Edited {step['file_path']}: replaced {n if n is not None else 1} occurrence of the old text with the new text."
+    res = backend.execute(step["command"])
+    # A sandbox result without an exit code (an older SDK) counts as having succeeded.
+    exit_code = getattr(res, "exit_code", None)
+    if exit_code not in (0, None):
+        raise RuntimeError(f"exit code {exit_code}: {res.output[:200]}")
+    return res.output
+
+
+def forced_turn(step: dict | str, output: str) -> list[BaseMessage]:
+    """A synthetic tool call plus its real result, appended to the history.
+
+    `step` is an arm's step (`arm_plan`, `fix_plan`); a plain string is a shell command. A command becomes an
+    `execute` call, an edit an `edit_file` call: the agent then sees exactly what it would have seen had it
+    done the step itself.
+    """
     call_id = f"forced-{uuid.uuid4().hex[:12]}"
+    if isinstance(step, str):
+        step = {"command": step}
+    if step_kind(step) == "edit":
+        name = "edit_file"
+        args = {"file_path": step["file_path"], "old_string": step["old_string"], "new_string": step["new_string"]}
+    else:
+        name, args = "execute", {"command": step["command"]}
     return [
-        AIMessage(content="", tool_calls=[{"name": "execute", "args": {"command": command}, "id": call_id}]),
-        ToolMessage(content=output, tool_call_id=call_id, name="execute"),
+        AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": call_id}]),
+        ToolMessage(content=output, tool_call_id=call_id, name=name),
     ]

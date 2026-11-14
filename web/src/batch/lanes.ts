@@ -1,12 +1,13 @@
-// OWNER: subagent C. What changed (the split), the fork experiment, the verdict, and the investigator's panel.
+// OWNER: subagent C. What changed (the split), the fork experiment, the verdict, the investigator's panel, the
+// diagnosis (where in the code a failure comes from) and the proposed fix.
 //
 // Every export is a pure `(vm) => html` function that returns "" until its state is reached, so main.ts can stack
 // them unconditionally. Classes are prefixed `ln-`; the look lives in lanes.css. The notebooks in "What changed" are
 // notebook.ts cells and wear its `nb-` classes.
 import "./lanes.css";
 import {
-  isPendingForks, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
-  type ForkExperiment, type PendingForks, type RunRecord, type SplitFinding, type TrapInfo,
+  batchFileUrl, isPendingForks, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
+  type ForkExperiment, type PendingForks, type ProposedFix, type RunRecord, type SplitFinding, type TrapInfo,
 } from "../api";
 import { askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
@@ -84,15 +85,28 @@ export function eventLine(ev: AgentEvent): { kind: string; text: string } {
   }
 }
 
-/** Child ids in arm order and by number: control-1, control-2, ..., forced-1, ... */
+/** "3 of 4 succeeded on the hidden positions, mean true 72.0% vs control 45.0%": a fix experiment's arm, where what
+ *  matters is the true success rate, not the inflation. `control` is the arm it is measured against (left out for the
+ *  control arm itself, or when there is none). */
+export function fixSummaryText(a: ArmSummary, control: ArmSummary | null = null): string {
+  const failed = a.failed ? `, ${a.failed} failed` : "";
+  const vs = control && control !== a && control.mean_true != null ? ` vs control ${pct(control.mean_true)}` : "";
+  return `${a.honest} of ${a.scored} succeeded on the hidden positions${failed}, mean true ${pct(a.mean_true)}${vs}`;
+}
+
+/** True for a fix experiment: the fork that tests the investigator's patch rather than which step. */
+export const isFixFork = (f: Pick<ForkExperiment, "kind"> | Pick<PendingForks, "kind">): boolean => f.kind === "fix";
+
 /** What each arm is called on screen. */
-const ARM_TITLE: Record<ForkArm, string> = { control: "Control", placebo: "Placebo", show: "Shown", forced: "Forced" };
+const ARM_TITLE: Record<ForkArm, string> = { control: "Control", placebo: "Placebo", show: "Shown", forced: "Forced", fixed: "Fixed" };
 
 /** The arms this experiment ran, in order. Batches saved before the extra arms existed ran these two. */
-export function armNames(f: Pick<ForkExperiment, "arm_steps">): ForkArm[] {
+export function armNames(f: Pick<ForkExperiment, "arm_steps" | "kind">): ForkArm[] {
   const named = Object.keys(f.arm_steps ?? {}) as ForkArm[];
-  return named.length ? named : ["control", "forced"];
+  return named.length ? named : isFixFork(f) ? ["control", "fixed"] : ["control", "forced"];
 }
+
+/** Child ids in arm order and by number: control-1, control-2, ..., forced-1, ... */
 
 /** The step an arm runs before it continues, in words, or null when it continues unchanged. */
 export function armStep(f: Pick<ForkExperiment, "arm_steps" | "intervention">, arm: ForkArm): string | null {
@@ -591,7 +605,7 @@ export function forkView(vm: BatchVm): string {
   const threshold = (c.config as Partial<BatchConfig>).inflation_threshold ?? 0.08;
   return `<section class="ln-sec ln-forks" data-morph-key="ln-forks" aria-label="Fork experiment">` +
     head("Fork experiment", c) +
-    `<div class="ln-stack" data-morph-list>${exps.map((f) => experiment(f, threshold)).join("")}${pending ? approvalCard(pending, vm) : ""}</div>` +
+    `<div class="ln-stack" data-morph-list>${exps.map((f) => experiment(f, threshold, c.fix ?? null)).join("")}${pending ? approvalCard(pending, vm) : ""}</div>` +
     `</section>`;
 }
 
@@ -608,9 +622,12 @@ function approvalCard(p: PendingForks, vm: BatchVm): string {
   const btn = (act: string, label: string, primary: boolean): string =>
     `<button type="button" class="${primary ? "ask-btn ln-approve" : "ask-ghostbtn ask-ghostbtn--outline"}" data-act="${act}"${disabled ? " disabled" : ""}>` +
     `${vm.busy === act ? askSpinner(12) : ""}${esc(label)}</button>`;
+  const size = `${p.n_per_arm} ${p.n_per_arm === 1 ? "run" : "runs"} in each of ${armCount(p)} arms, ${p.vm_count} VMs.`;
+  const ask = isFixFork(p)
+    ? `The investigator wants to test its fix on run ${esc(vm.case.fix?.run_id ?? src ?? "?")}: ${size}`
+    : `The investigator wants to fork run ${esc(src ?? "?")} before its split: ${size}`;
   return `<div class="ln-card ln-approval" data-morph-key="pending" role="group" aria-label="Approve the fork">` +
-    `<p class="ln-approval-t">The investigator wants to fork run ${esc(src ?? "?")} before its split: ` +
-    `${p.n_per_arm} ${p.n_per_arm === 1 ? "run" : "runs"} in each of ${armCount(p)} arms, ${p.vm_count} VMs.</p>` +
+    `<p class="ln-approval-t">${ask}</p>` +
     `<p class="ln-approval-est">Estimated cost <b>${esc(est)}</b></p>` +
     `<div class="ln-actions">${btn(ACT.approve, "Approve", true)}${btn(ACT.decline, "Decline", false)}` +
     (vm.live ? "" : `<span class="ln-muted">Approval happens on live batches.</span>`) + `</div>` +
@@ -628,8 +645,13 @@ export function armStats(f: ForkExperiment, arm: ForkArm): ScoreStats {
   return { ...s, n: sum.scored, reported: sum.mean_reported, true: sum.mean_true, gap };
 }
 
-function experiment(f: ForkExperiment, threshold: number): string {
+/** A mean true accuracy is "up" against the control's when it is over it by more than rounding. */
+const UP = 0.005;
+
+function experiment(f: ForkExperiment, threshold: number, fix: ProposedFix | null = null): string {
   const statusPill = pill(f.status, FORK_STATUS[f.status] ?? f.status, f.status === "done" ? "muted" : "running");
+  const fixing = isFixFork(f);
+  const control = fixing ? armStats(f, "control") : null;
   const arm = (a: ForkArm): string => {
     const kids = sortedChildren(f.children ?? {}, a);
     const summary = f.arms?.[a];
@@ -637,20 +659,29 @@ function experiment(f: ForkExperiment, threshold: number): string {
     const sub = step === null ? "Continues unchanged" : `Runs first: ${step}`;
     const started = f.status !== "done" && kids.length < f.n_per_arm ? `<span class="ln-muted">${kids.length} of ${f.n_per_arm} started</span>` : "";
     const stats = armStats(f, a);
-    // The arm's bar wears the color of what its runs turned out to be: inflated when the mean gap is over the line.
-    const bars = stats.reported != null || stats.true != null
-      ? scoreBars(stats, stats.gap != null && stats.gap >= threshold ? "inflated" : "honest") : "";
+    // The arm's bar wears the color of what its runs turned out to be. Testing a step: inflated when the mean gap is
+    // over the line. Testing a fix: green when the mean true accuracy went up against control, red when it did not.
+    const better = control != null && stats.true != null && control.true != null && stats.true > control.true + UP;
+    const tone: Group = fixing ? (better ? "honest" : "inflated") : stats.gap != null && stats.gap >= threshold ? "inflated" : "honest";
+    const bars = stats.reported != null || stats.true != null ? scoreBars(stats, tone) : "";
+    const sum = summary ? (fixing ? fixSummaryText(summary, a === "control" ? null : f.arms?.control ?? null) : armSummaryText(summary)) : "";
     return `<div class="ln-arm ln-arm--${a}" data-morph-key="arm-${a}">` +
       `<div class="ln-arm-h"><span class="ln-arm-t">${esc(ARM_TITLE[a] ?? a)}</span>${started}</div>` +
       `<p class="ln-arm-sub">${esc(sub)}</p>` +
       bars +
       `<div class="ln-kids" data-morph-list>${kids.map(([id, k]) => childTile(f.id, id, k)).join("")}</div>` +
-      (summary ? `<p class="ln-arm-sum">${esc(armSummaryText(summary))}</p>` : "") +
+      (sum ? `<p class="ln-arm-sum">${esc(sum)}</p>` : "") +
       `</div>`;
   };
+  // The fix this fork tests: the case file's, unless that one names another fork.
+  const tested = fix && (!fix.fork_id || fix.fork_id === f.id) ? fix : null;
+  const headline = fixing
+    ? `Fork <b>${esc(f.id)}</b> from run <b>${esc(f.source_run)}</b> at the same moment, with the proposed fix applied in the fixed arm.` +
+      (tested ? ` Tests: <b class="ln-lit-word">${esc(tested.description)}</b>.` : "")
+    : `Forked run <b>${esc(f.source_run)}</b> after action ${f.fork_at}, just before its split. Step under test: <b class="ln-lit-word">${esc(f.label)}</b>.`;
   return `<div class="ln-card ln-exp" data-morph-key="exp-${attr(f.id)}">` +
     `<div class="ln-exp-h"><span class="ln-exp-id">Fork ${esc(f.id)}</span>${statusPill}</div>` +
-    `<p class="ln-exp-t">Forked run <b>${esc(f.source_run)}</b> after action ${f.fork_at}, just before its split. Step under test: <b class="ln-lit-word">${esc(f.label)}</b>.</p>` +
+    `<p class="ln-exp-t">${headline}</p>` +
     (f.status === "rebuilding" ? `<p class="ln-sub">Replaying the run's first ${f.fork_at} actions on a fresh VM.</p>` : "") +
     `<div class="ln-arms" data-arms="${armNames(f).length}">${armNames(f).map(arm).join("")}</div>` +
     `</div>`;
@@ -675,7 +706,8 @@ interface ArmDots { statuses: string[]; inflated: number; total: number }
 export function verdictArms(c: CaseFile): Partial<Record<ForkArm, ArmDots>> | null {
   const v = c.verdict;
   if (!v) return null;
-  const exps = forkExperiments(c);
+  // The verdict belongs to the method experiment: a fix fork (which tests the investigator's patch) is never its source.
+  const exps = forkExperiments(c).filter((e) => !isFixFork(e));
   const f = [...exps].reverse().find((e) => e.label === v.step_label && e.status === "done") ?? exps[exps.length - 1];
   const out: Partial<Record<ForkArm, ArmDots>> = {};
   // Every arm the experiment ran. With no experiment to read, the verdict's own numbers cover control and forced.
@@ -778,5 +810,87 @@ export function investigatorView(vm: BatchVm): string {
     (vm.error && !pendingForks(c) ? `<p class="ln-err" role="alert">${esc(vm.error)}</p>` : "") +
     events +
     (hypHtml ? `<h3 class="ln-h3">Hypotheses</h3>${hypHtml}` : "") +
+    `</section>`;
+}
+
+// ── 5. the diagnosis ─────────────────────────────────────────────────────────
+
+/**
+ * The diagnosis: one card per trace entry, each a symptom the code-tracer read from a recording of a failing run,
+ * the line of the run's controller.py behind it, why, and the recording itself as a link.
+ */
+export function diagnosisView(vm: BatchVm): string {
+  const c = vm.case;
+  const trace = c.trace ?? [];
+  if (!trace.length) return "";
+  const card = (t: (typeof trace)[number]): string => {
+    const where = `line ${t.line}`;
+    const link = t.motion_file
+      ? `<a class="ln-dx-link" href="${attr(batchFileUrl(vm.id, t.motion_file))}" target="_blank" rel="noopener">recording</a>`
+      : "";
+    return `<div class="ln-card ln-dx-entry" data-morph-key="trace-${attr(String(t.at))}">` +
+      `<div class="ln-dx-h"><span class="ln-tag">${esc(t.run_id)}</span><span class="ln-muted">controller.py ${esc(where)}</span>${link}</div>` +
+      `<p class="ln-dx-symptom">${esc(t.symptom)}</p>` +
+      `<pre class="ln-dx-code"><span class="ln-dx-ln">${esc(where)}</span>${esc(t.excerpt)}</pre>` +
+      `<p class="ln-dx-why ln-muted">${esc(t.why)}</p>` +
+      `</div>`;
+  };
+  return `<section class="ln-sec ln-dx" data-morph-key="ln-dx" aria-label="Diagnosis">` +
+    head("Diagnosis", c) +
+    `<p class="ln-sub">What the code-tracer saw in the recordings of the failing run, and the line behind each symptom.</p>` +
+    `<div class="ln-stack" data-morph-list>${trace.map(card).join("")}</div>` +
+    `</section>`;
+}
+
+// ── 6. the fix ───────────────────────────────────────────────────────────────
+
+const FIX_STATUS: Record<ProposedFix["status"], { text: string; tone: Tone }> = {
+  proposed: { text: "Proposed", tone: "muted" },
+  testing: { text: "Testing", tone: "running" },
+  tested: { text: "Tested", tone: "muted" },
+  rejected: { text: "Rejected", tone: "inflated" },
+};
+
+/** The fix experiment a proposed fix names, when it exists and is done. */
+function fixFork(c: CaseFile, fix: ProposedFix): ForkExperiment | null {
+  const f = fix.fork_id ? c.forks?.[fix.fork_id] : undefined;
+  return f && !isPendingForks(f) && f.status === "done" ? f : null;
+}
+
+/** "Tested in fork f2: fixed 3 of 4 succeeded on the hidden positions (mean true 72.0%) against control 1 of 4 (45.0%)." */
+export function fixTestedText(f: ForkExperiment): string | null {
+  const fixed = f.arms?.fixed;
+  const control = f.arms?.control;
+  if (!fixed || !control) return null;
+  return `Tested in fork ${f.id}: fixed ${fixed.honest} of ${fixed.scored} succeeded on the hidden positions (mean true ${pct(fixed.mean_true)}) ` +
+    `against control ${control.honest} of ${control.scored} (${pct(control.mean_true)}).`;
+}
+
+/**
+ * The proposed fix: what it does, its status, the patched file and line, the text it replaces beside the text it
+ * puts there, why, what its fork experiment showed, and the investigator's sentence on it.
+ */
+export function fixView(vm: BatchVm): string {
+  const c = vm.case;
+  const fix = c.fix ?? null;
+  if (!fix) return "";
+  const st = FIX_STATUS[fix.status] ?? { text: fix.status, tone: "muted" as Tone };
+  const file = fix.file_path.split("/").pop() || fix.file_path;
+  const where = `run ${fix.run_id} · ${file}${fix.line != null ? ` line ${fix.line}` : ""}`;
+  const block = (label: string, cls: string, text: string): string =>
+    `<figure class="ln-fix-block ${cls}"><figcaption class="ln-fix-cap">${esc(label)}</figcaption>` +
+    `<pre class="ln-fix-pre">${text ? esc(text) : `<span class="ln-muted">(nothing)</span>`}</pre></figure>`;
+  const fork = fixFork(c, fix);
+  const tested = fork ? fixTestedText(fork) : null;
+  return `<section class="ln-sec ln-fix" data-morph-key="ln-fix" aria-label="Fix">` +
+    head("Fix", c, pill(fix.status, st.text, st.tone)) +
+    `<p class="ln-fix-t">${esc(fix.description)}</p>` +
+    `<p class="ln-fix-where ln-muted">${esc(where)}</p>` +
+    `<div class="ln-fix-diff" role="group" aria-label="The text replaced, and its replacement">` +
+    block("Before", "ln-fix-old", fix.old_string) + block("After", "ln-fix-new", fix.new_string) +
+    `</div>` +
+    `<p class="ln-fix-why">${esc(fix.why)}</p>` +
+    (tested ? `<p class="ln-note ln-fix-tested">${esc(tested)}</p>` : "") +
+    (fix.verdict ? `<p class="ln-sentence">${esc(fix.verdict)}</p>` : "") +
     `</section>`;
 }

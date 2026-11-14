@@ -41,7 +41,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..config import ROOT_DIR, BatchConfig
+from ..config import ROOT_DIR, VM_WORKSPACE, BatchConfig
 from ..events import read_events
 from . import ConfigError, Domain, InvestigatorWords
 
@@ -167,4 +167,7 @@ DOMAIN = Domain(
     secret_files=("hidden_positions",),
     config_defaults=config_defaults,
     check_config=check_config,
+    trace_run=lambda task, run_dir, n: _sim().trace_run(task, run_dir, n),
+    fix_file=f"{VM_WORKSPACE}/controller.py",
+    fix_output="controller.py",
 )

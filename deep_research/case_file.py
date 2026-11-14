@@ -40,8 +40,14 @@ class CaseFile:
                 "forks": {},
                 "verdict": None,
                 "costs": {},
+                # The diagnosis: symptoms traced to lines of the agent's code, and the fix proposed and tested.
+                "trace": [],
+                "fix": None,
             }
             self._save()
+        # Case files saved before these sections existed.
+        self.data.setdefault("trace", [])
+        self.data.setdefault("fix", None)
 
     # ---- plumbing ----
     def subscribe(self, fn: Listener) -> None:
@@ -124,6 +130,57 @@ class CaseFile:
             )
             self._changed("hypotheses")
         return "hypothesis saved"
+
+    def record_trace(self, run_id: str, symptom: str, line: int, excerpt: str, why: str, motion_file: str = "") -> str:
+        """Save one traced failure: a symptom from a recording, and the line of the run's code it points at."""
+        if run_id not in self.data["runs"]:
+            return f"error: unknown run {run_id}"
+        try:
+            line = int(line)
+        except (TypeError, ValueError):
+            return "error: line must be a line number"
+        if line < 1:
+            return "error: line must be 1 or more"
+        if not symptom.strip() or not why.strip():
+            return "error: give the symptom and why that line causes it"
+        with self._lock:
+            self.data["trace"].append(
+                {
+                    "at": time.time(),
+                    "run_id": run_id,
+                    "symptom": symptom.strip()[:500],
+                    "line": line,
+                    "excerpt": excerpt.strip()[:300],
+                    "why": why.strip()[:1000],
+                    # The recording the symptom was read from, as a path for the files route, when known.
+                    "motion_file": (motion_file or "").strip()[:300] or None,
+                }
+            )
+            self._changed("trace")
+        return f"trace saved: {run_id} line {line}"
+
+    def set_fix(self, fix: dict | None) -> None:
+        with self._lock:
+            self.data["fix"] = fix
+            self._changed("fix")
+
+    def update_fix(self, **fields: Any) -> None:
+        with self._lock:
+            if self.data.get("fix") is None:
+                self.data["fix"] = {}
+            self.data["fix"].update(fields)
+            self._changed("fix")
+
+    def record_fix_verdict(self, sentence: str) -> str:
+        """The investigator's one sentence on what the fix experiment showed."""
+        if self.data.get("fix") is None:
+            return "error: no fix has been proposed"
+        if not sentence.strip():
+            return "error: the sentence is empty"
+        with self._lock:
+            self.data["fix"]["verdict"] = sentence.strip()[:500]
+            self._changed("fix")
+        return "fix verdict saved"
 
     def record_verdict(self, sentence: str, step_label: str, numbers: dict) -> str:
         with self._lock:

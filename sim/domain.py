@@ -435,6 +435,101 @@ def score_run(
     )
 
 
+# --- the traceback: where a controller fails, recorded ----------------------------------------------
+
+# The file the investigator's fix patches, in the VM and among a run's downloaded outputs.
+FIX_FILE = f"{VM_WORKSPACE}/controller.py"
+FIX_OUTPUT = "controller.py"
+TRACE_DIR = "trace"
+
+
+def numbered(source: str) -> str:
+    """The source with a line number on every line, as the investigator reads it."""
+    return "\n".join(f"{i + 1:4d}  {line}" for i, line in enumerate(source.splitlines()))
+
+
+def _symptoms_of(motion: dict) -> list[dict]:
+    """sim.symptoms on one recording; the result dict's own facts when that module is not available."""
+    try:
+        from sim import symptoms as S
+
+        return [asdict(x) for x in S.symptoms(motion)]
+    except Exception:  # noqa: BLE001 - the recording and the result still tell the story
+        r = motion.get("result") or {}
+        text = ("Succeeded" if r.get("success") else f"Failed: {r.get('end_reason')}") + (
+            f", placed {r.get('place_error_cm')} cm from the target" if r.get("place_error_cm") is not None else ""
+        )
+        return [{"t": None, "kind": "ok" if r.get("success") else "failed", "text": text, "data": {}}]
+
+
+def trace_run(task: RobotTaskFiles, run_dir: Path, max_episodes: int = 3) -> dict:
+    """Re-run one run's controller on the evaluation positions with recording on, and describe where it fails.
+
+    The run's own recordings only cover what the agent chose to try (an inflated run: the practice spot), so the
+    failures the score comes from were never recorded. This runs the hidden positions again, keeps the recording
+    of up to `max_episodes` failures under `run_dir/trace/`, and turns each into timestamped symptoms. The agent's
+    practice recording, when there is one, is described too, for the contrast with where it works.
+    """
+    from sim.episode import run_episode
+    from sim.motion import read_motion, write_motion
+
+    controller = run_dir / "outputs" / FIX_OUTPUT
+    if not controller.is_file():
+        return {"error": f"{FIX_OUTPUT} is missing from this run's outputs"}
+    meta = read_meta(task)
+    positions = json.loads(task.hidden.read_text())
+    place_xy = meta.get("place_xy") or practice_setup()["place_xy"]
+    seed = int((meta.get("eval_seeds") or (0,))[0])
+    practice_xy = (meta.get("practice") or practice_setup())["can_xy"]
+    out = run_dir / TRACE_DIR
+    out.mkdir(parents=True, exist_ok=True)
+    rel = run_dir.name  # runs/<id>
+    episodes, successes = [], 0
+    for i, xy in enumerate(positions):
+        r, mo = run_episode(str(controller), xy, place_xy, seed=seed, record=True)
+        successes += bool(r["success"])
+        if r["success"] or len(episodes) >= max_episodes or mo is None:
+            continue
+        path = out / f"hidden_{i:02d}.motion.json"
+        write_motion(mo, path)
+        d = math.hypot(float(xy[0]) - float(place_xy[0]), float(xy[1]) - float(place_xy[1]))
+        episodes.append(
+            {
+                "index": i,
+                "can_xy": [round(float(xy[0]), 3), round(float(xy[1]), 3)],
+                "carry_distance_m": round(d, 3),
+                "success": False,
+                "end_reason": r.get("end_reason"),
+                "motion_file": f"runs/{rel}/{TRACE_DIR}/{path.name}",
+                "symptoms": _symptoms_of(mo),
+            }
+        )
+    practice = None
+    for f in motion_files(run_dir / "outputs"):
+        try:
+            mo = read_motion(f)
+        except Exception:  # noqa: BLE001
+            continue
+        start = (mo.get("header") or {}).get("can_start") or []
+        if len(start) == 2 and _same_xy(start, practice_xy, tol=0.02):
+            practice = {
+                "can_xy": [float(start[0]), float(start[1])],
+                "carry_distance_m": round(math.hypot(start[0] - place_xy[0], start[1] - place_xy[1]), 3),
+                "success": bool((mo.get("result") or {}).get("success")),
+                "motion_file": f"runs/{rel}/outputs/{f.relative_to(run_dir / 'outputs').as_posix()}",
+                "symptoms": _symptoms_of(mo),
+            }
+            break
+    return {
+        "controller": FIX_FILE,
+        "source": numbered(controller.read_text()),
+        "n_positions": len(positions),
+        "successes": successes,
+        "practice": practice,
+        "episodes": episodes,
+    }
+
+
 # --- step labels ---------------------------------------------------------------------------------
 #
 # Event shape, as `deep_research/events.py` writes it: {"type": "tool_call", "id", "name", "args"}.
