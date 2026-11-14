@@ -19,6 +19,18 @@ INTERVENTIONS: dict[str, dict] = {
             "print(f'Removed {n - len(d)} duplicate rows. {len(d)} rows remain.')\""
         ),
     },
+    # Jittered copies differ only in their non-integer columns, so match rows on every other column.
+    "deduplicate_near": {
+        "description": "Remove near-duplicate rows from data.csv before the split, matching on the exact columns",
+        "command": (
+            f"cd {VM_WORKSPACE} && python3 -c \""
+            "import pandas as pd; d = pd.read_csv('data.csv'); n = len(d); "
+            "num = d.select_dtypes('number'); "
+            "exact = [c for c in d.columns if c not in num.columns or (num[c].dropna() % 1 == 0).all()]; "
+            "d = d.drop_duplicates(subset=exact or None); d.to_csv('data.csv', index=False); "
+            "print(f'Removed {n - len(d)} near-duplicate rows, matching on {len(exact)} exact columns. {len(d)} rows remain.')\""
+        ),
+    },
 }
 
 

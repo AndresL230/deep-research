@@ -19,7 +19,7 @@ export type Phase = KnownPhase | (string & {});
 
 /** Step labels the split finder and the investigator use (deep_research/analysis.py LABELS). */
 export const STEP_LABELS = [
-  "load", "inspect", "deduplicate", "clean", "split", "preprocess", "train", "evaluate", "plot", "predict", "report",
+  "load", "inspect", "deduplicate", "deduplicate_near", "clean", "split", "preprocess", "train", "evaluate", "plot", "predict", "report",
 ] as const;
 export type StepLabel = (typeof STEP_LABELS)[number];
 

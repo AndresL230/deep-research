@@ -6,6 +6,7 @@ can correct the labels, and explains the result, but the numbers come from here.
 
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import asdict, dataclass, field
 
@@ -14,6 +15,7 @@ LABELS = [
     "load",
     "inspect",
     "deduplicate",
+    "deduplicate_near",
     "clean",
     "split",
     "preprocess",
@@ -24,12 +26,40 @@ LABELS = [
     "report",
 ]
 
-_RULES: list[tuple[str, re.Pattern]] = [
+
+class _TopLevel:
+    """A pattern that only counts outside any call on its line.
+
+    `df = df.drop_duplicates()` removes rows; `print(df.drop_duplicates().shape)` or
+    `h.merge(df.drop_duplicates(feats))` only looks at them.
+    """
+
+    def __init__(self, pattern: str):
+        self.rx = re.compile(pattern)
+
+    def search(self, text: str) -> re.Match | None:
+        for m in self.rx.finditer(text):
+            line = text[text.rfind("\n", 0, m.start()) + 1 : m.start()]
+            if line.count("(") <= line.count(")"):
+                return m
+        return None
+
+
+_RULES: list[tuple[str, re.Pattern | _TopLevel]] = [
     ("load", re.compile(r"read_csv")),
-    ("inspect", re.compile(r"\.describe\(|\.info\(|\.head\(|value_counts|\.isnull\(|\.isna\(|\.shape\b")),
-    ("deduplicate", re.compile(r"drop_duplicates|\.duplicated\(")),
+    # Counting or showing duplicates (`df.duplicated().sum()`) is a look at the data, not removing them.
+    ("inspect", re.compile(r"\.describe\(|\.info\(|\.head\(|value_counts|\.isnull\(|\.isna\(|\.shape\b|\.duplicated\(")),
+    # Removing rows: `drop_duplicates`, or keeping `~df.duplicated()`.
+    ("deduplicate", _TopLevel(r"drop_duplicates|~[^\n\]]*?\.duplicated\(")),
+    # Removing rows that match on a subset of columns or after rounding, which also catches jittered copies.
+    # Same line only: a `.round(3)` in a print elsewhere is not part of the dedupe.
+    ("deduplicate_near", _TopLevel(
+        r"drop_duplicates\(\s*subset|~[^\n\]]*?\.duplicated\(\s*subset"
+        r"|\.round\([^)\n]*\)[^\n]*?drop_duplicates|~[^\n\]]*?\.round\([^)\n]*\)[^\n]*?\.duplicated\("
+        r"|NearestNeighbors|np\.isclose|cdist\("
+    )),
     ("clean", re.compile(r"fillna|dropna|replace\(\s*0|\.median\(\)")),
-    ("split", re.compile(r"train_test_split|KFold|StratifiedKFold|\.sample\(\s*frac")),
+    ("split", re.compile(r"train_test_split|(?:Stratified)?(?:Group)?(?:KFold|ShuffleSplit)|\.sample\(\s*frac")),
     ("preprocess", re.compile(r"StandardScaler|MinMaxScaler|fit_transform|SimpleImputer")),
     ("train", re.compile(r"\.fit\(")),
     ("evaluate", re.compile(r"accuracy_score|\.score\(|classification_report|confusion_matrix|cross_val_score")),
@@ -86,6 +116,39 @@ def actions_from_events(events: list[dict], given_files: dict[str, str] | None =
 
 
 _RUN_SCRIPT = re.compile(r"python3?\s+(?:-\S+\s+)*(\S+\.py)")
+# `cat > model.py <<'EOF' ... EOF` inside a shell command.
+_HEREDOC_WRITE = re.compile(r"cat\s*>\s*(\S+\.py)\s*<<-?\s*['\"]?(\w+)['\"]?\n(.*?)\n\2\b", re.DOTALL)
+# `python3 - <<'EOF' ... EOF`: an inline Python program.
+_PY_HEREDOC = re.compile(r"python3?\s+-\s*<<-?\s*['\"]?(\w+)['\"]?\n(.*?)\n\1\b", re.DOTALL)
+
+
+def _inline_edits(command: str, files: dict[str, str]) -> None:
+    """Apply what an inline Python program does to a script it rewrites.
+
+    Agents often patch a script with `s = open('model.py').read(); s = s.replace(a, b);
+    open('model.py', 'w').write(s)`. Only literal `replace` calls are applied.
+    """
+    for _, body in _PY_HEREDOC.findall(command):
+        try:
+            tree = ast.parse(body)
+        except SyntaxError:
+            continue
+        targets = {
+            n.args[0].value.rsplit("/", 1)[-1]
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "open"
+            and len(n.args) >= 2 and all(isinstance(x, ast.Constant) and isinstance(x.value, str) for x in n.args[:2])
+            and "w" in n.args[1].value
+        }
+        replaces = [
+            (n.args[0].value, n.args[1].value)
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "replace"
+            and len(n.args) >= 2 and all(isinstance(x, ast.Constant) and isinstance(x.value, str) for x in n.args[:2])
+        ]
+        for t in targets & files.keys():
+            for old, new in replaces:
+                files[t] = files[t].replace(old, new)
 
 
 def _resolve_script_runs(actions: list[Action], given_files: dict[str, str]) -> list[Action]:
@@ -109,7 +172,11 @@ def _resolve_script_runs(actions: list[Action], given_files: dict[str, str]) -> 
                 files[n] = files[n].replace(old, new)
             a.labels = []
         elif a.tool == "execute":
-            m = _RUN_SCRIPT.search(a.args.get("command", ""))
+            command = a.args.get("command", "")
+            for path, _, content in _HEREDOC_WRITE.findall(command):
+                files[name(path)] = content
+            _inline_edits(command, files)
+            m = _RUN_SCRIPT.search(command)
             if m and name(m.group(1)) in files:
                 a.source = files[name(m.group(1))]
                 a.labels = sorted(set(a.labels) | set(label_text(a.source)), key=LABELS.index)
@@ -145,14 +212,18 @@ def _blank(m: re.Match) -> str:
 
 
 def _order_in_text(text: str, first: str, second: str) -> bool:
-    """True if `first`'s pattern appears before `second`'s inside one action.
+    """True if `first`'s pattern appears before the last of `second`'s inside one action.
 
-    Import lines are blanked first: `from sklearn.model_selection import train_test_split`
-    at the top of a script is not the split.
+    The last one, as across actions: a script may split the raw data to compare, then dedupe
+    and split again for the score it reports. Import lines are blanked first:
+    `from sklearn.model_selection import train_test_split` at the top of a script is not the split.
     """
     text = _IMPORT_LINE.sub(_blank, _IMPORT_BLOCK.sub(_blank, text))
     rx = dict(_RULES)
-    m1, m2 = rx[first].search(text), rx[second].search(text)
+    m1 = rx[first].search(text)
+    m2 = None
+    for m2 in rx[second].finditer(text):
+        pass
     return bool(m1 and m2 and m1.start() < m2.start())
 
 
