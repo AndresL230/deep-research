@@ -19,6 +19,7 @@ HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amaz
 | Costs | Tokens from every model response, VM time, budget guard | `costs.py`, `prices.json` |
 | Lab page | Tiny web page inside each VM showing the agent's latest chart. The server proxies it (no Daytona preview warning); the UI reads a live run's charts through it | `lab_page/server.py` |
 | API | FastAPI plus a websocket per batch; also serves the web UI | `api.py` |
+| Team hub | Cloudflare Worker and D1 that hold every teammate's batches, events and costs, and the runner keys | `hub/`, `hub.py` |
 | Web UI | Vite + TypeScript, Trov Ask styling. A start panel, a wall of runs where each tile is a notebook typing out the agent's code, a side by side view of what the honest and inflated runs did differently, the fork experiment, the verdict, and a replay player for saved batches | `web/src/main.ts`, `web/src/batch/` |
 
 ### Who can write what
@@ -131,6 +132,43 @@ server also closes every open batch when it shuts down.
 
 As a safety net for a VM that leaks anyway (a crash, a killed server), every VM is created with a 30 minute idle
 auto-stop and is deleted the moment it stops.
+
+## The team hub
+
+A Cloudflare Worker with a D1 database (`hub/`) that is the team's shared record. Every local server that has
+`HUB_URL` and `HUB_TOKEN` in its `.env`:
+
+- sends each batch to the hub as it runs: every change to the case file and every agent event, from a background
+  thread, so a slow or unreachable hub never holds up a run (what fails is retried);
+- lists the whole team's batches and opens other people's as replays read from the hub, tagged with the machine
+  that ran them, and counts their spend on the cost screen;
+- takes any runner key it does not have locally (Anthropic, Daytona, LangSmith) from the hub at startup. A key in
+  the local `.env` always wins.
+
+Without those two settings nothing changes: the server works on its own as before. Charts are not on the hub yet,
+so a teammate's replay shows code and output but no chart images.
+
+### Join the hub
+
+Ask the owner for `HUB_URL` and `HUB_TOKEN`, put them in `.env` (see `.env.example`), optionally set
+`HUB_MACHINE=<your name>`, and restart the server. `uv run python -m deep_research.hub status` shows what the hub
+holds; `uv run python -m deep_research.hub push-all` uploads the batches already saved in `batches/`.
+
+### Keys and the token (owner)
+
+The hub runs on the owner's Cloudflare account. Its secrets are the team token and the runner keys:
+
+```bash
+cd hub && npm install
+export CLOUDFLARE_ACCOUNT_ID=<the account id>
+npx wrangler secret put ANTHROPIC_API_KEY     # change a runner key: every server picks it up on its next start
+npx wrangler secret put DAYTONA_API_KEY
+npx wrangler secret put TEAM_TOKEN            # rotate the token: then update HUB_TOKEN in everyone's .env
+npx wrangler secret list                      # names only, never values
+```
+
+Anyone holding the token can read every batch and fetch the runner keys, so share it privately and rotate it (and
+the keys) if it leaks. Deploy changes to the Worker with `npm run deploy`, run its tests with `npm test`.
 
 ## Demo data for the frontend
 
