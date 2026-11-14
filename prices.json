@@ -1,8 +1,28 @@
 {
-  "_note": "USD. Fill from Anthropic's and Daytona's current pricing pages before a demo. Null means unknown; the UI then shows tokens only.",
+  "_note": "USD. Checked 2026-11-14 against platform.claude.com/docs/en/about-claude/pricing and daytona.io/pricing. Model prices are per million tokens. cache_write is the 5-minute TTL rate; 1-hour writes cost 2x input. Haiku 5.5 bills a whole request at the long_prompt rates when its prompt is over 100,000 tokens. The VM rate is one default sandbox (1 vCPU $0.0504/h, 1 GiB RAM $0.0162/h, 3 GiB disk $0.000108/GiB/h) while running, counting the disk even though the first 5 GiB may be free. Null means unknown; the UI then shows tokens only.",
   "models": {
-    "anthropic:claude-haiku-5-5": {"input_per_mtok": null, "output_per_mtok": null},
-    "anthropic:claude-sonnet-5-5": {"input_per_mtok": null, "output_per_mtok": null}
+    "anthropic:claude-haiku-5-5": {
+      "input_per_mtok": 0.10,
+      "output_per_mtok": 0.50,
+      "cache_read_per_mtok": 0.01,
+      "cache_write_per_mtok": 0.125,
+      "cache_write_1h_per_mtok": 0.20,
+      "long_prompt": {
+        "over_tokens": 100000,
+        "input_per_mtok": 0.50,
+        "output_per_mtok": 2.50,
+        "cache_read_per_mtok": 0.05,
+        "cache_write_per_mtok": 0.625,
+        "cache_write_1h_per_mtok": 1.00
+      }
+    },
+    "anthropic:claude-sonnet-5-5": {
+      "input_per_mtok": 2.00,
+      "output_per_mtok": 10.00,
+      "cache_read_per_mtok": 0.10,
+      "cache_write_per_mtok": 2.50,
+      "cache_write_1h_per_mtok": 4.00
+    }
   },
-  "daytona_vm_per_hour": null
+  "daytona_vm_per_hour": 0.0669
 }

@@ -20,8 +20,11 @@ class OverBudget(Exception):
 
 @dataclass
 class ScopeCost:
+    # input_tokens is the whole prompt, including the cached reads and writes below.
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     model_usd: float | None = 0.0
     vm_seconds: float = 0.0
     vm_usd: float | None = 0.0
@@ -36,6 +39,8 @@ class ScopeCost:
         return {
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "cache_write_tokens": self.cache_write_tokens,
             "model_usd": _r(self.model_usd),
             "vm_seconds": round(self.vm_seconds, 1),
             "vm_usd": _r(self.vm_usd),
@@ -56,20 +61,46 @@ class CostTracker:
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     # ---- model usage ----
-    def model_price(self, model: str) -> tuple[float | None, float | None]:
+    def model_price(self, model: str, prompt_tokens: int = 0) -> dict:
+        """Per-million-token rates for one response. Some models bill a long prompt at higher rates."""
         p = self.prices.get("models", {}).get(model) or {}
-        return p.get("input_per_mtok"), p.get("output_per_mtok")
+        long = p.get("long_prompt")
+        if long and prompt_tokens > long.get("over_tokens", float("inf")):
+            return long
+        return p
 
-    def record_tokens(self, scope: str, model: str, input_tokens: int, output_tokens: int) -> None:
-        pin, pout = self.model_price(model)
+    def record_tokens(
+        self,
+        scope: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cache_read: int = 0,
+        cache_write: int = 0,
+        cache_write_1h: int = 0,
+    ) -> None:
+        """One model response. `input_tokens` is the whole prompt, cached parts included."""
+        p = self.model_price(model, input_tokens)
+        uncached = max(0, input_tokens - cache_read - cache_write - cache_write_1h)
+        parts = [
+            (uncached, p.get("input_per_mtok")),
+            (output_tokens, p.get("output_per_mtok")),
+            (cache_read, p.get("cache_read_per_mtok")),
+            (cache_write, p.get("cache_write_per_mtok")),
+            (cache_write_1h, p.get("cache_write_1h_per_mtok")),
+        ]
+        # A missing rate only matters when there are tokens to price with it.
+        known = all(rate is not None for n, rate in parts if n) and p.get("input_per_mtok") is not None
         with self._lock:
             s = self.scopes[scope]
             s.input_tokens += input_tokens
             s.output_tokens += output_tokens
-            if pin is None or pout is None or s.model_usd is None:
+            s.cache_read_tokens += cache_read
+            s.cache_write_tokens += cache_write + cache_write_1h
+            if not known or s.model_usd is None:
                 s.model_usd = None
             else:
-                s.model_usd += input_tokens / 1e6 * pin + output_tokens / 1e6 * pout
+                s.model_usd += sum(n / 1e6 * rate for n, rate in parts if n)
 
     # ---- VM time ----
     def vm_started(self, scope: str) -> None:
@@ -141,6 +172,22 @@ class UsageCallback(BaseCallbackHandler):
                 msg = getattr(g, "message", None)
                 usage = getattr(msg, "usage_metadata", None) if msg is not None else None
                 if usage:
-                    self.tracker.record_tokens(
-                        self.scope, self.model, usage.get("input_tokens", 0), usage.get("output_tokens", 0)
-                    )
+                    self.tracker.record_tokens(self.scope, self.model, **token_counts(usage))
+
+
+def token_counts(usage: dict) -> dict[str, int]:
+    """Read a LangChain `usage_metadata` dict. For Anthropic, `input_tokens` already includes
+    cache reads and writes, and `input_token_details` says how many of each."""
+    details = usage.get("input_token_details") or {}
+    write_5m = int(details.get("ephemeral_5m_input_tokens") or 0)
+    write_1h = int(details.get("ephemeral_1h_input_tokens") or 0)
+    if not write_5m and not write_1h:
+        # langchain-anthropic zeroes the generic `cache_creation` when it reports per-TTL keys.
+        write_5m = int(details.get("cache_creation") or 0)
+    return {
+        "input_tokens": int(usage.get("input_tokens") or 0),
+        "output_tokens": int(usage.get("output_tokens") or 0),
+        "cache_read": int(details.get("cache_read") or 0),
+        "cache_write": write_5m,
+        "cache_write_1h": write_1h,
+    }

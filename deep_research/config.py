@@ -51,10 +51,10 @@ class BatchConfig(BaseModel):
 
 
 def load_prices() -> dict:
-    """Prices per million tokens and per VM hour.
+    """Prices per million tokens and per VM hour, from `prices.json`.
 
-    `prices.json` ships with nulls on purpose. Fill it from the providers'
-    current pricing pages. Until then costs show token counts only.
+    A null price means unknown: costs then show token counts only and the
+    budget guard cannot enforce a dollar cap.
     """
     if PRICES_FILE.exists():
         return json.loads(PRICES_FILE.read_text())
