@@ -20,10 +20,10 @@ from daytona import (
 from langchain_daytona import DaytonaSandbox
 
 from .analysis import Action
-from .config import BACKEND_DIR, LAB_PAGE_PORT, VM_LIVE_DIR, VM_WORKSPACE
+from .config import ROOT_DIR, LAB_PAGE_PORT, VM_LIVE_DIR, VM_WORKSPACE
 from .task import OUTPUT_FILES, TaskFiles
 
-LAB_PAGE_SRC = BACKEND_DIR / "lab_page" / "server.py"
+LAB_PAGE_SRC = ROOT_DIR / "lab_page" / "server.py"
 LAB_PAGE_VM = "/home/daytona/lab_page.py"
 PY_PACKAGES = ["pandas", "scikit-learn", "matplotlib"]
 

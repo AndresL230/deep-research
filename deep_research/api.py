@@ -15,11 +15,10 @@ from pydantic import BaseModel
 load_dotenv()
 
 from .batch import Batch  # noqa: E402 - needs the environment loaded first
-from .config import BACKEND_DIR, BATCHES_DIR, BatchConfig, load_prices  # noqa: E402
+from .config import BATCHES_DIR, FIXTURES_DIR, BatchConfig, load_prices  # noqa: E402
 from .costs import OverBudget, estimate_batch_usd  # noqa: E402
 from .events import read_events  # noqa: E402
 
-FIXTURES_DIR = BACKEND_DIR.parent / "fixtures"
 STATS_FILE = BATCHES_DIR / "_stats.json"
 
 app = FastAPI(title="deep-research")

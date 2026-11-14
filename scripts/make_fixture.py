@@ -26,7 +26,7 @@ from sklearn.metrics import confusion_matrix  # noqa: E402
 from sklearn.model_selection import train_test_split  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "backend"))
+sys.path.insert(0, str(ROOT))
 
 from deep_research.analysis import actions_from_events, find_split  # noqa: E402
 from deep_research.batch import _arm_summary  # noqa: E402

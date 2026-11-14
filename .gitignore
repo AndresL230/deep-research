@@ -11,4 +11,4 @@ dist/
 /runs/
 
 # Batch outputs written by real runs (fixtures/ is committed)
-backend/batches/
+/batches/

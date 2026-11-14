@@ -1,25 +1,38 @@
 [project]
 name = "deep-research"
 version = "0.1.0"
+description = "Run a data science agent many times, find the step where its results go wrong, and prove it by forking the VM."
 requires-python = ">=3.12"
 dependencies = [
+    "daytona>=0.231",
     "deepagents>=0.7.38",
     "fastapi>=0.162.7",
     "langchain-anthropic>=1.7.10",
     "langchain-daytona>=0.0.9",
+    "pandas",
     "python-dotenv>=1.2.4",
-    "python-multipart>=0.0.33",
+    "scikit-learn",
     "uvicorn[standard]>=0.54.0",
 ]
 
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    # scripts/make_fixture.py draws the fixture's charts.
+    "matplotlib",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.5.0",
 ]
 
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["deep_research*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

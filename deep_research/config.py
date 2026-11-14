@@ -9,11 +9,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BACKEND_DIR / "data"
-BATCHES_DIR = BACKEND_DIR / "batches"
-SKILLS_DIR = BACKEND_DIR / "skills"
-PRICES_FILE = BACKEND_DIR / "prices.json"
+# The repo root: data/, skills/, lab_page/, prices.json, batches/, fixtures/ and web/ live here.
+ROOT_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = ROOT_DIR / "data"
+BATCHES_DIR = ROOT_DIR / "batches"
+FIXTURES_DIR = ROOT_DIR / "fixtures"
+SKILLS_DIR = ROOT_DIR / "skills"
+PRICES_FILE = ROOT_DIR / "prices.json"
+WEB_DIST = ROOT_DIR / "web" / "dist"
 
 # Paths inside each analyst VM.
 VM_WORKSPACE = "/home/daytona/workspace"
