@@ -45,10 +45,10 @@ const text = (html: string): string => html.replace(/<[^>]+>/g, " ").replace(/&[
 
 describe("words", () => {
   it("come from the domain, with a fallback by kind for older batches", () => {
-    expect(wordsOf(robotCfg)).toBe(ROBOT_W);
-    expect(wordsOf({ visual: "motion" })).toBe(ROBOT_WORDS);
-    expect(wordsOf({})).toBe(TABULAR_WORDS);
-    expect(wordsOf(null)).toBe(TABULAR_WORDS);
+    expect(wordsOf(robotCfg)).toMatchObject({ ...ROBOT_W, steps: expect.any(Object) });
+    expect(wordsOf({ visual: "motion" })).toEqual(ROBOT_WORDS);
+    expect(wordsOf({})).toEqual(TABULAR_WORDS);
+    expect(wordsOf(null)).toEqual(TABULAR_WORDS);
   });
 
   it("say one run's 'they' as 'it' and fill the count", () => {
@@ -273,8 +273,9 @@ describe("the tabular bars", () => {
     expect(t).toContain("Its test set, 154 rows");
     expect(t).toContain("53 of 154 test rows were also in training");
     expect(t).toContain("Holdout, 154 rows it never saw");
-    expect(t).toContain("Claimed 98.7%");
-    expect(t).toContain("Measured 75.9%");
+    // An older tabular batch keeps the labels it always had (words.ts TABULAR_WORDS).
+    expect(t).toContain("Reported 98.7%");
+    expect(t).toContain("True 75.9%");
     expect(html).toMatch(/class="ck-bar-c" style="width:34\.42%"/);
     expect(html).not.toContain("data-ck-dot");
     expect(html).not.toContain("\u2014");

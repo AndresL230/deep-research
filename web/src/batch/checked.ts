@@ -17,49 +17,22 @@ import "./checked.css";
 import type { BatchConfig, DomainWords, HiddenOutcome, HiddenResult, RunScore } from "../api";
 import { attr, esc } from "../ui";
 import { pct } from "./format";
+import { domainWords, judgedOn as judgedOnAll, TABULAR_WORDS } from "./words";
 import { cm, isMotionBatch, robotView } from "../robot/markup";
 import "../robot/mount";
 
 // ── words ────────────────────────────────────────────────────────────────────
 
-/** The words for a batch saved before domains described them: what the tabular screens always said. */
-export const TABULAR_WORDS: DomainWords = {
-  subject: "model",
-  judged_on: "on {n} rows they never saw",
-  checked: "test set",
-  claim_label: "Claimed",
-  truth_label: "Measured",
-  step_when: "before splitting into train and test",
-  skipped: "This run went straight to splitting the data",
-  evidence_text: "of test rows were also in training",
-  steps: {},
-};
-
-/** A robot batch saved before domains had words (only robot runs draw the map, so they never say "test rows"). */
-export const ROBOT_WORDS: DomainWords = {
-  subject: "robot",
-  judged_on: "at {n} positions they never tested",
-  checked: "practice spot",
-  claim_label: "Claimed",
-  truth_label: "Measured",
-  step_when: "before writing the report",
-  skipped: "This run wrote its report from the practice spot alone",
-  evidence_text: "of tested can positions were the practice spot",
-  steps: {},
-};
+// The words and their fallbacks for older batches live in words.ts, shared with the batch screens.
+export { ROBOT_WORDS, TABULAR_WORDS } from "./words";
 
 /** The batch's domain words, or the fallback for its kind when the batch does not have them. */
-export function wordsOf(config: unknown): DomainWords {
-  const w = (config as Partial<BatchConfig> | null)?.domain_info?.words;
-  if (w && typeof w.judged_on === "string" && typeof w.claim_label === "string") return w;
-  return isMotionBatch(config) ? ROBOT_WORDS : TABULAR_WORDS;
-}
+export const wordsOf = (config: unknown): DomainWords => domainWords(config);
 
 /** "at {n} positions they never tested" for one run: "at 20 positions it never tested". Without a count the number
  *  is left out ("at positions it never tested"). */
 export function judgedOn(words: DomainWords, n: number | null | undefined): string {
-  const one = words.judged_on.replace(/\bthey\b/g, "it");
-  return n != null && Number.isFinite(n) ? one.replace("{n}", String(n)) : one.replace(/\s*\{n\}/, "");
+  return judgedOnAll(words, n).replace(/\bthey\b/g, "it");
 }
 
 // ── the data ─────────────────────────────────────────────────────────────────
