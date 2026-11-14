@@ -89,17 +89,26 @@ export interface BatchConfig {
   trap_info?: TrapInfo;
   trap_strength: number;
   trap_noise: number;
+  /** Share of the planted copies that get the noise. Sent back as the server gave it. */
+  trap_hidden_share?: number;
   hint_level: "none" | "light";
   model_hint: "random_forest" | "any";
   holdout_fraction: number;
   n_runs: number;
   forks_per_choice: number;
+  /** The fork experiment's extra arms (forks.arm_plan). Sent back as the server gave them. */
+  placebo_arm?: boolean;
+  show_arm?: boolean;
   analyst_model: string;
   investigator_model: string;
   budget_usd: number;
   inflation_threshold: number;
   mode: "live" | "replay";
   seed: number;
+  /** robot_arm only: how many hidden can positions a controller is scored on (the first n); null means all. */
+  robot_hidden_positions?: number | null;
+  /** robot_arm only: the seeds each hidden position is run with (one to five). */
+  robot_eval_seeds?: number[];
   /** Only on fixtures made by scripts/make_fixture.py: the agents' choices are scripted. */
   simulated?: boolean;
 }

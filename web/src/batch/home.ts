@@ -1,6 +1,6 @@
 // OWNER: subagent A. The home screen (batch cards, the new batch panel with its estimate and Start) and the header cost bar.
 import "./home.css";
-import type { BatchConfig, BatchListItem, Costs, Health, ScopeCost, TrapInfo } from "../api";
+import type { BatchConfig, BatchListItem, Costs, Defaults, Health, ScopeCost, TrapInfo } from "../api";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { pct, tokens, usd } from "./format";
@@ -15,15 +15,18 @@ export interface HomeInputs { html: string; label: string }
 /** The home screen: the batches to open, then one panel to start a new one. Labels only, no prose. */
 export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
   const trap = chosenTrap(vm.defaults, vm.draft?.trap);
+  // What the batch runs on, the trap and its strength only mean something in the tabular domain.
+  const tabular = isTabular(vm.draft);
   return `<div class="hm" data-morph-key="home">
     ${batchesSection(vm.batches)}
     <section class="hm-panel" data-morph-key="new" aria-labelledby="hm-new-h">
       <div class="hm-panel-h" data-morph-key="head">
         <h2 class="hm-h2" id="hm-new-h">New batch</h2>
-        <span class="hm-fixed">${esc(summaryLabel(inputs?.label ?? `Pima diabetes · ${DEFAULT_PLANTED}`, trap))}</span>
+        ${tabular ? `<span class="hm-fixed">${esc(summaryLabel(inputs?.label ?? `Pima diabetes · ${DEFAULT_PLANTED}`, trap))}</span>` : ""}
       </div>
-      ${inputs?.html ?? ""}
-      ${vm.draft ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
+      ${vm.draft ? domainRow(vm.draft, vm.defaults, vm.starting) : ""}
+      ${tabular ? inputs?.html ?? "" : ""}
+      ${vm.draft && tabular ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
       ${vm.draft ? mainRow(vm.draft, trap) : mainSkeleton(defaultsFailed(vm))}
       ${advancedBlock(vm)}
       ${footer(vm)}
@@ -83,6 +86,111 @@ function batchesSection(b: Loadable<BatchListItem[]>): string {
     <h2 class="hm-h2" id="hm-batches-h">Batches</h2>
     ${body}
   </section>`;
+}
+
+// ── the domain ───────────────────────────────────────────────────────────────
+
+/** The domain picker's action, handled in main.ts: `data-act="hm-domain" data-arg="<domain name>"`. */
+export const HM_ACT = { domain: "hm-domain" } as const;
+
+/** The domain of a config that names none (every batch saved before domains). */
+export const DEFAULT_DOMAIN = "tabular";
+
+export const domainOf = (c: Pick<BatchConfig, "domain"> | null | undefined): string => c?.domain || DEFAULT_DOMAIN;
+const isTabular = (c: BatchConfig | null | undefined): boolean => domainOf(c) === DEFAULT_DOMAIN;
+
+/** Settings only the tabular domain reads: what the agents get (dataset, target, script) and the planted flaw. */
+export const TABULAR_ONLY = [
+  "dataset", "target", "script", "trap", "trap_strength", "trap_noise", "trap_hidden_share", "model_hint", "holdout_fraction",
+] as const;
+
+/** A domain's default config: the server's top-level one for the tabular domain, as before domains. */
+export function domainDefaults(d: Defaults, name: string): BatchConfig | null {
+  if (name === DEFAULT_DOMAIN) return d.config;
+  return d.domains?.find((x) => x.name === name)?.config ?? null;
+}
+
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * The draft for domain `name`. With no `from`, its defaults. With `from` (the draft being edited), that draft with
+ * every setting whose default differs between the two domains (the domain itself, the inflation threshold) set to the
+ * new domain's default: runs, budget, hint and models carry over, and so do tabular settings a round trip leaves alone.
+ */
+export function domainDraft(d: Defaults, name: string, from?: BatchConfig | null): BatchConfig | null {
+  const to = domainDefaults(d, name);
+  if (!to) return from ?? null;
+  if (!from) return { ...to };
+  const was = domainDefaults(d, domainOf(from)) ?? d.config;
+  const out: Record<string, unknown> = { ...from };
+  for (const k of new Set([...Object.keys(to), ...Object.keys(was)])) {
+    const a = (was as unknown as Record<string, unknown>)[k];
+    const b = (to as unknown as Record<string, unknown>)[k];
+    if (!same(a, b)) out[k] = b;
+  }
+  return out as unknown as BatchConfig;
+}
+
+/** The first draft once the defaults load: the remembered domain's when the server has it, else the defaults. */
+export function initialDraft(d: Defaults, remembered: string | null): BatchConfig {
+  const known = remembered && remembered !== DEFAULT_DOMAIN && d.domains?.some((x) => x.name === remembered);
+  return (known && domainDraft(d, remembered)) || { ...d.config };
+}
+
+/** The home screen after the domain picker is pressed. Nothing changes while a batch is starting. */
+export function pickDomain(vm: HomeVm, name: string): HomeVm {
+  if (!vm.defaults || !vm.draft || vm.starting || name === domainOf(vm.draft)) return vm;
+  const draft = domainDraft(vm.defaults, name, vm.draft);
+  return draft && draft !== vm.draft ? { ...vm, draft, error: null } : vm;
+}
+
+/** Reset: the chosen domain's defaults. */
+export function resetDraft(vm: HomeVm): BatchConfig | null {
+  return vm.defaults ? domainDraft(vm.defaults, domainOf(vm.draft)) : vm.draft;
+}
+
+/**
+ * The body of POST /api/batches. Tabular: the draft with what dataset-input.ts chose, as before domains. Any other
+ * domain: the draft with its tabular-only settings at that domain's defaults, so the case file never shows a dataset or
+ * a trap the batch did not use.
+ */
+export function startPayload(draft: BatchConfig, inputs: Pick<BatchConfig, "dataset" | "target" | "script">, defaults: Defaults | null): BatchConfig {
+  if (isTabular(draft)) return { ...draft, ...inputs, mode: "live" };
+  const own = defaults ? domainDefaults(defaults, domainOf(draft)) : null;
+  const reset: Record<string, unknown> = {};
+  if (own) for (const k of TABULAR_ONLY) if (k in own) reset[k] = (own as unknown as Record<string, unknown>)[k];
+  return { ...draft, ...reset, mode: "live" } as BatchConfig;
+}
+
+const DOMAIN_KEY = "orro.domain";
+
+/** The domain chosen last time on this browser, or null. */
+export function recallDomain(): string | null {
+  try { return localStorage.getItem(DOMAIN_KEY); } catch { return null; }
+}
+
+export function rememberDomain(name: string): void {
+  try { localStorage.setItem(DOMAIN_KEY, name); } catch { /* private window or storage off: not remembered */ }
+}
+
+/** Short names for the picker. A domain added later shows its own title. */
+const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm" };
+
+/** The choice of domain, with the chosen one's line under it. Only when the server offers more than one. */
+function domainRow(c: BatchConfig, d: Defaults | null, locked: boolean): string {
+  // The default domain first, as the form was before there was a choice; the others in the server's order.
+  const list = [...(d?.domains ?? [])].sort((x, y) => Number(y.name === DEFAULT_DOMAIN) - Number(x.name === DEFAULT_DOMAIN));
+  if (list.length < 2) return "";
+  const cur = domainOf(c);
+  const chosen = list.find((x) => x.name === cur);
+  const opts = list.map((x) => {
+    const on = x.name === cur;
+    return `<button type="button" class="hm-dom-o" role="radio" aria-checked="${on}" data-act="${HM_ACT.domain}" data-arg="${attr(x.name)}" title="${attr(x.title)}"${locked ? " disabled" : ""}>${esc(DOMAIN_SHORT[x.name] ?? x.title)}</button>`;
+  }).join("");
+  return `<div class="hm-dom" data-morph-key="domain">
+    <div class="hm-dom-seg" role="radiogroup" aria-label="Task">${opts}</div>
+    ${chosen?.description ? `<span class="hm-dom-d">${esc(chosen.description)}</span>` : ""}
+  </div>`;
 }
 
 // ── the settings ─────────────────────────────────────────────────────────────
@@ -146,11 +254,13 @@ function trapRow(c: BatchConfig, traps: readonly TrapInfo[]): string {
   </div>`;
 }
 
-/** The four settings that matter, on one row. The strength slider is named by the chosen trap. */
+/** The four settings that matter, on one row. The strength slider is named by the chosen trap. Other domains plant
+ *  nothing, so they have no strength slider. */
 function mainRow(c: BatchConfig, trap: TrapInfo | null): string {
-  return `<div class="hm-main" data-morph-key="main">
+  const tabular = isTabular(c);
+  return `<div class="hm-main${tabular ? "" : " hm-main--3"}" data-morph-key="main">
     ${numberField(c, "n_runs", "Runs", { min: 1, max: 24 })}
-    ${rangeField(c, "trap_strength", trap?.strength_label || "Duplicated rows", 0, 1, 0.05, pct(c.trap_strength, 0))}
+    ${tabular ? rangeField(c, "trap_strength", trap?.strength_label || "Duplicated rows", 0, 1, 0.05, pct(c.trap_strength, 0)) : ""}
     ${choiceField(c, "hint_level", "Hint", [["none", "None"], ["light", "Light"]])}
     ${numberField(c, "budget_usd", "Budget", { min: 0, step: "any", prefix: "$" })}
   </div>`;
@@ -170,8 +280,22 @@ function advancedBlock(vm: HomeVm): string {
   const open = !!vm.advanced && !!c;
   const toggle = `<button type="button" class="hm-adv-t" data-act="${ACT.toggleAdvanced}" aria-expanded="${open}"${open ? ` aria-controls="hm-adv"` : ""}${c ? "" : " disabled"}>${askIcon("chevRight", 13)}<span>Advanced</span></button>`;
   if (!c || !open) return `<div class="hm-adv" data-morph-key="adv"><div class="hm-adv-h">${toggle}</div></div>`;
+  const head = `<div class="hm-adv-h">${toggle}<button type="button" class="ask-ghostbtn hm-reset" data-act="${ACT.resetConfig}"${vm.starting ? " disabled" : ""}>Reset</button></div>`;
+  if (!isTabular(c)) {
+    // A success rate gap, wider than an accuracy gap: the robot default is 27.5 points (sim/CALIBRATION.md).
+    return `<div class="hm-adv" data-morph-key="adv">
+    ${head}
+    <div class="hm-adv-grid" id="hm-adv" data-morph-key="adv-grid">
+      ${rangeField(c, "inflation_threshold", "Inflation threshold", 0.05, 0.5, 0.025, points(c.inflation_threshold))}
+      ${numberField(c, "forks_per_choice", "Forks per arm", { min: 1, max: 8 })}
+      ${numberField(c, "seed", "Seed", { min: 0 })}
+      ${textField(c, "analyst_model", "Analyst model")}
+      ${textField(c, "investigator_model", "Investigator model")}
+    </div>
+  </div>`;
+  }
   return `<div class="hm-adv" data-morph-key="adv">
-    <div class="hm-adv-h">${toggle}<button type="button" class="ask-ghostbtn hm-reset" data-act="${ACT.resetConfig}"${vm.starting ? " disabled" : ""}>Reset</button></div>
+    ${head}
     <div class="hm-adv-grid" id="hm-adv" data-morph-key="adv-grid">
       ${rangeField(c, "trap_noise", "Trap noise", 0, 0.5, 0.05, c.trap_noise.toFixed(2))}
       ${rangeField(c, "holdout_fraction", "Holdout fraction", 0.05, 0.45, 0.05, pct(c.holdout_fraction, 0))}

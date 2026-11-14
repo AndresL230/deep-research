@@ -25,7 +25,7 @@ import {
   type AgentEvent, type HubStatus, type BatchConfig, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
-import { costBar, homeView } from "./batch/home";
+import { HM_ACT, costBar, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload } from "./batch/home";
 import { hubBadge } from "./batch/hub-badge";
 import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { wallView } from "./batch/wall";
@@ -462,7 +462,7 @@ async function loadHome(force = false): Promise<void> {
     batches: batches.status === "fulfilled" ? { state: "ready", value: batches.value } : { state: "error", message: message(batches.reason, "Couldn't load the batches.") },
     health: health.status === "fulfilled" ? health.value : null,
     defaults: defaults.status === "fulfilled" ? defaults.value : S.home.defaults,
-    draft: S.home.draft ?? (defaults.status === "fulfilled" ? { ...defaults.value.config } : null),
+    draft: S.home.draft ?? (defaults.status === "fulfilled" ? initialDraft(defaults.value, recallDomain()) : null),
   };
   paint();
   scheduleEstimate();
@@ -547,7 +547,7 @@ async function start(): Promise<void> {
   S.home = { ...S.home, starting: true, error: null };
   paint();
   try {
-    const { id } = await startBatch({ ...draft, ...inputsConfig(S.ds), mode: "live" });
+    const { id } = await startBatch(startPayload(draft, inputsConfig(S.ds), S.home.defaults));
     S.home = { ...S.home, starting: false };
     go({ name: "batch", id });
   } catch (e) {
@@ -664,9 +664,14 @@ root.addEventListener("click", (e) => {
     }
     case DI_ACT.scriptRemove: S.ds = { ...S.ds, script: null, upload: uploadAfterEdit(S.ds.upload) }; paint(); return;
     case ACT.toggleAdvanced: S.home = { ...S.home, advanced: !S.home.advanced }; paint(); return;
+    case HM_ACT.domain: {
+      const next = pickDomain(S.home, arg);
+      if (next !== S.home) { S.home = next; rememberDomain(arg); paint(); scheduleEstimate(); }
+      return;
+    }
     case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
     case ACT.resetConfig:
-      if (S.home.defaults) { S.home = { ...S.home, draft: { ...S.home.defaults.config }, error: null }; paint(); scheduleEstimate(); }
+      if (S.home.defaults) { S.home = { ...S.home, draft: resetDraft(S.home), error: null }; paint(); scheduleEstimate(); }
       return;
     case ACT.openRun: if ("id" in r) go({ name: "run", id: r.id, run: arg }); return;
     case ACT.openChild: {
