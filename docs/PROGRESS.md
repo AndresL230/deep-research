@@ -1,5 +1,30 @@
 # Progress log
 
+## Final sprint, Sat Nov 14 (branch `scientific-autonomy`)
+
+Baseline at `ef0fcb2`: 369 Python tests, 138 sim tests and 557 web tests passed, `tsc` clean, build OK. Keys present.
+PRs #16 and #24 were open; both were tested (#24: 634 web tests) and merged into this branch only.
+
+| Done | Evidence |
+| --- | --- |
+| The investigator is blind: no planted words in its prompt, skills or case view | `tests/test_blind_investigator.py`, mutation-checked |
+| Competing hypotheses (at least 2, each with a prediction and a falsification), chosen by the investigator, tested at its own fork point | `tests/test_experiments.py` |
+| Prediction registered before copies run; outcome computed from the counts; every experiment approved, the direct fix test included | `tests/test_experiments.py`, `tests/test_measured_code.py` |
+| Fix measured with a paired sign test, labelled controller performance; wording guards for "caused" and "improved" | `deep_research/evidence.py` |
+| Trace on diagnostic positions disjoint from the hidden set | `sim/tests/test_trace.py`, `tests/test_blind_investigator.py` |
+| Files route: secret files under any spelling; fork VMs cleaned up on a cancel; scoring rate-limited | `tests/test_api.py`, `tests/test_cleanup.py` |
+| Real investigation of `1114-103920-eb72`, $2.50 total ($6 cap), peak 9 VMs | `fixtures/robot-live-investigation`, README "What a real run found" |
+
+What went wrong on the live run, and is in the record:
+- Daytona refused to fork VMs, so all 16 copies were rebuilt by replay.
+- Ten copies' scoring timed out because the full test suite was running at the same time. They were scored afterwards
+  from their saved outputs (`scripts/rescore_failed_copies.py`).
+- The first verdict was written on the incomplete counts. A follow-up session wrote it again; the first is kept under
+  `superseded_verdicts`.
+- The investigator chose 4 per arm, so its fork cannot reach `supported`.
+
+Final checks: 387 Python, 138 sim and 647 web tests; `tsc` clean; build OK; 0 VMs left running.
+
 Plan: `docs/MASTER_PLAN.md`. Branch: `upgrade/investigator`, cut from `origin/main` at `14f1d0a`.
 All times are US Eastern. Deadline: Sunday Nov 15, 8:00 am.
 

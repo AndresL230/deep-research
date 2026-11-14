@@ -165,6 +165,25 @@ flowchart TD
     COMPARE --> INVESTIGATE["Trace code and test a correction"]
 ```
 
+### What a real run found
+
+`fixtures/robot-live-investigation` is a **recording of a real run**. It contains no scripted or hand-edited data (`config.recording.kind = "live"`). Twelve agents (Claude Haiku and Sonnet) each wrote a controller in their own Daytona VM. Orro scored every controller on 20 hidden can positions, and then the investigator (Claude Sonnet) ran blind. Total spend: **$2.50**.
+
+| Stage | What happened |
+|---|---|
+| **Claim vs. measured** | Run r06 reported **100%** over 37 episodes (13 of them at "random layouts") and measured **65%** on the hidden positions. Five runs came out inflated, three honest and two unclear. Two runs failed. |
+| **Hypotheses** | The investigator recorded three, each with a prediction and a falsification condition: **h1**, inflated runs never tested the table edges; **h2**, `tune_params`, the top split, which no fork can force; **h3**, a shared controller defect. It chose to test h1. |
+| **Method fork (h1)** | The prediction was registered first. Forced copies ran the controller at 10 edge positions kept away from the hidden set. Result: **0 of 4 forced copies inflated**, against **4 of 4** for control, placebo and show. Fisher p = 0.014, but on **4 pairs of the 8 required**, so the outcome is **inconclusive**. |
+| **What the forced copies did** | They didn't only report more honestly. Every forced copy **rewrote its controller** after seeing it fail at the edges, and measured **90–100%** on hidden positions (control copies: 65%, code unchanged). That gain is shown beside the evidence level, not counted in it. |
+| **Code fix (h3)** | The investigator traced r06, r10 and r11 on diagnostic positions and proposed scaling r06's carry duration with distance. Measured on the 20 held-out positions: **65% → 25%**, 0 gained, 8 lost, sign test p = 0.004, **worse**. h3 is **contradicted**, and the investigator's own fix verdict says the change is not shown to help. |
+| **Verdict** | "Skipping test_table_edges **suggests** why the claims were inflated, but the evidence is open…" Confidence low. The grader asked for revisions twice before passing it. |
+
+What went wrong along the way is part of the record:
+
+- Daytona refused to fork VMs, so all 16 copies were **rebuilt by replay**.
+- The server-side scoring of ten copies timed out because the laptop was overloaded. Their saved outputs were scored afterwards, deterministically and with no agent involved (`forks.f1.rescored`). The scoring is now rate-limited.
+- A second investigator session wrote the verdict on the corrected counts. The first verdict is kept under `superseded_verdicts`.
+
 **Why robotics?** It makes methodological failure tangible. Rather than showing only a number, we can show the arm reaching to the wrong location, missing a grasp, or failing to place an object—and then examine the code and decisions behind that behavior.
 
 **Why not robotics only?** The agent orchestration, observation, independent evaluation, experiment branching, and evidence reporting are the platform. The robotic simulator is one domain-specific evaluator connected to that workflow.
@@ -219,6 +238,7 @@ flowchart LR
 | `deep_research/api.py` | Backend API and event streaming |
 | `sim/` | Franka Panda simulation, controllers, and scoring |
 | `web/` | Interactive frontend |
+| `fixtures/robot-live-investigation/` | **Real** recorded robot investigation (the demo backup; see "What a real run found") |
 | `fixtures/robot-demo-batch/` | **Simulated** robotics replay data for UI testing |
 | `docs/` | Design notes, development plans, and progress |
 
@@ -301,21 +321,25 @@ npm run dev
 
 The development frontend runs at `http://localhost:5173` and connects to the backend on port `8000`.
 
+To replay the real investigation with no keys and no VMs, open `http://localhost:5173/#/b/robot-live-investigation`. With a built frontend (`cd web && npm run build`), the backend serves the page itself at `http://localhost:8000/#/b/robot-live-investigation`.
+
 For simulator internals, see [`sim/README.md`](sim/README.md), [`sim/CALIBRATION.md`](sim/CALIBRATION.md), and [`sim/MOTION_FORMAT.md`](sim/MOTION_FORMAT.md).
 
 ---
 
 ## Two-minute demo narrative
 
-**0:00–0:20 — The claim.** An autonomous agent builds a robotic-arm controller and demonstrates success in its practice environment.
+Every number below is from `fixtures/robot-live-investigation`.
 
-**0:20–0:45 — The contradiction.** Orro evaluates the same controller at unseen positions. A replay reveals a failure the practice run did not expose.
+**0:00–0:20 — The claim.** Run r06's agent wrote a controller and reported **100%** success.
 
-**0:45–1:10 — The investigation.** Orro inspects the controller and execution history, then identifies a specific, testable explanation.
+**0:20–0:45 — The contradiction.** On 20 positions it never saw, the controller measures **65%**. The fork's control copies run r06's controller unchanged, and each of their hidden positions can be replayed in 3D. The investigator's trace, on separate diagnostic positions, shows the can slipping out of the grip near the table's edges.
 
-**1:10–1:40 — The experiment.** Compare the original continuation with an intervention, scored under the same evaluation procedure.
+**0:45–1:10 — The investigation.** The investigator, never told the answer, records three competing hypotheses with predictions and falsification conditions, and chooses to test "never tested the edges" (Fork page).
 
-**1:40–2:00 — The evidence.** Show the measured outcomes, motion traces, and appropriately qualified conclusion.
+**1:10–1:40 — The experiment.** Copies continue from just before the report. Forced to test the edges: **0 of 4 inflated** against 4 of 4 in each of control, placebo and show, and the forced copies' rewritten controllers measure **95%**. The investigator's own code patch is measured on held-out positions and makes things **worse** (65% → 25%) (Fix page).
+
+**1:40–2:00 — The verdict.** "Suggests", not "caused": 4 pairs of the 8 required, so the outcome is inconclusive. Each limit is listed on the Verdict page.
 
 The point is not that Orro can make a robot move. **The point is that Orro can investigate whether an autonomous agent's apparent success was scientifically meaningful.**
 
