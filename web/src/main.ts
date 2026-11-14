@@ -19,6 +19,7 @@ import "./style.css";
 import "./system.css";
 import "./batch/page.css";
 import { attr, esc } from "./ui";
+import { symbolTile, wordmark } from "./brand";
 import { morphInner } from "./morph";
 import { AWAY_PX, conversationView, initialConversationUi, jumpButton, stickAfterScroll, thinkingLabel, type ConversationUi } from "./ask-conversation";
 import { scheduleOrbs } from "./thinking-orb";
