@@ -21,7 +21,8 @@ A robot batch on disk (`batches/<id>/`):
     runs/<run>/messages.json, actions.json, score.json
     runs/<run>/outputs/controller.py, report.json
     runs/<run>/outputs/live/<name>.motion.json    the motion files (any `sim.domain.OUTPUT_GLOBS` match,
-                                                  at its path relative to the workspace)
+                                                  at its path relative to the workspace), pulled from the VM
+                                                  every 15 s while the run goes, then once more at its end
     forks/<fork>/<child>/outputs/...              the same for each fork child
 
 and in `case/case.json`, besides what every batch has (see deep_research/domains/__init__.py):

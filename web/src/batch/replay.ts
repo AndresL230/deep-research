@@ -23,6 +23,10 @@
 //
 // Fork child logs: a child's log may begin with the source run's history copied in (fixtures do this: the times
 // drop back down where the child's own events start). That copied prefix shows at once when the child starts.
+//
+// Motion files (robot runs): the server pulls them from the VM while a run is going and logs a `motion` event for
+// each, so mid-run `motion_files` are the ones whose event has happened, newest last (`motionAt`). Batches saved
+// before those events existed have none: their motion files appear when the run ends, with its final record.
 
 import "./replay.css";
 import type {
@@ -309,6 +313,26 @@ function without<T extends object>(o: T, keys: readonly string[]): Partial<T> {
 
 const RUN_LIVE_FIELDS = [...SCORE_FIELDS, "status", "todos", "step", "last_tool", "duration_s", "charts", "motion_files", "tokens", "vm_id", "lab_url"];
 
+/**
+ * The motion files of a run or fork child as they were `t` seconds in: those whose `motion` event has happened, in
+ * the order they last arrived (a changed file moves to the end), limited to the files the final record lists (only
+ * those are known to be on disk). Null when none had arrived yet, or the log has no motion events (an older batch).
+ */
+export function motionAt(final: string[] | undefined, evs: AgentEvent[], times: number[], t: number): string[] | null {
+  if (!final?.length) return null;
+  const keep = new Set(final);
+  const out: string[] = [];
+  const n = countAt(times, t);
+  for (let i = 0; i < n; i++) {
+    const e = evs[i];
+    if (e.type !== "motion" || !keep.has(e.path)) continue;
+    const k = out.indexOf(e.path);
+    if (k >= 0) out.splice(k, 1);
+    out.push(e.path);
+  }
+  return out.length ? out : null;
+}
+
 function runAt(r: RunRecord, slot: RunSlot, evs: AgentEvent[], times: number[], t: number): RunRecord {
   if (t >= slot.end) return { ...r };
   const rest = without(r, RUN_LIVE_FIELDS);
@@ -332,6 +356,8 @@ function runAt(r: RunRecord, slot: RunSlot, evs: AgentEvent[], times: number[], 
     out.step = todos.find((x) => x.status === "in_progress")?.content ?? null;
   }
   if (tool !== null) out.last_tool = tool;
+  const motion = motionAt(r.motion_files, evs, times, t);
+  if (motion) out.motion_files = motion;
   if (r.tokens) {
     const p = progress(t, 0, slot.end);
     out.tokens = { input: Math.round(r.tokens.input * p), output: Math.round(r.tokens.output * p) };
@@ -339,23 +365,26 @@ function runAt(r: RunRecord, slot: RunSlot, evs: AgentEvent[], times: number[], 
   return out;
 }
 
-function childAt(c: ForkChild, slot: ChildSlot, t: number): ForkChild | null {
+function childAt(c: ForkChild, slot: ChildSlot, evs: AgentEvent[], times: number[], t: number): ForkChild | null {
   if (t < slot.start) return null;
   if (t >= slot.end) return { ...c };
   const out: ForkChild = { arm: c.arm, status: "running" };
   if (c.lab_url !== undefined) out.lab_url = c.lab_url;
   if (c.how !== undefined) out.how = c.how;
+  const motion = motionAt(c.motion_files, evs, times, t);
+  if (motion) out.motion_files = motion;
   return out;
 }
 
-function forkAt(f: ForkExperiment, slot: ForkSlot, t: number): ForkExperiment | null {
+function forkAt(f: ForkExperiment, slot: ForkSlot, events: Record<EventKey, AgentEvent[]>, times: Record<EventKey, number[]>, t: number): ForkExperiment | null {
   if (t < slot.rebuildAt) return null;
   if (t >= slot.doneAt) return { ...f };
   const rest = without(f, ["status", "children", "arms"]) as Omit<ForkExperiment, "status" | "children" | "arms">;
   if (t < slot.runningAt) return { ...rest, status: "rebuilding", children: {} };
   const children: Record<string, ForkChild> = {};
   for (const [cid, c] of Object.entries(f.children)) {
-    const at = childAt(c, slot.children[cid], t);
+    const key = childKey(f.id, cid);
+    const at = childAt(c, slot.children[cid], events[key] ?? [], times[key] ?? [], t);
     if (at) children[cid] = at;
   }
   return { ...rest, status: "running", children };
@@ -429,7 +458,7 @@ export function caseAt(full: CaseFile, events: Record<EventKey, AgentEvent[]>, t
       const n = f.n_per_arm;
       forks.pending = { id: "pending", status: "awaiting_approval", n_per_arm: n, vm_count: 2 * n + 1, estimate_usd: null };
     }
-    const at = forkAt(f, slot, t);
+    const at = forkAt(f, slot, events, s.times, t);
     if (at) forks[f.id] = at;
   });
   if (s.finalPendingAt !== null && t >= s.finalPendingAt && full.forks.pending) forks.pending = { ...full.forks.pending };

@@ -36,6 +36,7 @@ import { LABEL_PATTERNS, chartUrl, logOf, notebookCells, notebookView } from "./
 import { fetchCosts, type CostReport } from "./api";
 import type { Loadable } from "./batch/model";
 import { costsLink, costsView } from "./batch/costs";
+import { refreshMotion } from "./robot/mount";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -358,6 +359,8 @@ function openBatch(id: string, reopen = false): void {
       if (m.kind === "event") append(b, m.run, m.event);
       else if (m.kind === "fork_event") append(b, childKey(m.fork, m.child), m.event);
       else if (m.kind === "investigator") append(b, "investigator", m.event);
+      // A robot run saved an episode: a file saved again under the same path is drawn again from its new content.
+      if ((m.kind === "event" || m.kind === "fork_event") && m.event.type === "motion") refreshMotion(b.id, m.event.path);
       paint();
     },
     close: () => {

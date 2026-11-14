@@ -4,6 +4,7 @@
 // three.js (robot/viewer.ts) is loaded the first time a placeholder appears: a tabular batch never downloads it.
 
 import "./robot.css";
+import { motionChanged } from "./data";
 
 interface Mounted { dispose(): void }
 type Viewer = typeof import("./viewer");
@@ -45,4 +46,33 @@ if (typeof document !== "undefined" && typeof MutationObserver !== "undefined") 
     schedule();
   };
   if (document.body) start(); else document.addEventListener("DOMContentLoaded", start, { once: true });
+}
+
+/**
+ * A live run's motion file arrived (a `motion` event on the websocket). A new file needs nothing here: the case update
+ * that follows lists it, and the views draw a new placeholder for it. A file saved again under the same path does: the
+ * thumbnails showing it, and a player on it by default (its last file), are mounted again on the new content.
+ */
+export function refreshMotion(batch: string, path: string): void {
+  if (!motionChanged(batch, path)) return;
+  let again = false;
+  for (const [el, m] of mounted) {
+    if (el.dataset.batch !== batch) continue;
+    const shows = el.hasAttribute("data-robot-thumb") ? el.dataset.file === path : lastFile(el) === path;
+    if (!shows) continue;
+    m?.dispose();
+    mounted.delete(el);
+    // A player draws itself from scratch when mounted; a thumbnail adds its canvas in front of its label.
+    el.querySelectorAll(".rb-thumb-c").forEach((c) => c.remove());
+    el.classList.remove("is-ready", "is-error");
+    again = true;
+  }
+  if (again) schedule();
+}
+
+function lastFile(el: HTMLElement): string | undefined {
+  try {
+    const files = JSON.parse(el.dataset.files ?? "[]") as unknown;
+    return Array.isArray(files) && typeof files.at(-1) === "string" ? (files.at(-1) as string) : undefined;
+  } catch { return undefined; }
 }

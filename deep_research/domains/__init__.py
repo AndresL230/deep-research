@@ -17,8 +17,11 @@ What a domain adds to the case file (`case.json`), so a fixture or the UI can ma
   or "motion" (the motion files in `runs[id].motion_files`). Absent: "charts".
 - `config.domain_info`: `Domain.public()`, the domain in words. The tabular domain also writes `config.trap_info`.
 - `runs[id].motion_files` and `forks[id].children[cid].motion_files`: the motion files the run saved, as paths
-  relative to the batch folder for the files route, such as `runs/r01/outputs/live/practice.motion.json`.
-  Only set when the run saved any; never set in the tabular domain.
+  relative to the batch folder for the files route, such as `runs/r01/outputs/live/practice.motion.json`, newest
+  last. Only set when the run saved any; never set in the tabular domain. A "motion" run's list grows while it runs:
+  the batch pulls the VM's live folder every `batch.MOTION_POLL_S` seconds (`batch.MotionWatch`) and logs a
+  `{"type": "motion", "path": ...}` event in the run's events.jsonl for each file that arrives, so a replay can
+  show it then. Batches saved before that have no motion events.
 - `runs[id].reported_accuracy`, `true_accuracy`, `gap`, `overlap_share`: the run's claim, the truth, their
   difference and the domain's evidence number, whatever the domain measures (a test accuracy, a success rate).
   The names stay the tabular ones so every saved batch keeps reading the same way.

@@ -6,6 +6,8 @@ All functions here are blocking. Call them with `asyncio.to_thread` from async c
 from __future__ import annotations
 
 import fnmatch
+import hashlib
+import json
 import logging
 import os
 import time
@@ -149,6 +151,76 @@ def download_globs(sb: Sandbox, patterns: list[str], dest: Path, limit: int) -> 
             (dest / rel).parent.mkdir(parents=True, exist_ok=True)
             (dest / rel).write_bytes(data)
             saved.append(rel)
+    return saved
+
+
+# The live folder relative to the workspace ("live"): where a run saves its motion files as it goes.
+LIVE_FOLDER = os.path.relpath(VM_LIVE_DIR, VM_WORKSPACE)
+# A motion file bigger than this is never pulled while the run is going (a real one is 30 to 110 KB).
+MAX_LIVE_FILE_BYTES = 20 * 1024 * 1024
+
+
+def live_globs(patterns: list[str]) -> list[str]:
+    """The `patterns` (globs relative to the workspace) that match files in the live folder, such as `live/*.motion.json`."""
+    return [p for p in patterns if p.rpartition("/")[0] == LIVE_FOLDER]
+
+
+def poll_live_files(sb: Sandbox, dest: Path, patterns: list[str], seen: dict[str, tuple], limit: int) -> list[str]:
+    """One look at the live folder while a run is going: save the files matching `patterns` that are new or changed.
+
+    `patterns` are globs relative to the workspace in the live folder (`live_globs`). Only the newest `limit` files
+    are looked at. A file counts as changed when its size or modification time is not the one in `seen` (path ->
+    stamp, updated here) and its bytes differ too. A file that does not parse as JSON yet is still being written: it
+    is left for the next look. Files go to `dest` at their path relative to the workspace (`live/<name>`), the path
+    the final `download_outputs` writes, so the run's outputs folder never holds a file twice.
+
+    Returns the paths saved (relative to `dest`), oldest first. One list call, then one download per new file. Never
+    raises: the run must not notice it is being watched.
+    """
+    name_globs = [p.rpartition("/")[2] for p in patterns]
+    try:
+        entries = [e for e in sb.fs.list_files(VM_LIVE_DIR)
+                   if not e.is_dir and any(fnmatch.fnmatch(Path(e.name).name, g) for g in name_globs)]
+    except Exception as e:  # noqa: BLE001 - no live folder yet
+        log.debug("listing %s failed: %r", VM_LIVE_DIR, e)
+        return []
+
+    def modified(e) -> str:
+        return str(getattr(e, "modified_at", None) or getattr(e, "mod_time", None) or "")
+
+    entries.sort(key=lambda e: (modified(e), Path(e.name).name))
+    saved: list[str] = []
+    for e in entries[-limit:] if limit > 0 else []:
+        name = Path(e.name).name
+        rel = f"{LIVE_FOLDER}/{name}"
+        size = getattr(e, "size", None)
+        stamp = (size, modified(e))
+        before = seen.get(rel)
+        if before is not None and before[0] == stamp:
+            continue
+        if isinstance(size, int) and size > MAX_LIVE_FILE_BYTES:
+            continue
+        try:
+            data = sb.fs.download_file(f"{VM_LIVE_DIR}/{name}")
+        except Exception as err:  # noqa: BLE001 - gone again, or the VM is busy: the next look tries again
+            log.warning("downloading %s failed: %r", rel, err)
+            continue
+        if not data:
+            continue
+        try:
+            json.loads(data)
+        except ValueError:
+            continue  # still being written
+        digest = hashlib.sha1(data).hexdigest()
+        seen[rel] = (stamp, digest)
+        if before is not None and before[1] == digest:
+            continue  # touched, not changed
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(f".{target.name}.part")
+        tmp.write_bytes(data)
+        os.replace(tmp, target)
+        saved.append(rel)
     return saved
 
 

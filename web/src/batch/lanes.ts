@@ -81,6 +81,7 @@ export function eventLine(ev: AgentEvent): { kind: string; text: string } {
       return { kind: "plan", text: `Plan: ${done} of ${ev.todos.length} done` };
     }
     case "forced": return { kind: "forced", text: clip(`Forced: ${ev.command}`, 120) };
+    case "motion": return { kind: "motion", text: clip(`Saved an episode: ${ev.path.split("/").at(-1) ?? ev.path}`, 120) };
   }
 }
 

@@ -150,7 +150,8 @@ export interface RunRecord extends Partial<Omit<RunScore, "status">> {
   /** The charts the run saved, oldest first, as paths for `batchFileUrl`. Set once the run has finished. */
   charts?: string[];
   /** The motion files the run saved (`visual` "motion"), as paths for `batchFileUrl`, such as
-   *  `runs/r01/outputs/live/practice.motion.json`. Set once the run has finished; absent in the tabular domain. */
+   *  `runs/r01/outputs/live/practice.motion.json`, newest last. Grows while the run is going (the server pulls them
+   *  from its VM every 15 s, each with a `motion` event); final once it has finished. Absent in the tabular domain. */
   motion_files?: string[];
   // Fixture only (scripts/make_fixture.py).
   duration_s?: number;
@@ -185,7 +186,8 @@ export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   lab_url?: string | null;
   /** The charts the child saved, as paths for `batchFileUrl`. */
   charts?: string[];
-  /** The motion files the child saved, as paths for `batchFileUrl` (`forks/f1/forced-1/outputs/live/...`). */
+  /** The motion files the child saved, as paths for `batchFileUrl` (`forks/f1/forced-1/outputs/live/...`), newest
+   *  last. Grows while the child runs, as a run's does. */
   motion_files?: string[];
   /** "fork": a copy-on-write VM fork. "replay": rebuilt by replaying the actions when forking failed. */
   how?: "fork" | "replay";
@@ -291,6 +293,9 @@ export type AgentEvent = { t: number; /** Investigator only: which agent or suba
   | { type: "todos"; todos: AgentTodo[] }
   /** Forced fork children only: the step the experiment forced, before the agent continues. */
   | { type: "forced"; command: string; output: string }
+  /** Robot runs and fork children only: a motion file arrived from the VM (new, or changed since it last did), at
+   *  `path`, batch-relative as in `motion_files`. Batches saved before these existed have none. */
+  | { type: "motion"; path: string }
 );
 
 // ── the websocket ────────────────────────────────────────────────────────────

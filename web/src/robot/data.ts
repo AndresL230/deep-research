@@ -94,16 +94,31 @@ export function fetchScene(): Promise<SceneData> {
 
 const MOTION_CACHE = 80;
 const motions = new Map<string, Promise<MotionData>>();
+/** How many times a file has changed on the server since the page loaded (a live run saving it again). */
+const revisions = new Map<string, number>();
+
 /** One motion file's poses, kept for the page (the thumbnails and the run view share them). */
 export function fetchMotion(batch: string, path: string): Promise<MotionData> {
   const key = `${batch}\n${path}`;
   let p = motions.get(key);
   if (p) { motions.delete(key); motions.set(key, p); return p; }
-  p = getJson<MotionData>(`${batchPath(batch)}/motion?path=${encodeURIComponent(path)}`);
+  const rev = revisions.get(key);
+  p = getJson<MotionData>(`${batchPath(batch)}/motion?path=${encodeURIComponent(path)}${rev ? `&rev=${rev}` : ""}`);
   p.catch(() => motions.delete(key));
   motions.set(key, p);
   while (motions.size > MOTION_CACHE) motions.delete(motions.keys().next().value as string);
   return p;
+}
+
+/**
+ * A live run's motion file arrived from its VM (a `motion` event): new, or saved again with new content under the same
+ * path. Forget what was fetched for it, so the next `fetchMotion` gets the new content. Returns whether anything was
+ * fetched before (a view showing it then needs to load it again).
+ */
+export function motionChanged(batch: string, path: string): boolean {
+  const key = `${batch}\n${path}`;
+  revisions.set(key, (revisions.get(key) ?? 0) + 1);
+  return motions.delete(key);
 }
 
 /** Can start, place target, length and result of each file, for the picker. */
