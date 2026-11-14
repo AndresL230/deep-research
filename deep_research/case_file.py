@@ -43,11 +43,14 @@ class CaseFile:
                 # The diagnosis: symptoms traced to lines of the agent's code, and the fix proposed and tested.
                 "trace": [],
                 "fix": None,
+                # The live commentary's feed of notable moments across runs (commentary.py), oldest first.
+                "feed": [],
             }
             self._save()
         # Case files saved before these sections existed.
         self.data.setdefault("trace", [])
         self.data.setdefault("fix", None)
+        self.data.setdefault("feed", [])
 
     # ---- plumbing ----
     def subscribe(self, fn: Listener) -> None:
@@ -97,6 +100,12 @@ class CaseFile:
         with self._lock:
             self.data["forks"].pop(fork_id, None)
             self._changed("forks")
+
+    def add_feed(self, item: dict, cap: int = 200) -> None:
+        """One item of the commentary feed, `{"t", "run", "model", "kind", "text"}`. Only the newest `cap` are kept."""
+        with self._lock:
+            self.data["feed"] = [*self.data.get("feed", []), item][-cap:]
+            self._changed("feed")
 
     def set_costs(self, costs: dict) -> None:
         with self._lock:

@@ -26,3 +26,14 @@ def no_real_hub(monkeypatch):
     monkeypatch.delenv("HUB_TOKEN", raising=False)
     monkeypatch.setattr(hub, "_pusher", None)
     yield
+
+
+@pytest.fixture(autouse=True)
+def no_real_commentary(monkeypatch):
+    """The live commentary never calls a real model in tests: a test that wants captions passes a fake one."""
+    from deep_research import commentary
+
+    def offline(model: str):
+        raise RuntimeError("no model calls in tests")
+
+    monkeypatch.setattr(commentary, "make_llm", offline)

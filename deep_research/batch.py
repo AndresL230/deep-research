@@ -25,6 +25,7 @@ from .agents.analyst import build_analyst
 from .agents.investigator import build_investigator
 from .analysis import find_split
 from .case_file import CaseFile
+from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
 from .events import EventLog, current_step, events_from_update, read_events
@@ -194,6 +195,8 @@ class Batch:
         self.tracker = CostTracker(budget_usd=cfg.budget_usd)
         # A reopened batch (Batch.resume, cli forks, cli investigate) has spend on record already.
         self.tracker.restore(self.case.data.get("costs") or {})
+        # Live captions of the runs and a feed of notable moments (commentary.py); None when the config has them off.
+        self.commentary = commentary_for(self)
         self.vms: dict[str, Any] = {}
         self._queues: set[asyncio.Queue] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -362,6 +365,8 @@ class Batch:
                 self.case.update_run(run_id, todos=ev["todos"], step=current_step(ev["todos"]))
             elif ev["type"] == "tool_call":
                 self.case.update_run(run_id, last_tool=ev["name"])
+            if self.commentary is not None:
+                self.commentary.observe(run_id, ev)
 
         return on_event
 
@@ -385,7 +390,13 @@ class Batch:
                     return
                 await self.run_one(r)
 
-        await asyncio.gather(*(guarded(r) for r in run_ids))
+        if self.commentary is not None:
+            self.commentary.start()
+        try:
+            await asyncio.gather(*(guarded(r) for r in run_ids))
+        finally:
+            if self.commentary is not None:
+                await self.commentary.stop()
         self.push_costs(force=True)
         self.analyze()
         if self.case.data.get("phase") == "no_split":
@@ -407,6 +418,8 @@ class Batch:
             self.case.update_run(run_id, status="running", vm_id=sb.id, lab_url=url)
 
             on_event = self._run_event(run_id)
+            if self.commentary is not None:
+                self.commentary.attach(run_id, log, on_event)
             watch = _watch_motion(self.domain, sb, rdir / "outputs", f"runs/{run_id}/outputs", log, on_event,
                                   lambda files: self.case.update_run(run_id, motion_files=files))
             agent = build_analyst(DaytonaSandbox(sandbox=sb), model, self.domain.analyst_system_prompt)
@@ -434,6 +447,8 @@ class Batch:
         finally:
             if watch is not None:
                 await watch.stop()
+            if self.commentary is not None:
+                self.commentary.finish(run_id)  # its last caption, before the log closes
             log.close()
             # The VM is used once: delete it now, so it stops costing anything. Its lab page goes with it.
             if await self._release(run_id, scope):

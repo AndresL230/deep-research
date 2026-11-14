@@ -27,6 +27,9 @@ VM_WORKSPACE = "/home/daytona/workspace"
 VM_LIVE_DIR = f"{VM_WORKSPACE}/live"
 LAB_PAGE_PORT = 8080
 
+# The domains whose batches have live commentary unless their config says otherwise (BatchConfig.commentary).
+COMMENTARY_DOMAINS = ("robot_arm",)
+
 
 class BatchConfig(BaseModel):
     """Everything set on the config screen."""
@@ -87,6 +90,19 @@ class BatchConfig(BaseModel):
     # What the robot agent's controller.py holds at the start. "blank": a copy of the template. "colleague": a working
     # controller from a colleague (sim/controllers/colleague.py), and the prompt asks the agent to start from it.
     robot_start: Literal["blank", "colleague"] = "blank"
+    # Live commentary (deep_research/commentary.py): a cheap model writes a short caption of what each run is doing,
+    # and a feed of notable moments across runs. Left out (None): on for the domains in COMMENTARY_DOMAINS (robot_arm),
+    # off for the others, so a tabular batch behaves as it did before commentary existed.
+    commentary: bool | None = None
+    commentary_model: str = Field(default_factory=lambda: os.getenv("COMMENTARY_MODEL", "anthropic:claude-haiku-5-5"))
+    # The most the captions may spend in one batch. Counted in the batch's costs under the scope "commentary".
+    commentary_budget_usd: float = Field(0.5, ge=0)
+
+    @model_validator(mode="after")
+    def _commentary_default(self) -> "BatchConfig":
+        if self.commentary is None:
+            self.commentary = self.domain in COMMENTARY_DOMAINS
+        return self
 
     @field_validator("trap")
     @classmethod
