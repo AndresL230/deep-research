@@ -73,7 +73,14 @@ Without the UI:
 uv run python -m deep_research.cli runs --n 1        # milestone 1: one real run end to end
 uv run python -m deep_research.cli runs --n 12       # milestone 2: a batch and the split finding
 uv run python -m deep_research.cli forks <batch_id> --n 4
+uv run python -m deep_research.cli runs --n 6 --budget 3          # a small batch under a 3 dollar budget
+uv run python -m deep_research.cli investigate <batch_id>         # the investigator on a saved batch
+uv run python scripts/batch_numbers.py <batch_id>                 # the numbers a saved batch backs
 ```
+
+`investigate` asks on the terminal before each fork experiment. `--auto-approve` answers yes for you, at most three
+times, and only on a batch whose budget is 3 dollars or less. `forks` and `investigate` reopen the saved batch with the
+spend it already recorded, so the budget covers the whole batch, not each command.
 
 ## Test
 

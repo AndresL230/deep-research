@@ -154,6 +154,8 @@ def fork_vm(sb: Sandbox, name: str | None = None) -> Sandbox:
 
 def stop_vm(sb: Sandbox) -> None:
     try:
-        sb.stop()
+        # By keyword: the SDK applies its stop timeout only when it is passed that way, and without
+        # one a VM stuck in "stopping" would hang the whole batch.
+        sb.stop(timeout=60)
     except Exception:  # noqa: BLE001
         pass

@@ -104,10 +104,21 @@ def _did_before_split(actions: list[Action], label: str) -> bool:
     return False
 
 
+# An import statement, up to the end of the line or the next `;`. Naming a function in an import is not using it.
+_IMPORT = re.compile(
+    r"""(^|[;"'])[ \t]*(?:from[ \t]+[\w.]+[ \t]+)?import[ \t]+(?:\([^)]*\)|[^;\n"']*)""", re.MULTILINE
+)
+
+
 def _order_in_text(text: str, first: str, second: str) -> bool:
-    """True if `first`'s pattern appears before `second`'s inside one action."""
+    """True if `first`'s pattern appears before `second`'s inside one action.
+
+    Import statements are skipped: `from sklearn.model_selection import train_test_split`
+    at the top of a script is not the split.
+    """
+    body = _IMPORT.sub(r"\1", text)
     rx = dict(_RULES)
-    m1, m2 = rx[first].search(text), rx[second].search(text)
+    m1, m2 = rx[first].search(body), rx[second].search(body)
     return bool(m1 and m2 and m1.start() < m2.start())
 
 
@@ -144,6 +155,9 @@ def find_split(runs: dict[str, list[Action]], statuses: dict[str, str]) -> Split
         if best is None or (h - i) > best[0]:
             best = (h - i, label)
     assert best is not None
+    if best[0] <= 0:
+        # No step is done more often by honest runs than by inflated ones: there is nothing to report.
+        return None
     label = best[1]
     h_rate = sum(_did_before_split(runs[r], label) for r in honest) / len(honest)
     i_rate = sum(_did_before_split(runs[r], label) for r in inflated) / len(inflated)
