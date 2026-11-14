@@ -650,6 +650,8 @@ export interface BatchListItem {
   id: string;
   kind: "live" | "replay";
   resumable?: boolean;
+  /** A saved example from `fixtures/`, with no real runs behind it: nothing can be run on it. */
+  fixture?: boolean;
   /** Run on another machine and read from the team hub; `machine` says which. */
   remote?: boolean;
   machine?: string | null;
@@ -681,6 +683,11 @@ export interface BatchSummary {
   /** The step that separates honest from inflated runs: its label and its name in the domain's words. */
   step: { label: string; name: string } | null;
   verdict: { state: VerdictState; pairs?: number | null; needed_pairs?: number | null };
+  /** The fork request waiting for approval (`forks.pending`), or null. Absent from a server older than it. */
+  pending?: { kind: ForkKind; n_per_arm: number | null; vm_count: number | null; estimate_usd: number | null } | null;
+  /** The fork experiment still going (a first one, a fix test or a round of more pairs): copies scored of all it
+   *  will run. Null when none is going. Absent from a server older than it. */
+  fork_progress?: { scored: number; total: number } | null;
   /** Dollars when prices are known (null for simulated batches or missing prices); tokens are input plus output. */
   spend: { usd: number | null; usd_partial: boolean; tokens: number };
 }

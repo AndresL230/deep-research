@@ -26,12 +26,13 @@ import { scheduleOrbs } from "./thinking-orb";
 import { PAGE_BACKGROUND, readStoredTheme, resolveTheme, storeTheme, themeChoice, themeSwitch, type Theme, type ThemeChoice } from "./theme";
 import {
   applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
-  fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, uploadController, uploadDataset, uploadScript, startInvestigation, stopBatch,
-  type AgentEvent, type HubStatus, type BatchConfig, type BatchSocket, type CaseFile,
+  fetchMorePairs, fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, startMorePairs, uploadController, uploadDataset, uploadScript, startInvestigation, stopBatch,
+  type AgentEvent, type HubStatus, type BatchConfig, type BatchListItem, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, BATCH_STEPS, STEP_LABEL, childKey, parseRoute, routeHash, type BatchStep, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
 import { DEFAULT_DOMAIN, HM_ACT, costBar, domainOf, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload, toggleModel } from "./batch/home";
 import { BT_ACT, DEFAULT_VIEW, sortBy } from "./batch/batch-table";
+import { NY_ACT, moreFailedUi, needKey, pruneNeeds, quoteUi, type NeedKind, type NeedUi } from "./batch/needs-you";
 import { hubBadge } from "./batch/hub-badge";
 import { DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { notYetView, overviewView, pageHeadView, pagerView } from "./batch/overview";
@@ -376,7 +377,13 @@ function followStory(): void {
 }
 
 let ticker: ReturnType<typeof setInterval> | null = null;
+/** An element to focus once the next paint is in (a row's Start once its confirm opens, say), as a selector. */
+let focusNext: string | null = null;
 function afterPaint(): void {
+  if (focusNext) {
+    scrollEl.querySelector<HTMLElement>(focusNext)?.focus({ preventScroll: true });
+    focusNext = null;
+  }
   // First, before the browser styles the page: what morph took off the elements that move (motion.ts).
   syncMotion(scrollEl, scrollEl);
   // The landing page's 3D scenes are canvases, not markup: start them when the page is there, stop them when it is
@@ -545,7 +552,7 @@ async function loadLiveLogs(b: BatchState): Promise<void> {
 async function loadHome(force = false): Promise<void> {
   if (S.homeLoaded && !force) {
     // The batch list is cheap and changes: refresh it on every visit.
-    fetchBatches().then((items) => { S.home = { ...S.home, batches: { state: "ready", value: items } }; paint(); }).catch(() => undefined);
+    void refreshBatches();
     return;
   }
   S.homeLoaded = true;
@@ -556,12 +563,22 @@ async function loadHome(force = false): Promise<void> {
   S.home = {
     ...S.home,
     batches: batches.status === "fulfilled" ? { state: "ready", value: batches.value } : { state: "error", message: message(batches.reason, "Couldn't load the batches.") },
+    needs: batches.status === "fulfilled" ? pruneNeeds(S.home.needs, batches.value) : S.home.needs,
     health: health.status === "fulfilled" ? health.value : null,
     defaults: defaults.status === "fulfilled" ? defaults.value : S.home.defaults,
     draft: S.home.draft ?? (defaults.status === "fulfilled" ? initialDraft(defaults.value, recallDomain()) : null),
   };
   paint();
   scheduleEstimate();
+}
+
+/** The batch list again (it is cheap and changes), and the "Needs you" rows' states that still apply. A failed refresh
+ *  keeps the list there was. */
+async function refreshBatches(): Promise<void> {
+  let items: BatchListItem[];
+  try { items = await fetchBatches(); } catch { return; }
+  S.home = { ...S.home, batches: { state: "ready", value: items }, needs: pruneNeeds(S.home.needs, items) };
+  paint();
 }
 
 /** The datasets a batch can run on (the built-in table and earlier uploads). */
@@ -717,6 +734,86 @@ async function resumeAndInvestigate(b: BatchState): Promise<void> {
   }
 }
 
+// ── "Needs you" (batch/needs-you.ts) ─────────────────────────────────────────
+
+const needUi = (kind: NeedKind, id: string): NeedUi | undefined => S.home.needs?.[needKey(kind, id)];
+
+function setNeed(kind: NeedKind, id: string, ui: NeedUi | null): void {
+  const needs = { ...(S.home.needs ?? {}) };
+  if (ui) needs[needKey(kind, id)] = ui;
+  else delete needs[needKey(kind, id)];
+  S.home = { ...S.home, needs };
+  paint();
+}
+
+/** A row's call is in flight: a second press waits for it. */
+const inFlight = (ui: NeedUi | undefined): boolean => ui?.state === "busy" || (ui?.state === "confirm" && !!ui.starting);
+
+/** Open a batch from its row once the call that wakes it is in, if the person is still on the home screen. A batch
+ *  that went live opens on a fresh websocket: home closed the one of any batch open before (`closeBatch`). */
+function openFromHome(id: string): void {
+  if (S.route.name === "home") go({ name: "batch", id });
+}
+
+/** Approve or decline the fork waiting on a live batch, as its page does. */
+async function needDecide(id: string, approve: boolean): Promise<void> {
+  if (inFlight(needUi("approve", id))) return;
+  setNeed("approve", id, { state: "busy", action: approve ? "approve" : "decline" });
+  try {
+    await postDecision(id, approve);
+    setNeed("approve", id, { state: "done", message: approve ? "Approved. The fork is starting." : "Declined. The investigator goes on without it." });
+    void refreshBatches();
+  } catch (e) {
+    setNeed("approve", id, { state: "error", message: message(e, "Couldn't send the decision.") });
+  }
+}
+
+/** Bring a saved batch back live with its investigator started, as its page's Investigate does, then open it. */
+async function needInvestigate(id: string): Promise<void> {
+  if (inFlight(needUi("investigate", id))) return;
+  setNeed("investigate", id, { state: "busy", action: "investigate" });
+  try {
+    await resumeBatch(id, true);
+    setNeed("investigate", id, null);
+    openFromHome(id);
+  } catch (e) {
+    setNeed("investigate", id, { state: "error", message: message(e, "Couldn't resume the batch.") });
+  }
+}
+
+/** "Run 4 more": what the pairs would run and cost (nothing starts), as the row's confirm. */
+async function needQuote(id: string): Promise<void> {
+  if (inFlight(needUi("open", id))) return;
+  setNeed("open", id, { state: "busy", action: "quote" });
+  try {
+    const ui = quoteUi(await fetchMorePairs(id));
+    focusNext = `.ny-row[data-morph-key="${CSS.escape(id)}"] [data-ny-focus]`;
+    setNeed("open", id, ui);
+  } catch (e) {
+    setNeed("open", id, moreFailedUi(e));
+  }
+}
+
+/** The confirm's Start: run the quoted pairs, then open the batch to follow them live. */
+async function needStartMore(id: string): Promise<void> {
+  const ui = needUi("open", id);
+  if (ui?.state !== "confirm" || ui.starting) return;
+  setNeed("open", id, { ...ui, starting: true });
+  try {
+    await startMorePairs(id, ui.quote.n_per_arm);
+    setNeed("open", id, null);
+    openFromHome(id);
+  } catch (e) {
+    setNeed("open", id, moreFailedUi(e));
+  }
+}
+
+function needCancel(id: string): void {
+  if (inFlight(needUi("open", id))) return;
+  focusNext = `.ny-row[data-morph-key="${CSS.escape(id)}"] [data-act="${NY_ACT.more}"]`;
+  setNeed("open", id, null);
+}
+
 // ── routing ──────────────────────────────────────────────────────────────────
 
 function go(r: Route): void {
@@ -792,6 +889,12 @@ root.addEventListener("click", (e) => {
       paint();
       return;
     case ACT.toggleAdvanced: S.home = { ...S.home, advanced: !S.home.advanced }; paint(); return;
+    case NY_ACT.approve: void needDecide(arg, true); return;
+    case NY_ACT.decline: void needDecide(arg, false); return;
+    case NY_ACT.investigate: void needInvestigate(arg); return;
+    case NY_ACT.more: void needQuote(arg); return;
+    case NY_ACT.start: void needStartMore(arg); return;
+    case NY_ACT.cancel: needCancel(arg); return;
     case BT_ACT.sort: S.home = { ...S.home, table: sortBy(S.home.table ?? DEFAULT_VIEW, arg) }; paint(); return;
     case BT_ACT.domain: S.home = { ...S.home, table: { ...(S.home.table ?? DEFAULT_VIEW), domain: arg || null } }; paint(); return;
     case HM_ACT.domain: {
@@ -937,6 +1040,10 @@ scrollEl.addEventListener("scroll", () => {
 
 // A live batch's notebooks type between server messages.
 setInterval(() => { if (S.batch?.live && "id" in S.route) paint(); }, 150);
+// The home screen follows batches that are running: their "Needs you" rows and table rows move on.
+setInterval(() => {
+  if (S.route.name === "home" && S.home.batches.state === "ready" && S.home.batches.value.some((b) => b.kind === "live")) void refreshBatches();
+}, 5000);
 // The cost screen follows a batch that is still running.
 setInterval(() => { if (S.route.name === "costs" && S.costs.state === "ready" && S.costs.value.batches.some((b) => b.kind === "live")) void loadCosts(); }, 5000);
 
