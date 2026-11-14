@@ -24,9 +24,9 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | GET | `/api/batches/{id}/runs/{run}/events` | One run's `events.jsonl` as a JSON array |
 | GET | `/api/batches/{id}/forks/{fork}/{child}/events` | One fork child's events, `child` like `control-1` or `forced-2` |
 | GET | `/api/batches/{id}/investigator/events` | The investigator's events, each with an `agent` field |
-| GET | `/api/batches/{id}/files/{path}` | A file saved with the batch, such as a run's `charts` entry. Served with a CSP that blocks scripts. The holdout labels are never served |
+| GET | `/api/batches/{id}/files/{path}` | A file saved with the batch, such as a run's `charts` entry. Served with a CSP that blocks scripts. The holdout labels and hidden can positions are never served, and a run's `hidden/` recordings only once the case lists them for the scored run |
 | GET | `/api/robot/scene` | The robot scene for the 3D viewer (`deep_research/robot_view.py`): `{"bodies", "meshes", "geoms"}`, every visual geom with its body, type, size, local pose and color, meshes decimated to flat `v`/`f` arrays. About 1.4 MB, 0.45 MB gzipped (sent gzipped when accepted). `503` without mujoco or the panda meshes |
-| GET | `/api/batches/{id}/motion?path=<motion file>` | One motion file as body poses: `{"t", "bodies", "frames": [[x, y, z, qw, qx, qy, qz per body], ...], "static", "result", "can_start", "place_target"}`, from `mj_kinematics` on each frame's qpos. `path` must be under `runs/<run>/outputs/` or `forks/<fork>/<child>/outputs/` (`400` otherwise, never `task/`); `422` when the file is not a motion file |
+| GET | `/api/batches/{id}/motion?path=<motion file>` | One motion file as body poses: `{"t", "bodies", "frames": [[x, y, z, qw, qx, qy, qz per body], ...], "static", "result", "can_start", "place_target"}`, from `mj_kinematics` on each frame's qpos. `path` must be under `runs/<run>/outputs/` or `forks/<fork>/<child>/outputs/`, or be a scored run's hidden episode listed in its `hidden_results` (`400` otherwise, never `task/`; `404` for a hidden episode of a run not scored yet); `422` when the file is not a motion file |
 | GET | `/api/batches/{id}/motion-summaries?path=...&path=...` | For the viewer's file picker: per path, `{"can_start", "place_target", "duration", "n", "result"}` or `{"error"}` |
 | POST | `/api/batches/{id}/investigate` | Live only. Starts the investigator (phase `ready`) |
 | POST | `/api/batches/{id}/decision` | Live only. `{"approve": bool}` answers `forks.pending` (phase `awaiting_approval`) |
@@ -109,7 +109,10 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
 
 - `config`: the `BatchConfig` (`deep_research/config.py`), plus `trap_info`: the batch's trap as a `TrapInfo`.
   Batches saved before traps were pluggable have no `trap_info`; they planted duplicates, and the web app then
-  uses its built-in words for that trap. Fixtures add `"simulated": true`.
+  uses its built-in words for that trap. Fixtures add `"simulated": true`. `domain_info` is the domain
+  (`Domain.public()`), and `domain_info.words` how the screens talk about it (`DomainWords` in `web/src/api.ts`:
+  `subject`, `judged_on` with `{n}`, `checked`, `claim_label`, `truth_label`, `step_when`, `skipped`,
+  `evidence_text`, and `steps`: `{name, did, missing}` for every step label). Absent on batches saved before it.
 - `phase`: `config`, `running`, `analyzing`, then `ready` or `no_split`, `investigating`, `awaiting_approval`,
   `forking`, `forked`, `done`. Also `stopped`, `blocked: <why>` (over budget) and `error: <why>`.
 - `runs`: by id (`r01`...). `status` goes `queued`, `starting`, `running`, then `honest`, `inflated` or `failed`.
@@ -120,6 +123,18 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   duplicates the share of test rows also in training, for repeat subjects the share of test rows whose subject is
   also in training. It is null when the trap has no evidence number (`trap_info.evidence_text` is null too) or the
   run's files do not have what it is read from; the UI then leaves the line out.
+  Also once scored (`score.json` has the same keys): `n_hidden`, how many hidden cases the true score is measured on
+  (holdout rows, or robot can positions). Tabular: `n_test` (rows in the run's own `test.csv`) and `n_test_copies`
+  (how many of them the trap's evidence counts as copies of training rows, `round(overlap_share * n_test)`, null
+  without an evidence number). robot_arm: `checked_positions` (`[x, y]` the run's own episodes used: every can start its
+  episode runs printed, `sim.run`'s `"can_start"` or a `can at (x, y): success` line, and every saved motion file's,
+  rounded to the millimeter, deduplicated, in order of first appearance; a fork copy counts its source run's
+  episodes before the fork and its forced step's too) and `hidden_results`, one per hidden position and seed:
+  `{x, y, seed, result, place_error_cm, motion}`. `result` is `placed`, `dropped`, `tipped` or `missed`
+  (`sim.domain.outcome`), `motion` that episode's recording at 8 fps (`runs/r02/hidden/07-s0.motion.json`, fork
+  copies under `forks/<fork>/<child>/hidden/`). The files and `/motion` routes serve a `hidden/` file only when
+  the case lists it for a scored run; the investigator reads a case without `hidden_results` and cannot read
+  `hidden/` folders. Fork children carry the same fields.
 - `step_labels`: the investigator's labels per run.
 - `split`: where honest and inflated runs part ways (`label`, `honest_rate`, `inflated_rate`, `fork_run_id`,
   `fork_at`, examples, `intervention`), or null.
@@ -147,7 +162,12 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   in them is `honest` of `scored` and `mean_true` (did the code get better), not the inflation. `forks.pending`
   carries the same `kind`, so the approval card can say which experiment is being asked for. The verdict always
   belongs to the method experiment; a fix experiment's result is recorded on `fix`.
-- `verdict`: `{sentence, step_label, numbers}` or null.
+- `verdict`: `{sentence, step_label, numbers, evidence}` or null. `evidence` (`deep_research/evidence.py`,
+  `VerdictEvidence` in `web/src/api.ts`): `{level, pairs, needed_pairs, control_inflated, control_total,
+  forced_inflated, forced_total, p_value}`. `pairs` is min(control, forced scored copies); `level` is `supported`
+  when pairs >= 8 and a one-sided Fisher exact test of fewer inflated forced copies than control copies gives
+  p < 0.05, else `open`. The sentence says "suggests", with the score and the pairs, while it is open, and "caused"
+  only when supported (`record_verdict` refuses a causal word while open). Verdicts saved before it get it when read.
 - `trace`: what the investigator's `code-tracer` subagent found, in order: `[]` until it records something (absent on
   case files saved before it existed; read as `[]`). Each entry has `at` (unix seconds), `run_id` (the run whose
   code was traced), `symptom` (one sentence read from a recording, with its time and distances), `line` (1-based,

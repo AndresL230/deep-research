@@ -33,7 +33,7 @@ import { feedView, notebookWithCaptions, wallWithFeed } from "./batch/commentary
 import { diagnosisView, fixView, forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, runSummaryView, taskText, workStrip } from "./batch/run";
-import { agentTimes, caseAt, eventsAt, replayBar, replayDuration, replaySchedule } from "./batch/replay";
+import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule } from "./batch/replay";
 import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook";
 import { fetchCosts, type CostReport } from "./api";
 import type { Loadable } from "./batch/model";
@@ -295,6 +295,8 @@ function render(): void {
 
 /** Sections on screen last paint, so a replay can bring a newly revealed one into view. */
 let shownSections = new Set<string>();
+/** When the person last scrolled the page themselves (the listeners are with the other events below). */
+const follow = new ScrollFollow();
 
 let ticker: ReturnType<typeof setInterval> | null = null;
 function afterPaint(): void {
@@ -302,8 +304,9 @@ function afterPaint(): void {
     const els = Array.from(scrollEl.querySelectorAll<HTMLElement>(".pg-sec[data-morph-key]"));
     const keys = new Set(els.map((el) => el.dataset.morphKey!));
     const fresh = els.filter((el) => !shownSections.has(el.dataset.morphKey!));
-    // Follow the story while a replay plays: the split, the fork and the verdict scroll in as they appear.
-    if (S.batch?.replay?.playing && shownSections.size && fresh.length) {
+    // Follow the story while a replay plays: the split, the fork and the verdict scroll in as they appear, unless
+    // the person scrolled in the last few seconds (then the page stays where they put it).
+    if (S.batch?.replay?.playing && shownSections.size && fresh.length && follow.follows(Date.now())) {
       const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
       fresh[fresh.length - 1].scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
     }
@@ -810,6 +813,18 @@ root.addEventListener("drop", (e) => {
   setDragging(false);
   if (file) void upload(file);
 });
+
+// The person scrolling the page themselves: a playing replay then stops following new sections for a few seconds.
+// Only input counts (wheel, touch, scroll keys, a press on the scrollbar), not the `scroll` event, which the replay's
+// own scrollIntoView fires too.
+const userScrolled = (): void => follow.userScrolled(Date.now());
+scrollEl.addEventListener("wheel", userScrolled, { passive: true });
+scrollEl.addEventListener("touchmove", userScrolled, { passive: true });
+scrollEl.addEventListener("pointerdown", (e) => {
+  // The scrollbar is the part of the element right of (or below) its content box.
+  if (e.target === scrollEl && (e.offsetX >= scrollEl.clientWidth || e.offsetY >= scrollEl.clientHeight)) userScrolled();
+});
+root.addEventListener("keydown", (e) => { if (isScrollKey(e.key, e.target as HTMLElement | null)) userScrolled(); });
 
 // Scrolling in a run: scrolling up lets go of the bottom; the jump arrow shows once away from it.
 let lastTop = 0;

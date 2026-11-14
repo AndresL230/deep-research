@@ -72,7 +72,7 @@ def _fake_forks(monkeypatch):
     return calls
 
 
-VERDICT = {"sentence": "Skipping the duplicate check caused it.", "step_label": "deduplicate",
+VERDICT = {"sentence": "Skipping the duplicate check suggests why the scores were inflated.", "step_label": "deduplicate",
            "honest_rate": 1.0, "inflated_rate": 0.0, "n_honest": 1, "n_inflated": 1, "confidence": "low",
            "arms": {"control": {"inflated": 2, "total": 2}, "forced": {"inflated": 0, "total": 2}}}
 

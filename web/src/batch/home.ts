@@ -442,7 +442,8 @@ export function costBar(costs: Costs, opts: { simulated: boolean }): string {
   const tok = `<span class="hm-cb-tok">${esc(tokens(total))} tokens</span>`;
   let inner: string;
   if (simulated) {
-    inner = `<span class="hm-cb-sim">Simulated</span>${tok}`;
+    // The page's one Simulated marker: the sections and the run page no longer repeat it.
+    inner = `<span class="hm-cb-sim" title="Simulated batch: the agents' choices are scripted, the scores and charts are real. Token counts only, no real spend.">Simulated</span>${tok}`;
   } else if (dollars) {
     const ratio = budget ? costs.spent_usd! / budget : 0;
     const level = ratio > 1 ? "over" : ratio > 0.75 ? "warn" : "ok";

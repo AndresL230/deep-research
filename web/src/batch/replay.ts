@@ -494,6 +494,34 @@ export function eventsAt(full: CaseFile, events: Record<EventKey, AgentEvent[]>,
   return out;
 }
 
+// ── following the story ──────────────────────────────────────────────────────
+
+/** How long after the person last scrolled a playing replay leaves the page where they put it. */
+export const USER_SCROLL_QUIET_MS = 4000;
+
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Spacebar"]);
+
+/** A key that scrolls the page, pressed outside a text field (where it moves the caret instead). */
+export function isScrollKey(key: string, target?: { tagName?: string; isContentEditable?: boolean } | null): boolean {
+  if (!SCROLL_KEYS.has(key)) return false;
+  const tag = target?.tagName;
+  return !(tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable === true);
+}
+
+/**
+ * Whether a playing replay may scroll a newly revealed section into view: not while the person is scrolling
+ * themselves. Only the person's own input (wheel, touch, keys, the scrollbar) is reported here, never the replay's
+ * programmatic scroll, so following the story never counts as the person scrolling.
+ */
+export class ScrollFollow {
+  private last = Number.NEGATIVE_INFINITY;
+  constructor(private readonly quietMs = USER_SCROLL_QUIET_MS) {}
+  /** The person scrolled at `now` (ms). */
+  userScrolled(now: number): void { this.last = now; }
+  /** True when the person has not scrolled in the last `quietMs`. */
+  follows(now: number): boolean { return now - this.last >= this.quietMs; }
+}
+
 // ── the control bar ──────────────────────────────────────────────────────────
 
 const svg = (body: string, size = 14): string =>

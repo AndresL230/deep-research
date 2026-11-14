@@ -15,7 +15,7 @@ from deep_research import batch as batch_mod
 from deep_research import forks as forks_mod
 from deep_research.batch import Batch
 from deep_research.config import VM_WORKSPACE, BatchConfig
-from deep_research.events import read_events
+from deep_research.events import PREFIX_EVENTS, read_events
 from tests.local_vm import COUNT_DUPLICATES, LOOK, install_local_vms, model_script
 from tests.scripted import call, say, script_analysts, script_investigator
 
@@ -126,6 +126,10 @@ async def test_the_fork_experiment_changes_one_step_and_keeps_a_control(local_vm
     assert forced_events[0]["type"] == "forced" and "Removed" in forced_events[0]["output"]
     control_events = read_events(b.forks_dir / "f1" / "control-1" / "events.jsonl")
     assert control_events[0]["type"] == "tool_call"
+    # Next to each copy's log, the source run's events up to the fork: its one action and that action's result.
+    prefix = read_events(b.forks_dir / "f1" / "forced-1" / PREFIX_EVENTS)
+    source = read_events(b.runs_dir / "r02" / "events.jsonl")
+    assert prefix == source[: len(prefix)] and [e["type"] for e in prefix if e["type"].startswith("tool")] == ["tool_call", "tool_result"]
 
     assert {"fork:f1:base", *(f"fork:f1:{a}-1" for a in arms)} <= set(case["costs"]["scopes"])
     assert "t-f1-base" in local_vms["stopped"]
@@ -188,7 +192,7 @@ async def test_runs_stop_spending_once_the_batch_is_over_budget(local_vms, tmp_p
     assert sorted(local_vms["stopped"]) == ["t-r01", "t-r02"]  # nothing left running
 
 
-VERDICT = {"sentence": "Skipping the duplicate check caused it.", "step_label": "deduplicate",
+VERDICT = {"sentence": "Skipping the duplicate check suggests why the scores were inflated.", "step_label": "deduplicate",
            "honest_rate": 1.0, "inflated_rate": 0.0, "n_honest": 1, "n_inflated": 1, "confidence": "low",
            "arms": {"control": {"inflated": 1, "total": 1}, "forced": {"inflated": 0, "total": 1}}}
 

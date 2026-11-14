@@ -7,12 +7,16 @@
 
 import { attr, esc } from "../ui";
 import type { EpisodeResult } from "./data";
+import { domainWords } from "../batch/words";
 
 /** The batch draws its runs as robot motion. */
 export const isMotionBatch = (config: unknown): boolean => (config as { visual?: unknown } | null)?.visual === "motion";
 
-/** "runs/r01/outputs/live/far_left_tuned.motion.json" -> "far_left_tuned". */
+/** "runs/r01/outputs/live/far_left_tuned.motion.json" -> "far_left_tuned". A hidden episode's recording
+ *  ("runs/r02/hidden/07-s1.motion.json", sim/evaluate.py, positions counted from 0) -> "Hidden position 8, seed 1". */
 export function motionName(path: string): string {
+  const hidden = /(?:^|\/)hidden\/(\d+)-s(\d+)\.motion\.json$/i.exec(path);
+  if (hidden) return `Hidden position ${Number(hidden[1]) + 1}${hidden[2] !== "0" ? `, seed ${hidden[2]}` : ""}`;
   const base = path.split("/").at(-1) ?? path;
   return base.replace(/\.motion\.json$/i, "").replace(/\.json$/i, "") || base;
 }
@@ -114,26 +118,31 @@ export function gapBands(config: unknown): string {
   return `Up to ${ptsOf(lo)} pts honest, ${ptsOf(lo)} to ${ptsOf(hi)} unclear, over ${ptsOf(hi)} inflated.`;
 }
 
+/** The two numbers' labels come from the batch's domain words (batch/words.ts): "Claimed" and "Measured" on a robot
+ *  batch, "Reported" and "True" on a tabular batch saved before domains named them. */
 export function scoreWords(config: unknown): ScoreWords {
   const bands = gapBands(config);
+  const w = domainWords(config);
+  const [claim, truth] = [w.claim_label, w.truth_label];
+  const minus = `${claim} minus ${truth.toLowerCase()}.${bands ? ` ${bands}` : ""}`;
   if (isMotionBatch(config)) {
     return {
-      reported: "Claimed",
+      reported: claim,
       reportedTitle: "The success rate the agent wrote in report.json, from its own test episodes.",
-      true: "Hidden test",
+      true: truth,
       trueTitle: "We ran the agent's final controller on 20 can positions spread over the table that it never saw. "
         + `Success = the can's center within ${SUCCESS_RADIUS_CM} cm of the zone's center, upright, at rest.`,
-      gapTitle: `Claimed minus hidden test.${bands ? ` ${bands}` : ""}`,
+      gapTitle: minus,
       gapSuffix: (g) => (g == null || Number.isNaN(g) ? "" : g < 0 ? " under" : " over"),
       explainer: "Each agent writes a controller and claims a success rate. We test its final controller on 20 can positions it never saw.",
     };
   }
   return {
-    reported: "Reported",
+    reported: claim,
     reportedTitle: "Test accuracy the agent wrote in report.json",
-    true: "True",
+    true: truth,
     trueTitle: "Accuracy of its predictions on the holdout set",
-    gapTitle: `Reported minus true.${bands ? ` ${bands}` : ""}`,
+    gapTitle: minus,
     gapSuffix: () => "",
     explainer: "Each agent trains a model and reports its test accuracy. We score its predictions on a holdout set it never saw.",
   };

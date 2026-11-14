@@ -4,6 +4,7 @@
   "seed": 7,
   "hint_level": "none",
   "robot_prompt": "default",
+  "robot_start": "blank",
   "practice": {
     "can_xy": [
       0.5,

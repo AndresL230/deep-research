@@ -28,16 +28,28 @@ from sklearn.model_selection import train_test_split  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from deep_research import domains  # noqa: E402
 from deep_research.analysis import actions_from_events, find_split  # noqa: E402
 from deep_research.batch import _arm_summary  # noqa: E402
 from deep_research.case_file import CaseFile  # noqa: E402
 from deep_research.config import BatchConfig  # noqa: E402
+from deep_research.evidence import verdict_evidence  # noqa: E402
 from deep_research.forks import intervention_for  # noqa: E402
 from deep_research.scoring import score_run  # noqa: E402
 from deep_research.task import TARGET, build_task, task_prompt  # noqa: E402
 
 OUT = ROOT / "fixtures" / "demo-batch"
 W = "/home/daytona/workspace"
+HYPOTHESIS_AT = 1794637981.6498184
+
+# This batch is also the web app's example of a batch saved before domains, commentary and the diagnosis existed
+# (web/test reads it so: no `domain`, `trap_info` or `commentary` in its config, no trace or feed sections). It keeps
+# only the config keys such a batch had, and leaves out the case sections added since. What it has of today's: the
+# domain's words for the screens (`config.domain_info`), each run's n_test / n_test_copies / n_hidden, and the
+# verdict's evidence.
+LEGACY_CONFIG = ("dataset", "trap", "trap_strength", "trap_noise", "hint_level", "model_hint", "holdout_fraction", "n_runs",
+                 "forks_per_choice", "analyst_model", "investigator_model", "budget_usd", "inflation_threshold", "mode", "seed")
+LEGACY_DROPPED = ("trace", "fix", "trace_comparison", "rubric", "feed")
 
 
 def todos(items: list[str], active: int) -> list[dict]:
@@ -163,7 +175,11 @@ def main() -> None:
     task = build_task(cfg, OUT / "task")
     (OUT / "task" / "prompt.txt").write_text(task_prompt(cfg))
     case = CaseFile(OUT / "case" / "case.json")
-    case.set_config({**cfg.model_dump(), "mode": "replay", "simulated": True})
+    # The config keys a batch saved before domains had, plus the domain in words for the screens
+    # (`domain_info.words`). See LEGACY_CONFIG.
+    dump = cfg.model_dump()
+    case.set_config({**{k: dump[k] for k in LEGACY_CONFIG}, "domain_info": domains.get(cfg.domain).public(),
+                     "mode": "replay", "simulated": True})
     rng = random.Random(cfg.seed)
 
     runs, statuses = {}, {}
@@ -215,16 +231,26 @@ def main() -> None:
         f"{split['honest_rate']:.0%} of honest runs removed duplicates before splitting; {split['inflated_rate']:.0%} of inflated runs did.",
     )
     c, f = arms["control"], arms["forced"]
+    numbers = {"control_inflated": c["inflated"], "control_total": c["scored"], "forced_inflated": f["inflated"], "forced_total": f["scored"]}
+    # The words follow the evidence level (deep_research/evidence.py), which record_verdict saves next to them.
+    evidence = verdict_evidence(numbers=numbers)
+    verb = "caused the inflated scores" if evidence["level"] == "supported" else "suggests why the scores were inflated"
     case.record_verdict(
-        f"Skipping the duplicate check caused the inflated score: forcing it left {f['inflated']} of {f['scored']} runs inflated, against {c['inflated']} of {c['scored']} without it.",
+        f"Skipping the duplicate check {verb}: forcing it left {f['inflated']} of {f['scored']} copies inflated, "
+        f"against {c['inflated']} of {c['scored']} without ({evidence['pairs']} pairs).",
         split["label"],
-        {"control_inflated": c["inflated"], "control_total": c["scored"], "forced_inflated": f["inflated"], "forced_total": f["scored"]},
+        numbers,
     )
     total_in = sum(r["tokens"]["input"] for r in case.data["runs"].values())
     total_out = sum(r["tokens"]["output"] for r in case.data["runs"].values())
     case.set_costs({"budget_usd": cfg.budget_usd, "spent_usd": None, "prices_missing": True,
                     "scopes": {"runs": {"input_tokens": total_in, "output_tokens": total_out}}, "simulated": True})
     case.set_phase("done")
+    # A fixed time, so the file is the same on every run (when this fixture was first written).
+    case.data["hypotheses"][0]["at"] = HYPOTHESIS_AT
+    for section in LEGACY_DROPPED:
+        case.data.pop(section, None)
+    case.set_phase("done")  # saves the file as it is now
 
     n_inf = sum(s == "inflated" for s in statuses.values())
     print(f"wrote {OUT.relative_to(ROOT)}: {n_inf} of {len(statuses)} runs inflated; split = {split['label']} "

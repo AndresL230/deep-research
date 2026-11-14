@@ -20,6 +20,9 @@ describe("markup helpers", () => {
   it("names a motion file by its file name", () => {
     expect(motionName("runs/r01/outputs/live/far_left_tuned.motion.json")).toBe("far_left_tuned");
     expect(motionName("forks/f1/forced-1/outputs/motion_3.json")).toBe("motion_3");
+    // A hidden episode's recording reads as the position it was, like its dot on the map.
+    expect(motionName("runs/r02/hidden/00-s0.motion.json")).toBe("Hidden position 1");
+    expect(motionName("forks/f1/forced-1/hidden/07-s1.motion.json")).toBe("Hidden position 8, seed 1");
   });
 
   it("says how an episode ended", () => {
