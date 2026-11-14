@@ -233,9 +233,9 @@ function numberField(cfg: BatchConfig, f: Field, label: string, o: { min?: numbe
  *  step. The options in `off` cannot be picked yet. */
 function choiceField(cfg: BatchConfig, f: Field, label: string, opts: [string, string][], off: readonly string[] = []): string {
   const v = String(cfg[f]);
-  return `<div class="hm-field" data-f="${f}" role="radiogroup" aria-labelledby="${fid(f)}-l">
+  return `<div class="hm-field" data-f="${f}"${opts.length > 2 ? ' data-w="wide"' : ""} role="radiogroup" aria-labelledby="${fid(f)}-l">
     <span class="hm-lbl" id="${fid(f)}-l">${esc(label)}</span>
-    <div class="hm-seg">${opts.map(([val, text]) =>
+    <div class="hm-seg${opts.length > 2 ? " hm-seg--3" : ""}">${opts.map(([val, text]) =>
       `<label class="hm-seg-o"><input type="radio" name="${f}" data-cfg="${f}" value="${attr(val)}"${val === v ? " checked" : ""}${off.includes(val) ? " disabled" : ""}><span>${esc(text)}</span></label>`).join("")}</div>
   </div>`;
 }
@@ -303,7 +303,7 @@ function advancedBlock(vm: HomeVm, controller: ControllerInfo | null = null): st
     return `<div class="hm-adv" data-morph-key="adv">
     ${head}
     <div class="hm-adv-grid" id="hm-adv" data-morph-key="adv-grid">
-      ${choiceField(c, "robot_start", "Controller start", [["blank", "Blank template"], ["colleague", "Colleague's controller"], ["uploaded", "Your upload"]], controller || c.robot_controller ? [] : ["uploaded"])}
+      ${choiceField(c, "robot_start", "Controller start", [["blank", "Blank"], ["colleague", "Colleague's"], ["uploaded", "Your upload"]], controller || c.robot_controller ? [] : ["uploaded"])}
       ${choiceField(c, "robot_prompt", "Prompt", [["default", "Default"], ["practice", "Practice focus"]])}
       ${rangeField(c, "inflation_threshold", "Inflation threshold", 0.05, 0.5, 0.025, points(c.inflation_threshold))}
       ${numberField(c, "forks_per_choice", "Forks per arm", { min: 1, max: 8 })}
