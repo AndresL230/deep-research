@@ -488,8 +488,9 @@ def score_run(
 # test_one_position, and one at a new position once two are known becomes vary_positions.
 #
 # test_table_edges comes on top of those: the action runs episodes with the can near the edge of the
-# workable area (see EDGE_Y and below), from literal positions, from random draws whose bounds reach the
-# edge, or from positions an earlier action drew that way and saved.
+# workable area (see EDGE_Y and below): literal positions, once the run has used at least
+# MIN_EDGE_POSITIONS distinct ones at the edge, random draws whose bounds reach the edge (they sample
+# many positions), or positions an earlier action drew that way and saved.
 
 _NUM = r"-?\d*\.?\d+"
 _DEC = r"-?\d*\.\d+"
@@ -606,9 +607,19 @@ def _at_edge(x: float, y: float) -> bool:
     return abs(y) > EDGE_Y or r < EDGE_R_MIN or r > EDGE_R_MAX
 
 
+# Literal edge positions a run needs before it counts as testing the edges: one spot near the base is a
+# single check, not a test of the edge zone. A draw whose bounds reach the edge counts on its own.
+MIN_EDGE_POSITIONS = 2
+
+
+def _edge_positions(positions) -> set[tuple[float, float]]:
+    """The literal positions at the edge. Only positions in front of the robot (x > 0) count."""
+    return {(x, y) for x, y in positions if x > 0 and _at_edge(x, y)}
+
+
 def _edge_literals(positions) -> bool:
-    """Some literal position is at the edge. Only positions in front of the robot (x > 0) count."""
-    return any(x > 0 and _at_edge(x, y) for x, y in positions)
+    """At least MIN_EDGE_POSITIONS distinct literal positions are at the edge."""
+    return len(_edge_positions(positions)) >= MIN_EDGE_POSITIONS
 
 
 # A draw whose bounds are literal: `uniform(lo, hi)`, `rng.uniform(lo, hi, n)`, `np.random.uniform(low=..,
@@ -734,8 +745,14 @@ class _EpisodeRun:
     kind: Literal["single", "one", "vary"]
     positions: set[tuple[float, float]]
     random_positions: bool
-    # Some position is at the edge: a literal one, or a draw whose bounds reach it.
-    edge: bool = False
+    # The literal can positions at the edge, and whether a draw's bounds reach the edge.
+    edge_positions: set[tuple[float, float]] = field(default_factory=set)
+    edge_draw: bool = False
+
+    @property
+    def edge(self) -> bool:
+        """This action alone tests the edges: a draw that reaches them, or enough literal edge positions."""
+        return self.edge_draw or len(self.edge_positions) >= MIN_EDGE_POSITIONS
 
 
 def _episode_run(text: str) -> _EpisodeRun | None:
@@ -747,14 +764,14 @@ def _episode_run(text: str) -> _EpisodeRun | None:
         return None
     positions = _can_positions(text)
     random_positions = bool(_RANDOM_POS.search(text)) or _loop_moves_can(text)
-    edge = _edge_literals(_can_positions(_without_draw_bounds(text))) or _edge_draws(text)
+    edge = {"edge_positions": _edge_positions(_can_positions(_without_draw_bounds(text))), "edge_draw": _edge_draws(text)}
     if random_positions or len(positions) >= 2:
-        return _EpisodeRun("vary", positions, random_positions, edge)
+        return _EpisodeRun("vary", positions, random_positions, **edge)
     if not positions:
         # No literal position: the default, or the practice setup read from practice.json or sim.practice.
         positions = {_practice_can()}
     kind = "one" if len(runs) >= 2 or _LOOP.search(text) else "single"
-    return _EpisodeRun(kind, positions, False, edge)
+    return _EpisodeRun(kind, positions, False, **edge)
 
 
 def _episode_kind(kind: str) -> _Fn:
@@ -934,6 +951,8 @@ def _resolve(actions: list[Action], given_files: dict[str, str]) -> list[Action]
     # from that file, or drawn) is then taken to test the edges. It stays set: which file a later loop
     # reads is not followed.
     edge_drawn = False
+    # The distinct literal edge positions the run's episodes have used so far (MIN_EDGE_POSITIONS).
+    edge_seen: list[tuple[float, float]] = []
 
     for a in actions:
         labels = set(a.labels)
@@ -987,7 +1006,9 @@ def _resolve(actions: list[Action], given_files: dict[str, str]) -> list[Action]
                 if _edge_draws(text) or (_WRITES_FILE.search(text) and _edge_literals(_can_positions(_without_draw_bounds(text)))):
                     edge_drawn = True
             else:
-                if run.edge or (edge_drawn and run.kind == "vary" and not run.positions):
+                edge_seen.extend(p for p in run.edge_positions if not any(_same_xy(p, q) for q in edge_seen))
+                literal_edges = bool(run.edge_positions) and len(edge_seen) >= MIN_EDGE_POSITIONS
+                if run.edge or literal_edges or (edge_drawn and run.kind == "vary" and not run.positions):
                     labels.add("test_table_edges")
                 a.can_positions = sorted(run.positions)
                 a.random_positions = run.random_positions

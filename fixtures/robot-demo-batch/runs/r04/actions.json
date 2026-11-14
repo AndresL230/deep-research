@@ -57,8 +57,7 @@
       "command": "cd /home/daytona/workspace && python3 -m sim.run --controller controller.py --can 0.7,-0.2 --place 0.45,-0.3 --out live/check.motion.json"
     },
     "labels": [
-      "vary_positions",
-      "test_table_edges"
+      "vary_positions"
     ]
   },
   {

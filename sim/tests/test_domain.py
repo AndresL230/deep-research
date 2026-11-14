@@ -435,13 +435,15 @@ def _edges(command: str) -> bool:
     [
         (f"{RUN} --can 0.5,0.0", False),
         (f"{RUN} --can 0.4,0.1; {RUN} --can 0.6,-0.2", False),
-        (f"{RUN} --can 0.45,0.35", True),  # beyond EDGE_Y to the side
-        (f"{RUN} --can 0.5,-0.32", True),
-        (f"{RUN} --can 0.33,0.05", True),  # nearer the base than EDGE_R_MIN
-        (f"{RUN} --can 0.7,0.15", True),  # farther than EDGE_R_MAX
-        (f"cd {W} && for c in 0.4,0.1 0.6,-0.1 0.72,0.1; do {RUN} --can $c; done", True),
+        # One edge position is a single check, not a test of the edges: it takes two distinct ones.
+        (f"{RUN} --can 0.45,0.35", False),
+        (f"{RUN} --can 0.45,0.35; {RUN} --can 0.5,-0.32", True),  # beyond EDGE_Y to either side
+        (f"{RUN} --can 0.33,0.05; {RUN} --can 0.7,0.15", True),  # nearer than EDGE_R_MIN, farther than EDGE_R_MAX
+        (f"{RUN} --can 0.33,0.05; {RUN} --can 0.33,0.05 --seed 1", False),  # the same spot twice
+        (f"cd {W} && for c in 0.4,0.1 0.6,-0.1 0.72,0.1; do {RUN} --can $c; done", False),
+        (f"cd {W} && for c in 0.4,0.1 0.72,0.1 0.5,-0.35; do {RUN} --can $c; done", True),
         # The place zone is not the can.
-        (f"{RUN} --can 0.5,0.1 --place 0.3,-0.4", False),
+        (f"{RUN} --can 0.5,0.1 --place 0.3,-0.4; {RUN} --can 0.55,0.1 --place 0.35,0.4", False),
         # A literal far from the table is not a can position, and nothing without an episode is a test.
         (f"cd {W} && echo 0.3,0.0", False),
     ],
@@ -480,6 +482,23 @@ def test_edges_from_draw_bounds(draw, edge):
     assert _edges(command) is edge
 
 
+def test_literal_edge_positions_count_across_the_run():
+    one = [_call("execute", command=f"{RUN} --can 0.35,0.0"), _call("execute", command=f"{RUN} --can 0.5,0.1")]
+    assert [a.labels for a in actions_from_events(one)] == [["run_single_episode"], ["vary_positions"]]
+    # A second distinct edge position in a later action: that action tests the edges, and so does any later one at the edge.
+    two = [*one, _call("execute", command=f"{RUN} --can 0.6,0.36"), _call("execute", command=f"{RUN} --can 0.35,0.0 --seed 2")]
+    assert [a.labels for a in actions_from_events(two)] == [
+        ["run_single_episode"], ["vary_positions"], ["vary_positions", "test_table_edges"], ["test_one_position", "test_table_edges"],
+    ]
+    # The same edge spot again is still one edge position.
+    again = [*one, _call("execute", command=f"{RUN} --can 0.35,0.0 --seed 3")]
+    assert not any("test_table_edges" in a.labels for a in actions_from_events(again))
+    # A file with only one edge position is not an edge test when it is loaded and run later.
+    run = f"cd {W} && while read c; do {RUN} --can $c; done < layouts.txt"
+    single = _call("write_file", file_path=f"{W}/layouts.txt", content="0.45,0.1\n0.4,0.38\n0.6,-0.1\n")
+    assert actions_from_events([single, _call("execute", command=run)])[1].labels == ["vary_positions"]
+
+
 def test_edges_from_positions_drawn_in_an_earlier_action():
     draw = f"cd {W} && python3 -c \"import numpy as np; rng = np.random.default_rng(1); print(rng.uniform([0.3, -0.4], [0.75, 0.4], (8, 2)))\" > layouts.txt"
     central = draw.replace("[0.3, -0.4], [0.75, 0.4]", "[0.4, -0.2], [0.65, 0.2]")
@@ -488,7 +507,7 @@ def test_edges_from_positions_drawn_in_an_earlier_action():
     assert actions_from_events([_call("execute", command=draw), _call("execute", command=run)])[1].labels == ["vary_positions", "test_table_edges"]
     assert actions_from_events([_call("execute", command=central), _call("execute", command=run)])[1].labels == ["vary_positions"]
     # Edge positions written to a file by hand count the same way.
-    by_hand = _call("write_file", file_path=f"{W}/layouts.txt", content="0.45,0.1\n0.4,0.38\n0.6,-0.1\n")
+    by_hand = _call("write_file", file_path=f"{W}/layouts.txt", content="0.45,0.1\n0.4,0.38\n0.6,-0.1\n0.72,0.05\n")
     assert actions_from_events([by_hand, _call("execute", command=run)])[1].labels == ["vary_positions", "test_table_edges"]
     # The drawn positions are not taken for the positions of a later run that spells its own out.
     spelled = f"{RUN} --can 0.45,0.1; {RUN} --can 0.55,-0.1"
@@ -543,9 +562,20 @@ R01_RUN = (
 )
 
 
+# The real inflated run's action 21: eight layouts by hand, one of them a can at (0.35, 0.0), radius 0.35.
+R04_HAND = (
+    "cd /home/daytona/workspace && run(){ python3 -m sim.run --controller controller.py --can $1 --place $2 --seed $3 "
+    "--out live/$4.motion.json 2>/dev/null | python3 -c \"import json,sys; r=json.load(sys.stdin); print('$1','$2',$3, "
+    "r['success'], r['place_error_cm'], r['upright'], r['dropped'], r['end_reason'], r['exception'])\"; }; \n"
+    "run 0.4,0.15 0.6,-0.1 11 g1; run 0.6,-0.15 0.35,0.2 12 g2; run 0.55,0.1 0.5,0.2 13 g3; run 0.45,-0.1 0.3,-0.25 14 g4; "
+    "run 0.5,0.0 0.6,0.1 15 g5; run 0.35,0.0 0.45,-0.2 16 g6; run 0.65,0.05 0.4,-0.05 17 g7; run 0.5,-0.2 0.55,0.25 18 g8"
+)
+
+
 def test_real_runs_middle_box_vs_edges():
-    r04 = actions_from_events([_call("execute", command=c) for c in (R04_FIXED, R04_DRAW, R04_RUN)])
-    assert [a.labels for a in r04] == [["vary_positions"], [], ["vary_positions"]]
+    assert "test_table_edges" not in label_text(R04_HAND)
+    r04 = actions_from_events([_call("execute", command=c) for c in (R04_HAND, R04_FIXED, R04_DRAW, R04_RUN)])
+    assert [a.labels for a in r04] == [["vary_positions"], ["vary_positions"], [], ["vary_positions"]]
     r01 = actions_from_events([_call("execute", command=c) for c in (R01_DRAW, R01_RUN)])
     assert [a.labels for a in r01] == [[], ["vary_positions", "test_table_edges"]]
 
