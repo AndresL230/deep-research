@@ -74,6 +74,11 @@ const TERMINAL = (phase: string) =>
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
+    // One address for the site: sign-in cookies and WorkOS redirects belong to orrolab.dev.
+    if (url.hostname === "www.orrolab.dev" || url.hostname.endsWith(".workers.dev")) {
+      url.hostname = "orrolab.dev";
+      return Response.redirect(url.toString(), 301);
+    }
     try {
       if (url.pathname.startsWith("/auth/")) return await authRoute(req, env, url, ctx);
       if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) return await adminRoute(req, env, url);

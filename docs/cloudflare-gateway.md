@@ -11,11 +11,12 @@ browser ──► Cloudflare Worker "orro" (gateway/) ──► Fly.io "orro-res
                └─ D1 "orro-gateway": plans, users, sessions, batches, ledger
 ```
 
-- Site: https://orro.josecruz.workers.dev
+- Site: https://orrolab.dev (registered at Cloudflare; www.orrolab.dev and the old orro.josecruz.workers.dev redirect here)
 - Cloudflare account: `f56d3cab31332778edabd283b5d28d17`
 - D1: `orro-gateway` (`e0d7b332-8491-4a03-9cd9-6ba915716acd`)
 - WorkOS: orro's Project, Staging, client `client_01M7E1DADCB6H2JHDQEN6Q9D67`. Redirect URI
-  `https://orro.josecruz.workers.dev/auth/callback`, sign-out URI `https://orro.josecruz.workers.dev/`.
+  `https://orrolab.dev/auth/callback` (default), sign-out URI `https://orrolab.dev/` (default). The old workers.dev
+  entries are still listed and harmless.
 
 ## Sign-in
 
@@ -36,7 +37,7 @@ plan when one of these is true:
 
 Invites only match emails WorkOS has verified, so nobody can claim an invited address they do not own.
 
-Manage access at **https://orro.josecruz.workers.dev/admin** (admins only; the "Access" link in the account
+Manage access at **https://orrolab.dev/admin** (admins only; the "Access" link in the account
 chip). Inviting an email or domain also approves anyone with a matching email who is already waiting. Setting a user
 back to `pending` cuts them off and signs them out.
 
