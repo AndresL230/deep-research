@@ -109,7 +109,7 @@ export function replaySchedule(full: CaseFile, events: Record<EventKey, AgentEve
 const num = (x: unknown): number => (typeof x === "number" && Number.isFinite(x) ? x : 0);
 
 /** Own times of an agent log, non-decreasing; a copied prefix (before the last drop in `t`) is at 0. */
-function agentTimes(evs: AgentEvent[]): number[] {
+export function agentTimes(evs: AgentEvent[]): number[] {
   let reset = 0;
   for (let i = 1; i < evs.length; i++) if (num(evs[i].t) < num(evs[i - 1].t)) reset = i;
   const out: number[] = [];

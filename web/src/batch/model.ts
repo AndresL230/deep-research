@@ -15,10 +15,12 @@ export const ACT = {
   // home / config
   start: "start",               // start a live batch with the draft config
   resetConfig: "reset-config",  // draft back to the server defaults
+  toggleAdvanced: "toggle-advanced", // show or hide the less used settings
   // batch screen
   openRun: "open-run",          // arg: run id ("r01")
   openChild: "open-child",      // arg: "<fork>/<child>" ("f1/control-1")
   back: "back",                 // from a run or child back to its batch
+  runView: "run-view",          // arg: "notebook" | "steps", how a run's page shows its log
   investigate: "investigate",   // live only: start the investigator
   approve: "approve",           // live only: approve forks.pending
   decline: "decline",           // live only: decline forks.pending
@@ -77,6 +79,18 @@ export interface ReplayState {
   speed: number;
 }
 
+/** One event log with a clock, for the notebook views (notebook.ts), which type code out as it is written. */
+export interface LogView {
+  /** Everything known of the log. In a replay that is the WHOLE saved log, including what has not happened yet. */
+  events: AgentEvent[];
+  /** Each event's time in the log's own seconds, non-decreasing (a fork child's copied prefix is at 0). */
+  times: number[];
+  /** Now, in the same seconds. Events after it have not happened yet. Infinity = the log is over. */
+  clock: number;
+  /** The events after `clock` are known (a replay), so a cell can be typed out before its call lands. */
+  lookahead: boolean;
+}
+
 export interface BatchVm {
   id: string;
   /** Started on this server: the live-only actions (investigate, approve, decline, stop) work. */
@@ -85,6 +99,8 @@ export interface BatchVm {
   case: CaseFile;
   /** Event logs loaded so far, keyed by EventKey. During a replay, cut to `replay.t`. Missing key = not loaded. */
   events: Record<EventKey, AgentEvent[]>;
+  /** The same logs with clocks, for the notebooks. Absent in tests: notebook.ts falls back to `events`. */
+  logs?: Record<EventKey, LogView>;
   /** Null for a live batch. */
   replay: ReplayState | null;
   /** The action in flight ("investigate", "approve", ...), to disable its button. */
@@ -104,6 +120,8 @@ export interface HomeVm {
   /** The config being edited; null until the defaults load. */
   draft: BatchConfig | null;
   estimate: Loadable<Estimate> | null;
+  /** The less used settings are showing (default: hidden). */
+  advanced?: boolean;
   /** POST /api/batches in flight. */
   starting: boolean;
   error: string | null;

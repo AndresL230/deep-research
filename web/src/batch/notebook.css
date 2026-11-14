@@ -1,0 +1,58 @@
+/* The notebook (notebook.ts): cells with an execution count in the gutter, code that types itself out, output and
+   charts under it. Full size on a run's page; `nb--compact` on tiles and in the side by side view. */
+
+.nb { display:flex; flex-direction:column; gap:10px; min-width:0; font-size:12.5px; }
+.nb-cell { display:flex; gap:8px; min-width:0; }
+.nb-gut { flex:none; width:30px; padding-top:7px; text-align:right; font-family:var(--code); font-size:11px; color:var(--fg-40); user-select:none; }
+.nb-cell.is-running .nb-gut { color:var(--accent); }
+.nb-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.nb-head { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.nb-file { font-family:var(--code); font-size:11px; color:var(--fg-55); }
+.nb-file::before { content:"%%writefile "; color:var(--fg-40); }
+.nb-tag { padding:1px 6px; border-radius:5px; font-size:10.5px; font-weight:600; letter-spacing:.01em; }
+.nb-tag--forced { color:var(--accent); background:var(--accent-soft); }
+
+.nb-code, .nb-out { margin:0; font-family:var(--code); font-size:12px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; tab-size:4; }
+.nb-code { padding:6px 9px; border:1px solid var(--border); border-radius:7px; background:var(--surface); color:var(--fg); }
+.nb-cell.is-running .nb-code { border-color:color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.nb-cell--forced .nb-code { border-color:color-mix(in srgb, var(--accent) 55%, var(--border)); background:var(--accent-soft); }
+.nb-then { color:var(--fg-70); }
+.nb-ln { display:inline; }
+.nb-hl { background:color-mix(in srgb, var(--amber) 28%, transparent); border-radius:3px; box-shadow:0 0 0 2px color-mix(in srgb, var(--amber) 28%, transparent); }
+.nb-out { padding:2px 9px; color:var(--fg-70); max-height:340px; overflow:auto; }
+.nb-more { color:var(--fg-40); font-style:italic; }
+.nb-caret { display:inline-block; width:6px; height:1.05em; margin-left:1px; vertical-align:-2px; background:var(--accent); animation:nb-blink 1s steps(2, start) infinite; }
+@keyframes nb-blink { to { visibility:hidden; } }
+
+.nb-imgs { display:flex; flex-wrap:wrap; gap:8px; padding:2px 0; }
+.nb-img { display:block; max-width:min(100%, 420px); max-height:300px; border:1px solid var(--border); border-radius:6px; background:#fff; }
+
+.nb-cell--note { padding-left:38px; }
+.nb-note { margin:0; color:var(--fg-70); font-size:12.5px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
+.nb-md { white-space:normal; font-size:13px; }
+.nb-md > :first-child { margin-top:0; }
+.nb-md > :last-child { margin-bottom:0; }
+.nb-cell.is-inherited { opacity:.55; }
+
+/* Compact: tiles and columns. */
+.nb--compact { gap:6px; font-size:11px; }
+.nb--compact .nb-gut { width:22px; padding-top:5px; font-size:9.5px; }
+.nb--compact .nb-code, .nb--compact .nb-out { font-size:10.5px; line-height:1.45; }
+.nb--compact .nb-code { padding:4px 6px; border-radius:6px; }
+.nb--compact .nb-out { padding:0 6px; max-height:none; overflow:hidden; }
+.nb--compact .nb-cell--note { padding-left:30px; }
+.nb--compact .nb-note { font-size:10.5px; }
+.nb--compact .nb-img { max-height:110px; max-width:100%; }
+.nb--compact .nb-file { font-size:10px; }
+
+/* A tile: the notebook's end, pinned to the bottom of a fixed box like a terminal. */
+.nb--tail { justify-content:flex-end; height:100%; overflow:hidden; }
+.nb--tail .nb-cell { flex:none; }
+/* Lines stay whole and clip at the edge, and the oldest lines fade out at the top. */
+.nb--tail .nb-code, .nb--tail .nb-out { white-space:pre; overflow:hidden; }
+.nb--tail { -webkit-mask-image:linear-gradient(to bottom, transparent, #000 22px); mask-image:linear-gradient(to bottom, transparent, #000 22px); }
+
+@media (prefers-reduced-motion: reduce) { .nb-caret { animation:none; } }
+.nb-md .ask-p, .nb-md .ask-ul > li { font-size:13px; line-height:1.55; color:var(--fg-70); }
+.nb-md .ask-p { margin-bottom:8px; }
+.nb-md .ask-h { margin:12px 0 6px; font-size:13.5px; }
