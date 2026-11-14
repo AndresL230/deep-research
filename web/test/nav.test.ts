@@ -20,6 +20,7 @@ const ROUTES: [Route, string | null][] = [
   [{ name: "home" }, "needs"],
   [{ name: "home", at: "batches" }, "batches"],
   [{ name: "costs" }, "costs"],
+  [{ name: "how" }, "how"],
   [{ name: "batch", id: "b1" }, null],
   [{ name: "batch", id: "b1", step: "verdict" }, null],
   [{ name: "run", id: "b1", run: "r02" }, null],
@@ -27,11 +28,11 @@ const ROUTES: [Route, string | null][] = [
 ];
 
 describe("the nav links", () => {
-  it("lists Needs you, Batches and Costs as real links, in that order", () => {
+  it("lists How it works, Needs you, Batches and Costs as real links, in that order", () => {
     const html = navBar({ name: "home" }, null);
     expect(html).toMatch(/^<nav class="nv" aria-label="Main"/);
-    expect(text(html)).toBe("Needs you Batches Costs");
-    expect(NAV_LINKS.map((l) => l.href)).toEqual(["#/start", "#/batches", "#/costs"]);
+    expect(text(html)).toBe("How it works Needs you Batches Costs");
+    expect(NAV_LINKS.map((l) => l.href)).toEqual(["#/how", "#/start", "#/batches", "#/costs"]);
     for (const l of NAV_LINKS) expect(linkOf(html, l.key)).toContain(`href="${l.href}"`);
   });
 
@@ -82,7 +83,7 @@ describe("the menu on narrow screens", () => {
     const open = navMenu({ name: "home" }, null, true, [["Theme", "<i>SWITCH</i>"], ["Team hub", "<b>HUB</b>"]]);
     expect(open).toContain('aria-expanded="true"');
     expect(open).toMatch(/<div class="nv-panel" id="nv-panel">/);
-    expect(text(open)).toBe("Menu Needs you Batches Costs Theme SWITCH Team hub HUB");
+    expect(text(open)).toBe("Menu How it works Needs you Batches Costs Theme SWITCH Team hub HUB");
     expect(open).toContain('<div class="nv-row"><span>Theme</span><i>SWITCH</i></div>');
     expect(navMenu({ name: "home" }, null, true)).not.toContain("nv-panel-x");
   });

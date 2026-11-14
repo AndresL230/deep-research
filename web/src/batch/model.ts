@@ -67,6 +67,8 @@ export const STEP_LABEL: Record<BatchStep, string> = {
 export type Route =
   | { name: "landing" }
   | { name: "home"; at?: "batches" }
+  /** "How it works": the loop in five steps (how.ts), and the first screen of someone new. */
+  | { name: "how" }
   | { name: "costs" }
   /** `step` is left out on the first page (the overview and the agents). */
   | { name: "batch"; id: string; step?: BatchStep }
@@ -82,6 +84,7 @@ export function parseRoute(hash: string): Route {
     return step && step !== "wall" ? { name: "batch", id: parts[1], step } : { name: "batch", id: parts[1] };
   }
   if (parts[0] === "costs") return { name: "costs" };
+  if (parts[0] === "how") return { name: "how" };
   if (parts[0] === "start") return { name: "home" };
   if (parts[0] === "batches") return { name: "home", at: "batches" };
   return { name: "landing" };
@@ -93,6 +96,7 @@ export function routeHash(r: Route): string {
     case "landing": return "#/";
     case "home": return r.at === "batches" ? "#/batches" : "#/start";
     case "costs": return "#/costs";
+    case "how": return "#/how";
     case "batch": return r.step && r.step !== "wall" ? `#/b/${e(r.id)}/${STEP_SLUG[r.step]}` : `#/b/${e(r.id)}`;
     case "run": return `#/b/${e(r.id)}/run/${e(r.run)}`;
     case "child": return `#/b/${e(r.id)}/fork/${e(r.fork)}/${e(r.child)}`;

@@ -9,6 +9,8 @@
 //   #/b/<id>/run/<run>         one run in the Ask conversation view
 //   #/b/<id>/fork/<f>/<child>  one fork child in the conversation view
 //   #/costs                    what every batch cost, in total and one by one
+//   #/how                      how it works: the loop in five steps, on the robot demo's numbers. The first time
+//                              someone enters the app (any app page but a batch's own), they are sent here once
 //
 // Every page but the landing page has the same top bar (batch/nav.ts): the links to Needs you (with how many batches
 // wait on the person), Batches and Costs, and "+ New batch", which opens the New batch form in a dialog from any page
@@ -54,6 +56,7 @@ import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook
 import { fetchCosts, type CostReport } from "./api";
 import type { Loadable } from "./batch/model";
 import { costsView } from "./batch/costs";
+import { HOW_BATCH, firstVisitRedirect, howSeen, howView } from "./batch/how";
 import { landingView } from "./landing/landing";
 import { syncLanding } from "./landing/mount";
 import { syncMotion } from "./motion";
@@ -101,6 +104,8 @@ interface AppState {
   workOpen: boolean;
   /** The cost screen's report (GET /api/costs), loaded again on every visit. */
   costs: Loadable<CostReport>;
+  /** The robot demo's case file, for the How it works page's pictures (batch/how.ts). */
+  how: Loadable<CaseFile>;
   /** Where the cost screen was opened from, for its back button. */
   costsBack: Route;
   /** The page of a batch last open, so the way back from one of its runs lands on it. */
@@ -123,6 +128,7 @@ const S: AppState = {
   runView: "notebook",
   workOpen: false,
   costs: { state: "loading" },
+  how: { state: "loading" },
   costsBack: { name: "home" },
   lastStep: null,
   hub: null,
@@ -375,6 +381,7 @@ function render(): void {
   let body: string;
   if (landing) body = landingView(landingTone);
   else if (r.name === "home") body = homeView(S.home);
+  else if (r.name === "how") body = howView(S.how);
   else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
   else if (!vm) body = messageView("loading", "Opening the batch", "Loading its case file and event logs…");
@@ -791,6 +798,25 @@ async function loadCosts(): Promise<void> {
   paint();
 }
 
+// ── how it works ─────────────────────────────────────────────────────────────
+
+/** Whether this browser has seen How it works (batch/how.ts `howSeen`: storage that fails never loops). */
+const seenHow = howSeen(() => localStorage);
+let howLoading = false;
+/** The robot demo's case file, once a session; a failed load is tried again on the next visit. */
+async function loadHow(): Promise<void> {
+  if (howLoading || S.how.state === "ready") return;
+  howLoading = true;
+  S.how = { state: "loading" };
+  try {
+    S.how = { state: "ready", value: await fetchCase(HOW_BATCH) };
+  } catch (e) {
+    S.how = { state: "error", message: message(e, "Couldn't load the demo batch.") };
+  }
+  howLoading = false;
+  paint();
+}
+
 // ── live actions ─────────────────────────────────────────────────────────────
 
 async function liveAction(name: string, call: (id: string) => Promise<unknown>): Promise<void> {
@@ -917,6 +943,13 @@ function go(r: Route): void {
 }
 
 function onRoute(): void {
+  // Someone new entering the app sees How it works first, once. replace(): Back does not return to the page skipped.
+  const first = firstVisitRedirect(parseRoute(location.hash), seenHow.get());
+  if (first) {
+    seenHow.set();
+    location.replace(routeHash(first));
+    if (routed) return; // the hashchange routes it
+  }
   const prev = S.route;
   S.route = parseRoute(location.hash);
   const r = S.route;
@@ -940,6 +973,10 @@ function onRoute(): void {
     const was = routed && prev.name === "home";
     if (r.at === "batches") homeScroll = { to: "batches", glide: was };
     else if (was && prev.name === "home" && prev.at === "batches") homeScroll = { to: "top", glide: true };
+  } else if (r.name === "how") {
+    seenHow.set();
+    closeBatch();
+    void loadHow();
   } else if (r.name === "costs") {
     if (prev.name !== "costs") S.costsBack = prev;
     closeBatch();
@@ -973,6 +1010,8 @@ root.addEventListener("click", (e) => {
   if (S.navOpen && !target?.closest?.(".nv-menu")) { S.navOpen = false; paint(); }
   // The header's links are real links (the hash routes them). One to the page already open goes to its place again
   // (the top, or the batch table) instead of doing nothing.
+  // How it works' "Go to my batches": seen, so the home screen never sends the person back.
+  if (target?.closest?.("[data-how-done]")) seenHow.set();
   const nav = target?.closest<HTMLAnchorElement>("a[data-nav]");
   if (nav) {
     S.navOpen = false;
@@ -1035,7 +1074,8 @@ root.addEventListener("click", (e) => {
     case ACT.resetConfig:
       if (S.home.defaults) { S.home = { ...S.home, draft: resetDraft(S.home), error: null }; paint(); scheduleEstimate(); }
       return;
-    case ACT.openRun: if ("id" in r) go({ name: "run", id: r.id, run: arg }); return;
+    // How it works draws the robot demo's bars: a bar there opens that batch's run.
+    case ACT.openRun: if ("id" in r) go({ name: "run", id: r.id, run: arg }); else if (r.name === "how") go({ name: "run", id: HOW_BATCH, run: arg }); return;
     case ACT.openChild: {
       const [fork, child] = arg.split("/");
       if ("id" in r && fork && child) go({ name: "child", id: r.id, fork, child });

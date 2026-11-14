@@ -1,0 +1,123 @@
+/* How it works (how.ts) and its diagrams (how-diagrams.ts). Prefix hw-. Tokens only, so both themes work. */
+
+.app-root[data-view="how"] { --pg-w:1040px; }
+
+.hw { width:100%; max-width:var(--pg-w, 1040px); margin:0 auto; padding:32px var(--pg-pad, 24px) 72px; box-sizing:border-box; display:flex; flex-direction:column; gap:28px; min-width:0; color:var(--fg); font-size:13px; }
+.hw-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+
+/* ── the top ── */
+.hw-top { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.hw-eyebrow { margin:0; font-size:12.5px; font-weight:500; color:var(--accent); }
+.hw-title { margin:0; font-size:clamp(26px, 3.4vw, 36px); font-weight:500; line-height:1.12; letter-spacing:-0.025em; }
+.hw-lead { margin:0; max-width:68ch; font-size:15px; line-height:1.55; color:var(--fg-70); }
+.hw-note { margin:0; max-width:72ch; font-size:12.5px; line-height:1.5; color:var(--fg-55); }
+
+/* ── cards ── */
+.hw-fig, .hw-step, .hw-part { min-width:0; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); box-sizing:border-box; }
+.hw-fig { margin:0; padding:20px; }
+
+/* ── the five steps ── */
+.hw-steps { display:flex; flex-direction:column; gap:14px; margin:0; padding:0; list-style:none; }
+.hw-step { display:grid; grid-template-columns:minmax(0, 320px) minmax(0, 1fr); gap:20px 32px; padding:22px; }
+.hw-step.is-text { grid-template-columns:minmax(0, 1fr); }
+.hw-step-l { display:flex; align-items:flex-start; gap:14px; min-width:0; }
+.hw-n { flex:none; display:grid; place-items:center; width:26px; height:26px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:12.5px; font-weight:600; font-variant-numeric:tabular-nums; }
+.hw-h { margin:2px 0 0; font-size:17px; font-weight:500; letter-spacing:-0.01em; }
+.hw-h2 { margin:0; font-size:22px; font-weight:500; letter-spacing:-0.02em; }
+.hw-h3 { margin:0; font-size:14px; font-weight:600; }
+.hw-p { margin:6px 0 0; max-width:62ch; font-size:13.5px; line-height:1.6; color:var(--fg-70); }
+.hw-pic { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.hw-head { margin:0; font-size:15px; font-weight:500; line-height:1.4; letter-spacing:-0.01em; }
+.hw-head--sm { font-size:14px; }
+.hw-cap { margin:0; font-size:12.5px; line-height:1.5; color:var(--fg-55); }
+.hw-quote { margin:0; padding-left:12px; border-left:2px solid var(--accent); font-size:13.5px; line-height:1.55; color:var(--fg-70); }
+
+/* 1. every agent's claim */
+.hw-agents { display:grid; grid-template-columns:repeat(auto-fill, minmax(70px, 1fr)); gap:6px; margin:0; padding:0; list-style:none; }
+.hw-agent { display:flex; flex-direction:column; gap:5px; padding:7px 9px 9px; border:1px solid var(--border); border-radius:var(--r-ctl); font-variant-numeric:tabular-nums; }
+.hw-agent-id { font-size:11px; color:var(--fg-55); }
+.hw-agent-v { font-size:13px; font-weight:500; }
+.hw-agent.is-none .hw-agent-v { font-size:12px; font-weight:400; color:var(--fg-55); }
+
+/* bars, as in the overview's chart */
+.hw-bar { display:block; height:6px; min-width:0; border-radius:3px; background:var(--bar-base); overflow:hidden; }
+.hw-bar > i { display:block; height:100%; border-radius:3px; background:var(--fg-40); }
+.hw-bar--claim > i { background:var(--pu-hi); }
+.hw-bar--ok > i { background:var(--ok); }
+.hw-bar--bad > i { background:var(--bad); }
+.hw-row { display:grid; grid-template-columns:110px minmax(0, 1fr) 56px; align-items:center; gap:12px; font-size:12.5px; }
+.hw-row-n { color:var(--fg-70); }
+.hw-row-v { font-variant-numeric:tabular-nums; font-weight:500; text-align:right; white-space:nowrap; }
+
+/* 2. the chart and the map sit in the picture column */
+.hw-chart { overflow-x:clip; }
+.hw-chart .ov-card { padding:16px; }
+.hw-map .ck { margin:0; }
+
+/* 3. the step */
+.hw-step-name { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:0; font-size:15px; font-weight:500; }
+.hw-tag { padding:1px 7px; border-radius:var(--r-ctl); background:var(--hover); color:var(--fg-55); font-size:11.5px; font-weight:500; line-height:18px; }
+
+/* 4. the fork */
+.hw-fork .hw-svg { max-width:460px; }
+.hw-keys { display:flex; flex-wrap:wrap; gap:4px 14px; margin:0; padding:0; list-style:none; font-size:12px; color:var(--fg-55); }
+.hw-keys li { display:inline-flex; align-items:center; gap:6px; }
+.hw-sw { display:block; width:9px; height:9px; border-radius:2px; }
+.hw-sw--ok { background:var(--ok); }
+.hw-sw--bad { background:var(--bad); }
+
+/* 5. the pairs */
+.hw-pairs { display:flex; align-items:center; flex-wrap:wrap; gap:10px 14px; }
+.hw-level { padding:1px 8px; border-radius:var(--r-ctl); font-size:11.5px; font-weight:600; line-height:20px; color:var(--fg-55); box-shadow:inset 0 0 0 1px var(--border-strong); }
+.hw-level[data-level="supported"] { color:var(--green); box-shadow:none; background:color-mix(in srgb, var(--green) 16%, transparent); }
+.hw-slots { display:inline-flex; gap:4px; }
+.hw-slots > i { display:block; width:18px; height:10px; border-radius:2px; box-shadow:inset 0 0 0 1px var(--border-strong); }
+.hw-slots > i.is-on { background:var(--accent); box-shadow:none; }
+
+/* ── under the hood ── */
+.hw-hood { display:flex; flex-direction:column; gap:14px; min-width:0; padding-top:12px; }
+.hw-parts { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
+.hw-part { padding:18px 20px; }
+
+/* ── the way out ── */
+.hw-go { display:flex; flex-wrap:wrap; gap:10px; padding-top:4px; }
+.hw-btn { height:38px; padding:0 18px; font-size:13.5px; text-decoration:none; }
+.hw-btn:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+
+/* ── the diagrams ── */
+.hw-svg { display:block; width:100%; height:auto; overflow:visible; font-family:inherit; }
+.hw-svg--narrow { display:none; max-width:420px; margin:0 auto; }
+.hw-d-box rect { fill:var(--surface); stroke:var(--border-strong); stroke-width:1; }
+.hw-d-box--accent rect { fill:var(--accent-soft); stroke:var(--accent); }
+.hw-d-box--strong rect { fill:var(--muted); stroke:var(--fg-40); }
+.hw-d-box--dash rect { fill:none; stroke:var(--accent); stroke-dasharray:4 3; }
+.hw-d-t { fill:var(--fg); font-size:12.5px; font-weight:600; }
+.hw-d-s { fill:var(--fg-55); font-size:11.5px; }
+.hw-d-l { fill:var(--fg-55); font-size:10.5px; }
+.hw-d-l--accent { fill:var(--accent); font-weight:500; }
+.hw-d-l--h { fill:var(--fg-70); font-size:12px; font-weight:600; }
+.hw-d-a { fill:none; stroke:var(--fg-40); stroke-width:1.3; }
+.hw-d-a--dash { stroke:var(--accent); stroke-dasharray:3 3; }
+.hw-d-a--loop { stroke-dasharray:4 3; }
+.hw-d-a--ok { stroke:var(--ok); stroke-width:2; }
+.hw-d-ah { fill:var(--fg-40); }
+.hw-d-pill rect { fill:var(--accent-soft); }
+.hw-d-pill text { fill:var(--accent); font-size:11.5px; font-weight:500; }
+.hw-d-run { fill:none; stroke:var(--fg-40); stroke-width:2; }
+.hw-d-dot { fill:var(--fg-55); }
+.hw-d-cut { stroke:var(--accent); stroke-width:1.5; stroke-dasharray:3 3; }
+.hw-d-end { fill:var(--fg-40); }
+.hw-d-end--ok { fill:var(--ok); }
+.hw-d-sq { fill:var(--bar-base); }
+.hw-d-sq--inflated { fill:var(--bad); }
+.hw-d-sq--honest { fill:var(--ok); }
+
+@media (max-width: 760px) {
+  .hw { padding-top:22px; gap:22px; }
+  .hw-step { grid-template-columns:minmax(0, 1fr); padding:18px 16px; }
+  .hw-parts { grid-template-columns:minmax(0, 1fr); }
+  .hw-fig { padding:16px 12px; }
+  .hw-svg--wide { display:none; }
+  .hw-svg--narrow { display:block; }
+  .hw-row { grid-template-columns:96px minmax(0, 1fr) 48px; gap:10px; }
+}

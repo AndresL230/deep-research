@@ -1,5 +1,5 @@
 // The app's top bar (main.ts `headerView`), on every page but the landing page: the logo, the links to the app's
-// pages (Needs you with its count, Batches, Costs), and on the right the hub badge, the theme switch and "+ New batch",
+// pages (How it works, Needs you with its count, Batches, Costs), and on the right the hub badge, the theme switch and "+ New batch",
 // which opens the New batch dialog (new-batch-dialog.ts). On a narrow screen the links fold into a menu button. Pure,
 // like every view here: main.ts renders it and handles its actions.
 //
@@ -11,9 +11,10 @@ import { askIcon } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { ACT, type Route } from "./model";
 
-export type NavKey = "needs" | "batches" | "costs";
+export type NavKey = "how" | "needs" | "batches" | "costs";
 
 export const NAV_LINKS: readonly { key: NavKey; label: string; href: string }[] = [
+  { key: "how", label: "How it works", href: "#/how" },
   { key: "needs", label: "Needs you", href: "#/start" },
   { key: "batches", label: "Batches", href: "#/batches" },
   { key: "costs", label: "Costs", href: "#/costs" },
@@ -23,13 +24,14 @@ export const NAV_LINKS: readonly { key: NavKey; label: string; href: string }[] 
 export function navCurrent(r: Route): NavKey | null {
   if (r.name === "home") return r.at === "batches" ? "batches" : "needs";
   if (r.name === "costs") return "costs";
+  if (r.name === "how") return "how";
   return null;
 }
 
 /** The count as the badge shows it: nothing for none (or before the list loads), "99+" past 99. */
 export const countLabel = (n: number | null): string => (!n || n < 0 ? "" : n > 99 ? "99+" : String(n));
 
-/** The three links, for the bar or for the menu. `count` is how many batches wait on the person (needs-you.ts
+/** The links, for the bar or for the menu. `count` is how many batches wait on the person (needs-you.ts
  *  `needsCount`). */
 export function navLinks(r: Route, count: number | null, where: "bar" | "menu" = "bar"): string {
   const cur = navCurrent(r);
