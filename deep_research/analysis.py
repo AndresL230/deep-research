@@ -103,8 +103,10 @@ def _resolve_script_runs(actions: list[Action], given_files: dict[str, str]) -> 
         elif a.tool == "edit_file" and name(a.args.get("file_path", "")) in files:
             n = name(a.args.get("file_path", ""))
             old, new = a.args.get("old_string", ""), a.args.get("new_string", "")
-            if old:
-                files[n] = files[n].replace(old, new) if a.args.get("replace_all") else files[n].replace(old, new, 1)
+            # The sandbox refuses an edit whose old text is missing, or is there more than once without replace_all,
+            # and leaves the file as it was.
+            if old and (a.args.get("replace_all") or files[n].count(old) == 1):
+                files[n] = files[n].replace(old, new)
             a.labels = []
         elif a.tool == "execute":
             m = _RUN_SCRIPT.search(a.args.get("command", ""))
