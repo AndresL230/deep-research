@@ -1,0 +1,110 @@
+/* The home screen (home.ts homeView) and the header cost bar (home.ts costBar). Tokens only. */
+
+/* ── home: the column ── */
+.hm { width:100%; max-width:880px; margin:0 auto; padding:24px 24px 56px; box-sizing:border-box; display:flex; flex-direction:column; gap:28px; font-size:13.5px; color:var(--fg); animation:hm-fade var(--fx-base) var(--fx-ease) both; }
+@keyframes hm-fade { from { opacity:0; } to { opacity:1; } }
+.hm-lead { margin:0; max-width:620px; font-size:14px; line-height:1.55; color:var(--fg-70); text-wrap:pretty; }
+.hm-sec { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.hm-sec-h { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 16px; }
+.hm-h2 { margin:0; font-size:13px; font-weight:600; letter-spacing:-0.005em; color:var(--fg); }
+.hm-note { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--fg-55); }
+.hm-err { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 12px; padding:10px 12px; border:1px solid color-mix(in srgb, var(--red) 35%, var(--border)); border-radius:8px; font-size:13px; color:var(--red); }
+.hm-errtext { margin:0; font-size:12.5px; line-height:1.5; color:var(--red); }
+.hm-warn { margin:0; font-size:12.5px; line-height:1.5; color:var(--amber); }
+.hm-help { margin:0; font-size:12px; line-height:1.45; color:var(--fg-55); }
+
+/* ── the batch list ── */
+.hm-batches { display:flex; flex-direction:column; border:1px solid var(--border); border-radius:8px; background:var(--surface); overflow:hidden; }
+.hm-batch { display:flex; align-items:center; gap:10px; width:100%; min-height:42px; padding:8px 12px; text-align:left; font-size:13px; color:var(--fg); border-top:1px solid var(--border); transition:background var(--fx-fast) var(--fx-ease); }
+.hm-batch:first-child { border-top:0; }
+.hm-batch:hover { background:var(--hover); }
+.hm-batch:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.hm-batch-id { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--code); font-size:12.5px; }
+.hm-kind { flex:none; padding:1px 7px; border-radius:6px; font-size:11.5px; font-weight:500; color:var(--fg-55); background:var(--hover); }
+.hm-kind[data-kind="live"] { color:var(--accent); background:var(--accent-soft); }
+.hm-batch-go { flex:none; color:var(--fg-40); }
+
+/* ── keys ── */
+.hm-keys { display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px; font-size:12px; color:var(--fg-55); }
+.hm-key { display:inline-flex; align-items:center; gap:6px; }
+.hm-dot { width:6px; height:6px; border-radius:50%; background:var(--green); flex:none; }
+.hm-key[data-ok="0"] { color:var(--red); }
+.hm-key[data-ok="0"] .hm-dot { background:var(--red); }
+
+/* ── the form ── */
+.hm-form { display:flex; flex-direction:column; gap:12px; }
+.hm-group { margin:0; padding:12px 14px 14px; min-width:0; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
+.hm-legend { padding:0 4px; margin-left:-4px; font-size:11.5px; font-weight:600; letter-spacing:0.02em; color:var(--fg-55); }
+.hm-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:14px 20px; margin-top:4px; }
+.hm-field { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.hm-lbl-row { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.hm-lbl { font-size:12.5px; font-weight:500; color:var(--fg-70); }
+.hm-out { font-size:12px; color:var(--fg); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.hm-fixed { display:flex; align-items:center; min-height:32px; font-size:13px; color:var(--fg); }
+.hm-inwrap { position:relative; display:flex; }
+.hm-input { width:100%; min-width:0; height:32px; padding:0 10px; border:1px solid var(--border-strong); border-radius:8px; background:var(--bg); color:var(--fg); font-size:13px; font-variant-numeric:tabular-nums; transition:border-color var(--fx-fast) var(--fx-ease); }
+.hm-input:hover { border-color:var(--fg-40); }
+.hm-input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+.hm-input--pre { padding-left:22px; }
+.hm-input--code { font-family:var(--code); font-size:12px; }
+.hm-prefix { position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:13px; color:var(--fg-55); pointer-events:none; }
+.hm-select { appearance:auto; cursor:pointer; }
+.hm-range { width:100%; margin:4px 0; accent-color:var(--accent); cursor:pointer; }
+.hm-range:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px; }
+
+/* the skeleton while the defaults load */
+.hm-group--skel { display:flex; flex-direction:column; gap:10px; }
+.hm-skel { display:block; height:10px; border-radius:5px; background:var(--hover); animation:hm-pulse 1.4s var(--fx-ease) infinite alternate; }
+@keyframes hm-pulse { from { opacity:1; } to { opacity:.45; } }
+
+/* ── the estimate ── */
+.hm-est { display:flex; flex-direction:column; gap:8px; padding:12px 14px; border:1px solid var(--border); border-radius:8px; }
+.hm-est-h { font-size:11.5px; font-weight:600; letter-spacing:0.02em; color:var(--fg-55); }
+.hm-est-row { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:8px 16px; }
+.hm-est-cell { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.hm-est-k { font-size:11.5px; color:var(--fg-55); }
+.hm-est-v { font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; color:var(--fg); }
+.hm-est-row[data-over="1"] .hm-est-cell:nth-child(3) .hm-est-v { color:var(--red); }
+
+/* ── Start ── */
+.hm-start { display:flex; flex-direction:column; gap:8px; }
+.hm-start-btns { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.hm-go { display:inline-flex; align-items:center; gap:7px; height:34px; padding:0 16px; border-radius:8px; background:var(--accent); color:var(--accent-fg); font-size:13px; font-weight:600; transition:opacity var(--fx-fast) var(--fx-ease); }
+.hm-go:hover:not(:disabled) { opacity:.9; }
+.hm-go:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.hm-go:disabled { opacity:.45; cursor:not-allowed; }
+.hm-go .ask-spin { color:var(--accent-fg) !important; }
+
+/* ── the cost bar (header) ── */
+.hm-cb { display:inline-flex; align-items:center; gap:10px; min-width:0; max-width:100%; height:28px; padding:0 10px; border:1px solid var(--border); border-radius:8px; font-size:12px; color:var(--fg-70); white-space:nowrap; font-variant-numeric:tabular-nums; cursor:default; }
+.hm-cb-usd { font-weight:600; color:var(--fg); }
+.hm-cb-usd[data-level="warn"] { color:var(--amber); }
+.hm-cb-usd[data-level="over"] { color:var(--red); }
+.hm-cb-of { font-weight:400; color:var(--fg-55); }
+.hm-cb-meter { position:relative; flex:none; width:72px; height:4px; border-radius:2px; background:var(--hover); overflow:hidden; box-shadow:inset 0 0 0 1px var(--border); }
+.hm-cb-fill { position:absolute; inset:0 auto 0 0; border-radius:2px; background:var(--accent); transition:width var(--fx-base) var(--fx-ease), background-color var(--fx-base) var(--fx-ease); }
+.hm-cb-meter[data-level="warn"] .hm-cb-fill { background:var(--amber); }
+.hm-cb-meter[data-level="over"] .hm-cb-fill { background:var(--red); }
+.hm-cb-tok { color:var(--fg-55); }
+.hm-cb-tok--keep { color:var(--fg-70); }
+.hm-cb-hint { font-size:11.5px; color:var(--amber); }
+.hm-cb-sim { padding:1px 6px; border-radius:5px; font-size:11.5px; font-weight:600; color:var(--purple); background:color-mix(in srgb, var(--purple) 14%, transparent); }
+
+/* ── phones ── */
+@media (max-width: 640px) {
+  .hm { padding:16px 16px 40px; gap:22px; }
+  .hm-grid { grid-template-columns:minmax(0, 1fr); }
+  .hm-est-row { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .hm-go { flex:1; justify-content:center; }
+  .hm-cb { gap:6px; padding:0 8px; }
+  .hm-cb-meter { width:36px; }
+  .hm-cb-of, .hm-cb-hint, .hm-cb-usd ~ .hm-cb-tok { display:none; }
+}
+@media (max-width: 380px) {
+  .hm-cb-sim ~ .hm-cb-tok { display:none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm, .hm-skel { animation:none !important; }
+  .hm-batch, .hm-input, .hm-go, .hm-cb-fill { transition:none !important; }
+}
