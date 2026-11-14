@@ -1,8 +1,8 @@
-# Deep Research — Experimental Auditing for AI Research Agents
+# Orro — Experimental Auditing for AI Research Agents
 
 **When an AI scientist reports a breakthrough, how do we know the methodology was sound?**
 
-Deep Research is a HackPrinceton Fall 2026 **Science + Discovery** project that investigates methodological failures in autonomous AI research. Instead of merely asking another language model to critique a result, it **runs independent agents, checks their claims against hidden evaluation data, reconstructs a suspicious decision point, and experimentally tests what changes when that decision is corrected**.
+Orro is a HackPrinceton Fall 2026 **Science + Discovery** project that investigates methodological failures in autonomous AI research. Instead of merely asking another language model to critique a result, it **runs independent agents, checks their claims against hidden evaluation data, reconstructs a suspicious decision point, and experimentally tests what changes when that decision is corrected**.
 
 > **Project status:** The repository includes real orchestration and evaluation code, offline tests, and **explicitly simulated** demonstration fixtures. The complete live Anthropic + Daytona + investigator + fork approval path is not documented as end-to-end verified in this snapshot. Do not describe fixture runs as real agent experiments.
 
@@ -27,7 +27,7 @@ A separate, clean holdout may reveal that actual accuracy is closer to **75%**.
 
 The question is not just **“Is the reported number wrong?”** It is **“Which methodological decision explains the gap, and what evidence supports that explanation?”**
 
-Deep Research is designed to investigate that question by changing the experimental process itself.
+Orro is designed to investigate that question by changing the experimental process itself.
 
 ## End-to-end workflow
 
@@ -85,9 +85,9 @@ Repeated executions expose methodological variation: one run may clean the data,
 
 For each completed run, the scorer compares its **reported metric** with its **independently evaluated metric**.
 
-\[
+$$
 \text{Inflation gap} = \text{reported score} - \text{hidden-evaluation score}
-\]
+$$
 
 A run is classified using domain-specific thresholds. For tabular tasks, the default inflation threshold is **8 percentage points**. Robotics uses separate success-rate thresholds and can classify intermediate cases as `unclear`.
 
@@ -368,6 +368,7 @@ uv run python scripts/batch_numbers.py <batch_id>                 # the numbers 
 times, and only on a batch whose budget is 3 dollars or less. `forks` and `investigate` reopen the saved batch with the
 spend it already recorded, so the budget covers the whole batch, not each command.
 
+```bash
 uv run python -m deep_research.cli vms               # how many VMs are running on the Daytona key
 uv run python -m deep_research.cli cleanup           # stop every running deep-research VM, from any machine
 ```
