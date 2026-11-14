@@ -80,10 +80,10 @@ describe("the menu on narrow screens", () => {
     expect(shut).toMatch(new RegExp(`<button type="button" class="nv-menu-b" data-act="${ACT.navMenu}" aria-expanded="false" aria-controls="nv-panel"`));
     expect(shut).toMatch(/<div class="nv-panel" id="nv-panel" hidden>/);
     expect(text(shut)).toContain("Menu");
-    const open = navMenu({ name: "home" }, null, true, [["Theme", "<i>SWITCH</i>"], ["Team hub", "<b>HUB</b>"]]);
+    const open = navMenu({ name: "home" }, null, true, [["Theme", "<i>SWITCH</i>"]]);
     expect(open).toContain('aria-expanded="true"');
     expect(open).toMatch(/<div class="nv-panel" id="nv-panel">/);
-    expect(text(open)).toBe("Menu How it works Needs you Batches Costs Theme SWITCH Team hub HUB");
+    expect(text(open)).toBe("Menu How it works Needs you Batches Costs Theme SWITCH");
     expect(open).toContain('<div class="nv-row"><span>Theme</span><i>SWITCH</i></div>');
     expect(navMenu({ name: "home" }, null, true)).not.toContain("nv-panel-x");
   });

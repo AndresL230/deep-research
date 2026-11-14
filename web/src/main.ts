@@ -43,11 +43,10 @@ import { BT_ACT, DEFAULT_VIEW, sortBy } from "./batch/batch-table";
 import { NY_ACT, moreFailedUi, needKey, needsCount, pruneNeeds, quoteUi, type NeedKind, type NeedUi } from "./batch/needs-you";
 import { navBar, navMenu, newBatchButton, refreshDue } from "./batch/nav";
 import { newBatchDialog } from "./batch/new-batch-dialog";
-import { hubBadge } from "./batch/hub-badge";
 import { DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { notYetView, overviewView, pageHeadView, pagerView } from "./batch/overview";
 import { wallView } from "./batch/wall";
-import { feedView, notebookWithCaptions, wallWithFeed } from "./batch/commentary";
+import { feedButton, notebookWithCaptions } from "./batch/commentary";
 import { diagnosisView, fixView, forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, runSummaryView, taskText, workStrip } from "./batch/run";
@@ -302,7 +301,9 @@ function headerView(vm: BatchVm | null): string {
     ${crumbs.length ? `<nav class="pg-crumbs" aria-label="Breadcrumb" data-morph-key="crumbs">${crumbs.join(`<span class="ask-crumb-sep" aria-hidden="true">›</span>`)}</nav>` : ""}
   </div>`;
   const bar = vm ? costBar(vm.case.costs ?? {}, { simulated: !!(vm.case.config as BatchConfig).simulated }) : "";
-  const right = `<div class="pg-hdr-r">${bar}${hubBadge(S.hub)}${themeSwitch(theme())}${newBatchButton(newBatch.isOpen)}${navMenu(r, count, S.navOpen, [["Theme", themeSwitch(theme())], ["Team hub", hubBadge(S.hub)]])}</div>`;
+  // The live feed sits where the hub badge was: on a batch's pages only, opening on hover (commentary.ts).
+  const feed = vm && "id" in r ? feedButton(vm, S.feedOpen) : "";
+  const right = `<div class="pg-hdr-r">${bar}${feed}${themeSwitch(theme())}${newBatchButton(newBatch.isOpen)}${navMenu(r, count, S.navOpen, [["Theme", themeSwitch(theme())]])}</div>`;
   return left + right;
 }
 
@@ -312,14 +313,14 @@ const STEP_VIEW: Record<Exclude<BatchStep, "wall">, (vm: BatchVm) => string> = {
 };
 
 /**
- * A batch, a page at a time instead of one long scroll. The first page is where the batch stands and its agents, with
- * the live feed of notable moments beside them (commentary.ts); each stage after them (where the runs split, the
+ * A batch, a page at a time instead of one long scroll. The first page is where the batch stands and its agents, the
+ * wall at the page's full width (the live feed is in the header, commentary.ts); each stage after them (where the runs split, the
  * investigator, the fork, the verdict, and a robot batch's diagnosis and fix) is a page of its own. Every page ends in
  * Back / Next (overview.ts `pagerView`).
  */
 function batchBody(vm: BatchVm, step: BatchStep): string {
   const sections: [string, string][] = step === "wall"
-    ? [["overview", overviewView(vm)], ["wall", wallWithFeed(wallView(vm), feedView(vm, S.feedOpen))]]
+    ? [["overview", overviewView(vm)], ["wall", wallView(vm)]]
     : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || notYetView(vm, step)]];
   // The bar is a new element on every page, so it arrives with the page.
   sections.push([`pager:${step}`, pagerView(vm, step)]);
@@ -1008,6 +1009,8 @@ root.addEventListener("click", (e) => {
   const target = e.target as Element | null;
   // A press anywhere but the header's menu folds it.
   if (S.navOpen && !target?.closest?.(".nv-menu")) { S.navOpen = false; paint(); }
+  // And anywhere but the live feed folds a feed opened by a press.
+  if (S.feedOpen && !target?.closest?.(".cm-hf")) { S.feedOpen = false; paint(); }
   // The header's links are real links (the hash routes them). One to the page already open goes to its place again
   // (the top, or the batch table) instead of doing nothing.
   // How it works' "Go to my batches": seen, so the home screen never sends the person back.
@@ -1133,6 +1136,12 @@ root.addEventListener("click", (e) => {
 
 // Keyboard: Esc folds the header's menu (the dialog closes on Esc by itself), back onto its button.
 root.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && S.feedOpen && !newBatch.isOpen) {
+    S.feedOpen = false;
+    paint();
+    headerEl.querySelector<HTMLElement>(".cm-hf-btn")?.focus();
+    return;
+  }
   if (e.key !== "Escape" || !S.navOpen || newBatch.isOpen) return;
   S.navOpen = false;
   paint();

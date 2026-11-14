@@ -7,7 +7,7 @@ import r01Raw from "../../fixtures/robot-demo-batch/runs/r01/events.jsonl?raw";
 import type { AgentEvent, CaseFile, FeedItem } from "../src/api";
 import type { BatchVm, LogView } from "../src/batch/model";
 import {
-  captionPlacement, captionsOf, feedItems, feedLine, feedView, latestCaption, notebookWithCaptions, tileCaption, wallWithFeed,
+  captionPlacement, captionsOf, feedItems, feedButton, feedLine, latestCaption, notebookWithCaptions, tileCaption,
 } from "../src/batch/commentary";
 import { caseAt, eventsAt } from "../src/batch/replay";
 import { notebookCells } from "../src/batch/notebook";
@@ -114,9 +114,12 @@ describe("the feed", () => {
     const vm = vmOf(full);
     expect(feedItems(vm).map((f) => f.kind)).toEqual(["finish", "first_success", "label"]);
     expect(feedLine(FEED[1])).toBe("r01 · Sonnet · made the first clean pick and place of the batch");
-    const html = feedView(vm, false);
+    const html = feedButton(vm, false);
     expect(html).toContain(`aria-label="Live feed"`);
     expect(html).toContain(`data-open="false"`);
+    // A button in the header with the count; the list is in the popover it opens.
+    expect(html).toContain(`class="cm-hf-btn" data-act="toggle-feed" aria-expanded="false" aria-controls="cm-hf-pop"`);
+    expect(html).toContain(`<span class="cm-feed-n">3</span>`);
     expect(html.indexOf("finished: reports 100%")).toBeLessThan(html.indexOf("started testing the can"));
     // A finish takes its run's status for its dot; the run id opens the run.
     expect(html).toContain(`data-tone="${full.runs.r01.status}"`);
@@ -129,13 +132,15 @@ describe("the feed", () => {
     expect(feedItems(vmAt(5))).toEqual([]);
     expect(feedItems(vmAt(20)).map((f) => f.kind)).toEqual(["label"]);
     expect(feedItems(vmAt(50)).map((f) => f.kind)).toEqual(["first_success", "label"]);
-    expect(feedView(vmAt(5), true)).toContain("cm-feed-empty");
+    expect(feedButton(vmAt(5), true)).toContain("cm-feed-empty");
+    expect(feedButton(vmAt(5), true)).toContain(`aria-expanded="true"`);
   });
 
-  it("is absent from a batch without commentary, and sits beside the wall with it", () => {
+  it("is absent off a batch and on a batch without commentary, and pulses only while live", () => {
     const off: CaseFile = { ...robot, feed: [] };
-    expect(feedView(vmOf(off), false)).toBe("");
-    expect(wallWithFeed("<wall>", "")).toBe("<wall>");
-    expect(wallWithFeed("<wall>", "<feed>")).toBe(`<div class="cm-wrap"><wall><feed></div>`);
+    expect(feedButton(vmOf(off), false)).toBe("");
+    expect(feedButton(null, false)).toBe("");
+    expect(feedButton(vmOf(full, { live: true }), false)).toContain(`class="cm-live is-live"`);
+    expect(feedButton(vmOf(full, { live: false }), false)).not.toContain("is-live");
   });
 });

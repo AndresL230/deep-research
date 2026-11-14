@@ -33,7 +33,7 @@ export const ACT = {
   approve: "approve",           // live only: approve forks.pending
   decline: "decline",           // live only: decline forks.pending
   stop: "stop",                 // live only: stop the batch and its VMs
-  toggleFeed: "toggle-feed",    // fold or unfold the live commentary feed (narrow screens)
+  toggleFeed: "toggle-feed",    // open or close the live feed under its header button (touch; hover opens it too)
   // replay
   replayToggle: "replay-toggle",   // play / pause
   replaySpeed: "replay-speed",     // arg: speed multiplier ("1", "4", "16")
