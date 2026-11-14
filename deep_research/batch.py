@@ -257,14 +257,16 @@ class Batch:
                     try:
                         vm = await asyncio.to_thread(vms.fork_vm, base, f"{self.id}-{fork_id}-{cid}")
                         self.vms[f"{fork_id}-{cid}"] = vm
+                        self.tracker.vm_started(scope)
                         how = "fork"
                     except Exception:  # noqa: BLE001 - fall back to rebuilding by replay
                         vm = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-{cid}")
                         self.vms[f"{fork_id}-{cid}"] = vm
+                        # From here, not after the rebuild: the VM is up and billing while it replays.
+                        self.tracker.vm_started(scope)
                         await asyncio.to_thread(vms.load_task, vm, self.task)
                         await asyncio.to_thread(vms.replay_actions, vm, prefix_actions)
                         how = "replay"
-                    self.tracker.vm_started(scope)
                     url = await _try(asyncio.to_thread(vms.start_lab_page, vm))
                     self._set_child(fork_id, cid, arm=arm, status="running", lab_url=url, how=how)
 
