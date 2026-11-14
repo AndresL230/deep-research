@@ -5,10 +5,13 @@
 .brand-tile .brand-sym { display:block; }
 
 /* The app header: tile, then the wordmark, which dims like the old text did once there are crumbs after it. */
-.pg-home .brand-word { height:16px; }
+.pg-home .brand-word { height:19px; }
+.pg-home .brand-tile { width:26px; height:26px; }
+.pg-home .brand-tile .brand-sym { width:17px; height:17px; }
 .pg-home .ask-h1 { display:flex; align-items:center; }
 
 /* The landing nav: the tile replaces the old grey mark box. */
-.lp-mark.brand-tile { width:32px; height:32px; border-radius:8px; background:#b07af2; box-shadow:none; }
-.lp-name .brand-word { height:20px; }
-@media (max-width: 640px) { .lp-name .brand-word { height:18px; } }
+.lp-mark.brand-tile { width:38px; height:38px; border-radius:9px; background:#b07af2; box-shadow:none; }
+.lp-mark.brand-tile .brand-sym { width:24px; height:24px; }
+.lp-name .brand-word { height:24px; }
+@media (max-width: 640px) { .lp-mark.brand-tile { width:34px; height:34px; } .lp-mark.brand-tile .brand-sym { width:22px; height:22px; } .lp-name .brand-word { height:21px; } }

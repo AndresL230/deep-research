@@ -16,46 +16,46 @@
 .cs-dim { color:var(--fg-55); font-size:12.5px; }
 
 /* ── the header link ── */
-.cs-link { height:28px; padding:0 10px; border:1px solid var(--border); border-radius:8px; }
+.cs-link { height:28px; padding:0 10px; border:1px solid var(--border); border-radius:var(--r-ctl); }
 .cs-link:hover { border-color:var(--border-strong); }
 .cs-link[aria-current="page"] { color:var(--accent); background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 40%, var(--border)); cursor:default; }
 .cs-link:focus-visible, .cs-back:focus-visible, .cs-id:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
 /* ── back, and the loading, empty and error states ── */
-.cs-back { align-self:flex-start; display:inline-flex; align-items:center; gap:4px; height:28px; margin:0 0 -12px -8px; padding:0 10px 0 6px; border-radius:7px; font-size:12.5px; font-weight:500; color:var(--fg-55); min-width:0; max-width:100%; transition:background var(--fx-fast) var(--fx-ease), color var(--fx-fast) var(--fx-ease); }
+.cs-back { align-self:flex-start; display:inline-flex; align-items:center; gap:4px; height:28px; margin:0 0 -12px -8px; padding:0 10px 0 6px; border-radius:var(--r-ctl); font-size:12.5px; font-weight:500; color:var(--fg-55); min-width:0; max-width:100%; transition:background var(--fx-fast) var(--fx-ease), color var(--fx-fast) var(--fx-ease); }
 .cs-back > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cs-back:hover { color:var(--fg); background:var(--hover); }
 .cs-state { display:flex; align-items:center; gap:8px; min-height:120px; font-size:13px; color:var(--fg-55); }
-.cs-err { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 12px; padding:10px 10px 10px 14px; border:1px solid color-mix(in srgb, var(--red) 35%, var(--border)); border-radius:8px; background:color-mix(in srgb, var(--red) 6%, var(--surface)); color:var(--red); overflow-wrap:anywhere; }
+.cs-err { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 12px; padding:10px 10px 10px 14px; border:1px solid color-mix(in srgb, var(--red) 35%, var(--border)); border-radius:var(--r-ctl); background:color-mix(in srgb, var(--red) 6%, var(--surface)); color:var(--red); overflow-wrap:anywhere; }
 .cs-empty { padding:48px 0; }
-.cs-empty h2 { margin:0 0 4px; font-size:20px; font-weight:600; letter-spacing:-0.02em; }
+.cs-empty h2 { margin:0 0 4px; font-size:20px; font-weight:500; letter-spacing:-0.02em; }
 .cs-empty p, .cs-quiet { margin:0; color:var(--fg-55); font-size:13.5px; }
 .cs-quiet { max-width:64ch; }
 
 /* ── the grand total ── */
 .cs-hero { display:flex; flex-direction:column; gap:10px; min-width:0; }
 .cs-eyebrow { font-size:12.5px; font-weight:500; color:var(--fg-55); }
-.cs-total { font-size:clamp(44px, 9vw, 72px); font-weight:650; line-height:1; letter-spacing:-0.04em; color:var(--fg); overflow-wrap:anywhere; }
-.cs-plus { margin-left:1px; color:var(--amber); font-weight:600; cursor:help; }
+.cs-total { font-size:clamp(44px, 9vw, 72px); font-weight:400; line-height:1; letter-spacing:-0.04em; color:var(--fg); overflow-wrap:anywhere; }
+.cs-plus { margin-left:1px; color:var(--amber); font-weight:500; cursor:help; }
 .cs-total .cs-plus { margin-left:4px; font-size:.5em; letter-spacing:0; vertical-align:.62em; }
 .cs-behind { display:flex; align-items:center; flex-wrap:wrap; gap:8px 14px; font-size:14px; color:var(--fg-70); }
-.cs-warn { margin:0; max-width:72ch; padding:8px 12px; border:1px solid color-mix(in srgb, var(--amber) 40%, var(--border)); border-radius:8px; background:color-mix(in srgb, var(--amber) 8%, transparent); color:var(--amber); font-size:12.5px; }
+.cs-warn { margin:0; max-width:72ch; padding:8px 12px; border:1px solid color-mix(in srgb, var(--amber) 40%, var(--border)); border-radius:var(--r-ctl); background:color-mix(in srgb, var(--amber) 8%, transparent); color:var(--amber); font-size:12.5px; }
 
 /* ── chips and tags ── */
 .cs-chips { display:inline-flex; flex-wrap:wrap; gap:4px; min-width:0; }
-.cs-chip { padding:1px 7px; border-radius:6px; font-size:11.5px; font-weight:600; line-height:18px; white-space:nowrap; color:var(--fg-70); background:var(--hover); }
+.cs-chip { padding:1px 7px; border-radius:var(--r-ctl); font-size:11.5px; font-weight:500; line-height:18px; white-space:nowrap; color:var(--fg-70); background:var(--hover); }
 .cs-chip[data-s="honest"] { color:var(--green); background:color-mix(in srgb, var(--green) 16%, transparent); }
 .cs-chip[data-s="inflated"] { color:var(--red); background:color-mix(in srgb, var(--red) 16%, transparent); }
 .cs-chip[data-s="unclear"] { color:var(--fg-70); background:color-mix(in srgb, var(--fg) 7%, transparent); box-shadow:inset 0 0 0 1px var(--border-strong); }
 .cs-chip[data-s="failed"] { color:var(--fg-70); background:color-mix(in srgb, var(--fg) 11%, transparent); }
 .cs-chip[data-s="open"] { font-weight:500; color:var(--fg-55); background:none; box-shadow:inset 0 0 0 1px var(--border-strong); }
-.cs-tag { flex:none; padding:1px 7px; border-radius:6px; font-size:11.5px; font-weight:500; line-height:18px; white-space:nowrap; color:var(--fg-55); background:var(--hover); }
-.cs-tag[data-t="live"] { color:var(--accent); background:var(--accent-soft); font-weight:600; }
-.cs-tag[data-t="sim"] { color:var(--purple); background:color-mix(in srgb, var(--purple) 14%, transparent); font-weight:600; }
+.cs-tag { flex:none; padding:1px 7px; border-radius:var(--r-ctl); font-size:11.5px; font-weight:500; line-height:18px; white-space:nowrap; color:var(--fg-55); background:var(--hover); }
+.cs-tag[data-t="live"] { color:var(--accent); background:var(--accent-soft); font-weight:500; }
+.cs-tag[data-t="sim"] { color:var(--purple); background:color-mix(in srgb, var(--purple) 14%, transparent); font-weight:500; }
 
 /* ── sections and cards ── */
 .cs-sec { display:flex; flex-direction:column; gap:10px; min-width:0; }
-.cs-h2 { display:flex; align-items:baseline; flex-wrap:wrap; gap:2px 10px; margin:0; font-size:13px; font-weight:600; letter-spacing:-0.005em; color:var(--fg); }
+.cs-h2 { display:flex; align-items:baseline; flex-wrap:wrap; gap:2px 10px; margin:0; font-size:13px; font-weight:500; letter-spacing:-0.005em; color:var(--fg); }
 .cs-h2-x { font-size:12.5px; font-weight:400; color:var(--fg-55); }
 .cs-split { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
 .cs-card { display:flex; flex-direction:column; gap:14px; min-width:0; padding:16px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
@@ -79,7 +79,7 @@
 .cs-sw { width:10px; height:10px; border-radius:3px; background:var(--fg-40); }
 .cs-leg-n { min-width:0; color:var(--fg-70); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cs-leg-x { margin-left:8px; color:var(--fg-55); font-variant-numeric:tabular-nums; }
-.cs-leg-v { font-weight:600; color:var(--fg); }
+.cs-leg-v { font-weight:500; color:var(--fg); }
 .cs-leg-p { text-align:right; color:var(--fg-55); }
 
 /* ── tokens and VM time: one strip, five cells ── */
@@ -87,7 +87,7 @@
 .cs-stat { display:flex; flex-direction:column; gap:2px; min-width:0; padding:12px 14px 13px; border-left:1px solid var(--border); }
 .cs-stat:first-child { border-left:none; }
 .cs-stat-l { font-size:12px; color:var(--fg-55); }
-.cs-stat-v { font-size:22px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; color:var(--fg); }
+.cs-stat-v { font-size:22px; font-weight:500; line-height:1.2; letter-spacing:-0.02em; color:var(--fg); }
 .cs-stat-s { font-size:11.5px; line-height:1.35; color:var(--fg-55); }
 
 /* ── by model ── */
@@ -98,7 +98,7 @@
 .cs-model-n { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; min-width:0; }
 .cs-model-n .cs-mono { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cs-model-t { color:var(--fg-55); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.cs-model > .cs-num, .cs-c-total { text-align:right; font-weight:600; color:var(--fg); white-space:nowrap; }
+.cs-model > .cs-num, .cs-c-total { text-align:right; font-weight:500; color:var(--fg); white-space:nowrap; }
 
 /* ── one row per batch ── */
 .cs-table { border:1px solid var(--border); border-radius:8px; background:var(--surface); overflow:hidden; }

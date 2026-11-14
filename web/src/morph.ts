@@ -10,9 +10,11 @@
 // replaces the old instead of being patched into it. A container marked `data-morph-list` pairs its children by key
 // (`morphList`). Dropped from Trov: `paint` / `syncOverlays` / `paintRoot` (Trov's app-shell regions).
 
-/** Make `live`'s attributes equal `next`'s. */
+/** Make `live`'s attributes equal `next`'s. A <details>'s `open` is the person's, like an input's value: markup
+ *  without it does not close one they opened (a live page repaints every 150ms), though markup with it still opens. */
 export function syncAttrs(live: Element, next: Element): void {
-  for (const a of Array.from(live.attributes)) if (!next.hasAttribute(a.name)) live.removeAttribute(a.name);
+  const keepOpen = live.nodeName === "DETAILS";
+  for (const a of Array.from(live.attributes)) if (!next.hasAttribute(a.name) && !(keepOpen && a.name === "open")) live.removeAttribute(a.name);
   for (const a of Array.from(next.attributes)) if (live.getAttribute(a.name) !== a.value) live.setAttribute(a.name, a.value);
 }
 
