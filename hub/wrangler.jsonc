@@ -9,7 +9,7 @@
     {
       "binding": "DB",
       "database_name": "deep-research-hub",
-      // No database_id: the first `wrangler deploy` creates the database and writes its id back here.
+      "database_id": "0541e366-8063-4af7-816d-9f02f767216a",
       "migrations_dir": "migrations"
     }
   ]
