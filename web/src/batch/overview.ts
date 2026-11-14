@@ -4,14 +4,14 @@
 // and the same steps, the one it is on marked; every page ends in a Back / Next bar (`pagerView`). A pure `(vm) => html` view like the others; the look is in overview.css and the motion in
 // system.css (motion.ts writes the animated markup).
 import "./overview.css";
-import type { BatchConfig, RunRecord } from "../api";
+import type { BatchConfig, CaseFile, RunRecord } from "../api";
 import { attr, esc } from "../ui";
 import { badge, chip, count, reveal, spinner } from "../motion";
 import { pct, pts, tokens, usd } from "./format";
 import { costGroups } from "./home";
 import { barShare, forkExperiments, isProblemPhase, isSimulated, pendingForks, phaseText, scoreStats } from "./lanes";
 import { ACT, STEP_LABEL, type BatchStep, type BatchVm } from "./model";
-import { claimHeadline, sortedRuns, summaryLine, wallSummary } from "./wall";
+import { claimHeadline, summaryLine, wallSummary } from "./wall";
 import { isMotionBatch, scoreWords } from "../robot/markup";
 import { domainWords } from "./words";
 
@@ -164,11 +164,13 @@ function bar(r: RunRecord, i: number, robot: boolean, words: [string, string]): 
     + col + `<span class="ov-bar-id">${esc(r.id)}</span></button>`;
 }
 
-function bars(vm: BatchVm): string {
-  const runs = sortedRuns(vm);
-  const threshold = (vm.case.config as Partial<BatchConfig>).inflation_threshold;
-  const robot = isMotionBatch(vm.case.config);
-  const w = scoreWords(vm.case.config);
+/** The "Claimed against measured" card, one bar per agent. A case file is all it needs, so How it works (how.ts)
+ *  draws the same card for the robot demo. Each bar opens its run (ACT.openRun). */
+export function claimBars(c: Pick<CaseFile, "runs" | "config">): string {
+  const runs = Object.values(c.runs ?? {}).sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  const threshold = (c.config as Partial<BatchConfig>).inflation_threshold;
+  const robot = isMotionBatch(c.config);
+  const w = scoreWords(c.config);
   const words: [string, string] = [w.reported.toLowerCase(), w.true.toLowerCase()];
   const body = runs.length
     ? `<div class="ov-bars" data-morph-key="bars" data-morph-list>${runs.map((r, i) => bar(r, i, robot, words)).join("")}</div>`
@@ -336,6 +338,6 @@ export function overviewView(vm: BatchVm): string {
     + `</header>`
     + steps(vm, "wall")
     + tiles(vm)
-    + `<div class="ov-cards">${ring(vm)}${bars(vm)}</div>`
+    + `<div class="ov-cards">${ring(vm)}${claimBars(vm.case)}</div>`
     + `</section>`;
 }

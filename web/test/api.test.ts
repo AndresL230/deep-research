@@ -7,8 +7,8 @@ import runEventsRaw from "../../fixtures/demo-batch/runs/r02/events.jsonl?raw";
 import forcedEventsRaw from "../../fixtures/demo-batch/forks/f1/forced-1/events.jsonl?raw";
 import {
   ApiError, CASE_SECTIONS, MAX_CONTROLLER_BYTES, MAX_SCRIPT_BYTES, PHASES, RUN_STATUSES, STEP_LABELS, applyMessage, batchFileUrl,
-  batchSocketUrl, fetchBatches, fetchCase, isPendingForks, labPageUrl, notebookUrl, postDecision, uploadController, type AgentEvent,
-  type CaseFile, type ControllerInfo, type ForkExperiment,
+  batchSocketUrl, fetchBatches, fetchCase, fetchMorePairs, isPendingForks, labPageUrl, notebookUrl, postDecision, startMorePairs,
+  uploadController, type AgentEvent, type CaseFile, type ControllerInfo, type ForkExperiment, type MorePairsQuote,
 } from "../src/api";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
@@ -130,6 +130,24 @@ describe("REST", () => {
     // A refused controller carries the server's reason.
     stubFetch(new Response(JSON.stringify({ detail: "no class Controller" }), { status: 422 }));
     await expect(uploadController(py)).rejects.toMatchObject({ status: 422, message: "The server answered HTTP 422: no class Controller" });
+  });
+
+  it("asks what more pairs would cost, then starts them", async () => {
+    const quote: MorePairsQuote = {
+      fork_id: "f1", n_per_arm: 4, max_per_arm: 8, arms: ["control", "forced"], vm_count: 9, estimate_usd: 1.2, basis: "8 new copies plus the base VM",
+      pairs_now: 4, pairs_after: 8, needed_pairs: 8, level_now: "open", p_value_now: 0.0714, budget_usd: 10,
+      spent_usd: 3.1, over_budget: false, budget_problem: null,
+    };
+    const f = stubFetch(new Response(JSON.stringify(quote)));
+    expect(await fetchMorePairs("b 1")).toEqual(quote);
+    expect(f).toHaveBeenCalledWith("/api/batches/b%201/more-pairs", {});
+    const g = stubFetch(new Response(JSON.stringify({ ...quote, id: "b1", phase: "forking", children: ["control-5"] })));
+    expect((await startMorePairs("b1", 3)).phase).toBe("forking");
+    const [url, init] = g.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/batches/b1/more-pairs?n=3");
+    expect(init.method).toBe("POST");
+    stubFetch(new Response(JSON.stringify({ detail: "cannot run more pairs: this batch has no verdict yet" }), { status: 409 }));
+    await expect(startMorePairs("b1")).rejects.toMatchObject({ status: 409, message: expect.stringContaining("no verdict yet") });
   });
 
   it("turns errors into messages", async () => {

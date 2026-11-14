@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections import defaultdict
@@ -185,6 +186,11 @@ class CostTracker:
             return None
         return sum(vals) / len(vals)  # type: ignore[arg-type]
 
+    def scope_costs(self, keys: set[str]) -> dict[str, ScopeCost]:
+        """The saved spend of each of `keys` that has a scope; a key with none is left out."""
+        with self._lock:
+            return {k: replace(self.scopes[k]) for k in keys if k in self.scopes}
+
     def snapshot(self) -> dict:
         with self._lock:
             scopes = self._current()
@@ -196,6 +202,12 @@ class CostTracker:
                 "prices_missing": spent is None,
                 "scopes": {k: v.to_dict() for k, v in scopes.items()},
             }
+
+
+def usd_up(x: float | None) -> float | None:
+    """A dollar estimate rounded up to the cent, never down: what a person is asked to approve must not undersell it.
+    A float's last bit (0.4 * 100 is 40.000000000000007) does not push it up a cent."""
+    return None if x is None else math.ceil(round(x * 100, 6)) / 100
 
 
 def estimate_batch_usd(n_runs: int, avg_run_usd: float | None) -> float | None:

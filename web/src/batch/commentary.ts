@@ -129,27 +129,30 @@ const itemKey = (f: FeedItem, i: number, all: FeedItem[]): string => {
   return `f:${f.run}:${f.t}:${f.kind}:${same}`;
 };
 
-/** The live feed panel: a slim column beside the wall on a wide screen, a one-line bar that opens on a narrow one. */
-export function feedView(vm: BatchVm, open: boolean): string {
-  if (!hasCommentary(vm)) return "";
+/** The feed's items, newest first, or a line saying what will show up. */
+function feedList(vm: BatchVm): string {
   const items = feedItems(vm);
-  const latest = items[0];
-  const head = `<button type="button" class="cm-feed-hd" data-act="${ACT.toggleFeed}" aria-expanded="${open}">`
-    + `<span class="cm-feed-title"><span class="cm-live" aria-hidden="true"></span>Live feed</span>`
-    + (items.length ? `<span class="cm-feed-n">${items.length}</span>` : "")
-    + `<span class="cm-feed-latest">${latest ? esc(feedLine(latest)) : ""}</span>`
-    + `<span class="cm-feed-chev" aria-hidden="true"></span></button>`;
-  const list = items.length
+  return items.length
     ? `<ol class="cm-feed-list" data-morph-list>${items.map((f, i) =>
       `<li class="cm-item" data-tone="${attr(tone(vm, f))}" data-morph-key="${attr(itemKey(f, i, items))}">`
       + `<span class="cm-dot" aria-hidden="true"></span>`
       + `<span class="cm-item-b"><span class="cm-item-who"><button type="button" class="cm-run" data-act="${ACT.openRun}" data-arg="${attr(f.run)}">${esc(f.run)}</button>${f.model ? ` · ${esc(f.model)}` : ""}<span class="cm-item-at">${esc(duration(f.t))}</span></span>`
       + `<span class="cm-item-t">${esc(f.text)}</span></span></li>`).join("")}</ol>`
     : `<p class="cm-feed-empty">Notable moments show up here as the runs go: a first success, a dropped can, a run that finishes.</p>`;
-  return `<aside class="cm-feed" data-open="${open}" data-morph-key="feed" aria-label="Live feed">${head}${list}</aside>`;
 }
 
-/** The wall with the feed beside it (or above it, folded, on a narrow screen). Just the wall without commentary. */
-export function wallWithFeed(wall: string, feed: string): string {
-  return feed ? `<div class="cm-wrap">${wall}${feed}</div>` : wall;
+/**
+ * The live feed in the page header: a button with the item count that opens the feed under it. It opens on hover and
+ * on keyboard focus (CSS), and stays open after a press (`open`, for touch), so the wall keeps the page's full width.
+ * Empty on a batch without commentary and off the batch pages. The dot pulses while the batch is live.
+ */
+export function feedButton(vm: BatchVm | null, open: boolean): string {
+  if (!vm || !hasCommentary(vm)) return "";
+  const n = feedItems(vm).length;
+  return `<div class="cm-hf" data-open="${open}" data-morph-key="hdr-feed">`
+    + `<button type="button" class="cm-hf-btn" data-act="${ACT.toggleFeed}" aria-expanded="${open}" aria-controls="cm-hf-pop">`
+    + `<span class="cm-live${vm.live ? " is-live" : ""}" aria-hidden="true"></span><span class="cm-hf-t">Live feed</span>`
+    + (n ? `<span class="cm-feed-n">${n}</span>` : "")
+    + `</button>`
+    + `<div class="cm-hf-pop" id="cm-hf-pop" role="region" aria-label="Live feed">${feedList(vm)}</div></div>`;
 }

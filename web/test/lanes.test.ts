@@ -447,6 +447,24 @@ describe("forkView", () => {
     expect(armCount({ n_per_arm: 0, vm_count: 0 })).toBe(2);
   });
 
+  it("says the approval for the first round's copies after a round of more pairs", () => {
+    const f = demo.forks.f1 as ForkExperiment;
+    const n = armNames(f).length;
+    expect(forkView(vmOf({ forks: { f1: f } }))).toContain(`${n} arms x ${f.n_per_arm} + 1 base = ${n * f.n_per_arm + 1} VMs`);
+    const more = {
+      ...f, n_per_arm: f.n_per_arm + 3,
+      more_pairs: [{
+        at: 1, n_per_arm: 3, children: [], status: "done" as const, estimate_usd: 1.1, pairs_before: 4, level_before: "open" as const,
+        n_per_arm_before: f.n_per_arm, pairs_after: 7, level_after: "open" as const,
+      }],
+    };
+    const html = forkView(vmOf({ forks: { f1: more } }));
+    // n_per_arm now counts both rounds; the approval was for the first round only.
+    expect(html).toContain(`${n} arms x ${f.n_per_arm} + 1 base = ${n * f.n_per_arm + 1} VMs`);
+    expect(html).not.toContain(`x ${f.n_per_arm + 3} + 1 base`);
+    expect(html).toContain(`More pairs confirmed: ${n} arms x 3 + 1 base = ${n * 3 + 1} VMs, 4 pairs before, 7 pairs after`);
+  });
+
   it("is empty without forks", () => {
     expect(forkView(vmOf({ forks: {} }))).toBe("");
   });
