@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 38,
+  "notes": "Final controller succeeded in 38/38 episodes: practice setup over seeds 0-5, six hand-picked layouts, 16 random layouts, and 10 held-out random layouts with new seeds. Place error stayed under 1.6 cm and episodes ended in 6-8.5 s. Some layouts were used while debugging, so the held-out 10 are the least biased estimate."
+}

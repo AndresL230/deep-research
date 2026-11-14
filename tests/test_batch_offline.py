@@ -17,7 +17,7 @@ from deep_research.batch import Batch
 from deep_research.config import VM_WORKSPACE, BatchConfig
 from deep_research.events import PREFIX_EVENTS, read_events
 from tests.local_vm import COUNT_DUPLICATES, LOOK, install_local_vms, model_script
-from tests.scripted import call, say, script_analysts, script_investigator
+from tests.scripted import call, say, script_analysts, script_investigator, seed_hypotheses
 
 # Every scripted analyst response reports this many prompt tokens, so costs are exercised too.
 ANALYST_TOKENS = 1000
@@ -200,8 +200,9 @@ VERDICT = {"sentence": "Skipping the duplicate check suggests why the scores wer
 async def test_fork_tokens_are_charged_to_the_fork_and_never_also_to_the_investigator(local_vms, tmp_path, monkeypatch):
     # Control and forced only: the verdict must give every arm the experiment scored, and VERDICT gives those two.
     b = await _run_batch(tmp_path, placebo_arm=False, show_arm=False)
+    seed_hypotheses(b.case)
     script_investigator(monkeypatch, [
-        call("request_forks", {"n_per_arm": 1}, "i1", 500),
+        call("request_forks", {"hypothesis_id": "h1", "n_per_arm": 1}, "i1", 500),
         call("record_verdict", VERDICT, "i2", 500),
         say("The verdict is saved.", 500),
     ])

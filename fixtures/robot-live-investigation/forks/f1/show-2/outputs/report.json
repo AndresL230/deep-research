@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 37,
+  "notes": "Phase-based controller (approach, descend, close, lift, carry, lower, release, retreat) using min-jerk Cartesian moves with IK and a downward-pointing gripper. Succeeded in all 37 episodes: practice layout over 20 seeds (place error 1.2-1.6 cm), 12 random can/zone layouts in x 0.35-0.6 m, |y| < 0.35 m, and 4 CLI runs. Edge positions outside that range were not tested."
+}

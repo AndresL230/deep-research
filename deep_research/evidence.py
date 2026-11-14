@@ -126,3 +126,86 @@ def verdict_sentence(step: str, ev: dict, arms: dict | None = None) -> str:
         return f"Skipping the step of {step} caused the inflated claims: {score} ({ev['pairs']} pairs, one-sided Fisher p {p})."
     return (f"Skipping the step of {step} suggests why the claims were inflated: {score} ({ev['pairs']} pairs of the "
             f"{ev['needed_pairs']} needed, p {p}).")
+
+
+# ---- what an experiment's result says about the hypothesis it tested (computed here, never by the model) ----
+
+OUTCOMES = ("supported", "contradicted", "inconclusive", "no_data")
+
+
+def method_outcome(ev: dict) -> str:
+    """The pre-registered prediction of a method experiment ("forcing the step leaves fewer copies inflated than
+    control") against its result `ev` (`verdict_evidence`).
+
+    - supported: the evidence level is supported (enough pairs and p < ALPHA).
+    - contradicted: enough pairs, and the forced arm inflated at least as often as control: a powered experiment that
+      saw no reduction at all.
+    - inconclusive: anything in between (too few pairs, or a reduction that is not significant).
+    - no_data: an arm has no scored copy.
+    """
+    ct, ft = ev.get("control_total") or 0, ev.get("forced_total") or 0
+    if ct <= 0 or ft <= 0:
+        return "no_data"
+    if ev.get("level") == "supported":
+        return "supported"
+    if ev.get("pairs", 0) >= NEEDED_PAIRS and ev["forced_inflated"] / ft >= ev["control_inflated"] / ct:
+        return "contradicted"
+    return "inconclusive"
+
+
+def sign_test_greater(wins: int, losses: int) -> float | None:
+    """One-sided exact sign test: the chance of `wins` or more of `wins + losses` discordant cases under a fair coin.
+    None when there is no discordant case."""
+    n = wins + losses
+    if n <= 0:
+        return None
+    return min(1.0, sum(math.comb(n, k) for k in range(wins, n + 1)) / 2 ** n)
+
+
+FIX_LEVELS = ("improved", "worse", "no_detectable_change", "unpaired")
+
+
+def fix_evidence(gained: int | None, lost: int | None, before: float | None = None, after: float | None = None) -> dict:
+    """How strong a measured fix is: the patched and the unpatched code on the same held-out cases, paired case by case.
+
+    Only the discordant cases count (a case that passes with the patch and failed without it is `gained`, the other way
+    `lost`). An exact one-sided sign test asks whether gains beat losses (improved) or losses beat gains (worse), at
+    p < ALPHA. This measures the controller's performance, not the accuracy of any agent's report.
+    """
+    out = {"measures": "controller_performance", "gained": gained, "lost": lost, "alpha": ALPHA,
+           "before": before, "after": after}
+    if gained is None or lost is None:
+        return {**out, "level": "unpaired", "p_value": None}
+    p_better, p_worse = sign_test_greater(gained, lost), sign_test_greater(lost, gained)
+    if p_better is not None and p_better < ALPHA:
+        level, p = "improved", p_better
+    elif p_worse is not None and p_worse < ALPHA:
+        level, p = "worse", p_worse
+    else:
+        level, p = "no_detectable_change", p_better
+    return {**out, "level": level, "p_value": None if p is None else round(p, 4)}
+
+
+def fix_outcome(fe: dict) -> str:
+    """A code hypothesis's prediction ("this patch makes the controller succeed more often") against `fix_evidence`.
+    A patch that does not help does not refute that the line is at fault (the patch may be wrong), so only a patch that
+    makes things significantly worse contradicts it."""
+    return {"improved": "supported", "worse": "contradicted", "unpaired": "no_data"}.get(fe.get("level"), "inconclusive")
+
+
+# A sentence that says the fix worked.
+IMPROVED = re.compile(r"\b(improv(?:e|ed|es|ing|ement)|fix(?:ed|es)\b(?! nothing)|solv(?:e|ed|es))\b", re.IGNORECASE)
+
+
+def fix_wording_error(sentence: str, fe: dict | None) -> str | None:
+    """Why `sentence` cannot stand as the fix verdict, or None: it may say the fix improved or fixed the controller
+    only when `fix_evidence` says `improved`."""
+    if fe is None:
+        return "error: the fix has not been measured yet: call request_fix_test first"
+    if fe.get("level") == "improved" or not IMPROVED.search(sentence or ""):
+        return None
+    p = "n/a" if fe.get("p_value") is None else format(fe["p_value"], ".3f")
+    return (f"error: the measured fix is '{fe.get('level')}' ({fe.get('gained')} cases gained, {fe.get('lost')} lost, "
+            f"one-sided exact sign test p = {p}, below {ALPHA} needed), so the sentence cannot say "
+            f"'{IMPROVED.search(sentence).group(0)}'. Say what the two success rates were and that the change is not "
+            "shown to help.")

@@ -47,7 +47,7 @@ import { DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputs
 import { notYetView, overviewView, pageHeadView, pagerView } from "./batch/overview";
 import { wallView } from "./batch/wall";
 import { feedButton, notebookWithCaptions } from "./batch/commentary";
-import { diagnosisView, fixView, forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
+import { diagnosisView, fixView, forkView, investigatorView, keyPointsView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, runSummaryView, taskText, workStrip } from "./batch/run";
 import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule } from "./batch/replay";
@@ -114,6 +114,9 @@ interface AppState {
   hub: HubStatus | null;
   /** The batch page's live feed is unfolded (narrow screens only: on a wide one it is always open). */
   feedOpen: boolean;
+  /** The batch page's folds the person opened or closed (lanes.ts), and the batch they belong to. */
+  folds: Record<string, boolean>;
+  foldsFor: string;
 }
 
 const S: AppState = {
@@ -133,6 +136,8 @@ const S: AppState = {
   lastStep: null,
   hub: null,
   feedOpen: false,
+  folds: {},
+  foldsFor: "",
 };
 
 const DEFAULT_SPEED = 4;
@@ -259,6 +264,7 @@ function batchVm(b: BatchState, full: CaseFile): BatchVm {
     busy: b.busy,
     error: b.error,
     now: Date.now(),
+    open: S.foldsFor === b.id ? S.folds : {},
   };
 }
 
@@ -321,7 +327,8 @@ const STEP_VIEW: Record<Exclude<BatchStep, "wall">, (vm: BatchVm) => string> = {
  */
 function batchBody(vm: BatchVm, step: BatchStep): string {
   const sections: [string, string][] = step === "wall"
-    ? [["overview", overviewView(vm)], ["wall", wallView(vm)]]
+    // The first page ends in the key points: what the batch found so far, one line each (lanes.ts keyPointsView).
+    ? [["overview", overviewView(vm)], ["wall", wallView(vm)], ["points", keyPointsView(vm)]]
     : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || notYetView(vm, step)]];
   // The bar is a new element on every page, so it arrives with the page.
   sections.push([`pager:${step}`, pagerView(vm, step)]);
@@ -1075,6 +1082,15 @@ root.addEventListener("click", (e) => {
     case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
     case ACT.workToggle: S.workOpen = !S.workOpen; paint(); return;
     case ACT.toggleFeed: S.feedOpen = !S.feedOpen; paint(); return;
+    case ACT.fold: {
+      if (!b) return;
+      // The button says whether its fold is open now, whatever made it so (its default, or an earlier click).
+      const was = el.getAttribute("aria-expanded") === "true";
+      S.folds = { ...(S.foldsFor === b.id ? S.folds : {}), [arg]: !was };
+      S.foldsFor = b.id;
+      paint();
+      return;
+    }
     case ACT.resetConfig:
       if (S.home.defaults) { S.home = { ...S.home, draft: resetDraft(S.home), error: null }; paint(); scheduleEstimate(); }
       return;

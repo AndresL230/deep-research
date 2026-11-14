@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 37,
+  "notes": "Phase-based controller: approach above the can, descend to mid-height, close, lift, carry to the zone, lower, release, and retreat, using min-jerk Cartesian moves and IK with gripper-down orientation. Succeeded in 37/37 episodes (practice layout with seeds 0-20, 12 random can/zone layouts, and 4 CLI reruns) with place error 0.6-1.9 cm; the sample is small and the random layouts were drawn from a limited region."
+}
