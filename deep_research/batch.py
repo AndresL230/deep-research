@@ -389,6 +389,8 @@ class Batch:
             elif motion:
                 self.case.update_run(run_id, motion_files=[f"runs/{run_id}/outputs/{path}" for path in motion])
         except Exception as e:  # noqa: BLE001 - one bad run must not sink the batch
+            # The reason keeps one line; the log gets the whole chain (an SDK's "Connection error." hides its cause).
+            logger.warning("run %s of %s failed", run_id, self.id, exc_info=True)
             self.case.update_run(run_id, status="failed", reason=f"{type(e).__name__}: {e}"[:500])
         finally:
             if watch is not None:
