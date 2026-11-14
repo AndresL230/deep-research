@@ -238,7 +238,7 @@ export function taskText(vm: BatchVm): string {
 
 type Status = RunRecord["status"] | ForkChild["status"];
 const STATUS_TEXT: Record<string, string> = {
-  queued: "Queued", starting: "Starting", running: "Running", honest: "Honest", inflated: "Inflated", failed: "Failed",
+  queued: "Queued", starting: "Starting", running: "Running", honest: "Honest", inflated: "Inflated", unclear: "Unclear", failed: "Failed",
 };
 
 interface Subject {
@@ -303,7 +303,8 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
   const s = subject(vm, key);
   const status = s.status ?? "queued";
   const scored = status === "honest" || status === "inflated";
-  const tone = status === "honest" ? " is-honest" : status === "inflated" ? " is-inflated" : status === "failed" ? " is-failed" : "";
+  const tone = status === "honest" ? " is-honest" : status === "inflated" ? " is-inflated" : status === "failed" ? " is-failed"
+    : status === "unclear" ? " is-unclear" : "";
   const simulated = (vm.case.config as Partial<BatchConfig>).simulated === true;
 
   const top = `<div class="rn-top">
@@ -326,6 +327,7 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
       : "No change: the agent carried on by itself.";
     note = `<p class="rn-note">${esc(from + what)}</p>`;
   }
+  if (status === "unclear" && s.score.reason) note += `<p class="rn-note">${esc(s.score.reason)}</p>`;
   if (status === "failed" && s.score.reason) note += `<p class="rn-note rn-note--fail">${esc(s.score.reason)}</p>`;
 
   const cost: ScopeCost | undefined = vm.case.costs.scopes?.[s.scope];

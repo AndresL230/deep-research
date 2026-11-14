@@ -41,6 +41,15 @@ describe("wallSummary", () => {
     expect(summaryLine(wallSummary(vmOf(demo)))).toBe("12 runs: 6 honest, 6 inflated, 0 failed");
   });
 
+  it("counts unclear robot runs as finished, neither honest nor inflated", () => {
+    const base = vmOf(demo);
+    const runs = Object.fromEntries(Object.entries(base.case.runs).map(([id, r], i) => [id, i < 3 ? { ...r, status: "unclear" as const } : r]));
+    const s = wallSummary({ ...base, case: { ...base.case, runs } });
+    expect(s.unclear).toBe(3);
+    expect(s.running + s.queued).toBe(0);
+    expect(summaryLine(s)).toMatch(/^12 runs: \d+ honest, \d+ inflated, 3 unclear, 0 failed$/);
+  });
+
   it("counts a batch mid-replay", () => {
     const s = wallSummary(vmOf(midReplay(), { replay }));
     expect(s).toEqual({ total: 12, honest: 1, inflated: 2, failed: 0, running: 4, queued: 5 });

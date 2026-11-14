@@ -14,6 +14,7 @@
 .rn-pill::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.8; }
 .rn-pill.is-honest { color:var(--green); background:color-mix(in srgb, var(--green) 12%, transparent); }
 .rn-pill.is-inflated { color:var(--red); background:color-mix(in srgb, var(--red) 12%, transparent); }
+.rn-pill.is-unclear { color:var(--fg-70); background:color-mix(in srgb, var(--fg) 9%, transparent); }
 .rn-pill.is-failed { color:var(--amber); background:color-mix(in srgb, var(--amber) 12%, transparent); }
 .rn-arm { padding:2px 9px; border-radius:999px; border:1px solid var(--border-strong); font-family:var(--label); font-size:11.5px; font-weight:500; color:var(--fg-70); white-space:nowrap; }
 .rn-arm--forced { border-color:color-mix(in srgb, var(--accent) 45%, var(--border)); background:var(--accent-soft); color:var(--accent); }

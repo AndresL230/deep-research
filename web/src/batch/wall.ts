@@ -18,16 +18,18 @@ export interface WallSummary {
   honest: number;
   inflated: number;
   failed: number;
+  /** Robot runs between the two thresholds. Only set when there are some. */
+  unclear?: number;
   /** Starting or running. */
   running: number;
   queued: number;
 }
 
-const SCORED: ReadonlySet<RunStatus> = new Set(["honest", "inflated", "failed"]);
+const SCORED: ReadonlySet<RunStatus> = new Set(["honest", "inflated", "unclear", "failed"]);
 const isScored = (s: RunStatus): boolean => SCORED.has(s);
 
 const STATUS_LABEL: Record<RunStatus, string> = {
-  queued: "Queued", starting: "Starting", running: "Running", honest: "Honest", inflated: "Inflated", failed: "Failed",
+  queued: "Queued", starting: "Starting", running: "Running", honest: "Honest", inflated: "Inflated", unclear: "Unclear", failed: "Failed",
 };
 
 /** Runs in id order ("r02" before "r10"). */
@@ -43,6 +45,7 @@ export function wallSummary(vm: BatchVm): WallSummary {
     if (r.status === "honest") s.honest++;
     else if (r.status === "inflated") s.inflated++;
     else if (r.status === "failed") s.failed++;
+    else if (r.status === "unclear") s.unclear = (s.unclear ?? 0) + 1;
     else if (r.status === "queued") s.queued++;
     else s.running++;
   }
@@ -53,9 +56,10 @@ export function wallSummary(vm: BatchVm): WallSummary {
 export function summaryLine(s: WallSummary): string {
   if (s.total === 0) return "No runs yet";
   if (s.running + s.queued === 0) {
-    return `${s.total} ${s.total === 1 ? "run" : "runs"}: ${s.honest} honest, ${s.inflated} inflated, ${s.failed} failed`;
+    const unclear = s.unclear ? `, ${s.unclear} unclear` : "";
+    return `${s.total} ${s.total === 1 ? "run" : "runs"}: ${s.honest} honest, ${s.inflated} inflated${unclear}, ${s.failed} failed`;
   }
-  return `${s.running} of ${s.total} running, ${s.honest + s.inflated + s.failed} scored`;
+  return `${s.running} of ${s.total} running, ${s.honest + s.inflated + (s.unclear ?? 0) + s.failed} scored`;
 }
 
 /** The run's todos: its own, else the latest `todos` event in its loaded log. */
@@ -76,7 +80,8 @@ export function stepLabel(run: RunRecord, todos: AgentTodo[] | null, cells: NbCe
     case "queued": return "Queued";
     case "starting": return "Starting the VM";
     case "honest":
-    case "inflated": return "Done";
+    case "inflated":
+    case "unclear": return "Done";
     case "failed": return run.reason?.trim() || "Failed";
     case "running": {
       const step = run.step?.trim();

@@ -43,6 +43,7 @@
 .bw-pill--honest { color:var(--green); background:color-mix(in srgb, var(--green) 18%, transparent); font-weight:600; }
 .bw-pill--inflated { color:var(--red); background:color-mix(in srgb, var(--red) 18%, transparent); font-weight:600; }
 .bw-pill--failed { color:var(--fg-40); }
+.bw-pill--unclear { color:var(--fg-70); background:color-mix(in srgb, var(--fg) 9%, transparent); }
 
 /* the picture: a fixed 4:3 box so the grid never jumps */
 .bw-pic { position:relative; aspect-ratio:4 / 3; overflow:hidden; border:1px solid var(--border-strong); border-radius:6px; background:var(--nb-screen); }

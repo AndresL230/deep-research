@@ -120,7 +120,7 @@ function ownTimes(events: AgentEvent[]): number[] {
   return t;
 }
 
-const SCORED = ["honest", "inflated", "failed"];
+const SCORED = ["honest", "inflated", "unclear", "failed"];
 
 /** Each log with its own clock, for the notebooks: a replay's from the timeline, a live batch's from the wall clock. */
 function logViews(b: BatchState, full: CaseFile, c: CaseFile): Record<EventKey, LogView> {
@@ -176,7 +176,7 @@ function routeKey(r: Route): EventKey | null {
 }
 
 function finished(c: CaseFile, r: Route): boolean {
-  if (r.name === "run") return ["honest", "inflated", "failed"].includes(c.runs[r.run]?.status ?? "");
+  if (r.name === "run") return SCORED.includes(c.runs[r.run]?.status ?? "");
   if (r.name === "child") {
     const f = c.forks[r.fork];
     const st = f && !isPendingForks(f) ? f.children[r.child]?.status : undefined;

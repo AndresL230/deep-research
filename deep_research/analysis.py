@@ -322,6 +322,7 @@ def find_split(
     that was planted for is the one the fork experiment can test.
 
     `steps` is the domain's labels and split anchor (`Steps`). None: this module's, the tabular ones.
+    Only honest and inflated runs are compared: failed runs and the robot domain's unclear runs are left out.
     """
     steps = steps or STEPS
     honest = [r for r, s in statuses.items() if s == "honest" and r in runs]
