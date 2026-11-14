@@ -8,6 +8,14 @@ export default defineConfig({
     // ws: true so the batch websocket (/api/batches/{id}/ws) works in dev too.
     proxy: { "/api": { target: "http://localhost:8000", changeOrigin: true, ws: true } },
   },
-  build: { outDir: "dist", emptyOutDir: true },
+  // The landing page's 3D scenes (src/landing/scene.ts and devices.ts) are loaded on demand, and both need three.js:
+  // about 550 kB before gzip. It gets a chunk of its own, named for what it is, and the limit only keeps the build
+  // from warning about that one chunk.
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    chunkSizeWarningLimit: 700,
+    rollupOptions: { output: { manualChunks: (id) => (id.includes("/node_modules/three/") ? "three" : undefined) } },
+  },
   test: { include: ["test/**/*.test.ts"], environment: "node" },
 });

@@ -1,6 +1,7 @@
 // The app: one canvas whose state follows the batch (docs/api-contract.md, web/src/batch/model.ts).
 //
-//   #/                         home: saved and live batches, and the config screen to start one
+//   #/                         the landing page: a nav and a hero over a 3D scene of the pipeline (landing/)
+//   #/start                    home: saved and live batches, and the config screen to start one
 //   #/b/<id>                   a batch: phase panel, the wall of runs, the split lanes, the fork experiment, the verdict
 //   #/b/<id>/run/<run>         one run in the Ask conversation view
 //   #/b/<id>/fork/<f>/<child>  one fork child in the conversation view
@@ -37,6 +38,8 @@ import { LABEL_PATTERNS, chartUrl, logOf, notebookCells, notebookView } from "./
 import { fetchCosts, type CostReport } from "./api";
 import type { Loadable } from "./batch/model";
 import { costsLink, costsView } from "./batch/costs";
+import { landingView } from "./landing/landing";
+import { syncLanding } from "./landing/mount";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -69,6 +72,8 @@ interface AppState {
   cvKey: string;
   /** A run's page: its notebook, or the same log as conversation steps. */
   runView: "notebook" | "steps";
+  /** The landing page: which item of the list under the hero is open. */
+  landingItem: number;
   /** The cost screen's report (GET /api/costs), loaded again on every visit. */
   costs: Loadable<CostReport>;
   /** Where the cost screen was opened from, for its back button. */
@@ -86,6 +91,7 @@ const S: AppState = {
   cv: initialConversationUi(),
   cvKey: "",
   runView: "notebook",
+  landingItem: 0,
   costs: { state: "loading" },
   costsBack: { name: "home" },
   hub: null,
@@ -100,7 +106,7 @@ const app = document.getElementById("app")!;
 const params = new URLSearchParams(location.search);
 const themeQ = matchMedia("(prefers-color-scheme: dark)");
 const forcedTheme = params.get("theme");
-// Dark unless asked, on a cool near-black. `?theme=light` forces light, `?theme=system` follows the OS.
+// Dark unless asked, on the same black as the landing page. `?theme=light` forces light, `?theme=system` follows the OS.
 const theme = (): "light" | "dark" => (forcedTheme === "light" ? "light" : forcedTheme === "system" && !themeQ.matches ? "light" : "dark");
 const syncPageTheme = (): void => { document.documentElement.style.colorScheme = theme(); document.body.style.background = theme() === "dark" ? "#15171b" : "#fbfbfc"; };
 syncPageTheme();
@@ -255,15 +261,22 @@ function render(): void {
   frame = 0;
   const r = S.route;
   const b = S.batch;
-  const vm = r.name !== "home" && b?.full ? batchVm(b, b.full) : null;
+  const vm = "id" in r && b?.full ? batchVm(b, b.full) : null;
 
+  // The landing page brings its own nav and its own palette, whatever the app's theme is: dark, or its light
+  // version when `?theme=light` asks for it.
+  const landing = r.name === "landing";
+  const landingTone = forcedTheme === "light" ? "light" : "dark";
+  headerEl.hidden = landing;
+  root.dataset.cnpyTheme = landing ? landingTone : theme();
   morphInner(headerEl, headerView(vm));
   const showReplay = !!(vm && vm.replay);
   subEl.hidden = !showReplay;
   if (showReplay && vm?.replay) morphInner(subEl, replayBar(vm.replay));
 
   let body: string;
-  if (r.name === "home") body = homeView(S.home, { html: inputsView(S.ds, S.home.starting), label: inputsLabel(S.ds) });
+  if (landing) body = landingView(landingTone, S.landingItem);
+  else if (r.name === "home") body = homeView(S.home, { html: inputsView(S.ds, S.home.starting), label: inputsLabel(S.ds) });
   else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
   else if (!vm) body = messageView("loading", "Opening the batch", "Loading its case file and event logs…");
@@ -280,6 +293,9 @@ let shownSections = new Set<string>();
 
 let ticker: ReturnType<typeof setInterval> | null = null;
 function afterPaint(): void {
+  // The landing page's 3D scenes are canvases, not markup: start them when the page is there, stop them when it is
+  // not, and show the open item's device.
+  syncLanding(scrollEl);
   if (S.route.name === "batch") {
     const els = Array.from(scrollEl.querySelectorAll<HTMLElement>(".pg-sec[data-morph-key]"));
     const keys = new Set(els.map((el) => el.dataset.morphKey!));
@@ -627,7 +643,9 @@ function onRoute(): void {
   const key = routeKey(r) ?? "";
   if (key !== S.cvKey) { S.cv = initialConversationUi(); S.cvKey = key; }
   if (prev.name !== r.name || routeKey(prev) !== routeKey(r)) scrollEl.scrollTop = 0;
-  if (r.name === "home") {
+  if (r.name === "landing") {
+    closeBatch();
+  } else if (r.name === "home") {
     closeBatch();
     void loadHome();
   } else if (r.name === "costs") {
@@ -648,6 +666,9 @@ window.addEventListener("hashchange", onRoute);
 // ── events ───────────────────────────────────────────────────────────────────
 
 root.addEventListener("click", (e) => {
+  // The landing page's list: pressing an item's title opens it.
+  const item = (e.target as Element | null)?.closest<HTMLElement>("[data-lp-item]");
+  if (item) { S.landingItem = Number(item.dataset.lpItem) || 0; paint(); return; }
   const el = (e.target as Element | null)?.closest<HTMLElement>("[data-act]");
   if (!el || (el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") return;
   if (el.tagName === "A") return; // real links (charts, lab pages) open on their own
@@ -774,7 +795,7 @@ scrollEl.addEventListener("scroll", () => {
 }, { passive: true });
 
 // A live batch's notebooks type between server messages.
-setInterval(() => { if (S.batch?.live && S.route.name !== "home") paint(); }, 150);
+setInterval(() => { if (S.batch?.live && "id" in S.route) paint(); }, 150);
 // The cost screen follows a batch that is still running.
 setInterval(() => { if (S.route.name === "costs" && S.costs.state === "ready" && S.costs.value.batches.some((b) => b.kind === "live")) void loadCosts(); }, 5000);
 

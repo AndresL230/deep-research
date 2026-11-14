@@ -38,7 +38,9 @@ export const ACT = {
 
 // ── routes (location.hash) ───────────────────────────────────────────────────
 
+/** `landing` is the page a visitor arrives on; `home` is the app's own first screen (the batches and the start panel). */
 export type Route =
+  | { name: "landing" }
   | { name: "home" }
   | { name: "costs" }
   | { name: "batch"; id: string }
@@ -53,13 +55,15 @@ export function parseRoute(hash: string): Route {
     return { name: "batch", id: parts[1] };
   }
   if (parts[0] === "costs") return { name: "costs" };
-  return { name: "home" };
+  if (parts[0] === "start") return { name: "home" };
+  return { name: "landing" };
 }
 
 export function routeHash(r: Route): string {
   const e = encodeURIComponent;
   switch (r.name) {
-    case "home": return "#/";
+    case "landing": return "#/";
+    case "home": return "#/start";
     case "costs": return "#/costs";
     case "batch": return `#/b/${e(r.id)}`;
     case "run": return `#/b/${e(r.id)}/run/${e(r.run)}`;

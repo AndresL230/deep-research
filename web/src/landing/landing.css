@@ -1,0 +1,174 @@
+/* The landing page (landing.ts): a nav and a hero over a 3D scene (scene.ts), then a list beside a 3D device
+   (devices.ts), then the split finder's pinned chapter (finder.ts). It keeps its own palette whatever the app's
+   theme is, because the scenes' colours are their own: dark, or light under `data-lp-tone="light"` (kit.ts PALETTES
+   holds the matching colours for the scenes). */
+
+/* ── type: one face, Geist, the app's own, in two voices (the robot floor's, which the rest follows):
+   - display: headings, heavy and set tight (`--lp-display-*`)
+   - text: paragraphs, regular, a hair tight, with room between the lines (`--lp-text-*`)
+   Smaller headings, like a card's, are a step lighter (`--lp-head-*`). */
+
+.lp { --lp-bg:#15171b; --lp-ink:#f2f3f3; --lp-lede:#dde0e3; --lp-ink-2:#c4c8cc; --lp-mark:#2b3235; --lp-mark-edge:inset 0 0 0 1px rgba(255,255,255,0.09); --lp-cta:#e9ecec; --lp-cta-fg:#16181d; --lp-cta-hover:#ffffff; --lp-cta-shadow:0 1px 2px rgba(0,0,0,0.5), 0 6px 14px -6px rgba(0,0,0,0.6); --lp-hover:rgba(255,255,255,0.08); --lp-focus:#8ea2ff; --lp-quiet:#7b838a; --lp-accent:#868ec1; --lp-chip:rgba(154,164,223,0.17); --lp-surface:#1b1e23; --lp-dot:#9aa4df; --lp-dot-halo:rgba(154,164,223,0.24); --lp-tag:#e9ecec; --lp-tag-ink:#16181d; --lp-tag-dim:#51585d; --lp-tag-honest:#4f58a8; --lp-tag-inflated:#8f5800; --lp-tag-code:rgba(22,24,29,0.075); --lp-tag-shadow:0 1px 2px rgba(0,0,0,0.5), 0 10px 24px -10px rgba(0,0,0,0.7);
+  --lp-gutter:clamp(20px, 5.4vw, 79px); --lp-display-weight:680; --lp-display-track:-0.035em; --lp-display-leading:1.02; --lp-head-weight:600; --lp-head-track:-0.025em; --lp-text-track:-0.005em; --lp-text-leading:1.45; color-scheme:dark;
+  flex:1 0 auto; background:var(--lp-bg); color:var(--lp-ink); font-family:var(--sans); }
+
+.lp[data-lp-tone="light"] { --lp-bg:#fcfcfc; --lp-ink:#16181d; --lp-lede:#16181d; --lp-ink-2:#383e42; --lp-mark-edge:0 1px 2px rgba(22,24,29,0.25), inset 0 1px 0 rgba(255,255,255,0.1); --lp-cta:#2b3235; --lp-cta-fg:#e9ecec; --lp-cta-hover:#374045; --lp-cta-shadow:0 1px 2px rgba(22,24,29,0.24), 0 4px 10px -3px rgba(22,24,29,0.26), inset 0 1px 0 rgba(255,255,255,0.09); --lp-hover:rgba(22,24,29,0.06); --lp-focus:#5f6fd6; --lp-quiet:#5c646a; --lp-accent:#6a72b8; --lp-chip:rgba(90,99,176,0.13); --lp-surface:#e9ecec; --lp-dot:#5a63b0; --lp-dot-halo:rgba(90,99,176,0.2); --lp-tag:#2b3235; --lp-tag-ink:#f2f3f3; --lp-tag-dim:#c4c8cc; --lp-tag-honest:#b7bce1; --lp-tag-inflated:#f2b040; --lp-tag-code:rgba(255,255,255,0.1); --lp-tag-shadow:0 1px 2px rgba(22,24,29,0.24), 0 8px 18px -8px rgba(22,24,29,0.4); color-scheme:light; }
+/* What shows past the page's ends when the scroll bounces: the landing's own ground, not the app's. The page behind
+   the app's root may carry an inline colour, hence the !important. */
+.pg-scroll:has(> .lp) { background:#15171b; }
+.pg-scroll:has(> .lp[data-lp-tone="light"]) { background:#fcfcfc; }
+html:has(.lp) body { background:#15171b !important; }
+html:has(.lp[data-lp-tone="light"]) body { background:#fcfcfc !important; }
+
+/* ── the first screen: the nav and the hero, over the scene ── */
+.lp-top { position:relative; isolation:isolate; display:flex; flex-direction:column; min-height:100vh; min-height:100dvh; overflow:hidden; }
+
+/* ── the scene: a canvas under everything, faded in once it has drawn ── */
+.lp-scene { position:absolute; inset:0; z-index:0; opacity:0; pointer-events:none; transition:opacity .7s ease; }
+.lp-scene[data-ready] { opacity:1; }
+.lp-scene > canvas { display:block; width:100%; height:100%; }
+
+/* ── the nav ── */
+.lp-nav { position:relative; z-index:2; flex:none; display:flex; align-items:center; gap:4px; height:88px; padding:0 var(--lp-gutter); }
+.lp-brand { display:inline-flex; align-items:center; gap:11px; margin-right:28px; border-radius:9px; color:var(--lp-ink); text-decoration:none; }
+.lp-mark { flex:none; display:grid; place-items:center; width:32px; height:32px; border-radius:8px; background:var(--lp-mark); box-shadow:var(--lp-mark-edge); }
+.lp-name { font-size:20px; font-weight:var(--lp-head-weight); letter-spacing:var(--lp-head-track); white-space:nowrap; }
+.lp-links { display:flex; align-items:center; gap:4px; min-width:0; }
+.lp-link { display:inline-flex; align-items:center; height:40px; padding:0 16px; border-radius:9px; font-size:14px; font-weight:500; letter-spacing:var(--lp-text-track); color:var(--lp-ink-2); text-decoration:none; white-space:nowrap; transition:background-color .15s ease; }
+.lp-link:hover { background:var(--lp-hover); }
+.lp-cta { flex:none; display:inline-flex; align-items:center; height:40px; margin-left:auto; padding:0 16px; border-radius:9px; background:var(--lp-cta); color:var(--lp-cta-fg); font-size:14px; font-weight:600; letter-spacing:var(--lp-text-track); text-decoration:none; white-space:nowrap; box-shadow:var(--lp-cta-shadow); transition:background-color .15s ease, transform .12s ease; }
+.lp-cta:hover { background:var(--lp-cta-hover); }
+.lp-cta:active { transform:translateY(1px); }
+.lp-brand:focus-visible, .lp-link:focus-visible, .lp-cta:focus-visible { outline:2px solid var(--lp-focus); outline-offset:2px; }
+
+/* ── the hero: the copy at the top left; scene.ts finds the room that is left and puts the scene in it ── */
+.lp-hero { position:relative; z-index:1; flex:1 0 auto; display:flex; flex-direction:column; min-height:520px; padding:0 var(--lp-gutter); }
+.lp-copy { width:fit-content; max-width:min(100%, 640px); margin-top:clamp(12px, 4.6vh, 40px); }
+.lp-title { margin:0; font-size:clamp(34px, min(4.1vw, 7vh), 60px); line-height:var(--lp-display-leading); font-weight:var(--lp-display-weight); letter-spacing:var(--lp-display-track); text-wrap:balance; }
+.lp-lede { max-width:608px; margin:clamp(16px, 3.2vh, 28px) 0 0; font-size:clamp(17px, min(1.77vw, 3vh), 26px); line-height:var(--lp-text-leading); letter-spacing:var(--lp-text-track); color:var(--lp-lede); text-wrap:pretty; }
+/* On a narrow page the scene goes under the copy, and this holds the room for it. */
+.lp-room { display:none; flex:none; }
+
+/* ── under the hero: a list, and beside it the device for whichever item is open. It is a screen of its own, with
+   the two held in the middle of it. ── */
+.lp-more { position:relative; display:grid; grid-template-columns:minmax(0, 572px) minmax(0, 1fr); align-items:center; gap:24px clamp(24px, 4vw, 64px); min-height:100vh; min-height:100dvh; padding:clamp(40px, 8vh, 96px) var(--lp-gutter); }
+/* The list is set in from the gutter by the room its bar takes. */
+.lp-more-copy { min-width:0; padding-left:24px; }
+.lp-more-title, .lp-item-t { font-size:clamp(32px, min(3.85vw, 6.6vh), 56px); line-height:var(--lp-display-leading); font-weight:var(--lp-display-weight); letter-spacing:var(--lp-display-track); }
+.lp-more-title { margin:0; color:var(--lp-quiet); }
+.lp-items { list-style:none; margin:0; padding:0; }
+.lp-item { position:relative; margin-top:clamp(22px, 2.6vw, 33px); }
+/* The bar beside the open item: it grows down from the title as the paragraph opens. */
+.lp-item::before { content:""; position:absolute; left:-24px; top:0; bottom:0; width:4px; background:var(--lp-accent); transform:scaleY(0); transform-origin:top; transition:transform .35s var(--fx-ease); }
+.lp-item.is-open::before { transform:none; }
+.lp-item-h { margin:0; }
+.lp-item-t { display:block; width:100%; padding:0; text-align:left; color:var(--lp-quiet); transition:color .25s ease; }
+.lp-item-t:hover { color:var(--lp-ink-2); }
+.lp-item.is-open .lp-item-t { color:var(--lp-ink); cursor:default; }
+.lp-item-t:focus-visible { outline:2px solid var(--lp-focus); outline-offset:4px; border-radius:4px; }
+/* A closed paragraph has no height and is out of reach of a screen reader; it opens by growing its row. */
+.lp-item-b { display:grid; grid-template-rows:0fr; visibility:hidden; transition:grid-template-rows .35s var(--fx-ease), visibility 0s .35s; }
+.lp-item.is-open .lp-item-b { grid-template-rows:1fr; visibility:visible; transition:grid-template-rows .35s var(--fx-ease), visibility 0s; }
+.lp-item-p { min-height:0; overflow:hidden; margin:0; font-size:clamp(17px, min(1.5vw, 2.6vh), 22px); line-height:var(--lp-text-leading); letter-spacing:var(--lp-text-track); color:var(--lp-lede); text-wrap:pretty; }
+.lp-item-x { display:block; padding:16px 0 2px; }
+.lp-chip { padding:1px 9px 2px; border-radius:8px; background:var(--lp-chip); color:var(--lp-ink); white-space:nowrap; }
+/* The device: a canvas that fades in once it has drawn, and out and in again when the open item changes. */
+.lp-device { position:relative; justify-self:center; width:min(100%, 640px); aspect-ratio:576 / 526; opacity:0; transition:opacity .45s ease; }
+.lp-device[data-ready] { opacity:1; }
+.lp-device[data-ready][data-swap] { opacity:0; transition-duration:.16s; }
+.lp-device > canvas { display:block; width:100%; height:100%; }
+
+/* ── the split finder: a chapter that stays on screen while the page scrolls through it. The scrolling is its clock
+   (chapter.ts): one screen that is seen, and 256vh of travel that finder.ts plays the chapter over. ── */
+.lp-pin { position:relative; height:356vh; }
+.lp-finder { position:sticky; top:0; box-sizing:border-box; height:100vh; height:100dvh; display:grid; grid-template-columns:minmax(0, 548px) minmax(0, 1fr); align-items:center; gap:20px clamp(24px, 5vw, 64px); padding:0 max(var(--lp-gutter), 44px) 16px; isolation:isolate; overflow:clip; }
+/* The card the chapter sits on. kit.ts PALETTES `surface` is the same colour: the scene blends toward it. */
+.lp-surface { position:absolute; inset:0 16px 16px; z-index:-1; border-radius:clamp(32px, 5.3vw, 68px); background:var(--lp-surface); }
+.lp-finder-copy { min-width:0; }
+.lp-finder-title { margin:0; font-size:clamp(32px, min(3.85vw, 6.6vh), 56px); line-height:var(--lp-display-leading); font-weight:var(--lp-display-weight); letter-spacing:var(--lp-display-track); }
+.lp-finder-p { margin:clamp(14px, 2.4vh, 20px) 0 0; font-size:clamp(17px, min(1.65vw, 2.9vh), 24px); line-height:var(--lp-text-leading); letter-spacing:var(--lp-text-track); color:var(--lp-lede); text-wrap:pretty; }
+/* The scene: a square canvas that fades in once it has drawn, with the split's tag over it. */
+.lp-net { position:relative; justify-self:center; width:min(100%, 540px, 74vh); aspect-ratio:1; container-type:inline-size; opacity:0; transition:opacity .5s ease; }
+.lp-net[data-ready] { opacity:1; }
+.lp-net > canvas { display:block; width:100%; height:100%; }
+/* The tag stands on the one point the web thins down to. finder.ts moves it there and brings it in (`--lp-tag-in`,
+   0 to 1): the point itself becomes the tag's dot, and the card slides out from it. The card is beside the dot
+   where there is room, and under it where there is not. Its type follows the canvas's width. */
+.lp-tag { --lp-tag-in:0; position:absolute; left:0; top:0; z-index:1; visibility:hidden; opacity:0; pointer-events:none; font-size:clamp(12px, 3.1cqw, 16.5px); will-change:transform, opacity; }
+.lp-tag-dot { position:absolute; left:-6px; top:-6px; width:12px; height:12px; border-radius:50%; background:var(--lp-dot); box-shadow:0 0 0 5px var(--lp-dot-halo); transform:scale(calc(0.4 + 0.6 * var(--lp-tag-in))); }
+.lp-tag-dot::after { content:""; position:absolute; inset:-5px; border-radius:50%; border:1px solid var(--lp-dot); animation:lp-ping 2.6s ease-out infinite; }
+@keyframes lp-ping { from { transform:scale(1); opacity:.75; } to { transform:scale(2.7); opacity:0; } }
+.lp-tag-card { position:absolute; left:26px; top:0; transform:translate(calc((var(--lp-tag-in) - 1) * 10px), -50%); display:grid; gap:0.2em; padding:0.7em 1em 0.78em; border-radius:0.8em; background:var(--lp-tag); color:var(--lp-tag-ink); box-shadow:var(--lp-tag-shadow); white-space:nowrap; }
+.lp-tag-card::before { content:""; position:absolute; right:100%; top:50%; width:13px; height:1px; background:var(--lp-dot); opacity:.7; }
+.lp-tag[data-side="under"] .lp-tag-card { left:0; top:24px; transform:translate(calc(-50% + var(--lp-tag-shift, 0px)), calc((var(--lp-tag-in) - 1) * 8px)); }
+.lp-tag[data-side="under"] .lp-tag-card::before { display:none; }
+.lp-tag-step { font-family:var(--code); font-size:1.12em; font-weight:600; letter-spacing:-0.01em; line-height:1.3; }
+.lp-tag-line { font-size:0.9em; line-height:1.4; letter-spacing:var(--lp-text-track); color:var(--lp-tag-dim); }
+.lp-tag-line b { font-weight:600; }
+.lp-tag-honest { color:var(--lp-tag-honest); }
+.lp-tag-inflated { color:var(--lp-tag-inflated); }
+.lp-tag-code { justify-self:start; margin-top:0.4em; padding:0.22em 0.6em 0.3em; border-radius:0.45em; background:var(--lp-tag-code); font-family:var(--code); font-size:0.82em; line-height:1.4; color:var(--lp-tag-ink); }
+
+/* ── the robot floor: the last chapter. One screen stays put while the page scrolls through the section's height;
+   factory.ts draws the floor behind it and moves its camera with the scrolling (floorplan.ts): 300vh of travel,
+   a station at each third of it. The floor's colour is the section's own (contour.ts FLOOR_INK `floor`). ── */
+.lp-floor { --lp-floor-bg:#15171b; --lp-floor-edge:#23272c; --lp-floor-pill:#f2f3f3; --lp-floor-pill-ink:#16181d; --lp-floor-a:#7780c2; --lp-floor-a-ink:#ffffff; --lp-floor-card:#f2f3f3; --lp-floor-card-ink:#16181d; --lp-floor-track:#d2d5d9; --lp-floor-fill:#6a72b8; --lp-floor-shadow:0 1px 2px rgba(0,0,0,0.5), 0 18px 40px -18px rgba(0,0,0,0.7);
+  position:relative; height:400vh; height:400lvh; background:var(--lp-floor-bg); border-top:1px solid var(--lp-floor-edge); }
+.lp[data-lp-tone="light"] .lp-floor { --lp-floor-bg:#e7e5e0; --lp-floor-edge:#d3d0c5; --lp-floor-pill:#ffffff; --lp-floor-pill-ink:#0a1c20; --lp-floor-a:#5a63b0; --lp-floor-card:#ffffff; --lp-floor-card-ink:#0a1c20; --lp-floor-track:#dddacd; --lp-floor-fill:#5a63b0; --lp-floor-shadow:none; }
+.lp-floor-stage { position:sticky; top:0; box-sizing:border-box; height:100vh; height:100lvh; display:grid; grid-template-rows:auto minmax(0, 1fr); padding:clamp(28px, 6.2vh, 56px) clamp(16px, 2.2vw, 32px) clamp(16px, 2.2vw, 32px); isolation:isolate; overflow:clip; }
+.lp-floor-scene { position:absolute; inset:0; z-index:-1; opacity:0; transition:opacity .7s ease-out; }
+.lp-floor-scene[data-ready] { opacity:1; }
+.lp-floor-scene > canvas { display:block; width:100%; height:100%; }
+/* The heading: two rows of pills, the second led by a round one. */
+.lp-floor-title { --pill:clamp(46px, min(5.35vw, 9.4vh), 80px); margin:0; display:flex; flex-direction:column; align-items:flex-start; gap:calc(var(--pill) * 0.0625); font-family:var(--sans); font-size:calc(var(--pill) * 0.66); line-height:1; font-weight:var(--lp-display-weight); letter-spacing:var(--lp-display-track); pointer-events:none; }
+.lp-floor-row { display:flex; align-items:center; gap:calc(var(--pill) * 0.0625); }
+.lp-floor-pill { display:inline-flex; align-items:center; height:var(--pill); padding:0 calc(var(--pill) * 0.42) calc(var(--pill) * 0.04); border-radius:calc(var(--pill) / 2); background:var(--lp-floor-pill); color:var(--lp-floor-pill-ink); white-space:nowrap; }
+.lp-floor-pill-a { background:var(--lp-floor-a); color:var(--lp-floor-a-ink); }
+.lp-floor-dot { flex:none; width:var(--pill); height:var(--pill); border-radius:50%; background:var(--lp-floor-pill); }
+/* The card: every chapter's words in one place, the open one showing, over a row of bars. */
+.lp-floor-card { align-self:end; justify-self:end; box-sizing:border-box; width:min(100%, 400px); padding:32px; border-radius:24px; background:var(--lp-floor-card); color:var(--lp-floor-card-ink); box-shadow:var(--lp-floor-shadow); }
+.lp-floor-texts { display:grid; }
+.lp-floor-text { grid-area:1 / 1; display:flex; flex-direction:column; gap:24px; visibility:hidden; opacity:0; transition:opacity .3s ease, visibility 0s .3s; }
+.lp-floor-card[data-chapter="0"] [data-lp-floor-text="0"], .lp-floor-card[data-chapter="1"] [data-lp-floor-text="1"], .lp-floor-card[data-chapter="2"] [data-lp-floor-text="2"], .lp-floor-card[data-chapter="3"] [data-lp-floor-text="3"] { visibility:visible; opacity:1; transition:opacity .45s ease .12s, visibility 0s; }
+.lp-floor-h { margin:0; font-size:28px; line-height:0.8; font-weight:var(--lp-head-weight); letter-spacing:var(--lp-head-track); }
+.lp-floor-p { margin:0; font-size:16px; line-height:1.5; letter-spacing:var(--lp-text-track); text-wrap:pretty; }
+.lp-floor-steps { list-style:none; display:flex; gap:3px; margin:32px 0 0; padding:0; }
+/* A bar: a dot, or a long pill while its chapter is open. Its filling slides in from the left as the page scrolls
+   through the chapter (`--lp-fill`, 0 to 1, set by factory.ts). */
+.lp-floor-step { --lp-fill:0; position:relative; display:block; width:16px; height:16px; padding:0; border-radius:8px; background:var(--lp-floor-track); overflow:hidden; cursor:pointer; transition:width .5s var(--fx-ease); }
+.lp-floor-step[aria-current="step"] { width:124px; }
+.lp-floor-step > span { position:absolute; inset:0; border-radius:8px; background:var(--lp-floor-fill); transform:translateX(calc((var(--lp-fill) - 1) * 100%)); }
+.lp-floor-step:focus-visible { outline:2px solid var(--lp-focus); outline-offset:3px; }
+
+@media (max-width: 860px) {
+  .lp-nav { height:72px; }
+  .lp-brand { margin-right:8px; }
+  .lp-copy { max-width:100%; }
+  .lp-title { font-size:clamp(34px, 7.6vw, 52px); }
+  .lp-lede { font-size:clamp(17px, 3.2vw, 22px); }
+  .lp-room { display:block; width:100%; aspect-ratio:1.42; margin-top:12px; }
+  .lp-more { grid-template-columns:minmax(0, 1fr); min-height:0; padding-bottom:clamp(56px, 10vh, 96px); }
+  .lp-more-title, .lp-item-t { font-size:clamp(30px, 6.6vw, 46px); }
+  .lp-item-p { font-size:clamp(17px, 3.2vw, 21px); }
+  .lp-finder { grid-template-columns:minmax(0, 1fr); align-content:center; padding-inline:max(var(--lp-gutter), 36px); }
+  .lp-finder-title { font-size:clamp(30px, 6.6vw, 46px); }
+  .lp-finder-p { font-size:clamp(16px, 3.2vw, 21px); }
+  .lp-net { width:min(100%, 460px, 46vh); }
+  .lp-floor-title { --pill:clamp(38px, 9.6vw, 56px); }
+  .lp-floor-card { width:100%; padding:22px 22px 24px; border-radius:20px; }
+  .lp-floor-text { gap:14px; }
+  .lp-floor-h { font-size:23px; }
+  .lp-floor-p { font-size:15px; line-height:1.42; }
+  .lp-floor-steps { margin-top:20px; }
+}
+@media (max-width: 560px) {
+  .lp-links { display:none; }
+  .lp-name { font-size:18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-scene, .lp-link, .lp-cta, .lp-device, .lp-net, .lp-floor-scene, .lp-floor-text, .lp-floor-step, .lp-item::before, .lp-item-t, .lp-item-b, .lp-item.is-open .lp-item-b { transition:none; }
+  /* The chapter is not pinned and does not play: it is one screen with its still picture (chapter.ts `chapterPoster`). */
+  .lp-pin { height:auto; }
+  .lp-finder { position:relative; }
+  .lp-tag-dot::after { animation:none; opacity:0; }
+}
