@@ -45,7 +45,7 @@ describe("the live robot recording", () => {
   it("shows a verdict that is open and claims no cause, and says what the fork measures", () => {
     const html = verdictView(vm);
     expect(html).toContain("Copies built by VM fork: 0; by replaying the run on a fresh VM: 16.");
-    expect(html).toContain("measures whether the reports became accurate, not whether the controller works better");
+    expect(html).toContain("The evidence level counts honest reports only.");
     expect(live.verdict!.evidence!.level).toBe("open");
     expect(live.verdict!.sentence).not.toMatch(/\bcaus(e|ed|es)\b/i);
     expect(html.length).toBeGreaterThan(0);

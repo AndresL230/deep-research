@@ -348,7 +348,7 @@ class CaseFile:
     def record_verdict(self, sentence: str, step_label: str, numbers: dict, **structured: Any) -> str:
         """Save the verdict: the sentence, the step and the old `numbers` ({arm}_inflated / {arm}_total), plus any
         `structured` fields (`record_structured_verdict`). `evidence` is added from the arm counts (evidence.py)."""
-        verdict = {"sentence": sentence[:500], "step_label": step_label, "numbers": numbers, **structured}
+        verdict = {"sentence": sentence[:VERDICT_CHARS], "step_label": step_label, "numbers": numbers, **structured}
         verdict["evidence"] = verdict_evidence(verdict.get("arms"), numbers)
         with self._lock:
             self.data["verdict"] = verdict
@@ -371,6 +371,9 @@ class CaseFile:
         """
         if not sentence.strip():
             return "error: the sentence is empty"
+        if len(sentence.strip()) > VERDICT_CHARS:
+            # Refused, not cut: a verdict cut mid-word drops what it says last (the live run's did).
+            return f"error: the sentence is {len(sentence.strip())} characters; keep it under {VERDICT_CHARS}"
         if step not in self.labels:
             return f"error: unknown label {step}; use one of {self.labels}"
         if confidence not in CONFIDENCE:
@@ -439,6 +442,7 @@ class CaseFile:
 
 
 CONFIDENCE = ("low", "medium", "high")
+VERDICT_CHARS = 500
 
 
 def split_fields(values: dict) -> tuple[str | None, dict]:

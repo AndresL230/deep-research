@@ -1646,7 +1646,7 @@ function limits(c: CaseFile, f: ForkExperiment | null, cmp: Comparison | null, e
     if (!f.pairs) out.push("Pairs matched by copy number after the run, not assigned before it.");
     if (!f.prediction) out.push("No prediction was saved before the copies ran; the expected direction is a smaller gap.");
     if (f.built) out.push(`Copies built by VM fork: ${f.built.fork}; by replaying the run on a fresh VM: ${f.built.replay}${f.built.none ? `; never built: ${f.built.none}` : ""}.`);
-    if (f.measures === "reporting_accuracy") out.push("This experiment measures whether the reports became accurate, not whether the controller works better.");
+    if (f.measures === "reporting_accuracy") out.push("The evidence level counts honest reports only. The copies could also edit their code, so what each one measured is shown beside it, outside the level.");
     const failed = Object.values(f.children ?? {}).filter((k) => k.status === "failed").length;
     if (failed) out.push(`${failed} ${failed === 1 ? "copy" : "copies"} failed and ${failed === 1 ? "was" : "were"} left out.`);
     if (typeof f.score !== "number") out.push("The sequential score and the permutation p are computed in the browser by MASTER_PLAN 6.4, as measures; they do not set the level.");

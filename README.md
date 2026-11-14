@@ -78,7 +78,9 @@ The evaluation procedure is implemented outside the analyst's sandbox. For the r
 
 ### 03 / Investigate the process
 
-When claims and measured results diverge, Orro examines execution traces and artifacts to identify plausible failure points. The investigator can inspect the code and relevant steps, formulate a hypothesis, and request an experiment.
+When claims and measured results diverge, Orro's investigator examines execution traces and artifacts to identify plausible failure points. It works **blind**: it is never told what the batch was built to go wrong, which step is the "right" one, or where the hidden test cases are. Only the evaluator knows those, and `tests/test_blind_investigator.py` checks every prompt, skill, case-file view and file-tool result the investigator can reach.
+
+Before any experiment, the investigator must record **at least two competing hypotheses**. Each one states its kind (a testing step the agent skipped, or a defect in the code), the evidence for it, a **prediction**, and the result that would **falsify** it. The investigator then chooses which hypothesis to test.
 
 A suspicious step is a **candidate explanation**, not an established cause.
 
@@ -98,6 +100,23 @@ flowchart LR
 ```
 
 This is the heart of Orro: **instead of asking an LLM whether an explanation sounds plausible, test whether changing the suspected decision changes the result**.
+
+Orro has two kinds of experiment, and they measure different things:
+
+| Experiment | Tests | Measures | Statistic (computed in Python, never by the model) |
+|---|---|---|---|
+| **Method fork** | "The agent skipped step X" | Whether the agent's **report** becomes accurate (the copies may also change their code; their measured rates are shown, outside the evidence level) | One-sided Fisher exact test, forced vs. control. `supported` needs ≥ 8 pairs and p < 0.05 |
+| **Code fix** | "Line N of the controller is wrong" | Whether the **controller** succeeds more often | Paired exact sign test on held-out positions, before vs. after the patch |
+
+A more accurate report is not a better controller, and Orro never presents one as the other.
+
+The controls behind these experiments:
+
+- **Pre-registered predictions.** The tested hypothesis's prediction is written onto the experiment before any copy runs. Its outcome (`supported`, `contradicted` or `inconclusive`) is computed from the stored counts.
+- **Separated diagnostic and test sets.** The investigator diagnoses the controller on a set of positions kept at least 3 cm from every hidden test position. The patch is then measured on the hidden set, which it never saw.
+- **Bounded interventions.** Forced steps come from a fixed table. A proposed patch must replace one exact, unique excerpt, must still parse, and is size-limited.
+- **Human approval for every experiment.** This includes the free local fix test, because it executes patched code.
+- **Wording follows the evidence.** A verdict cannot say "caused" unless the evidence level is `supported`, and a fix verdict cannot say "improved" unless the sign test says so.
 
 ### 05 / Produce an auditable case
 
@@ -310,7 +329,20 @@ Orro is an experimental system, and the distinction between implemented infrastr
 - **Evidence must be qualified.** The repository includes evidence-gating logic, but a single experiment is not universal proof of causality or generalization.
 - **Simulation is not physical deployment.** Success in MuJoCo does not establish performance on a real robot.
 - **Simulated fixtures are not live experiments.** The repository's prerecorded robotics demo fixture is intended for interface and storytelling tests and must be identified as simulated.
-- **Do not overclaim end-to-end validation.** The repository documents real robotics agent batches and experiment infrastructure, but a completed live robotics investigator verdict is not established by the inspected materials.
+- **VM forking falls back to replay.** Our Daytona sandboxes refused native forking ("Forking is not supported for this sandbox"), so experiment copies are rebuilt by replaying the source run's commands on a fresh VM. Every experiment records how each copy was built.
+- **Small samples are reported as small.** Robot scores use 20 hidden positions, so rates move in 5-point steps. Four copies per arm can never reach `supported` by design; such results are reported as `inconclusive`.
+
+## Credits
+
+Orro is built on open-source work and hosted services:
+
+- [LangChain Deep Agents](https://github.com/langchain-ai/deepagents), [LangGraph](https://github.com/langchain-ai/langgraph) and LangChain (`langchain-anthropic`, `langchain-daytona`): agent runtime, subagents, human-in-the-loop interrupts and the rubric grader.
+- [Anthropic Claude](https://www.anthropic.com/) models (Haiku and Sonnet) for the analyst agents, the investigator and the grader.
+- [Daytona](https://www.daytona.io/) sandboxes for the agents' isolated machines.
+- [MuJoCo](https://mujoco.org/) (Apache 2.0) for physics. The Franka Emika Panda model comes from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) (Apache 2.0, see `sim/ASSETS_LICENSE`) and is downloaded at a pinned commit by `sim/fetch_assets.py`.
+- FastAPI, Uvicorn, httpx, pandas, scikit-learn, NumPy and python-dotenv on the backend.
+- Vite, TypeScript, Vitest, [three.js](https://threejs.org/) (3D replay) and Lenis (scrolling) on the frontend.
+- The Geist and Hanken Grotesk fonts (SIL Open Font License, see `web/src/fonts/`).
 
 ## The bigger picture
 

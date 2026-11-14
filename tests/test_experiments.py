@@ -129,3 +129,9 @@ async def test_a_declined_experiment_runs_nothing_and_the_investigator_carries_o
     assert next(h for h in case["hypotheses"] if h["id"] == "h1")["status"] == "untested"
     events = [json.loads(line) for line in (b.dir / "investigator" / "events.jsonl").read_text().splitlines()]
     assert any("declined" in json.dumps(e) for e in events)
+
+
+def test_a_verdict_too_long_to_keep_is_refused_not_cut(tmp_path):
+    cf = CaseFile(tmp_path / "case.json")
+    out = cf.record_structured_verdict("x " * 300, "deduplicate", 1.0, 0.0, 1, 1, {}, "low")
+    assert out.startswith("error: the sentence is 599 characters") and cf.data["verdict"] is None
