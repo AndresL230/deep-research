@@ -21,7 +21,7 @@ export const ACT = {
   openRun: "open-run",          // arg: run id ("r01")
   openChild: "open-child",      // arg: "<fork>/<child>" ("f1/control-1")
   back: "back",                 // from a run or child back to its batch
-  goto: "goto",                 // arg: a section of the batch page ("wall", "split", "phase", "fork", "verdict"); scroll to it
+  goto: "goto",                 // arg: a step of the batch (BatchStep); open its page
   runView: "run-view",          // arg: "notebook" | "steps", how a run's page shows its log
   investigate: "investigate",   // live only: start the investigator
   approve: "approve",           // live only: approve forks.pending
@@ -40,11 +40,25 @@ export const ACT = {
 // ── routes (location.hash) ───────────────────────────────────────────────────
 
 /** `landing` is the page a visitor arrives on; `home` is the app's own first screen (the batches and the start panel). */
+/**
+ * A batch is read a page at a time, in this order: the overview and the agents, then each stage after them. The keys
+ * are the page sections' own names (main.ts `batchBody`); the address says them in words (`#/b/<id>/changed`).
+ */
+export const BATCH_STEPS = ["wall", "split", "phase", "fork", "verdict", "diagnosis", "fix"] as const;
+export type BatchStep = (typeof BATCH_STEPS)[number];
+export const STEP_SLUG: Record<BatchStep, string> = {
+  wall: "agents", split: "changed", phase: "investigator", fork: "fork", verdict: "verdict", diagnosis: "diagnosis", fix: "fix",
+};
+export const STEP_LABEL: Record<BatchStep, string> = {
+  wall: "Agents", split: "What changed", phase: "Investigator", fork: "Fork", verdict: "Verdict", diagnosis: "Diagnosis", fix: "Fix",
+};
+
 export type Route =
   | { name: "landing" }
   | { name: "home" }
   | { name: "costs" }
-  | { name: "batch"; id: string }
+  /** `step` is left out on the first page (the overview and the agents). */
+  | { name: "batch"; id: string; step?: BatchStep }
   | { name: "run"; id: string; run: string }
   | { name: "child"; id: string; fork: string; child: string };
 
@@ -53,7 +67,8 @@ export function parseRoute(hash: string): Route {
   if (parts[0] === "b" && parts[1]) {
     if (parts[2] === "run" && parts[3]) return { name: "run", id: parts[1], run: parts[3] };
     if (parts[2] === "fork" && parts[3] && parts[4]) return { name: "child", id: parts[1], fork: parts[3], child: parts[4] };
-    return { name: "batch", id: parts[1] };
+    const step = BATCH_STEPS.find((k) => STEP_SLUG[k] === parts[2]);
+    return step && step !== "wall" ? { name: "batch", id: parts[1], step } : { name: "batch", id: parts[1] };
   }
   if (parts[0] === "costs") return { name: "costs" };
   if (parts[0] === "start") return { name: "home" };
@@ -66,7 +81,7 @@ export function routeHash(r: Route): string {
     case "landing": return "#/";
     case "home": return "#/start";
     case "costs": return "#/costs";
-    case "batch": return `#/b/${e(r.id)}`;
+    case "batch": return r.step && r.step !== "wall" ? `#/b/${e(r.id)}/${STEP_SLUG[r.step]}` : `#/b/${e(r.id)}`;
     case "run": return `#/b/${e(r.id)}/run/${e(r.run)}`;
     case "child": return `#/b/${e(r.id)}/fork/${e(r.fork)}/${e(r.child)}`;
   }

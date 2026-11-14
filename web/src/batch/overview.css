@@ -107,6 +107,43 @@
 .ov-bar-id { font-size:11px; line-height:1; color:var(--fg-55); text-align:center; font-variant-numeric:tabular-nums; overflow:hidden; }
 .ov-bar:hover .ov-bar-id { color:var(--fg); }
 
+/* ── a later page's head: the batch's chips and the steps, the page open marked ── */
+.ov--page { gap:8px; }
+.ov--page > .ds-aurora { height:240px; }
+.ov-head--page { padding:14px 0 0; }
+.ov-step.is-here { background:var(--muted); color:var(--fg); }
+.ov-step.is-here:hover { background:var(--muted-2); }
+
+/* ── the bar at the end of every page: Back on the left, Next on the right ── */
+.pgr { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px 20px; padding-top:20px; border-top:1px solid var(--line); }
+.pgr-l, .pgr-r { display:flex; align-items:center; gap:16px; min-width:0; }
+.pgr-r { margin-left:auto; }
+.pgr-n { font-size:13px; color:var(--fg-55); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.pgr-ic { display:grid; place-items:center; flex:none; transition:transform var(--t-hover) var(--ease-out); }
+.pgr-prev { display:inline-flex; align-items:center; gap:8px; height:44px; padding:0 14px 0 10px; border-radius:var(--r-ctl); font-size:14px; font-weight:500; color:var(--fg-70); transition:background var(--t-hover) ease, color var(--t-hover) ease; }
+.pgr-prev:hover { background:var(--hover); color:var(--fg); }
+.pgr-prev:hover .pgr-ic { transform:translateX(-3px); }
+.pgr-again { padding:0 14px; color:var(--fg-55); }
+/* Next: the one dark button on the page, naming where it goes. */
+.pgr-next { display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 18px 0 20px; border-radius:var(--r-ctl); font-size:15px; font-weight:500; transition:opacity var(--t-hover) ease; }
+.pgr-next-k { color:color-mix(in srgb, var(--ink-fg) 60%, transparent); font-weight:400; }
+.pgr-next:hover .pgr-go { transform:translateX(3px); }
+.pgr-prev:focus-visible, .pgr-next:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+/* Not open yet: what comes next, and when. */
+.pgr-wait { display:inline-flex; align-items:center; gap:10px; min-height:48px; padding:0 16px; border-radius:var(--r-ctl); background:var(--muted); font-size:13.5px; color:var(--fg-55); }
+.pgr-wait b { font-weight:500; color:var(--fg); }
+.pgr-wait .ds-spin { color:var(--accent); }
+.pgr-wait-box { display:block; flex:none; width:7px; height:7px; border:1.5px solid currentColor; border-radius:1.5px; }
+@media (prefers-reduced-motion: no-preference) {
+  .pgr-wait { animation:ds-swap .35s var(--ease-swap) both; }
+}
+
+/* ── a later page the batch has not reached ── */
+.pg-yet { display:flex; flex-direction:column; align-items:flex-start; gap:12px; padding:40px 24px; border:1px dashed var(--border-strong); border-radius:var(--r-card); }
+.pg-yet-t { margin:0; font-size:28px; line-height:1.15; font-weight:400; letter-spacing:-0.03em; }
+.pg-yet-s { margin:0; font-size:14px; color:var(--fg-55); }
+.pg-yet .pgr-prev { margin:4px 0 0 -10px; }
+
 @container (max-width: 1040px) {
   .ov-kpis { grid-template-columns:repeat(3, minmax(0, 1fr)); }
   .ov-cards { grid-template-columns:minmax(0, 1fr); }
@@ -122,6 +159,11 @@
   .ov-kpi-v { font-size:32px; }
   .ov-bar-id { font-size:0; }
 }
+@media (max-width: 560px) {
+  .pgr-next { flex:1; justify-content:center; }
+  .pgr-r { flex:1 1 100%; }
+  .pgr-n { display:none; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .ov-step, .ov-step-line::after, .ov-ring-p, .ov-bar { transition:none; }
+  .ov-step, .ov-step-line::after, .ov-ring-p, .ov-bar, .pgr-ic, .pgr-prev { transition:none; }
 }

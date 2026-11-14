@@ -2,8 +2,9 @@
 //
 //   #/                         the landing page: a nav and a hero over a 3D scene of the pipeline (landing/)
 //   #/start                    home: saved and live batches, and the config screen to start one
-//   #/b/<id>                   a batch: the overview, the wall of runs, the split lanes, the investigator, the fork
-//                              experiment, the verdict
+//   #/b/<id>                   a batch, first page: the overview and the wall of runs
+//   #/b/<id>/<step>            a batch's later pages, one per stage: changed, investigator, fork, verdict,
+//                              diagnosis, fix (model.ts BATCH_STEPS)
 //   #/b/<id>/run/<run>         one run in the Ask conversation view
 //   #/b/<id>/fork/<f>/<child>  one fork child in the conversation view
 //   #/costs                    what every batch cost, in total and one by one
@@ -27,11 +28,11 @@ import {
   fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, uploadDataset, uploadScript, startInvestigation, stopBatch,
   type AgentEvent, type HubStatus, type BatchConfig, type BatchSocket, type CaseFile,
 } from "./api";
-import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
+import { ACT, BATCH_STEPS, STEP_LABEL, childKey, parseRoute, routeHash, type BatchStep, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
 import { HM_ACT, costBar, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload } from "./batch/home";
 import { hubBadge } from "./batch/hub-badge";
 import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
-import { overviewView } from "./batch/overview";
+import { notYetView, overviewView, pageHeadView, pagerView } from "./batch/overview";
 import { wallView } from "./batch/wall";
 import { diagnosisView, fixView, forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
@@ -84,6 +85,8 @@ interface AppState {
   costs: Loadable<CostReport>;
   /** Where the cost screen was opened from, for its back button. */
   costsBack: Route;
+  /** The page of a batch last open, so the way back from one of its runs lands on it. */
+  lastStep: { id: string; step: BatchStep } | null;
   /** This server's link to the team hub, for the header badge (refreshed every half minute). */
   hub: HubStatus | null;
 }
@@ -100,6 +103,7 @@ const S: AppState = {
   landingItem: 0,
   costs: { state: "loading" },
   costsBack: { name: "home" },
+  lastStep: null,
   hub: null,
 };
 
@@ -222,7 +226,9 @@ function paint(): void {
 function headerView(vm: BatchVm | null): string {
   const r = S.route;
   const crumbs: string[] = [];
-  if ("id" in r) crumbs.push(`<button type="button" class="pg-crumb${r.name === "batch" ? " is-cur" : ""}" data-act="${ACT.back}">${esc(r.id)}</button>`);
+  const onFirst = r.name === "batch" && !r.step;
+  if ("id" in r) crumbs.push(`<button type="button" class="pg-crumb${onFirst ? " is-cur" : ""}" data-act="${ACT.back}">${esc(r.id)}</button>`);
+  if (r.name === "batch" && r.step) crumbs.push(`<span class="pg-crumb is-cur">${esc(STEP_LABEL[r.step])}</span>`);
   if (r.name === "costs") crumbs.push(`<span class="pg-crumb is-cur">Costs</span>`);
   if (r.name === "run") crumbs.push(`<span class="pg-crumb is-cur">${esc(r.run)}</span>`);
   if (r.name === "child") crumbs.push(`<span class="pg-crumb is-cur">${esc(`${r.fork} ${r.child}`)}</span>`);
@@ -235,22 +241,25 @@ function headerView(vm: BatchVm | null): string {
   return left + right;
 }
 
-function batchBody(vm: BatchVm): string {
-  // The story in order: where the batch stands, the runs, where they split, what the investigator makes of it, the
-  // fork, the verdict.
-  const sections: [string, string][] = [
-    ["overview", overviewView(vm)],
-    ["wall", wallView(vm)],
-    ["split", splitView(vm)],
-    ["phase", investigatorView(vm)],
-    ["fork", forkView(vm)],
-    ["verdict", verdictView(vm)],
-    ["diagnosis", diagnosisView(vm)],
-    ["fix", fixView(vm)],
-  ];
+/** Each later page's one section. */
+const STEP_VIEW: Record<Exclude<BatchStep, "wall">, (vm: BatchVm) => string> = {
+  split: splitView, phase: investigatorView, fork: forkView, verdict: verdictView, diagnosis: diagnosisView, fix: fixView,
+};
+
+/**
+ * A batch, a page at a time instead of one long scroll. The first page is where the batch stands and its agents; each
+ * stage after them (where the runs split, the investigator, the fork, the verdict, and a robot batch's diagnosis and
+ * fix) is a page of its own. Every page ends in Back / Next (overview.ts `pagerView`).
+ */
+function batchBody(vm: BatchVm, step: BatchStep): string {
+  const sections: [string, string][] = step === "wall"
+    ? [["overview", overviewView(vm)], ["wall", wallView(vm)]]
+    : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || notYetView(vm, step)]];
+  // The bar is a new element on every page, so it arrives with the page.
+  sections.push([`pager:${step}`, pagerView(vm, step)]);
   return `<div class="pg-batch" data-morph-key="batch:${attr(vm.id)}" data-morph-list>${sections
     .filter(([, html]) => html)
-    .map(([k, html]) => `<section class="pg-sec pg-sec--${k}" data-morph-key="sec:${k}">${html}</section>`)
+    .map(([k, html]) => `<section class="pg-sec pg-sec--${k.replace(/:.*/, "")}" data-morph-key="sec:${k}">${html}</section>`)
     .join("")}</div>`;
 }
 
@@ -300,16 +309,13 @@ function render(): void {
   else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
   else if (!vm) body = messageView("loading", "Opening the batch", "Loading its case file and event logs…");
-  else if (r.name === "batch") body = batchBody(vm);
+  else if (r.name === "batch") body = batchBody(vm, r.step ?? "wall");
   else body = runBody(vm, routeKey(r)!);
   scrollEl.dataset.view = r.name;
   root.dataset.view = r.name;
   morphInner(scrollEl, body);
   afterPaint();
 }
-
-/** Sections on screen last paint, so a replay can bring a newly revealed one into view. */
-let shownSections = new Set<string>();
 
 let ticker: ReturnType<typeof setInterval> | null = null;
 function afterPaint(): void {
@@ -318,16 +324,6 @@ function afterPaint(): void {
   // The landing page's 3D scenes are canvases, not markup: start them when the page is there, stop them when it is
   // not, and show the open item's device.
   syncLanding(scrollEl);
-  if (S.route.name === "batch") {
-    const els = Array.from(scrollEl.querySelectorAll<HTMLElement>(".pg-sec[data-morph-key]"));
-    const keys = new Set(els.map((el) => el.dataset.morphKey!));
-    const fresh = els.filter((el) => !shownSections.has(el.dataset.morphKey!));
-    // Follow the story while a replay plays: the split, the fork and the verdict scroll in as they appear.
-    if (S.batch?.replay?.playing && shownSections.size && fresh.length) smooth.to(fresh[fresh.length - 1], { offset: -16 });
-    shownSections = keys;
-  } else {
-    shownSections = new Set();
-  }
   const k = routeKey(S.route);
   // The conversation keeps to the bottom while the person has not scrolled up, as in the chat. Not on a finished robot
   // run's page: its 3D replay at the top is what the page is for.
@@ -450,8 +446,8 @@ async function loadReplay(b: BatchState, full: CaseFile): Promise<void> {
     b.full = full;
     b.live = false;
     const duration = replayDuration(full, b.events);
-    // Opened straight onto a run: show it whole. Opened onto the batch: play it from the start.
-    const atEnd = S.route.name !== "batch" || params.has("end");
+    // Opened straight onto a run or a later page: show it whole. Opened onto the batch: play it from the start.
+    const atEnd = S.route.name !== "batch" || !!S.route.step || params.has("end");
     b.replay = { t: atEnd ? duration : replayStart(b), duration, playing: !atEnd && duration > 0, speed: DEFAULT_SPEED };
     if (b.replay.playing) runClock();
   } catch (e) {
@@ -664,7 +660,10 @@ function onRoute(): void {
   const r = S.route;
   const key = routeKey(r) ?? "";
   if (key !== S.cvKey) { S.cv = initialConversationUi(); S.cvKey = key; }
-  if (prev.name !== r.name || routeKey(prev) !== routeKey(r)) smooth.top();
+  // A new page starts at its top.
+  const stepOf = (x: Route): string => (x.name === "batch" ? x.step ?? "wall" : "");
+  if (prev.name !== r.name || routeKey(prev) !== routeKey(r) || stepOf(prev) !== stepOf(r)) smooth.top();
+  if (r.name === "batch") S.lastStep = { id: r.id, step: r.step ?? "wall" };
   if (r.name === "landing") {
     closeBatch();
   } else if (r.name === "home") {
@@ -728,11 +727,19 @@ root.addEventListener("click", (e) => {
       if ("id" in r && fork && child) go({ name: "child", id: r.id, fork, child });
       return;
     }
-    case ACT.back: if ("id" in r) go({ name: "batch", id: r.id }); else if (r.name === "costs") go(S.costsBack); return;
+    case ACT.back: {
+      // The batch's name in the header goes to its first page; a run's Back goes to the page it was opened from.
+      if (r.name === "batch") go({ name: "batch", id: r.id });
+      else if ("id" in r) {
+        const step = S.lastStep?.id === r.id ? S.lastStep.step : "wall";
+        go(step === "wall" ? { name: "batch", id: r.id } : { name: "batch", id: r.id, step });
+      } else if (r.name === "costs") go(S.costsBack);
+      return;
+    }
     case ACT.goto: {
-      // A step of the pipeline: glide to its section of the page.
-      const sec = Array.from(scrollEl.querySelectorAll<HTMLElement>(".pg-sec[data-morph-key]")).find((el) => el.dataset.morphKey === `sec:${arg}`);
-      if (sec) smooth.to(sec, { offset: -12 });
+      // A step of the batch, or Back / Next: open its page.
+      const step = BATCH_STEPS.find((k) => k === arg);
+      if ("id" in r && step) go(step === "wall" ? { name: "batch", id: r.id } : { name: "batch", id: r.id, step });
       return;
     }
     case ACT.investigate:

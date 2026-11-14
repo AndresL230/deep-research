@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import robotRaw from "../../fixtures/robot-demo-batch/case/case.json?raw";
 import type { CaseFile, RunRecord } from "../src/api";
-import type { BatchVm } from "../src/batch/model";
-import { headline, overviewView, stages } from "../src/batch/overview";
+import { parseRoute, routeHash, type BatchVm } from "../src/batch/model";
+import { headline, notYetView, overviewView, pageHeadView, pageNav, pagerView, stages } from "../src/batch/overview";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
 const robot = JSON.parse(robotRaw) as CaseFile;
@@ -72,9 +72,10 @@ describe("headline", () => {
 describe("overviewView", () => {
   const html = overviewView(vmOf(demo));
 
-  it("draws a step per stage, each a button to its section, finished ones with a drawn check", () => {
+  it("draws a step per stage, each a button to its page, finished ones with a drawn check, this page marked", () => {
     for (const key of ["wall", "split", "phase", "fork", "verdict"]) expect(html).toContain(`data-act="goto" data-arg="${key}"`);
-    expect(html.match(/class="ov-step ov-step--done"/g)).toHaveLength(5);
+    expect(html.match(/class="ov-step ov-step--done[ "]/g)).toHaveLength(5);
+    expect(html).toContain('class="ov-step ov-step--done is-here" data-morph-key="step:wall"');
     expect(html).not.toContain(" disabled>");
     // A step whose section is not on the page yet cannot be pressed.
     expect(overviewView(vmOf(midRun())).match(/ disabled>/g)).toHaveLength(3);
@@ -98,5 +99,46 @@ describe("overviewView", () => {
     expect(r).toContain("Claimed success against the hidden test");
     expect(r).toContain("from 0% to 100%");
     expect(r).toContain(">Hidden test</span>");
+  });
+});
+
+describe("the pages", () => {
+  it("gives each later step an address of its own, and the first page none", () => {
+    expect(parseRoute("#/b/demo-batch")).toEqual({ name: "batch", id: "demo-batch" });
+    expect(parseRoute("#/b/demo-batch/agents")).toEqual({ name: "batch", id: "demo-batch" });
+    expect(parseRoute("#/b/demo-batch/changed")).toEqual({ name: "batch", id: "demo-batch", step: "split" });
+    expect(parseRoute("#/b/demo-batch/fork")).toEqual({ name: "batch", id: "demo-batch", step: "fork" });
+    // A fork child's address still wins over the fork page's.
+    expect(parseRoute("#/b/demo-batch/fork/f1/control-1")).toEqual({ name: "child", id: "demo-batch", fork: "f1", child: "control-1" });
+    expect(parseRoute("#/b/demo-batch/nowhere")).toEqual({ name: "batch", id: "demo-batch" });
+    expect(routeHash({ name: "batch", id: "demo-batch", step: "phase" })).toBe("#/b/demo-batch/investigator");
+    expect(routeHash({ name: "batch", id: "demo-batch", step: "wall" })).toBe("#/b/demo-batch");
+  });
+
+  it("opens the first page onto the next only once every agent is scored", () => {
+    const mid = pageNav(vmOf(midRun()), "wall");
+    expect(mid.next).toBeNull();
+    expect(mid.waiting).toEqual({ label: "What changed", why: "once every agent is scored" });
+    const html = pagerView(vmOf(midRun()), "wall");
+    expect(html).toContain("Next: <b>What changed</b>, once every agent is scored");
+    expect(html).toContain("ds-spin");
+    expect(html).not.toContain('class="pgr-next');
+
+    const done = pageNav(vmOf(demo), "wall");
+    expect(done.next?.key).toBe("split");
+    expect(pagerView(vmOf(demo), "wall")).toContain('data-act="goto" data-arg="split" data-morph-key="next:split"');
+  });
+
+  it("goes back and forward through the stages, and ends on the way back to the start", () => {
+    expect(pageNav(vmOf(demo), "phase")).toMatchObject({ at: 3, of: 5, prev: { key: "split" }, next: { key: "fork" } });
+    const last = pagerView(vmOf(demo), "verdict");
+    expect(last).toContain('data-arg="fork"');
+    expect(last).toContain("That is the whole batch. Back to the agents");
+    expect(last).not.toContain('class="pgr-next');
+  });
+
+  it("says a later page has nothing yet when the batch has not got there", () => {
+    expect(notYetView(vmOf(midRun()), "verdict")).toContain("The verdict appears here once the batch gets there.");
+    expect(pageHeadView(vmOf(demo), "fork")).toContain('class="ov-step ov-step--done is-here" data-morph-key="step:fork" data-act="goto" data-arg="fork" aria-current="step"');
   });
 });
