@@ -1,341 +1,329 @@
-# deep-research
+<div align="center">
 
-AI agents are starting to run data analyses for research, and they make method errors that still produce a clean, confident number. This project runs one data science agent many times in parallel Daytona VMs, checks each run's reported score against the truth, finds the step where honest and inflated runs split, then rewinds to that step, forks the VM, and replays both choices to prove which step caused the wrong result.
+# Orro
 
-HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amazon.
+### The scientific debugger for autonomous AI agents
 
-## How it fits together
+**AI agents can run experiments. Orro investigates whether their conclusions deserve to be trusted.**
 
-| Part | What it is | File |
-| --- | --- | --- |
-| Task | A dataset with a trap planted (duplicate rows by default), plus a clean holdout whose labels never leave our server. Pima diabetes by default, or an uploaded CSV with a chosen target column | `deep_research/task.py`, `datasets.py` |
-| Domains | The kind of task a batch runs, one module each: the task and its prompt, the scoring, the step labels and the split anchor, the forced steps, the investigator's skill and wording, the lab image, and what the UI draws (`charts` or `motion`). `tabular` (the default) wraps the modules below; `robot_arm` wraps `sim/domain.py`, a pick and place controller for a Franka Panda in MuJoCo. Pick one with `BatchConfig.domain` | `deep_research/domains/` |
-| Traps | The flaw planted in the data, one module each: how to plant it, the step an honest run does and the regex that spots it, the forced fix, the evidence number, and the words the UI shows. See [Traps](#traps) | `deep_research/traps/` |
-| Analyst agents | One flat deepagent per run, `DaytonaSandbox` backend, `write_todos` planning, no subagents | `agents/analyst.py` |
-| Orchestrator | Plain Python: VMs, runs, scoring, split finding, fork experiment, costs | `batch.py` |
-| Scorer | Reported accuracy vs true holdout accuracy, plus the trap's evidence number (for duplicates: the share of test rows also in training) | `scoring.py` |
-| Split finder | Labels each action, finds the label honest runs do before the split and inflated runs skip | `analysis.py` |
-| Fork experiment | Rebuild the run just before its split, fork the VM, then run N copies in each arm: `control` unchanged, `forced` with the step done for it, and by default `placebo` (a harmless command, so `forced` is not the only arm with an extra tool call in its history) and `show` (told what `forced` fixes, left to decide) | `batch.py`, `forks.py` |
-| Investigator | Deepagent with `step-tagger` and `hypothesis` subagents, the `method-errors` skill, and an approval gate on `request_forks` | `agents/investigator.py` |
-| Diagnosis and fix | The investigator's `code-tracer` subagent re-runs a failing run's controller on the hidden positions with recording on, turns each recording into timestamped symptoms (`sim/symptoms.py`) and names the line of `controller.py` behind them; the investigator then proposes a patch and a second fork experiment (`control`, `placebo`, `fixed`) tests it from the same moment of the same run | `agents/investigator.py`, `sim/symptoms.py`, `forks.py` |
-| Case file | One JSON file per batch with everything the investigator knows. It is also the UI's data source | `case_file.py` |
-| Costs | Tokens from every model response, VM time, budget guard | `costs.py`, `prices.json` |
-| Lab page | Tiny web page inside each VM showing the agent's latest chart. The server proxies it (no Daytona preview warning); the UI reads a live run's charts through it | `lab_page/server.py` |
-| API | FastAPI plus a websocket per batch; also serves the web UI | `api.py` |
-| Team hub | Cloudflare Worker and D1 that hold every teammate's batches, events and costs, and the runner keys | `hub/`, `hub.py` |
-| Web UI | Vite + TypeScript, Trov Ask styling. A start panel, a wall of runs where each tile is a notebook typing out the agent's code, a side by side view of what the honest and inflated runs did differently, the fork experiment, the verdict, and a replay player for saved batches | `web/src/main.ts`, `web/src/batch/` |
+*Independent verification · Execution tracing · Controlled interventions · Evidence-based verdicts*
 
-### Who can write what
+**HackPrinceton 2026 · Science + Discovery**
 
-The analyst agents are fully isolated: no shared files, no labels, no case file.
+</div>
 
-The investigator reads `/case/`, `/runs/` and `/skills/` through the normal file tools, but a `FilesystemPermission` rule denies `write_file` and `edit_file` there. The case file changes only through narrow tools (`record_step_labels`, `record_hypothesis`, `record_verdict`), each writing one section and checking its input. `tests/test_agents_offline.py` checks that the denial works.
+---
 
-## Layout
+## The problem
 
+Autonomous AI agents are becoming capable of writing code, conducting experiments, interpreting results, and presenting conclusions with minimal human supervision.
+
+But **a successful run is not necessarily a sound experiment**.
+
+An agent can produce convincing results while relying on an inadequate test, an accidental shortcut, a brittle implementation, or a methodological decision that does not generalize. A polished explanation does not reveal which decision caused the problem—or whether correcting that decision would change the outcome.
+
+Most evaluation systems stop at **“Did the agent succeed?”** Orro asks a harder set of questions:
+
+1. **What did the agent claim?**
+2. **What happens under independent evaluation?**
+3. **Where did the agent's process go wrong?**
+4. **Can we experimentally test the suspected cause?**
+5. **How strong is the resulting evidence?**
+
+Orro turns agent evaluation into an **investigation of the process that produced the result**.
+
+## What is Orro?
+
+**Orro is an experimental auditing platform for autonomous AI research agents.**
+
+It launches independent agents in isolated execution environments, records their work, evaluates their outputs against a separate ground-truth procedure, and investigates discrepancies between claims and measured outcomes. When it identifies a suspicious decision, Orro can reconstruct the relevant execution state and compare the original continuation against an intervention.
+
+Instead of merely generating a critique, Orro attempts to **test an explanation**.
+
+The underlying workflow is designed to apply across computational research and agent-driven engineering tasks. **Our flagship demonstration is robotic control**: AI agents write controllers for a simulated robotic arm, and Orro investigates whether apparent success survives unfamiliar conditions.
+
+> **The key distinction:** Orro is not a robotic-arm controller. It is a system for auditing *how autonomous agents reach and justify their results*. Robotics makes that process visible.
+
+## How it works
+
+```mermaid
+flowchart TD
+    A["Research or engineering task"] --> B["Independent AI agents"]
+    B --> C["Isolated Daytona sandboxes"]
+    C --> D["Artifacts, decisions, tool traces, reported results"]
+    D --> E["Independent evaluation"]
+    E --> F{"Discrepancy or suspicious behavior?"}
+    F -- No --> G["Record verified outcome"]
+    F -- Yes --> H["Compare execution histories"]
+    H --> I["Investigator proposes a testable hypothesis"]
+    I --> J["Human approval and experiment budget"]
+    J --> K["Reconstruct a decision point"]
+    K --> L["Control: original continuation"]
+    K --> M["Intervention: targeted change"]
+    L --> N["Re-evaluate outcomes"]
+    M --> N
+    N --> O["Evidence-qualified verdict"]
+    O --> P["Case file and interactive replay"]
 ```
-deep_research/   the Python package: orchestrator, agents, scoring, API
-data/pima.csv    the dataset
-skills/          the investigator's method-errors skill
-lab_page/        the page each VM serves with the agent's latest chart
-prices.json      model and VM prices for the cost bar and budget guard
-fixtures/        saved replays (the simulated demo batch)
-batches/         batches from real runs (git-ignored)
-datasets/        uploaded CSV files (git-ignored)
-user_scripts/    uploaded training scripts (git-ignored)
-scripts/         make_fixture.py, calibrate_traps.py
-tests/           Python tests
-web/             the UI (Vite + TypeScript)
-docs/            api-contract.md
+
+### 01 / Observe independent agents
+
+Multiple research agents receive the same task, but work in separate Daytona environments. Each agent can write code, execute tools, inspect outputs, and report a result. Orro preserves the artifacts and execution history needed to inspect **what the agent actually did**, not just what it said it did.
+
+### 02 / Verify claims independently
+
+Orro uses a domain-specific evaluator to measure the submitted artifact under conditions separate from the agent's own testing. This creates a meaningful comparison between **self-reported performance** and **independently measured performance**.
+
+The evaluation procedure is implemented outside the analyst's sandbox. For the robotics demonstration, unseen object placements and their scoring logic remain server-side.
+
+### 03 / Investigate the process
+
+When claims and measured results diverge, Orro examines execution traces and artifacts to identify plausible failure points. The investigator can inspect the code and relevant steps, formulate a hypothesis, and request an experiment.
+
+A suspicious step is a **candidate explanation**, not an established cause.
+
+### 04 / Run a controlled intervention
+
+Orro reconstructs an earlier point in the agent's execution and compares continuations with and without a targeted change. The platform's experiment machinery supports an unchanged control and an intervention branch; additional comparison arms may be available depending on the intervention.
+
+```mermaid
+flowchart LR
+    S["Reconstructed execution state"] --> C["CONTROL<br/>Continue unchanged"]
+    S --> I["INTERVENTION<br/>Apply targeted correction"]
+    C --> EC["Independent scoring"]
+    I --> EI["Independent scoring"]
+    EC --> V["Compare outcomes and evidence"]
+    EI --> V
+    V --> R["Qualified finding"]
 ```
 
-## Setup
+This is the heart of Orro: **instead of asking an LLM whether an explanation sounds plausible, test whether changing the suspected decision changes the result**.
 
-Needs [uv](https://docs.astral.sh/uv/) and Node 20+.
+### 05 / Produce an auditable case
+
+Orro stores run histories, investigation steps, experiment outcomes, and a qualified verdict in a case record. The web interface can display live execution, compare branches, and replay recorded behavior.
+
+The result is not simply a pass/fail label. It is a traceable account of **what was claimed, what was measured, what was changed, and what the evidence supports**.
+
+---
+
+## Flagship demonstration: a robotic arm that succeeds for the wrong reasons
+
+Our HackPrinceton demonstration uses a **Franka Panda robotic arm in MuJoCo**.
+
+An autonomous AI agent is tasked with writing a Python controller that picks up a can and places it in a target zone. The agent can test its controller in a practice scene and report its performance.
+
+The catch: **success at a familiar object position does not establish generalization**.
+
+A controller may work at the practice location while failing when the can starts somewhere else. It might rely on fixed coordinates, an overly narrow trajectory, inadequate grasp alignment, or a testing procedure that never exercised the relevant variation.
+
+Orro does not assume which explanation is correct. It gathers evidence.
+
+### The experiment
+
+| Stage | What the audience sees | What Orro is testing |
+|---|---|---|
+| **Agent execution** | Independent agents develop and test robot controllers | What did each agent build and claim? |
+| **Hidden evaluation** | The same controllers attempt unseen can placements | Does apparent success generalize? |
+| **Failure replay** | Recorded robot motions reveal missed, dropped, or tipped objects | What actually happened? |
+| **Investigation** | Execution history and controller code are inspected | Which decision might explain the failure? |
+| **Intervention** | An unchanged continuation is compared with a targeted correction | Does changing that decision improve the measured outcome? |
+| **Verdict** | Scores, traces, and evidence are shown together | What conclusion is justified by the experiment? |
+
+### What gets measured?
+
+The robotics evaluator records episode outcomes such as `placed`, `dropped`, `tipped`, and `missed`, along with placement error, test conditions, and motion traces. This makes a failure **observable**, **replayable**, and **independently scored**.
+
+```mermaid
+flowchart TD
+    TASK["Pick up the can and place it in the target zone"] --> AGENT["AI-generated controller.py"]
+    AGENT --> PRACTICE["Visible practice scene"]
+    PRACTICE --> CLAIM["Agent reports performance"]
+    AGENT --> HIDDEN["Server-side unseen can positions"]
+    HIDDEN --> SCORE["Measured success and failure traces"]
+    CLAIM --> COMPARE["Compare claim vs. measured outcome"]
+    SCORE --> COMPARE
+    COMPARE --> INVESTIGATE["Trace code and test a correction"]
+```
+
+**Why robotics?** It makes methodological failure tangible. Rather than showing only a number, we can show the arm reaching to the wrong location, missing a grasp, or failing to place an object—and then examine the code and decisions behind that behavior.
+
+**Why not robotics only?** The agent orchestration, observation, independent evaluation, experiment branching, and evidence reporting are the platform. The robotic simulator is one domain-specific evaluator connected to that workflow.
+
+---
+
+## What makes Orro different?
+
+| Conventional agent evaluation | Orro's approach |
+|---|---|
+| Checks a final answer or benchmark score | Inspects the **execution process** behind the answer |
+| Trusts an agent's own tests or summary | Runs **independent evaluation** |
+| Uses another model to speculate about mistakes | Attempts **controlled interventions** to test explanations |
+| Reports success or failure | Connects **claims, traces, interventions, and outcomes** |
+| Produces a one-off judgment | Preserves an **auditable case record and replay** |
+
+Orro is designed to bridge the gap between **agent observability** and **experimental evidence**.
+
+## System architecture
+
+```mermaid
+flowchart LR
+    WEB["Vite / TypeScript interface"] <-->|"HTTP + WebSockets"| API["FastAPI server"]
+    API --> ORCH["Batch orchestration"]
+    ORCH --> AGENTS["LangChain Deep Agents"]
+    AGENTS --> VM["Isolated Daytona sandboxes"]
+    ORCH --> EVAL["Domain-specific evaluator"]
+    ORCH --> INV["Investigator and experiment runner"]
+    EVAL --> CASE["Scored artifacts and case record"]
+    INV --> CASE
+    CASE --> API
+```
+
+### Technology
+
+- **LangChain Deep Agents / LangGraph** — autonomous agent execution and structured investigation workflows.
+- **Daytona** — isolated environments for independent agent work and experiment reconstruction.
+- **Python** — orchestration, scoring, experiment logic, and simulation integration.
+- **MuJoCo** — physics simulation for the robotic-arm demonstration.
+- **FastAPI + WebSockets** — batch control, state, and live updates.
+- **Vite + TypeScript** — investigation dashboard, run comparisons, and replay UI.
+
+### Repository guide
+
+| Path | Purpose |
+|---|---|
+| `deep_research/agents/analyst.py` | Autonomous analyst execution |
+| `deep_research/agents/investigator.py` | Investigation and experiment requests |
+| `deep_research/batch.py` | Batch execution and experiment orchestration |
+| `deep_research/sandboxes.py` | Daytona sandbox lifecycle and reconstruction |
+| `deep_research/domains/robot_arm.py` | Robotics task and evaluation integration |
+| `deep_research/api.py` | Backend API and event streaming |
+| `sim/` | Franka Panda simulation, controllers, and scoring |
+| `web/` | Interactive frontend |
+| `fixtures/robot-demo-batch/` | **Simulated** robotics replay data for UI testing |
+| `docs/` | Design notes, development plans, and progress |
+
+---
+
+## Getting started
+
+### Requirements
+
+- Python and [`uv`](https://docs.astral.sh/uv/)
+- Node.js and npm for the web interface
+- Credentials for the agent and sandbox services when running live experiments (see `.env.example`)
+- MuJoCo dependencies for the robotics demonstration
+
+### Install Python dependencies
 
 ```bash
 uv sync
-(cd web && npm install && npm run build)
-cp .env.example .env                       # add ANTHROPIC_API_KEY and DAYTONA_API_KEY
-uv run python -m deep_research.snapshot    # once: bakes pandas, scikit-learn, matplotlib into a snapshot
 ```
 
-For the `robot_arm` domain, also once: `uv run python -m sim.fetch_assets` (the panda meshes, which the server needs to
-score controllers) and `uv run python -m deep_research.snapshot robot_arm` (its lab image, named by
-`DAYTONA_ROBOT_SNAPSHOT` in `.env`; without it each VM builds the image on first use).
-
-On macOS, if Daytona calls fail with `CERTIFICATE_VERIFY_FAILED`, Python has no default CA bundle. Add this to `.env`:
-`SSL_CERT_FILE=<output of: uv run python -c "import certifi; print(certifi.where())">`.
-
-`prices.json` was filled from Anthropic's and Daytona's pricing pages on 2026-11-14. A null price turns the dollar
-budget guard off and the UI shows token counts only.
-
-## Run
+### Prepare the robotics simulator
 
 ```bash
-uv run uvicorn deep_research.api:app --reload --port 8000
+uv run python -m sim.fetch_assets
 ```
 
-For a real, paid batch start the server without `--reload`. With it, saving any `.py` file restarts the server,
-which stops the batch's VMs and loses a pending approval.
-
-That serves the API and the built UI at http://localhost:8000. Open a batch to watch it; a saved batch replays on a
-timeline (play, pause, 1x/4x/16x, scrub, skip to end). Add `?end` to the URL to open a replay at its end. For UI work, also run `cd web && npm run dev`
-(Vite on 5173, proxying `/api` and the websocket to 8000).
-
-Without the UI:
+Run a practice episode and save a motion trace:
 
 ```bash
-uv run python -m deep_research.cli runs --n 1        # milestone 1: one real run end to end
-uv run python -m deep_research.cli runs --n 12       # milestone 2: a batch and the split finding
-uv run python -m deep_research.cli forks <batch_id> --n 4
-uv run python -m deep_research.cli runs --n 6 --budget 3          # a small batch under a 3 dollar budget
-uv run python -m deep_research.cli runs --domain robot_arm --n 1  # one robot arm run
-uv run python -m deep_research.cli investigate <batch_id>         # the investigator on a saved batch
-uv run python scripts/batch_numbers.py <batch_id>                 # the numbers a saved batch backs
+uv run --with-requirements sim/requirements.txt \
+  python -m sim.run \
+  --controller sim/controllers/baseline.py \
+  --can 0.5,0.1 \
+  --place 0.4,-0.3 \
+  --out motion.json
 ```
 
-`investigate` asks on the terminal before each fork experiment. `--auto-approve` answers yes for you, at most three
-times, and only on a batch whose budget is 3 dollars or less. `forks` and `investigate` reopen the saved batch with the
-spend it already recorded, so the budget covers the whole batch, not each command.
-
-uv run python -m deep_research.cli vms               # how many VMs are running on the Daytona key
-uv run python -m deep_research.cli cleanup           # stop every running deep-research VM, from any machine
-```
-
-Credits are shared: the Daytona key is used from more than one machine. Run `vms` after a batch, and `cleanup` when
-nothing should be running. `cleanup` also stops a teammate's live batch, so check first.
-
-## Test
+Run the independent position evaluator locally:
 
 ```bash
-uv run pytest                                      # Python: no keys, no VMs
-(cd web && npm run typecheck && npm test)          # web
+uv run --with-requirements sim/requirements.txt \
+  python -m sim.evaluate \
+  --controller sim/controllers/baseline.py \
+  --set hidden
 ```
 
-## API
-
-Full contract, including the case file and the websocket messages: `docs/api-contract.md`.
-
-| Method | Path | Does |
-| --- | --- | --- |
-| GET | `/api/health` | Whether each key is set (never the values) |
-| GET | `/api/defaults` | Default config, the traps to choose from, and whether prices are missing |
-| POST | `/api/estimate` | Cost estimate for a config, from earlier runs |
-| GET | `/api/datasets` | The built-in dataset and uploaded CSV files, with their columns |
-| POST | `/api/datasets` | Upload a CSV file (the request body) |
-| POST | `/api/scripts` | Upload a Python training script (the request body) |
-| GET | `/api/batches` | Live batches and saved replays (`fixtures/`) |
-| POST | `/api/batches` | Start a batch with a config |
-| GET | `/api/costs` | Spend across every batch: totals, by model, and one row per batch |
-| GET | `/api/batches/{id}/case` | The case file |
-| GET | `/api/batches/{id}/runs/{run}/events` | One run's event log |
-| GET | `/api/batches/{id}/forks/{fork}/{child}/events` | One fork child's event log |
-| GET | `/api/batches/{id}/investigator/events` | The investigator's event log |
-| GET | `/api/batches/{id}/files/{path}` | Saved charts and outputs (never the holdout labels) |
-| POST | `/api/batches/{id}/investigate` | Start the investigator |
-| POST | `/api/batches/{id}/decision` | `{"approve": true}` answers the fork approval |
-| POST | `/api/batches/{id}/stop` | Stop a live batch and its VMs |
-| POST | `/api/batches/{id}/resume` | Bring a saved batch that stopped at its split back live (`?investigate=true` also starts the investigator) |
-| WS | `/api/batches/{id}/ws` | A snapshot, then `case`, `event`, `fork_event` and `investigator` messages |
-
-The case file's `phase` moves through `config`, `running`, `analyzing`, `ready` (or `no_split`), `investigating`, `awaiting_approval`, `forking`, `forked`, `done`.
-
-### Picking a batch up again
-
-A batch lives in the server's memory while it runs. After a restart it is a replay, but one whose runs are scored and
-whose split was found, with no verdict yet, shows "Ready to investigate" on the home screen and an Investigate
-button on its page. Pressing it resumes the batch (the task files, each run's messages and the case file are all on
-disk) and starts the investigator; the fork experiment rebuilds its VMs by replay as it always does. An investigator
-that was mid-way when the server stopped does not come back: the batch starts again from `ready`.
-
-### VM cleanup
-
-A VM is used once. As soon as a run or a fork child is scored (or fails), its charts are downloaded and its VM is
-deleted, so it stops costing compute and disk. A run's `lab_url` works only while the run is going; afterwards it is
-null and the saved charts are listed in `charts`.
-
-`Batch.close()` deletes any VM a batch still has (a fork base, a run that is still going). A batch closes itself as
-soon as it is over: when the investigator finishes and the verdict is in, or when no step separates the runs. The
-server also closes every open batch when it shuts down.
-
-As a safety net for a VM that leaks anyway (a crash, a killed server), every VM is created with a 30 minute idle
-auto-stop and is deleted the moment it stops.
-
-## The team hub
-
-A Cloudflare Worker with a D1 database (`hub/`) that is the team's shared record. Every local server that has
-`HUB_URL` and `HUB_TOKEN` in its `.env`:
-
-- sends each batch to the hub as it runs: every change to the case file and every agent event, from a background
-  thread, so a slow or unreachable hub never holds up a run (what fails is retried);
-- lists the whole team's batches and opens other people's as replays read from the hub, tagged with the machine
-  that ran them, and counts their spend on the cost screen;
-- takes any runner key it does not have locally (Anthropic, Daytona, LangSmith) from the hub at startup. A key in
-  the local `.env` always wins.
-
-Without those two settings nothing changes: the server works on its own as before. Charts are not on the hub yet,
-so a teammate's replay shows code and output but no chart images.
-
-### Join the hub
-
-Ask the owner for `HUB_URL` and `HUB_TOKEN`, put them in `.env` (see `.env.example`), optionally set
-`HUB_MACHINE=<your name>` (it defaults to your git user name), and restart the server. `uv run python -m deep_research.hub status` shows what the hub
-holds; `uv run python -m deep_research.hub push-all` uploads the batches already saved in `batches/`.
-
-### Keys and the token (owner)
-
-The hub runs on the owner's Cloudflare account. Its secrets are the team token and the runner keys:
+Run simulation tests:
 
 ```bash
-cd hub && npm install
-export CLOUDFLARE_ACCOUNT_ID=<the account id>
-npx wrangler secret put ANTHROPIC_API_KEY     # change a runner key: every server picks it up on its next start
-npx wrangler secret put DAYTONA_API_KEY
-npx wrangler secret put TEAM_TOKEN            # rotate the token: then update HUB_TOKEN in everyone's .env
-npx wrangler secret list                      # names only, never values
+uv run --with-requirements sim/requirements.txt --with pytest \
+  pytest sim/tests -q
 ```
 
-Anyone holding the token can read every batch and fetch the runner keys, so share it privately and rotate it (and
-the keys) if it leaks. Deploy changes to the Worker with `npm run deploy`, run its tests with `npm test`.
+### Run a live robotics agent batch
 
-## Demo data for the frontend
+Configure the service credentials documented in `.env.example`, then prepare the robotics sandbox image and launch a batch:
 
-`fixtures/demo-batch/` is a **simulated** batch, made by `uv run python scripts/make_fixture.py`. No model calls: each run is scripted to either remove duplicates or not, then really trains a random forest on the real trapped data, so the scores, overlap and charts are real but the agent's choices and timing are not. Its case file says `"simulated": true`. Do not present it as real agent runs.
-
-It has the same files real batches produce:
-
-```
-case/case.json              the case file
-runs/<id>/events.jsonl      todos, tool_call, tool_result, thought events with a time offset `t`
-runs/<id>/actions.json      the agent's tool calls with step labels
-runs/<id>/score.json        status, reported_accuracy, true_accuracy, overlap_share, gap
-runs/<id>/live/*.png        the charts the lab page would show
-forks/f1/<arm>-<n>/...      the same, for each fork child
+```bash
+uv run python -m deep_research.snapshot robot_arm
+uv run python -m deep_research.cli runs --domain robot_arm --n 1
 ```
 
-## Traps
+Live model calls and Daytona workspaces may incur charges. Review experiment budgets and active sandboxes before running larger batches.
 
-A trap is the flaw planted in the agents' data. The New batch panel has a Trap picker; `BatchConfig.trap` is the
-trap's name.
+### Launch the dashboard
 
-| Trap | What is planted | The step an honest run does (label) | The forced fix | Evidence number |
-| --- | --- | --- | --- | --- |
-| `duplicates` | A share of the rows (`trap_strength`) is copied once more. `trap_noise` jitters the copies | Removes duplicates (`deduplicate`). Counting them is only a look at the data | Drop duplicate rows from `data.csv` | Share of test rows also in training |
-| `leaky_column` | A `followup_score` column derived from the target (think of a lab value only measured after the diagnosis). `trap_strength` sets how far apart the classes are. In `holdout_features.csv` the column is there but carries no information | Leaves the column out (`drop_leak`) | Drop the column from `data.csv` and `holdout_features.csv` | None |
-| `repeat_rows` | Every row becomes a subject with a `subject_id`, and a share of the subjects (`trap_strength`) gets 1 to 3 more visits: near-copies with the same target, never exact (`trap_noise` adds jitter). The holdout is unseen subjects | Splits by subject or keeps one row per subject (`group_split`) | Keep one visit per subject in `data.csv` | Share of test rows whose subject is also in training |
+Backend:
 
-### Calibration
+```bash
+uv run uvicorn deep_research.api:app --port 8000
+```
 
-`uv run python scripts/calibrate_traps.py` measures every trap without agents. For each one it builds the task on
-Pima over 5 seeds and trains a random forest two ways: naive (a random row split, every column) and honest (the
-trap's own fix first, then the same split and model). A trap is usable when the naive gap between reported and true
-accuracy is well above `inflation_threshold` (8 points) and the honest gap is below it. At the default settings
-(`trap_strength` 0.5, `trap_noise` 0):
+Frontend, in another terminal:
 
-| Trap | Run | Reported | True | Gap | Usable |
-| --- | --- | --- | --- | --- | --- |
-| duplicates | naive | 89.1% | 75.2% | +13.9 pts | yes |
-|  | honest | 75.8% | 75.6% | +0.2 pts |  |
-| leaky_column | naive | 94.3% | 56.5% | +37.8 pts | yes |
-|  | honest | 75.9% | 74.5% | +1.4 pts |  |
-| repeat_rows | naive | 93.2% | 75.5% | +17.7 pts | yes |
-|  | honest | 78.2% | 76.4% | +1.8 pts |  |
+```bash
+cd web
+npm install
+npm run dev
+```
 
-`--strength`, `--noise`, `--seeds`, `--trees` and `--dataset` try other settings, and `--markdown` prints the table
-for this file. Two things the script shows that are worth knowing: at `trap_strength` 0.25 the duplicates gap is
-only about 8 points, so runs land on both sides of the threshold; and with `trap_noise` above 0 the duplicates fix
-(an exact `drop_duplicates`) no longer removes the jittered copies. Removing those is a step of its own,
-`deduplicate_near`, which is not part of the trap's module: its pattern is in `analysis.py` and its fix (match rows
-on the exact columns) in `forks.py`.
+The development frontend runs at `http://localhost:5173` and connects to the backend on port `8000`.
 
-### Adding a trap
+For simulator internals, see [`sim/README.md`](sim/README.md), [`sim/CALIBRATION.md`](sim/CALIBRATION.md), and [`sim/MOTION_FORMAT.md`](sim/MOTION_FORMAT.md).
 
-Add one file, `deep_research/traps/<name>.py`, that defines `TRAP = Trap(...)`. Nothing else changes: the registry
-(`deep_research/traps/__init__.py`) finds the module, and the config check, the task builder, the split finder, the
-fork experiment, the scorer, the API and the web app all read the trap from it. The fields:
+---
 
-- `name` (the config value), `title` and `description` (one line, for the picker), `planted` (what goes after
-  "planted" in a sentence) and `strength_label` (what `trap_strength` means, as the slider's label).
-- `plant(work, holdout_features, target, cfg, rng)` returns `Planted(data, holdout_features, meta)`. `work` is the
-  labelled rows the agent will get and `holdout_features` the rows it must predict. A trap may add columns to both.
-  It never sees the holdout labels and must keep the holdout rows in order. Take all randomness from `rng`, so the
-  same seed gives the same task. `meta` is saved in the task's `meta.json`.
-- `label` and `pattern`: the step an honest run does, and the regex that spots it in code. The web app highlights
-  lines with the same regex, so it must be valid in both Python `re` and JavaScript `RegExp`. Set `at_split=True`
-  when the step can be part of the split itself (a grouped split): it then counts whenever it is in the action that
-  splits, not only before the split.
-- `intervention`: `{"description", "command"}`. The command runs in the VM workspace before the split and fixes the
-  data in place (`in_workspace("...")` wraps a line of Python).
-- `evidence(train, test, meta)` and `evidence_text`: a number from the run's own `train.csv` and `test.csv` that
-  shows the flaw, and how the UI finishes the sentence "52% ...". Leave both out when there is no such number.
-- `did` and `missing`: the UI's words, after "Honest runs" and for the empty slot on the side that skipped the step.
+## Two-minute demo narrative
 
-Then calibrate it: run `scripts/calibrate_traps.py` and tune the trap's constants until the naive gap is well above
-8 points and the honest gap is below it at the default `trap_strength` and `trap_noise`. `tests/test_traps.py` runs
-a two seed version of that for every registered trap, so a trap that does not inflate fails the suite. Add a row to
-`skills/method-errors/SKILL.md` so the investigator knows the new step.
+**0:00–0:20 — The claim.** An autonomous agent builds a robotic-arm controller and demonstrates success in its practice environment.
 
-## What is verified and what is not
+**0:20–0:45 — The contradiction.** Orro evaluates the same controller at unseen positions. A replay reveals a failure the practice run did not expose.
 
-Verified here, without keys:
-- Task building, scoring, overlap, split finding, cost tracking, case file (`tests/test_core.py`)
-- The trap registry and every trap: planting, the holdout never carrying label information, the split finder on scripted honest and inflated runs, the evidence numbers, the interventions run as shell commands, and the calibration (`tests/test_traps.py`)
-- Both agents build with the installed `deepagents` 0.7.38; the analyst has no `task` tool; the investigator cannot write to `/case/` but can read it (`tests/test_agents_offline.py`)
-- The API serves the demo batch, the websocket snapshot, health, JSON 404s and the web app, and never serves the holdout labels (`tests/test_api.py`)
-- The web client's types match the demo batch (`web/test/api.test.ts`)
+**0:45–1:10 — The investigation.** Orro inspects the controller and execution history, then identifies a specific, testable explanation.
 
-Not yet run, because it needs Anthropic and Daytona keys:
-- Real analyst runs in Daytona, the lab page through a signed preview URL, the fork experiment, and the investigator end to end. Signatures were checked against the installed SDKs, but behaviour was not. Run milestone 1 first.
+**1:10–1:40 — The experiment.** Compare the original continuation with an intervention, scored under the same evaluation procedure.
 
-## Notes from calibrating the duplicates trap
+**1:40–2:00 — The evidence.** Show the measured outcomes, motion traces, and appropriately qualified conclusion.
 
-Measured on Pima with scikit-learn, averaged over 5 seeds (the table for every trap is under [Traps](#traps)):
-- Honest accuracy is about 74 to 76%.
-- With half the rows duplicated, a random forest that skips deduplication reports about 89%. Logistic regression barely moves (about 79%). That is why the task asks for a random forest by default (`model_hint`).
-- Honest runs can miss the true score by up to about 7 points from test-set noise, so a run counts as inflated only above an 8 point gap (`inflation_threshold`).
-- Inflated runs' confusion matrices look cleaner and come from a larger test set, which is a visible tell on the lab page before the reveal.
+The point is not that Orro can make a robot move. **The point is that Orro can investigate whether an autonomous agent's apparent success was scientifically meaningful.**
 
-## Your own dataset
+## Scientific integrity and current limitations
 
-The New batch panel on the home screen has a Dataset row: pick Pima, or upload a CSV (or drop it on the row) and
-choose the column to predict. The target must be a class label: 2 to 20 different values, at least 5 rows each, in
-a file of at least 100 rows. `samples/churn.csv` is a synthetic table to try it with.
+Orro is an experimental system, and the distinction between implemented infrastructure and validated scientific findings matters.
 
-The traps were calibrated on Pima with a random forest. On another dataset the gap between honest and inflated runs
-may be smaller than `inflation_threshold`, and the batch then ends in `no_split`. Every trap plants on any dataset;
-`leaky_column` and `repeat_rows` refuse one that already has a `followup_score` or `subject_id` column.
+- **Hidden evaluation is independent of agent self-reporting.** The robotics evaluator keeps unseen test conditions on the server side.
+- **A hypothesis is not a proven cause.** An observed failure or suspicious code path motivates an intervention; it does not establish causality by itself.
+- **Execution reconstruction is not perfect time travel.** Replayed or forked agent continuations can differ because of nondeterminism and environment state.
+- **Evidence must be qualified.** The repository includes evidence-gating logic, but a single experiment is not universal proof of causality or generalization.
+- **Simulation is not physical deployment.** Success in MuJoCo does not establish performance on a real robot.
+- **Simulated fixtures are not live experiments.** The repository's prerecorded robotics demo fixture is intended for interface and storytelling tests and must be identified as simulated.
+- **Do not overclaim end-to-end validation.** The repository documents real robotics agent batches and experiment infrastructure, but a completed live robotics investigator verdict is not established by the inspected materials.
 
-## Your own training script
+## The bigger picture
 
-The same panel takes a Python training script (`.py`, one file; `samples/train_churn.py` goes with the sample table). Each agent then gets it as `train.py` and starts
-from it instead of writing its own, so the batch shows how the score your script reports compares with its score
-on the hidden holdout, and whether agents working from it catch the planted duplicates.
+As AI systems take on more scientific and engineering work, verifying the final output will not be enough. We will need tools that can reconstruct the process, identify questionable decisions, and experimentally test whether those decisions explain observed results.
 
-The VMs have pandas, scikit-learn and matplotlib only. A script that imports anything else (PyTorch, for example)
-is accepted with a warning; the agents may fail on it or rewrite that part. Saved weights (`.pth`) are not
-accepted: a finished model has no steps to compare or fork.
+**Orro is a step toward that future: an experimental debugger for the scientific reasoning and engineering work of autonomous AI agents.**
 
-## The arms of the fork experiment
+---
 
-Every arm starts from the same moment of the same run and differs only in what is run before it continues
-(`forks.py`, `arm_plan`):
+<div align="center">
 
-| Arm | Runs first | What it answers |
-| --- | --- | --- |
-| `control` | nothing | How often this moment inflates on its own |
-| `placebo` | a harmless command | Whether the forced arm's result comes from the step or from being interrupted with one more tool call |
-| `show` | the problem, reported but not fixed | Whether the run simply never noticed, or noticed and split the data anyway |
-| `forced` | the step itself | What doing the step is worth |
+**Orro · Built at HackPrinceton 2026**
 
-`placebo` and `show` are on by default and each costs another `forks_per_choice` VMs; turn them off with
-`placebo_arm` and `show_arm`. `show` exists only for a step with a weaker version defined, so a step without one
-runs three arms. Only `deduplicate` has an intervention today: a batch that splits on any other step reports the
-finding and the fork experiment refuses with its reason. A fix experiment (`forks[*].kind == "fix"`, the one that
-tests the investigator's proposed patch) has a `fixed` arm, the run with the patch applied, in place of `forced`.
+*Don't just trust the result. Investigate how it happened.*
 
-## Next
-
-1. Milestone 1 and 2 with real keys. Confirm a mix of honest and inflated runs; adjust `trap_strength`, `trap_noise` or `hint_level` if not.
-2. Frontend: built against `fixtures/demo-batch`. Still to check on a real batch: lab pages in the tile iframes, live websocket updates, and the fork approval round trip.
-3. One live fork wired to the approval button.
+</div>

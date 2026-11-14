@@ -29,7 +29,9 @@ from .case_file import CaseFile
 from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
-from .events import EventLog, current_step, events_from_update, read_events
+from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, prefix_events, read_events
+from .evidence import describe as describe_evidence
+from .evidence import verdict_evidence
 from .domains import actions_from_events, build_task, intervention_for, score_run
 from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
 
@@ -189,6 +191,7 @@ class Batch:
         self.dir = root / self.id
         self.runs_dir = self.dir / "runs"
         self.forks_dir = self.dir / "forks"
+        self.case_view = self.dir / "case" / "view" / "case.json"
         fresh = not self.dir.exists()
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         if resume:
@@ -202,7 +205,8 @@ class Batch:
                 if fresh:
                     shutil.rmtree(self.dir, ignore_errors=True)
                 raise
-        self.case = CaseFile(self.dir / "case" / "case.json", labels=self.domain.labels())
+        # The investigator reads the case through `case/view/case.json` (case_file.investigator_view), never case.json.
+        self.case = CaseFile(self.dir / "case" / "case.json", labels=self.domain.labels(), view_path=self.case_view)
         self.tracker = CostTracker(budget_usd=cfg.budget_usd)
         # A reopened batch (Batch.resume, cli forks, cli investigate) has spend on record already.
         self.tracker.restore(self.case.data.get("costs") or {})
@@ -403,9 +407,14 @@ class Batch:
 
         if self.commentary is not None:
             self.commentary.start()
+        # The code the runs start from is scored on this server while they work in their VMs.
+        baseline = asyncio.create_task(self.score_baseline())
         try:
             await asyncio.gather(*(guarded(r) for r in run_ids))
+            await baseline
         finally:
+            if not baseline.done():
+                baseline.cancel()
             if self.commentary is not None:
                 await self.commentary.stop()
         self.push_costs(force=True)
@@ -413,6 +422,36 @@ class Batch:
         if self.case.data.get("phase") == "no_split":
             # Nothing to investigate or fork, so nothing will use the VMs again.
             await self.close()
+
+    async def score_baseline(self) -> None:
+        """Score the code every run starts from, as it was handed over, on the hidden test (`Domain.score_code`).
+
+        The number the runs' true rates are read against: without it nobody can say whether a run made the code
+        better or worse. No VM and no model, so it costs nothing. A failure is recorded and never stops the batch.
+        Nothing happens in a domain that cannot score code, or in a batch whose runs start from nothing.
+        """
+        if self.domain.score_code is None:
+            return
+        try:
+            found = self.domain.baseline_code(self.cfg, self.task)
+        except Exception:  # noqa: BLE001 - the baseline is a reference number, never a reason to fail the batch
+            logger.warning("batch %s: could not find the code the runs start from", self.id, exc_info=True)
+            return
+        if found is None:
+            return
+        path, name = found
+        self.case.set_baseline({"status": "scoring", "name": name})
+        try:
+            measured = await asyncio.to_thread(self.domain.score_code, self.task, path)
+        except asyncio.CancelledError:
+            self.case.set_baseline({"status": "failed", "name": name, "reason": "the batch stopped before it was scored"})
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning("batch %s: the starting code could not be scored", self.id, exc_info=True)
+            self.case.set_baseline({"status": "failed", "name": name, "reason": f"{type(e).__name__}: {e}"[:300]})
+            return
+        self.case.set_baseline({"status": "scored", "name": name, **_measurement(measured),
+                                "hidden_results": measured.get("hidden_results") or []})
 
     async def run_one(self, run_id: str) -> None:
         scope, rdir = f"run:{run_id}", self.runs_dir / run_id
@@ -615,6 +654,70 @@ class Batch:
         )
         return f"fix proposed for {run_id} at line {line}: call request_fix_test to test it"
 
+    async def measure_fix(self) -> str:
+        """The fix test where the domain can score code by itself (`Domain.score_code`): the run's code with the patch
+        applied, next to the same code without it, on the hidden test. The result as words.
+
+        No agent continues the run, so nothing can undo the patch: in the fork experiment (`run_fix_forks`) a copy's
+        agent may revert an edit it did not make, and the arm then measures the unpatched code. No VM and no model
+        either, so it costs nothing and needs no approval. The patched file is kept as `fix/<fix_output>`.
+        """
+        fix = self.case.data.get("fix")
+        if not fix:
+            return "error: no fix has been proposed: call propose_fix first"
+        if self.domain.score_code is None or self.domain.fix_output is None:
+            return f"error: the {self.domain.name} domain cannot score code without a run"
+        src, name = fix["run_id"], self.domain.fix_output
+        path = self.runs_dir / src / "outputs" / name
+        try:
+            source = path.read_text()
+        except OSError:
+            return f"error: {src} has no {name} in its outputs"
+        n = source.count(fix["old_string"])
+        if n != 1:
+            return f"error: old_string occurs {n} times in {src}'s {name}; it must occur exactly once"
+        patched = self.dir / "fix" / name
+        patched.parent.mkdir(parents=True, exist_ok=True)
+        patched.write_text(source.replace(fix["old_string"], fix["new_string"], 1))
+
+        def both() -> tuple[dict, dict]:
+            # One after the other: two evaluations at once would share this server's cores and could time out.
+            return self.domain.score_code(self.task, path), self.domain.score_code(self.task, patched)
+
+        self.case.update_fix(status="testing")
+        try:
+            before, after = await asyncio.to_thread(both)
+        except Exception as e:  # noqa: BLE001 - the tool reports it instead of ending the investigation
+            logger.warning("batch %s: the fix could not be measured", self.id, exc_info=True)
+            self.case.update_fix(status="proposed")
+            return f"error: could not measure the fix: {type(e).__name__}: {e}"[:400]
+        gained, lost = _changed_cases(before.get("passed"), after.get("passed"))
+        measured = {
+            "before": _measurement(before),
+            "after": _measurement(after),
+            # Hidden cases that failed without the patch and pass with it, and the other way round. None when the
+            # two measurements cannot be paired case by case.
+            "gained": gained,
+            "lost": lost,
+            "exceptions": list(after.get("exceptions") or []),
+            "hidden_results": after.get("hidden_results") or [],
+        }
+        self.case.update_fix(status="tested", measured=measured, patched_file=f"fix/{name}")
+
+        def rate(m: dict) -> str:
+            of = "" if m["successes"] is None else f" ({m['successes']} of {m['n']})"
+            return f"{m['true_accuracy']:.0%}{of}"
+
+        lines = [
+            f"The fix was measured on run {src}'s {name} on the evaluation setups, with no agent in between: "
+            f"true success rate {rate(measured['before'])} without the patch and {rate(measured['after'])} with it."
+        ]
+        if gained is not None:
+            lines.append(f"{gained} setups that failed now succeed and {lost} that succeeded now fail.")
+        if measured["exceptions"]:
+            lines.append("The patched code raised: " + " | ".join(measured["exceptions"]))
+        return " ".join(lines)
+
     def fix_blocker(self) -> str | None:
         """Why the fix experiment cannot run, or None when it can."""
         fix = self.case.data.get("fix")
@@ -668,9 +771,12 @@ class Batch:
         base_scope = f"fork:{fork_id}:base"
         try:
             msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
-            actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task)
+            src_events = read_events(self.runs_dir / src / "events.jsonl")
+            actions = actions_from_events(src_events, self.task)
             prefix_msgs, n_prefix = cut_history(msgs, fork_at)
             prefix_actions = actions[:n_prefix]
+            # Each copy keeps these next to its own log: the episodes the source ran before the cut are the copy's too.
+            prefix_log = "".join(json.dumps(e) + "\n" for e in prefix_events(src_events, n_prefix))
             self.case.set_phase("forking")
             self.case.update_fork(
                 fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=n_prefix, n_per_arm=n_per_arm,
@@ -702,6 +808,7 @@ class Batch:
             cid, scope = f"{arm}-{i + 1}", f"fork:{fork_id}:{arm}-{i + 1}"
             cdir = self.forks_dir / fork_id / cid
             log = self._log(cdir / "events.jsonl", f"{fork_id}/{cid}")
+            (cdir / PREFIX_EVENTS).write_text(prefix_log)
             watch: MotionWatch | None = None
             async with sem:
                 try:
@@ -752,6 +859,12 @@ class Batch:
                         await watch.stop()
                     motion = await asyncio.to_thread(vms.download_outputs, vm, cdir / "outputs", **self._vm_domain)
                     charts = await asyncio.to_thread(vms.download_charts, vm, cdir / "live")
+                    if kind == "fix" and arm == "fixed" and self.domain.fix_output and step and step.get("new_string"):
+                        # The copy's agent may undo an edit it did not make. Scored, it would be a second control.
+                        final = cdir / "outputs" / self.domain.fix_output
+                        if final.is_file() and step["new_string"] not in final.read_text():
+                            raise RuntimeError(f"the copy undid the fix: its final {self.domain.fix_output} no longer "
+                                               "has the patch as proposed, so it says nothing about the fix")
                     score = await asyncio.to_thread(
                         score_run, cdir / "outputs", self.task, self.cfg.inflation_threshold
                     )
@@ -800,6 +913,10 @@ class Batch:
                              f"({what}; {a['failed']} failed).")
             else:
                 lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
+        if kind != "fix" and "control" in arms and "forced" in arms:
+            # How strong this is, so the verdict's words can follow it (evidence.py).
+            lines.append(describe_evidence(verdict_evidence(
+                {a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]} for a in ("control", "forced")})))
         if kind == "fix":
             self.case.update_fix(status="tested", fork_id=fork_id,
                                  result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
@@ -891,6 +1008,20 @@ class Batch:
             await asyncio.gather(*(asyncio.to_thread(vms.delete_vm, sb) for sb in left.values()))
         # The lab pages went with the VMs. Charts were saved when each run finished.
         self._forget_lab_pages()
+
+
+def _measurement(measured: dict) -> dict:
+    """What `Domain.score_code` measured, as the case file keeps it: the rate and its counts."""
+    return {"true_accuracy": round(float(measured["success_rate"]), 4), "successes": measured.get("successes"),
+            "n": measured.get("n")}
+
+
+def _changed_cases(before: list | None, after: list | None) -> tuple[int | None, int | None]:
+    """(gained, lost) between two `passed` lists of one task's hidden cases: how many fail before and pass after,
+    and how many pass before and fail after. (None, None) when they cannot be paired."""
+    if not before or not after or len(before) != len(after):
+        return None, None
+    return sum(a and not b for b, a in zip(before, after)), sum(b and not a for b, a in zip(before, after))
 
 
 def _arm_summary(rows: list[dict]) -> dict:

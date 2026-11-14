@@ -120,8 +120,10 @@ def _worker_main(conn) -> None:
         idx, kwargs = msg
         try:
             record_to = kwargs.get("record_to")
-            result, motion = run_episode(record=bool(record_to), **{k: v for k, v in kwargs.items() if k != "record_to"})
-            if record_to and motion is not None and not result.get("success"):
+            keep_all = bool(kwargs.get("record_all"))
+            episode_kwargs = {k: v for k, v in kwargs.items() if k not in ("record_to", "record_all")}
+            result, motion = run_episode(record=bool(record_to), **episode_kwargs)
+            if record_to and motion is not None and (keep_all or not result.get("success")):
                 from sim.motion import write_motion
 
                 write_motion(motion, record_to)
@@ -313,7 +315,9 @@ def run_jobs(
     """Run `run_episode(**job)` for every job in worker processes; results in job order.
 
     A job may carry `record_to`, a file path: the episode is then recorded, and when it fails its motion file is
-    written there by the worker and the result gets `motion_path` (sim/domain.py's `trace_run`).
+    written there by the worker and the result gets `motion_path` (sim/domain.py's `trace_run`). With `record_all`
+    true as well, the recording is written whatever the result (`evaluate`'s `record_dir`). `motion_fps` and
+    `motion_decimals` go to `run_episode` like every other key.
 
     A job that has not finished `timeout` seconds (wall clock) after it was sent to a ready worker is a
     failure with exception "Timeout: ..." and end_reason "timeout"; its worker is killed and replaced. A
@@ -464,29 +468,48 @@ def evaluate(
     timeout: float = DEFAULT_TIMEOUT,
     workers: int | None = None,
     controller_timeout: float | None = None,
+    record_dir=None,
 ) -> dict:
     """Run the controller once per can position and seed; return the success rate and every result.
 
     positions: list of [x, y] can starts. place_xy: the place target (default: the practice one).
     timeout: per episode, wall clock seconds. controller_timeout: total wall clock seconds for all the
     episodes (default `default_controller_timeout`); episodes unfinished when it runs out are failures.
+    record_dir: a folder; every episode's recording is written there as `motion_name(i, seed)` (i is the
+    position's index), at sim.motion.LOW_FPS and LOW_DECIMALS, and its result gets `motion_path`. An
+    episode that never ran (a timeout or a crashed worker) has no recording. Recording changes no result.
     Safe to call from any thread, and from several threads at once (each call has its own workers).
     Returns {"success_rate", "n", "successes", "results"}; each result is `run_episode`'s result dict
-    plus "can_xy" (the nominal position) and "seed".
+    plus "can_xy" (the nominal position), "seed" and "index" (the position's index in `positions`).
     """
+    from sim.motion import LOW_DECIMALS, LOW_FPS
+
     place = [float(v) for v in (PRACTICE["place_xy"] if place_xy is None else place_xy)]
     path = str(Path(controller_path).resolve())
+    seeds = tuple(int(s) for s in seeds)
     jobs = []
-    for xy in positions:
+    for i, xy in enumerate(positions):
         for seed in seeds:
-            jobs.append({"controller_path": path, "can_xy": [float(xy[0]), float(xy[1])], "place_xy": place, "seed": int(seed)})
+            job = {"controller_path": path, "can_xy": [float(xy[0]), float(xy[1])], "place_xy": place, "seed": seed}
+            if record_dir is not None:
+                job.update(record_to=str(Path(record_dir) / motion_name(i, seed)), record_all=True,
+                           motion_fps=LOW_FPS, motion_decimals=LOW_DECIMALS)
+            jobs.append(job)
+    if record_dir is not None:
+        Path(record_dir).mkdir(parents=True, exist_ok=True)
     results = run_jobs(jobs, timeout=timeout, workers=workers, controller_timeout=controller_timeout)
-    for job, r in zip(jobs, results):
+    for j, (job, r) in enumerate(zip(jobs, results)):
         r["can_xy"] = job["can_xy"]
         r["seed"] = job["seed"]
+        r["index"] = j // len(seeds)
     successes = sum(1 for r in results if r["success"])
     n = len(results)
     return {"success_rate": successes / n if n else 0.0, "n": n, "successes": successes, "results": results}
+
+
+def motion_name(index: int, seed: int) -> str:
+    """The file name of a hidden episode's recording: `07-s0.motion.json` for position 7, seed 0."""
+    return f"{index:02d}-s{seed}.motion.json"
 
 
 def position_set(name: str, n: int | None = None) -> list[list[float]]:

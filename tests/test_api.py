@@ -320,6 +320,54 @@ def test_a_batch_stops_being_live_once_it_is_over(client, tmp_path, monkeypatch)
     assert msg["kind"] == "snapshot" and msg["live"] is False and msg["case"]["phase"] == "done"
 
 
+
+def test_a_crashed_or_budget_blocked_batch_is_over(client, tmp_path, monkeypatch):
+    phases = {"b-err": "error: RuntimeError: boom", "b-blocked": "blocked: 12 runs would cost $3.00, over the $1.00 budget"}
+    for bid, phase in phases.items():
+        d = tmp_path / "batches" / bid / "case"
+        d.mkdir(parents=True)
+        (d / "case.json").write_text(json.dumps({"phase": phase, "runs": {}, "forks": {}}))
+    monkeypatch.setattr(api, "BATCHES", {bid: _FakeLiveBatch(phase) for bid, phase in phases.items()})
+    kinds = {b["id"]: b["kind"] for b in client.get("/api/batches").json()}
+    assert kinds["b-err"] == "replay" and kinds["b-blocked"] == "replay"
+    for bid in phases:
+        assert client.post(f"/api/batches/{bid}/investigate").status_code == 409
+        with client.websocket_connect(f"/api/batches/{bid}/ws") as ws:
+            assert ws.receive_json()["live"] is False
+    # A phase that only mentions an error is not one.
+    assert not api._is_over("running") and api._is_over("error: x") and not api._is_over(None)
+
+
+async def test_a_crash_ends_the_batch_and_deletes_its_vms(monkeypatch):
+    import asyncio
+
+    closed = []
+
+    class Crashing(_FakeLiveBatch):
+        def __init__(self):
+            super().__init__("running")
+            self.case.set_phase = lambda phase: self.case.data.update(phase=phase)
+
+        async def close(self):
+            closed.append(True)
+
+    b = Crashing()
+    monkeypatch.setattr(api, "BATCHES", {"b-crash": b})
+    monkeypatch.setattr(api, "TASKS", {})
+
+    async def boom():
+        raise RuntimeError("the analyst exploded")
+
+    api._spawn("b-crash", boom())
+    failed = api.TASKS["b-crash"]
+    for _ in range(10):  # the task fails, then its done callback schedules the cleanup
+        if api.TASKS["b-crash"] is not failed:
+            break
+        await asyncio.sleep(0)
+    await api.TASKS["b-crash"]
+    assert b.case.data["phase"] == "error: the analyst exploded"
+    assert api._running("b-crash") is None and closed == [True]
+
 # ---- each VM is deleted as soon as its run is scored ----
 
 class FakeVm:
@@ -649,6 +697,56 @@ async def test_two_resumes_at_once_build_one_batch_and_one_investigator(tmp_path
     assert len(built) == 1 and len(started) == 1
     for t in api.TASKS.values():
         t.cancel()
+
+
+# ---- uploaded robot controllers ----
+
+GOOD_CONTROLLER = b'''import numpy as np
+from sim.control import GRIPPER_OPEN, HOME_QPOS
+
+class Controller:
+    def reset(self, task):
+        self.task = task
+        self.done = False
+
+    def act(self, obs):
+        return list(HOME_QPOS) + [GRIPPER_OPEN]
+'''
+
+
+def test_upload_a_controller_and_start_checks_it(client, tmp_path, monkeypatch):
+    from deep_research import controllers
+    from deep_research import config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "CONTROLLERS_DIR", tmp_path / "controllers")
+    res = client.post("/api/controllers?name=my_arm.py", content=GOOD_CONTROLLER)
+    assert res.status_code == 200, res.text
+    info = res.json()
+    assert info["id"].startswith("ct-") and info["name"] == "my_arm.py" and info["lines"] == 10
+    assert info["imports"] == ["numpy", "sim"] and info["missing_packages"] == []
+    assert client.get("/api/controllers").json() == [info]
+    text, loaded = controllers.load(info["id"])
+    assert "class Controller" in text and loaded == info
+
+    # Refusals say why.
+    bad = client.post("/api/controllers", content=b"def act(obs): pass\n")
+    assert bad.status_code == 422 and "no `class Controller`" in bad.json()["detail"]
+    bad = client.post("/api/controllers", content=b"class Controller:\n    def reset(self, t): pass\n")
+    assert bad.status_code == 422 and "missing the method act" in bad.json()["detail"]
+    assert client.post("/api/controllers", content=b"class Controller(\n").status_code == 422
+    assert client.post("/api/controllers", content=b"x" * (200 * 1024 + 1)).status_code == 413
+    # A subclass may inherit the methods, and an import the VM lacks is a warning.
+    sub = client.post("/api/controllers?name=sub.py", content=b"import torch\nfrom sim.controllers.baseline import Controller as B\nclass Controller(B):\n    pass\n")
+    assert sub.status_code == 200 and sub.json()["missing_packages"] == ["torch"]
+
+    # Starting a robot batch from an upload needs a controller that exists; the config is refused before any VM.
+    monkeypatch.setattr(api, "Batch", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not build")))
+    body = {"domain": "robot_arm", "robot_start": "uploaded", "n_runs": 1}
+    res = client.post("/api/batches", json=body)
+    assert res.status_code == 422 and "no controller was uploaded" in res.json()["detail"]
+    res = client.post("/api/batches", json={**body, "robot_controller": "ct-00000000"})
+    assert res.status_code == 422 and "unknown controller" in res.json()["detail"]
+    assert client.post("/api/batches", json={**body, "robot_controller": "nope"}).status_code == 422
 
 
 def test_api_root_and_missing_assets_are_404_not_the_page(client):  # noqa: F811

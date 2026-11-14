@@ -137,7 +137,7 @@ describe("trap helpers", () => {
 
   it("stepWords and stepMark fall back to the built in table, then to generic words", () => {
     expect(stepWords("group_split", repeat).did).toBe("grouped the rows by subject");
-    expect(stepWords("group_split").did).toBe("did the group_split step");
+    expect(stepWords("group_split").did).toBe("did the group split step");
     expect(stepWords("clean", repeat)).toEqual(stepWords("clean"));
     expect(stepMark("group_split", repeat)).toBe(trapMark(repeat, "group_split"));
     expect(stepMark("group_split")).toBeNull();
@@ -228,8 +228,8 @@ describe("What changed, for a batch that planted repeat subjects", () => {
   const html = splitView(vm);
 
   it("says what the honest runs did in the trap's words", () => {
-    expect(splitHeadline(vm.case.split!, repeat)).toEqual({ honest: "Honest runs grouped the rows by subject before splitting.", inflated: "Inflated runs did not." });
-    expect(html).toContain("Honest runs grouped the rows by subject before splitting.");
+    expect(splitHeadline(vm.case.split!, repeat)).toEqual({ honest: "Honest runs grouped the rows by subject before splitting into train and test.", inflated: "Inflated runs did not." });
+    expect(html).toContain("Honest runs grouped the rows by subject before splitting into train and test.");
     expect(html).not.toContain("group_split step");
   });
 
@@ -262,7 +262,7 @@ describe("What changed, for a batch that planted repeat subjects", () => {
   it("escapes the trap's words", () => {
     const evil: TrapInfo = { ...repeat, did: "<b>did</b>", missing: "<i>none</i>", evidence_text: "<u>ev</u>" };
     const out = splitView({ ...vm, case: { ...vm.case, config: { ...(vm.case.config as BatchConfig), trap_info: evil } } });
-    expect(out).toContain("Honest runs &lt;b&gt;did&lt;/b&gt; before splitting.");
+    expect(out).toContain("Honest runs &lt;b&gt;did&lt;/b&gt; before splitting into train and test.");
     expect(out).toContain("&lt;i&gt;none&lt;/i&gt;");
     expect(out).toContain("&lt;u&gt;ev&lt;/u&gt;");
     expect(out).not.toMatch(/<(i|u)>/);
@@ -273,7 +273,7 @@ describe("What changed, for a batch that planted a leaky column", () => {
   const html = splitView(batch(leaky, DROPPED, [null, null]));
 
   it("uses the trap's words and highlights the dropped column", () => {
-    expect(html).toContain("Honest runs left out the leaky column before splitting.");
+    expect(html).toContain("Honest runs left out the leaky column before splitting into train and test.");
     expect(col(html, "honest")).toContain('<span class="nb-ln nb-hl">df = df.drop(columns=[&#39;followup_score&#39;])</span>');
     expect(col(html, "inflated")).toContain("The leaky column was kept here");
   });
@@ -302,7 +302,8 @@ describe("the wall's tiles", () => {
     const html = wallView(batch(leaky, DROPPED, [null, null]));
     expect(html).not.toContain("bw-ovl-t");
     expect(html).not.toContain("Overlap unknown");
-    expect(tile(html, "r02")).toMatch(/<div class="bw-foot"><span class="bw-gap"[^>]*>\+18\.0 pts<\/span><\/div>/);
+    // The gap alone on the device's panel, with no evidence sentence after it.
+    expect(tile(html, "r02")).toMatch(/<div class="bw-res"><span class="bw-gap"[^>]*><span class="mo-n"[^>]*><span data-keep>\+18\.0 pts<\/span><\/span><\/span><\/div>/);
     // A run of an evidence trap that did not keep what the number is read from.
     const partial = wallView(batch(repeat, GROUPED, [null, 0.71]));
     expect(tile(partial, "r01")).not.toContain("bw-ovl-t");
@@ -311,7 +312,7 @@ describe("the wall's tiles", () => {
 
   it("keep today's sentence on a batch that does not describe its trap", () => {
     const html = wallView({ ...batch(repeat, GROUPED, [0, 0.71]), case: demo });
-    expect(tile(html, "r02")).toContain("52% of test rows were in training");
+    expect(tile(html, "r02")).toContain("52% of test rows were also in training");
     const noShare = structuredClone(demo);
     noShare.runs.r02.overlap_share = null;
     const out = wallView({ ...batch(repeat, GROUPED, [0, 0.71]), case: noShare });
@@ -340,7 +341,7 @@ describe("the run page's summary", () => {
   it("keeps today's number and tooltip on a batch that does not describe its trap", () => {
     const vm: BatchVm = { ...batch(repeat, GROUPED, [0, 0.7]), id: "demo-batch", case: demo };
     const html = runSummaryView(vm, "r02");
-    expect(html).toContain('title="Share of its test rows that also appear in its training rows"');
+    expect(html).toContain('title="52.4% of test rows were also in training"');
     expect(text(html)).toContain("Overlap 52.4%");
   });
 });

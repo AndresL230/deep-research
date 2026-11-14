@@ -134,6 +134,26 @@ def test_validate_motion_reports_problems():
     assert any("qpos" in p for p in problems)
     assert any("fps" in p for p in problems)
     assert validate_motion({"format": "nope"})
+    for bad in (0, 31, 7.5, True):
+        motion["header"]["fps"] = bad
+        assert any("fps" in p for p in validate_motion(motion)), bad
+
+
+def test_low_rate_recording_is_small_valid_and_changes_nothing():
+    """The hidden episodes' recordings (sim.motion.LOW_FPS, LOW_DECIMALS): a 10 s episode in about 20 KB, and the
+    episode itself is the same bit for bit, recorded or not."""
+    from sim.motion import LOW_DECIMALS, LOW_FPS, dumps
+
+    plain, none = run_episode(BASELINE, [0.6, 0.2], PRACTICE["place_xy"], seed=3, record=False)
+    result, motion = run_episode(BASELINE, [0.6, 0.2], PRACTICE["place_xy"], seed=3, motion_fps=LOW_FPS,
+                                 motion_decimals=LOW_DECIMALS)
+    assert none is None and result == plain
+    assert validate_motion(motion) == [] and motion["header"]["fps"] == LOW_FPS
+    assert abs(len(motion["frames"]) - (result["time_taken"] * LOW_FPS + 1)) <= 2
+    assert all(len(str(v).split(".")[-1]) <= LOW_DECIMALS for v in motion["frames"][5]["qpos"])
+    _, full = run_episode(TEMPLATE, PRACTICE["can_xy"], PRACTICE["place_xy"], motion_fps=LOW_FPS,
+                          motion_decimals=LOW_DECIMALS)
+    assert len(dumps(full)) < 25_000
 
 
 # ---------------------------------------------------------------- broken controllers

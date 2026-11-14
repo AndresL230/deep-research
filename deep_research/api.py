@@ -28,8 +28,9 @@ from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
-from . import datasets, domains, hub, notebook, robot_view, traps, user_scripts  # noqa: E402
+from . import controllers, datasets, domains, hub, notebook, robot_view, traps, user_scripts  # noqa: E402
 from .batch import Batch, resume_problem  # noqa: E402 - needs the environment loaded first
+from .case_file import with_evidence  # noqa: E402
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
 from .costs import OverBudget, estimate_batch_usd, run_rate  # noqa: E402
@@ -170,12 +171,18 @@ def _batch_dir(batch_id: str) -> Path:
 
 # Phases after which nothing more happens: the batch is a saved replay from then on, even in the server that ran it.
 OVER = {"done", "no_split", "stopped"}
+# A batch that crashed ("error: ...") or that the budget guard refused ("blocked: ...") is over too.
+OVER_PREFIXES = ("error:", "blocked:")
+
+
+def _is_over(phase: str | None) -> bool:
+    return phase in OVER or (phase or "").startswith(OVER_PREFIXES)
 
 
 def _running(batch_id: str) -> Batch | None:
     """The batch, while it is still live in this server: started here and not over yet."""
     b = BATCHES.get(batch_id)
-    return b if b is not None and b.case.data.get("phase") not in OVER else None
+    return b if b is not None and not _is_over(b.case.data.get("phase")) else None
 
 
 def _live(batch_id: str) -> Batch:
@@ -191,7 +198,10 @@ def _spawn(batch_id: str, coro) -> None:
 
     def done(t: asyncio.Task) -> None:
         if not t.cancelled() and t.exception() is not None:
-            BATCHES[batch_id].case.set_phase(f"error: {t.exception()}"[:300])
+            b = BATCHES[batch_id]
+            b.case.set_phase(f"error: {t.exception()}"[:300])
+            # The batch is over now, so Stop no longer reaches it: delete any VMs it still holds here.
+            TASKS[batch_id] = asyncio.get_running_loop().create_task(b.close())
 
     task.add_done_callback(done)
 
@@ -367,6 +377,21 @@ async def upload_dataset(request: Request, name: str = "dataset.csv"):
         raise HTTPException(422, str(e)) from e
 
 
+@app.get("/api/controllers")
+def list_controllers():
+    return controllers.list_controllers()
+
+
+@app.post("/api/controllers")
+async def upload_controller(request: Request, name: str = "controller.py"):
+    """The request body is a robot controller (a Python file with a `Controller` class). Parsed here, never run."""
+    raw = await _read_body(request, controllers.MAX_UPLOAD_BYTES)
+    try:
+        return controllers.save_upload(name, raw)
+    except controllers.ControllerError as e:
+        raise HTTPException(422, str(e)) from e
+
+
 @app.post("/api/scripts")
 async def upload_script(request: Request, name: str = "train.py"):
     """The request body is the Python training script. It is parsed, never run, on this server."""
@@ -481,7 +506,7 @@ async def start_batch(cfg: BatchConfig):
         # Check the settings (for tabular: the dataset, target and script) before anything is written or started.
         await asyncio.to_thread(domains.get(cfg.domain).check_config, cfg)
         b = await asyncio.to_thread(Batch, cfg)
-    except (datasets.DatasetError, user_scripts.ScriptError, domains.ConfigError) as e:
+    except (datasets.DatasetError, user_scripts.ScriptError, controllers.ControllerError, domains.ConfigError) as e:
         raise HTTPException(422, str(e)) from e
     BATCHES[b.id] = b
 
@@ -531,7 +556,8 @@ def get_case(batch_id: str):
     if not _is_local(batch_id):
         return _remote_case(batch_id)
     root = _batch_dir(batch_id)
-    return _with_charts(json.loads((root / "case" / "case.json").read_text()), root)
+    # Verdicts saved before `evidence` get it here, from their arm counts.
+    return _with_charts(with_evidence(json.loads((root / "case" / "case.json").read_text())), root)
 
 
 def _events(batch_id: str, rel: str, key: str) -> list[dict]:
@@ -565,7 +591,45 @@ def batch_file(batch_id: str, path: str):
     secret = ("holdout_labels", *domains.secret_files())
     if root not in full.parents or not full.is_file() or any(s in full.name for s in secret):
         raise HTTPException(404, "no such file")
+    rel = full.relative_to(root).as_posix()
+    if _in_hidden_folder(rel) and not _hidden_listed(batch_id, rel):
+        raise HTTPException(404, "no such file")
     return FileResponse(full, headers=FILE_HEADERS)
+
+
+# The statuses of a run that has been scored: only then are its hidden results shown.
+SCORED = ("honest", "inflated", "unclear")
+# A hidden episode's recording (domains/robot_arm.py `hidden_recordings`): `runs/r02/hidden/07-s0.motion.json`.
+HIDDEN_PATH = re.compile(r"^(runs/[A-Za-z0-9._-]+|forks/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/hidden/[A-Za-z0-9._-]+\.motion\.json$")
+
+
+def _in_hidden_folder(rel: str) -> bool:
+    """Whether the batch-relative `rel` is inside a run's or fork child's `hidden/` folder."""
+    parts = rel.split("/")
+    return (len(parts) > 3 and parts[0] == "runs" and parts[2] == "hidden") or (
+        len(parts) > 4 and parts[0] == "forks" and parts[3] == "hidden")
+
+
+def _hidden_listed(batch_id: str, rel: str) -> bool:
+    """Whether the case lists `rel` as a hidden episode's recording of a scored run or fork child.
+
+    The recordings are written while a run is being scored and hold the hidden can positions, so a file is only
+    served once its run's score, with `hidden_results` naming the file, is in the case file."""
+    m = HIDDEN_PATH.match(rel)
+    if m is None:
+        return False
+    try:
+        case = _case(batch_id)
+    except (HTTPException, OSError, ValueError):
+        return False
+    owner = m.group(1).split("/")
+    if owner[0] == "runs":
+        entry = (case.get("runs") or {}).get(owner[1])
+    else:
+        entry = (((case.get("forks") or {}).get(owner[1]) or {}).get("children") or {}).get(owner[2])
+    if not isinstance(entry, dict) or entry.get("status") not in SCORED:
+        return False
+    return any(isinstance(h, dict) and h.get("motion") == rel for h in entry.get("hidden_results") or [])
 
 
 @app.get("/api/memory/{domain}")
@@ -615,8 +679,9 @@ def batch_motion(batch_id: str, path: str, request: Request):
     """One motion file of a run or fork child as body poses per frame (robot_view.poses), for the 3D replay.
 
     `path` is batch-relative, as in `motion_files`. Only a run's or a fork child's outputs are read, never task/ (the
-    hidden can positions live there) or anything a domain keeps secret."""
-    full = _motion_file(_batch_dir(batch_id).resolve(), path)
+    hidden can positions live there) or anything a domain keeps secret. A scored run's hidden episodes
+    (`runs/<run>/hidden/...`, listed in its `hidden_results`) are read too, once the run is scored."""
+    full = _motion_file(_batch_dir(batch_id).resolve(), path, batch_id)
     try:
         packed = robot_view.motion_poses(full)
     except robot_view.MotionError as e:
@@ -638,7 +703,7 @@ def batch_motion_summaries(batch_id: str, path: list[str] = Query(default=[])):
     out: dict[str, dict] = {}
     for p in path[:MAX_SUMMARIES]:
         try:
-            out[p] = robot_view.motion_summary(_motion_file(root, p))
+            out[p] = robot_view.motion_summary(_motion_file(root, p, batch_id))
         except HTTPException as e:
             out[p] = {"error": str(e.detail)}
         except robot_view.MotionError as e:
@@ -646,14 +711,18 @@ def batch_motion_summaries(batch_id: str, path: list[str] = Query(default=[])):
     return out
 
 
-def _motion_file(root: Path, path: str) -> Path:
-    """The motion file at batch-relative `path`: only under a run's or fork child's outputs, never a secret."""
+def _motion_file(root: Path, path: str, batch_id: str) -> Path:
+    """The motion file at batch-relative `path`: only under a run's or fork child's outputs, never a secret, or a
+    hidden episode's recording that the case lists for a scored run or fork child (`_hidden_listed`)."""
     rel = path.strip()
-    if ".." in rel.split("/") or not MOTION_PATH.match(rel):
+    hidden = bool(HIDDEN_PATH.match(rel))
+    if ".." in rel.split("/") or not (MOTION_PATH.match(rel) or hidden):
         raise HTTPException(400, "not a motion file path: it must be under runs/<run>/outputs or forks/<fork>/<child>/outputs")
     secret = ("holdout_labels", *domains.secret_files())
     full = (root / rel).resolve()
     if root not in full.parents or not full.is_file() or any(s in full.name for s in secret):
+        raise HTTPException(404, "no such motion file")
+    if (hidden or _in_hidden_folder(full.relative_to(root).as_posix())) and not _hidden_listed(batch_id, rel):
         raise HTTPException(404, "no such motion file")
     return full
 

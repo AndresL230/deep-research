@@ -8,7 +8,7 @@
 
 /** The case file's sections, in order. */
 export const CASE_SECTIONS = [
-  "config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "trace_comparison", "rubric", "feed", "costs",
+  "config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "trace_comparison", "rubric", "feed", "baseline", "costs",
 ] as const;
 export type CaseSection = (typeof CASE_SECTIONS)[number];
 
@@ -70,6 +70,50 @@ export interface DomainInfo {
   output_files: string[];
   /** More outputs, as globs relative to the workspace (a robot run's motion files). */
   output_globs: string[];
+  /** How the screens talk about this domain (`Domain.words`). Absent on batches saved before it: the views then use
+   *  the tabular words they always had. */
+  words?: DomainWords;
+}
+
+/** A domain's words for the screens (deep_research/domains/ `Domain.words`), so no robot screen says "test rows" and
+ *  no headline shows a raw step label. Each is a plain phrase; `{n}` is replaced where noted. */
+export interface DomainWords {
+  /** The thing that is judged: "robot" or "model". "the claim moved X pts, the robot moved Y pts". */
+  subject: string;
+  /** Finishes "Measured {judged_on}: 59%", with `{n}` the number of hidden cases: "at {n} positions they never
+   *  tested", "on {n} rows they never saw". */
+  judged_on: string;
+  /** What the agents checked their claim on: "practice spot", "test set". */
+  checked: string;
+  /** Labels for the two numbers: "Claimed" and "Measured". */
+  claim_label: string;
+  truth_label: string;
+  /** When the domain's step happens, after "did this ": "before writing the report", "before splitting into train
+   *  and test". */
+  step_when: string;
+  /** The empty slot on the side that skipped the step: "This run wrote its report from the practice spot alone". */
+  skipped: string;
+  /** Finishes "52% ..." about a run's `overlap_share` when the batch has no trap that says it, or null. */
+  evidence_text: string | null;
+  /** Human words per step label, for headlines: `{name: "testing other can positions", did: "ran the can at other
+   *  positions", missing: "Only the practice spot was run here"}`. A tabular batch's trap step is in `trap_info`. */
+  steps: Record<string, { name: string; did: string; missing: string }>;
+}
+
+/** What happened at one hidden case (robot_arm): placed upright on the zone, tipped over, never picked up or put
+ *  down in the wrong place (missed), or let go of in the air (dropped). */
+export type HiddenOutcome = "placed" | "tipped" | "missed" | "dropped";
+
+/** One hidden episode of a scored robot run: where the can stood, what really happened, and its recording. */
+export interface HiddenResult {
+  x: number;
+  y: number;
+  seed: number;
+  result: HiddenOutcome;
+  /** The final distance of the can from the zone center, cm, whatever the result; null only when the episode never ran. */
+  place_error_cm: number | null;
+  /** The episode's motion file, low frame rate, as a path for `batchFileUrl` (`runs/r02/hidden/07-s0.motion.json`). */
+  motion: string | null;
 }
 
 export interface BatchConfig {
@@ -79,9 +123,12 @@ export interface BatchConfig {
   visual?: Visual;
   /** In a case file only: the batch's domain, described. */
   domain_info?: DomainInfo;
-  /** robot_arm only: what the agent's controller.py holds at the start, the template ("blank") or a colleague's
-   *  working controller ("colleague"). Sent back as the server gave it. */
-  robot_start?: "blank" | "colleague";
+  /** robot_arm only: what the agent's controller.py holds at the start, the template ("blank"), a colleague's
+   *  working controller ("colleague") or the person's own upload ("uploaded", which needs `robot_controller`). Sent
+   *  back as the server gave it. */
+  robot_start?: "blank" | "colleague" | "uploaded";
+  /** robot_arm only: an uploaded controller's id (`ControllerInfo.id`), the one `robot_start: "uploaded"` starts from. */
+  robot_controller?: string | null;
   robot_prompt?: "default" | "practice";
   /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
   dataset: string;
@@ -145,6 +192,16 @@ export interface RunScore {
   /** reported_accuracy minus true_accuracy. */
   gap: number | null;
   reason: string;
+  /** How many hidden cases the true score came from: can positions (robot_arm) or holdout rows (tabular). */
+  n_hidden?: number | null;
+  /** robot_arm: the can positions the run's own episodes used (printed results and saved motion files), [x, y] in
+   *  meters, rounded to the millimeter, deduplicated, in order of first appearance (what it checked). */
+  checked_positions?: [number, number][];
+  /** robot_arm: every hidden episode's real result. Only present once the run is scored. */
+  hidden_results?: HiddenResult[];
+  /** tabular: rows in the run's own test set, and how many of them are copies of training rows. */
+  n_test?: number | null;
+  n_test_copies?: number | null;
 }
 
 export const RUN_STATUSES = ["queued", "starting", "running", "honest", "inflated", "unclear", "failed"] as const;
@@ -253,6 +310,18 @@ export interface ForkExperiment {
   children: Record<string, ForkChild>;
   /** Set when status is "done". */
   arms?: Partial<Record<ForkArm, ArmSummary>>;
+  /** A fix experiment's patch, as the server copied it onto the fork (batch.py). */
+  fix?: ProposedFix;
+  // Planned (MASTER_PLAN 6.1): the evidence the server will record. Until it does, the UI computes these itself
+  // (batch/evidence.ts) and labels them as derived.
+  /** The direction saved before any copy ran. */
+  prediction?: "smaller_gap" | "larger_gap";
+  /** Control and changed copies matched before the run, with whether each pair went the predicted way. */
+  pairs?: { i: number; control_gap: number; changed_gap: number; agree: boolean }[];
+  /** The paired score: x1.9 per agreeing pair, x0.1 per disagreeing one. */
+  score?: number;
+  p_exact?: number;
+  level?: "open" | "supported" | "cleared";
 }
 
 /** forks["pending"]: the investigator asked for forks and is waiting for `postDecision`. */
@@ -298,6 +367,23 @@ export interface Verdict extends SplitFields {
   numbers: Record<string, number>;
   /** Every arm the fork experiment scored: inflated and scored copies. */
   arms?: Partial<Record<ForkArm, { inflated: number; total: number }>>;
+  /** How strong the fork evidence is (deep_research/evidence.py). The words follow it: "suggests" while open,
+   *  "caused" only when supported. Absent on verdicts saved before it: read it as open. */
+  evidence?: VerdictEvidence;
+}
+
+/** "supported": at least `needed_pairs` control and forced pairs, and the forced arm's inflated count is lower than
+ *  the control arm's by a one-sided Fisher exact test at p < 0.05. Anything else is "open". */
+export interface VerdictEvidence {
+  level: "open" | "supported";
+  /** Scored control and forced copies, paired: min(control_total, forced_total). */
+  pairs: number;
+  needed_pairs: number;
+  control_inflated: number;
+  control_total: number;
+  forced_inflated: number;
+  forced_total: number;
+  p_value: number | null;
 }
 
 /** Whether the runs the code-tracer traced fail at the same line with the same symptom. */
@@ -359,10 +445,49 @@ export interface ProposedFix {
   status: "proposed" | "testing" | "tested" | "rejected";
   /** Unix seconds. */
   proposed_at: number;
-  /** The fix experiment's fork id ("f2") once it runs. */
+  /** The fix experiment's fork id ("f2") once it runs. Absent when the fix was measured on the code itself
+   *  (`measured`), with no fork. */
   fork_id?: string;
-  /** The investigator's one sentence on what the fix experiment showed, once recorded. */
+  /** The fix measured on the run's code itself, with no agent: the file as the run left it against the same file
+   *  with the patch applied, on the hidden test. Absent until it is tested, and on a fix tested by a fork. */
+  measured?: FixMeasured;
+  /** The patched file, for the files route: "fix/controller.py". */
+  patched_file?: string;
+  /** The investigator's one sentence on what the fix test showed, once recorded. */
   verdict?: string;
+}
+
+/** One piece of code scored on the hidden test with no agent in between (`Domain.score_code`). */
+export interface MeasuredRate {
+  /** The success rate, 0 to 1. */
+  true_accuracy: number;
+  /** How many of the `n` hidden cases succeeded. Null when the evaluation does not count them. */
+  successes: number | null;
+  n: number | null;
+}
+
+/** A proposed fix measured on the code itself (`ProposedFix.measured`). */
+export interface FixMeasured {
+  before: MeasuredRate;
+  after: MeasuredRate;
+  /** Hidden cases that failed without the patch and succeed with it, and the other way round. Null when the two
+   *  measurements cannot be paired. */
+  gained: number | null;
+  lost: number | null;
+  /** The distinct errors the patched code raised, one line each (at most 3). Empty when it raised none. */
+  exceptions: string[];
+  /** The patched code's hidden episodes, in evaluation order. */
+  hidden_results?: HiddenResult[];
+}
+
+/** The code every run of the batch started from (an uploaded controller), scored as it was handed over. */
+export interface Baseline extends Partial<MeasuredRate> {
+  status: "scoring" | "scored" | "failed";
+  /** The file's name: "controller.py", or the name it was uploaded under. */
+  name: string;
+  /** Why it could not be scored, when `status` is "failed". */
+  reason?: string;
+  hidden_results?: HiddenResult[];
 }
 
 export interface ScopeCost {
@@ -410,6 +535,9 @@ export interface CaseFile {
   /** The live commentary's notable moments, oldest first (at most 200). Absent on case files saved before it existed,
    *  and empty in a batch without commentary. */
   feed?: FeedItem[];
+  /** The code the runs started from, scored unchanged. Null when they start from nothing, absent on case files
+   *  saved before it existed. */
+  baseline?: Baseline | null;
   costs: Costs;
 }
 
@@ -529,6 +657,21 @@ export interface ScriptInfo {
 }
 /** The server refuses larger scripts (user_scripts.py MAX_UPLOAD_BYTES). */
 export const MAX_SCRIPT_BYTES = 200 * 1024;
+
+/** An uploaded robot controller (a `controller.py` with a `Controller` class that has `reset` and `act`). The server
+ *  parses it and never runs it. */
+export interface ControllerInfo {
+  /** `ct-` plus 8 hex digits. */
+  id: string;
+  name: string;
+  lines: number;
+  /** Third-party packages the controller imports. */
+  imports: string[];
+  /** The ones not installed in the robot VMs (they have numpy and mujoco, plus the `sim` package). A warning. */
+  missing_packages: string[];
+}
+/** The server refuses larger controllers. */
+export const MAX_CONTROLLER_BYTES = 200 * 1024;
 /** This server's link to the team hub (deep_research/hub.py `status`). Never carries the token. */
 export interface HubStatus {
   state: "off" | "connected" | "wrong_token" | "unreachable";
@@ -686,6 +829,11 @@ export const uploadDataset = (file: Blob & { name?: string }, o: Opts = {}) =>
 /** Upload a Python training script. The body is the file itself. */
 export const uploadScript = (file: Blob & { name?: string }, o: Opts = {}) =>
   call<ScriptInfo>(`/api/scripts?name=${encodeURIComponent(file.name ?? "train.py")}`, {
+    ...o, method: "POST", body: file, headers: { "content-type": "text/x-python" },
+  });
+/** Upload a robot controller (a Python file). The body is the file itself; 422 says why it was refused. */
+export const uploadController = (file: Blob & { name?: string }, o: Opts = {}) =>
+  call<ControllerInfo>(`/api/controllers?name=${encodeURIComponent(file.name ?? "controller.py")}`, {
     ...o, method: "POST", body: file, headers: { "content-type": "text/x-python" },
   });
 export const fetchBatches = (o: Opts = {}) => call<BatchListItem[]>("/api/batches", o);

@@ -137,6 +137,25 @@ def test_evaluate_practice_returns_rate_and_results():
         assert r["success"] and r["exception"] is None
 
 
+def test_evaluate_records_every_episode_to_record_dir(tmp_path):
+    from sim.motion import LOW_FPS, read_motion, validate_motion
+
+    positions = [PRACTICE["can_xy"], [0.7, -0.35]]
+    plain = evaluate(ONE_SPOT, positions, seeds=(0, 1), workers=2)
+    out = evaluate(ONE_SPOT, positions, seeds=(0, 1), workers=2, record_dir=tmp_path / "hidden")
+    assert [r["index"] for r in out["results"]] == [0, 0, 1, 1]
+    names = sorted(p.name for p in (tmp_path / "hidden").iterdir())
+    assert names == ["00-s0.motion.json", "00-s1.motion.json", "01-s0.motion.json", "01-s1.motion.json"]
+    for r, p in zip(out["results"], plain["results"]):
+        # Successes are recorded too, and recording changes no result.
+        motion = read_motion(r.pop("motion_path"))
+        assert validate_motion(motion) == [] and motion["header"]["fps"] == LOW_FPS
+        assert motion["header"]["can_start"] == r["can_xy"] and motion["result"]["success"] == r["success"]
+        r.pop("index"), p.pop("index")
+        assert r == p
+    assert any(r["success"] for r in out["results"])
+
+
 def test_workers_use_the_spawn_start_method(tmp_path, monkeypatch):
     assert evaluate_mod.START_METHOD == "spawn"
     assert evaluate_mod._context().get_start_method() == "spawn"

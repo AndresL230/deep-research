@@ -15,13 +15,53 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .analysis import LABELS
+from .evidence import verdict_evidence, wording_error
 
 Listener = Callable[[str, Any], None]
 
 
+def with_evidence(case: dict) -> dict:
+    """A case file saved before verdicts had `evidence`: add it from the verdict's arm counts, in place."""
+    verdict = case.get("verdict")
+    if isinstance(verdict, dict) and not isinstance(verdict.get("evidence"), dict):
+        verdict["evidence"] = verdict_evidence(verdict.get("arms"), verdict.get("numbers"))
+    return case
+
+
+def investigator_view(data: dict) -> dict:
+    """The case file as the investigator may read it: without any run's or fork copy's per hidden case results
+    (`hidden_results`, every hidden can position with what really happened there), the same for the baseline and the
+    measured fix, and without the screens' words (`config.domain_info.words`, only for the UI). Everything else is kept."""
+    view = dict(data)
+    cfg = data.get("config")
+    if isinstance(cfg, dict) and isinstance(cfg.get("domain_info"), dict) and "words" in cfg["domain_info"]:
+        view["config"] = {**cfg, "domain_info": {k: v for k, v in cfg["domain_info"].items() if k != "words"}}
+    view["runs"] = {rid: {k: v for k, v in r.items() if k not in VIEW_HIDDEN} if isinstance(r, dict) else r
+                    for rid, r in (data.get("runs") or {}).items()}
+    forks = {}
+    for fid, f in (data.get("forks") or {}).items():
+        if isinstance(f, dict) and isinstance(f.get("children"), dict):
+            f = {**f, "children": {cid: {k: v for k, v in c.items() if k not in VIEW_HIDDEN} if isinstance(c, dict) else c
+                                   for cid, c in f["children"].items()}}
+        forks[fid] = f
+    view["forks"] = forks
+    if isinstance(data.get("baseline"), dict):
+        view["baseline"] = {k: v for k, v in data["baseline"].items() if k not in VIEW_HIDDEN}
+    fix = data.get("fix")
+    if isinstance(fix, dict) and isinstance(fix.get("measured"), dict):
+        view["fix"] = {**fix, "measured": {k: v for k, v in fix["measured"].items() if k not in VIEW_HIDDEN}}
+    return view
+
+
+# Keys of a run (or fork copy) that never reach the investigator's view.
+VIEW_HIDDEN = frozenset({"hidden_results"})
+
+
 class CaseFile:
-    def __init__(self, path: Path, labels: list[str] | None = None):
+    def __init__(self, path: Path, labels: list[str] | None = None, view_path: Path | None = None):
         self.path = path
+        # Where `investigator_view` of the case is kept, rewritten on every save. None: no view.
+        self.view_path = view_path
         # The step labels the investigator's tools accept: the batch domain's (`Domain.labels()`).
         self.labels = list(labels) if labels is not None else LABELS
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -49,6 +89,9 @@ class CaseFile:
                 "rubric": [],
                 # The live commentary's feed of notable moments across runs (commentary.py), oldest first.
                 "feed": [],
+                # The code every run started from, scored as it was handed over (`Batch.score_baseline`). None when
+                # the runs start from nothing.
+                "baseline": None,
             }
             self._save()
         # Case files saved before these sections existed.
@@ -57,6 +100,9 @@ class CaseFile:
         self.data.setdefault("trace_comparison", None)
         self.data.setdefault("rubric", [])
         self.data.setdefault("feed", [])
+        self.data.setdefault("baseline", None)
+        with_evidence(self.data)
+        self._save_view()
 
     # ---- plumbing ----
     def subscribe(self, fn: Listener) -> None:
@@ -66,6 +112,15 @@ class CaseFile:
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.data, indent=2, default=str))
         os.replace(tmp, self.path)
+        self._save_view()
+
+    def _save_view(self) -> None:
+        if self.view_path is None:
+            return
+        self.view_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.view_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(investigator_view(self.data), indent=2, default=str))
+        os.replace(tmp, self.view_path)
 
     def _changed(self, section: str) -> None:
         self._save()
@@ -187,6 +242,11 @@ class CaseFile:
             self._changed("trace")
         return f"trace saved: {run_id} line {line}"
 
+    def set_baseline(self, baseline: dict | None) -> None:
+        with self._lock:
+            self.data["baseline"] = baseline
+            self._changed("baseline")
+
     def set_fix(self, fix: dict | None) -> None:
         with self._lock:
             self.data["fix"] = fix
@@ -212,9 +272,11 @@ class CaseFile:
 
     def record_verdict(self, sentence: str, step_label: str, numbers: dict, **structured: Any) -> str:
         """Save the verdict: the sentence, the step and the old `numbers` ({arm}_inflated / {arm}_total), plus any
-        `structured` fields (`record_structured_verdict`)."""
+        `structured` fields (`record_structured_verdict`). `evidence` is added from the arm counts (evidence.py)."""
+        verdict = {"sentence": sentence[:500], "step_label": step_label, "numbers": numbers, **structured}
+        verdict["evidence"] = verdict_evidence(verdict.get("arms"), numbers)
         with self._lock:
-            self.data["verdict"] = {"sentence": sentence[:500], "step_label": step_label, "numbers": numbers, **structured}
+            self.data["verdict"] = verdict
             self._changed("verdict")
         return "verdict saved"
 
@@ -263,6 +325,9 @@ class CaseFile:
                 want = ", ".join(f"{a} {t['inflated']}/{t['total']}" for a, t in truth.items()) or "none scored"
                 return f"error: the fork arms must match the experiment exactly ({want}, inflated/scored)"
         numbers = {f"{a}_{k}": v for a, c in given.items() for k, v in c.items()}
+        err = wording_error(sentence, verdict_evidence(given, numbers))
+        if err:
+            return err
         return self.record_verdict(sentence.strip(), step, numbers, step=step, **split, arms=given,
                                    confidence=confidence)
 
