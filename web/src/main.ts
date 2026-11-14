@@ -61,6 +61,7 @@ import { syncLanding } from "./landing/mount";
 import { syncMotion } from "./motion";
 import { refreshMotion } from "./robot/mount";
 import { smoothScroll } from "./scroll";
+import { mountAccount } from "./account";
 import { isMotionBatch } from "./robot/markup";
 
 // ── state ────────────────────────────────────────────────────────────────────
@@ -296,7 +297,7 @@ function headerView(vm: BatchVm | null): string {
   const count = needsCount(S.home.batches);
   // The logo, the links (nav.ts), then on a batch's pages its breadcrumb: the batch and the page in it.
   const left = `<div class="ask-hdr-l pg-hdr-l">
-    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${mark(13.4)}<span class="ask-h1 ask-h1-t">${wordmark(13)}</span></button>
+    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${mark(18.7)}<span class="ask-h1 ask-h1-t">${wordmark(13)}</span></button>
     ${navBar(r, count)}
     ${crumbs.length ? `<nav class="pg-crumbs" aria-label="Breadcrumb" data-morph-key="crumbs">${crumbs.join(`<span class="ask-crumb-sep" aria-hidden="true">›</span>`)}</nav>` : ""}
   </div>`;
@@ -1247,3 +1248,6 @@ void refreshHub();
 setInterval(() => { void refreshHub(); }, 30_000);
 
 onRoute();
+
+// Who is signed in, their plan and credits (only behind the Cloudflare gateway).
+void mountAccount();

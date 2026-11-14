@@ -1,0 +1,27 @@
+# What the image does not need. The web app is built inside the image, and saved batches and uploads live on the
+# volume, never in the image.
+.git
+.claude
+.env
+.env.*
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+*.egg-info
+node_modules
+web/node_modules
+web/dist
+# Written at run time, on the volume (scripts/fly-start.sh).
+batches
+datasets
+user_scripts
+controllers
+runs
+# Downloaded at build time (sim/fetch_assets.py).
+sim/assets
+# The team hub is a separate Cloudflare Worker, deployed on its own.
+hub
+tests
+# The Cloudflare gateway (Worker, D1 schema) deploys on its own with wrangler.
+gateway
