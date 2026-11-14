@@ -15,6 +15,101 @@
     "inflation_threshold": 0.08,
     "mode": "replay",
     "seed": 7,
+    "domain_info": {
+      "name": "tabular",
+      "title": "Tabular data science",
+      "description": "Agents train a classifier on a CSV with a flaw planted in it and report a test accuracy; we score their predictions on held-out rows they never see.",
+      "visual": "charts",
+      "output_files": [
+        "report.json",
+        "predictions.csv",
+        "train.csv",
+        "test.csv"
+      ],
+      "output_globs": [],
+      "words": {
+        "subject": "model",
+        "judged_on": "on {n} rows they never saw",
+        "checked": "test set",
+        "claim_label": "Claimed",
+        "truth_label": "Measured",
+        "step_when": "before splitting into train and test",
+        "skipped": "This run went straight to splitting the data",
+        "evidence_text": "of test rows were also in training",
+        "steps": {
+          "load": {
+            "name": "loading the data",
+            "did": "loaded the data",
+            "missing": "No data loaded here"
+          },
+          "inspect": {
+            "name": "looking at the data",
+            "did": "looked at the data",
+            "missing": "No look at the data here"
+          },
+          "deduplicate": {
+            "name": "removing duplicate rows",
+            "did": "removed duplicate rows",
+            "missing": "No duplicate removal here"
+          },
+          "drop_leak": {
+            "name": "leaving out the leaky column",
+            "did": "left out the leaky column",
+            "missing": "The leaky column was kept here"
+          },
+          "group_split": {
+            "name": "grouping the rows by subject",
+            "did": "grouped the rows by subject",
+            "missing": "No grouping by subject here"
+          },
+          "deduplicate_near": {
+            "name": "removing near-duplicate rows",
+            "did": "removed near-duplicate rows",
+            "missing": "No near-duplicate removal here"
+          },
+          "clean": {
+            "name": "cleaning up missing values",
+            "did": "cleaned up missing values",
+            "missing": "No cleaning here"
+          },
+          "split": {
+            "name": "splitting into train and test",
+            "did": "split the data",
+            "missing": "No split here"
+          },
+          "preprocess": {
+            "name": "scaling the features",
+            "did": "scaled or imputed the features",
+            "missing": "No preprocessing here"
+          },
+          "train": {
+            "name": "training a model",
+            "did": "trained a model",
+            "missing": "No model trained here"
+          },
+          "evaluate": {
+            "name": "scoring the model",
+            "did": "scored a model",
+            "missing": "No scoring here"
+          },
+          "plot": {
+            "name": "drawing charts",
+            "did": "drew a chart",
+            "missing": "No chart here"
+          },
+          "predict": {
+            "name": "predicting the holdout rows",
+            "did": "read the holdout rows",
+            "missing": "No holdout rows read here"
+          },
+          "report": {
+            "name": "writing the report",
+            "did": "wrote the report",
+            "missing": "No report written here"
+          }
+        }
+      }
+    },
     "simulated": true
   },
   "phase": "done",
@@ -27,6 +122,9 @@
       "overlap_share": 0.0,
       "gap": -0.0036,
       "reason": "",
+      "n_test": 123,
+      "n_test_copies": 0,
+      "n_hidden": 154,
       "n_actions": 5,
       "labels": [
         [
@@ -40,6 +138,7 @@
         ],
         [
           "load",
+          "inspect",
           "deduplicate"
         ],
         [],
@@ -73,6 +172,9 @@
       "overlap_share": 0.5243,
       "gap": 0.1322,
       "reason": "",
+      "n_test": 185,
+      "n_test_copies": 97,
+      "n_hidden": 154,
       "n_actions": 4,
       "labels": [
         [
@@ -115,6 +217,9 @@
       "overlap_share": 0.4811,
       "gap": 0.1311,
       "reason": "",
+      "n_test": 185,
+      "n_test_copies": 89,
+      "n_hidden": 154,
       "n_actions": 4,
       "labels": [
         [
@@ -157,6 +262,9 @@
       "overlap_share": 0.0,
       "gap": 0.0045,
       "reason": "",
+      "n_test": 123,
+      "n_test_copies": 0,
+      "n_hidden": 154,
       "n_actions": 5,
       "labels": [
         [
@@ -170,6 +278,7 @@
         ],
         [
           "load",
+          "inspect",
           "deduplicate"
         ],
         [],
@@ -203,6 +312,9 @@
       "overlap_share": 0.0,
       "gap": -0.015,
       "reason": "",
+      "n_test": 123,
+      "n_test_copies": 0,
+      "n_hidden": 154,
       "n_actions": 5,
       "labels": [
         [
@@ -216,6 +328,7 @@
         ],
         [
           "load",
+          "inspect",
           "deduplicate"
         ],
         [],
@@ -249,6 +362,9 @@
       "overlap_share": 0.5676,
       "gap": 0.1462,
       "reason": "",
+      "n_test": 185,
+      "n_test_copies": 105,
+      "n_hidden": 154,
       "n_actions": 4,
       "labels": [
         [
@@ -291,6 +407,9 @@
       "overlap_share": 0.0,
       "gap": 0.0256,
       "reason": "",
+      "n_test": 123,
+      "n_test_copies": 0,
+      "n_hidden": 154,
       "n_actions": 5,
       "labels": [
         [
@@ -304,6 +423,7 @@
         ],
         [
           "load",
+          "inspect",
           "deduplicate"
         ],
         [],
@@ -337,6 +457,9 @@
       "overlap_share": 0.5676,
       "gap": 0.1484,
       "reason": "",
+      "n_test": 185,
+      "n_test_copies": 105,
+      "n_hidden": 154,
       "n_actions": 4,
       "labels": [
         [
@@ -379,6 +502,9 @@
       "overlap_share": 0.5081,
       "gap": 0.1516,
       "reason": "",
+      "n_test": 185,
+      "n_test_copies": 94,
+      "n_hidden": 154,
       "n_actions": 4,
       "labels": [
         [
@@ -421,6 +547,9 @@
       "overlap_share": 0.5135,
       "gap": 0.1354,
       "reason": "",
+      "n_test": 185,
+      "n_test_copies": 95,
+      "n_hidden": 154,
       "n_actions": 4,
       "labels": [
         [
@@ -463,6 +592,9 @@
       "overlap_share": 0.0,
       "gap": 0.0712,
       "reason": "",
+      "n_test": 123,
+      "n_test_copies": 0,
+      "n_hidden": 154,
       "n_actions": 5,
       "labels": [
         [
@@ -476,6 +608,7 @@
         ],
         [
           "load",
+          "inspect",
           "deduplicate"
         ],
         [],
@@ -509,6 +642,9 @@
       "overlap_share": 0.0,
       "gap": 0.0013,
       "reason": "",
+      "n_test": 123,
+      "n_test_copies": 0,
+      "n_hidden": 154,
       "n_actions": 5,
       "labels": [
         [
@@ -522,6 +658,7 @@
         ],
         [
           "load",
+          "inspect",
           "deduplicate"
         ],
         [],
@@ -588,6 +725,9 @@
           "overlap_share": 0.4919,
           "gap": 0.1743,
           "reason": "",
+          "n_test": 185,
+          "n_test_copies": 91,
+          "n_hidden": 154,
           "how": "fork",
           "lab_url": null
         },
@@ -599,6 +739,9 @@
           "overlap_share": 0.5568,
           "gap": 0.2219,
           "reason": "",
+          "n_test": 185,
+          "n_test_copies": 103,
+          "n_hidden": 154,
           "how": "fork",
           "lab_url": null
         },
@@ -610,6 +753,9 @@
           "overlap_share": 0.0,
           "gap": 0.0581,
           "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
           "how": "fork",
           "lab_url": null
         },
@@ -621,6 +767,9 @@
           "overlap_share": 0.5243,
           "gap": 0.117,
           "reason": "",
+          "n_test": 185,
+          "n_test_copies": 97,
+          "n_hidden": 154,
           "how": "fork",
           "lab_url": null
         },
@@ -632,6 +781,9 @@
           "overlap_share": 0.0,
           "gap": 0.0207,
           "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
           "how": "fork",
           "lab_url": null
         },
@@ -643,6 +795,9 @@
           "overlap_share": 0.0,
           "gap": 0.0337,
           "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
           "how": "fork",
           "lab_url": null
         },
@@ -654,6 +809,9 @@
           "overlap_share": 0.0,
           "gap": -0.0232,
           "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
           "how": "fork",
           "lab_url": null
         },
@@ -665,6 +823,9 @@
           "overlap_share": 0.0,
           "gap": 0.0175,
           "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
           "how": "fork",
           "lab_url": null
         }
@@ -692,13 +853,23 @@
     }
   },
   "verdict": {
-    "sentence": "Skipping the duplicate check caused the inflated score: forcing it left 0 of 4 runs inflated, against 3 of 4 without it.",
+    "sentence": "Skipping the duplicate check suggests why the scores were inflated: forcing it left 0 of 4 copies inflated, against 3 of 4 without (4 pairs).",
     "step_label": "deduplicate",
     "numbers": {
       "control_inflated": 3,
       "control_total": 4,
       "forced_inflated": 0,
       "forced_total": 4
+    },
+    "evidence": {
+      "level": "open",
+      "pairs": 4,
+      "needed_pairs": 8,
+      "control_inflated": 3,
+      "control_total": 4,
+      "forced_inflated": 0,
+      "forced_total": 4,
+      "p_value": 0.0714
     }
   },
   "costs": {
