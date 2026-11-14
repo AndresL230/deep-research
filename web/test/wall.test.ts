@@ -198,4 +198,28 @@ describe("tile parts", () => {
     expect(html).toContain("bw-rev--failed");
     expect(html).toContain("1 run: 0 honest, 0 inflated, 1 failed");
   });
+
+  it("draws an unclear robot run in a neutral grey pill, with its numbers", () => {
+    const c = { ...demo, runs: { r01: { ...demo.runs.r01, status: "unclear" } } } as unknown as CaseFile;
+    const html = wallView(vmOf(c));
+    expect(html).toContain('bw-pill bw-pill--unclear');
+    expect(html).toContain(">Unclear<");
+    expect(html).toContain("bw-rev");
+    expect(html).toContain("1 run: 0 honest, 0 inflated, 1 unclear, 0 failed");
+  });
+
+  it("words a robot batch's tiles as claimed vs hidden test, and says so above the grid", () => {
+    const c = { ...demo, config: { ...demo.config, visual: "motion", inflation_threshold: 0.275 } } as unknown as CaseFile;
+    const html = wallView(vmOf(c));
+    expect(html).toContain("Each agent writes a controller and claims a success rate.");
+    const r02 = tileOf(html, "r02");
+    expect(r02).toContain(">Claimed<");
+    expect(r02).toContain(">Hidden test<");
+    expect(r02).toContain("+13.2 pts over");
+    // No unclear threshold in this config: two bands.
+    expect(r02).toContain('title="Claimed minus hidden test. Up to 27.5 pts honest, over 27.5 inflated."');
+    const tab = wallView(vmOf(demo));
+    expect(tab).toContain("Each agent trains a model and reports its test accuracy.");
+    expect(tileOf(tab, "r02")).toContain(">Reported<");
+  });
 });

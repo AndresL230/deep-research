@@ -80,6 +80,7 @@ export interface BatchConfig {
   /** robot_arm only: what the agent's controller.py holds at the start, the template ("blank") or a colleague's
    *  working controller ("colleague"). Sent back as the server gave it. */
   robot_start?: "blank" | "colleague";
+  robot_prompt?: "default" | "practice";
   /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
   dataset: string;
   /** The column to predict. Needed for an uploaded dataset; absent or null means Pima's `outcome`. */
@@ -92,17 +93,26 @@ export interface BatchConfig {
   trap_info?: TrapInfo;
   trap_strength: number;
   trap_noise: number;
+  /** Share of the planted copies that get the noise. Sent back as the server gave it. */
+  trap_hidden_share?: number;
   hint_level: "none" | "light";
   model_hint: "random_forest" | "any";
   holdout_fraction: number;
   n_runs: number;
   forks_per_choice: number;
+  /** The fork experiment's extra arms (forks.arm_plan). Sent back as the server gave them. */
+  placebo_arm?: boolean;
+  show_arm?: boolean;
   analyst_model: string;
   investigator_model: string;
   budget_usd: number;
   inflation_threshold: number;
   mode: "live" | "replay";
   seed: number;
+  /** robot_arm only: how many hidden can positions a controller is scored on (the first n); null means all. */
+  robot_hidden_positions?: number | null;
+  /** robot_arm only: the seeds each hidden position is run with (one to five). */
+  robot_eval_seeds?: number[];
   /** Only on fixtures made by scripts/make_fixture.py: the agents' choices are scripted. */
   simulated?: boolean;
 }
@@ -145,7 +155,8 @@ export interface RunRecord extends Partial<Omit<RunScore, "status">> {
   /** The charts the run saved, oldest first, as paths for `batchFileUrl`. Set once the run has finished. */
   charts?: string[];
   /** The motion files the run saved (`visual` "motion"), as paths for `batchFileUrl`, such as
-   *  `runs/r01/outputs/live/practice.motion.json`. Set once the run has finished; absent in the tabular domain. */
+   *  `runs/r01/outputs/live/practice.motion.json`, newest last. Grows while the run is going (the server pulls them
+   *  from its VM every 15 s, each with a `motion` event); final once it has finished. Absent in the tabular domain. */
   motion_files?: string[];
   // Fixture only (scripts/make_fixture.py).
   duration_s?: number;
@@ -180,7 +191,8 @@ export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   lab_url?: string | null;
   /** The charts the child saved, as paths for `batchFileUrl`. */
   charts?: string[];
-  /** The motion files the child saved, as paths for `batchFileUrl` (`forks/f1/forced-1/outputs/live/...`). */
+  /** The motion files the child saved, as paths for `batchFileUrl` (`forks/f1/forced-1/outputs/live/...`), newest
+   *  last. Grows while the child runs, as a run's does. */
   motion_files?: string[];
   /** "fork": a copy-on-write VM fork. "replay": rebuilt by replaying the actions when forking failed. */
   how?: "fork" | "replay";
@@ -288,6 +300,9 @@ export type AgentEvent = { t: number; /** Investigator only: which agent or suba
   | { type: "todos"; todos: AgentTodo[] }
   /** Forced fork children only: the step the experiment forced, before the agent continues. */
   | { type: "forced"; command: string; output: string }
+  /** Robot runs and fork children only: a motion file arrived from the VM (new, or changed since it last did), at
+   *  `path`, batch-relative as in `motion_files`. Batches saved before these existed have none. */
+  | { type: "motion"; path: string }
 );
 
 // ── the websocket ────────────────────────────────────────────────────────────

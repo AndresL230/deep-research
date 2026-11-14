@@ -11,6 +11,7 @@ import logging
 import shutil
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -39,9 +40,96 @@ RECURSION_LIMIT = 200
 # money already spent. The budget check is what limits the investigator's spend.
 INVESTIGATOR_RECURSION_LIMIT = 1000
 MAX_PARALLEL_VMS = 12
+# A robot run's motion files are pulled from its VM this often while it runs, so its tile shows it practicing.
+MOTION_POLL_S = 15.0
+# How long the end of a run waits for a pull in flight before it gives up on it.
+MOTION_POLL_STOP_S = 20.0
 
 # Run statuses that mean the run is over. "unclear" (robot only): scored, but neither honest nor inflated.
 SCORED = ("honest", "inflated", "unclear", "failed")
+
+# The pulls run here, not in the default thread pool the agents' sandbox calls share: 12 runs polling at once must
+# never hold up a run's own tool calls.
+_POLL_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="motion-poll")
+
+
+class MotionWatch:
+    """Pulls a robot run's (or fork child's) motion files from its VM while it runs.
+
+    Every `MOTION_POLL_S` seconds one look at the VM's live folder (`sandboxes.poll_live_files`) saves the new or
+    changed files under the run's `outputs/live/`, where the final download puts them too. Each file that arrives
+    is logged as an event, `{"type": "motion", "t": <run clock>, "path": "runs/r01/outputs/live/x.motion.json"}`, so
+    the websocket pushes it and a saved batch's replay shows the episode when it appeared, and `publish(files)` gets
+    the run's motion files so far (batch-relative, newest last, at most the domain's `max_output_globs`).
+
+    Runs on the event loop as its own task; the pulls run in `_POLL_POOL`. A failing pull is logged and the next one
+    tries again. `stop()` ends it, `finish()` merges in the files the final download found.
+    """
+
+    def __init__(self, sb: Any, outputs: Path, prefix: str, patterns: list[str], limit: int,
+                 log: EventLog, on_event, publish):
+        self.sb, self.outputs, self.prefix, self.patterns, self.limit = sb, outputs, prefix, patterns, limit
+        self.log, self.on_event, self.publish = log, on_event, publish
+        self.files: list[str] = []
+        self.seen: dict[str, tuple] = {}
+        self._stop = asyncio.Event()
+        self._task = asyncio.create_task(self._loop())
+
+    async def _loop(self) -> None:
+        while True:
+            try:
+                await asyncio.wait_for(self._stop.wait(), MOTION_POLL_S)
+                return
+            except asyncio.TimeoutError:
+                pass
+            await self.poll()
+
+    async def poll(self) -> None:
+        try:
+            new = await asyncio.get_running_loop().run_in_executor(
+                _POLL_POOL, vms.poll_live_files, self.sb, self.outputs, self.patterns, self.seen, self.limit)
+        except Exception as e:  # noqa: BLE001 - watching must never break the run
+            logger.warning("pulling motion files for %s failed: %s: %s", self.prefix, type(e).__name__, e)
+            return
+        if not self._stop.is_set():
+            self._arrived(new)
+
+    def _arrived(self, rels: list[str]) -> None:
+        if not rels:
+            return
+        for rel in rels:
+            path = f"{self.prefix}/{rel}"
+            if path in self.files:
+                self.files.remove(path)  # changed: it is the newest episode again
+            self.files.append(path)
+            try:
+                self.on_event(self.log.write({"type": "motion", "path": path}))
+            except Exception as e:  # noqa: BLE001 - the log is closed: the run is over
+                logger.warning("logging motion file %s failed: %r", path, e)
+        self.files = self.files[-self.limit:]
+        self.publish(list(self.files))
+
+    async def stop(self) -> None:
+        """Stop pulling. Waits a little for a pull in flight, so it never writes after the final download."""
+        if self._task.done():
+            return
+        self._stop.set()
+        try:
+            await asyncio.wait_for(asyncio.shield(self._task), MOTION_POLL_STOP_S)
+        except Exception:  # noqa: BLE001 - a pull that hangs, or the task failed: drop it
+            self._task.cancel()
+
+    def finish(self, final: list[str]) -> None:
+        """Merge in the files the final download saved (relative to `outputs`): those not seen yet come last."""
+        self._arrived([rel for rel in final if f"{self.prefix}/{rel}" not in self.files])
+
+
+def _watch_motion(domain, sb: Any, outputs: Path, prefix: str, log: EventLog, on_event, publish) -> MotionWatch | None:
+    """A `MotionWatch` for a run of `domain`, or None when its runs draw no motion (the tabular domain)."""
+    patterns = vms.live_globs(domain.output_globs) if domain.visual == "motion" else []
+    if not patterns:
+        return None
+    return MotionWatch(sb, outputs, prefix, patterns, domain.max_output_globs, log, on_event, publish)
 
 
 def resume_problem(case: dict, batch_dir: Path) -> str | None:
@@ -270,6 +358,7 @@ class Batch:
         scope, rdir = f"run:{run_id}", self.runs_dir / run_id
         log = self._log(rdir / "events.jsonl", run_id)
         self.case.update_run(run_id, status="starting")
+        watch: MotionWatch | None = None
         try:
             sb = await asyncio.to_thread(vms.create_vm, f"{self.id}-{run_id}", **self._vm_domain)
             self.vms[run_id] = sb
@@ -278,23 +367,32 @@ class Batch:
             url = await _try(asyncio.to_thread(vms.start_lab_page, sb))
             self.case.update_run(run_id, status="running", vm_id=sb.id, lab_url=url)
 
+            on_event = self._run_event(run_id)
+            watch = _watch_motion(self.domain, sb, rdir / "outputs", f"runs/{run_id}/outputs", log, on_event,
+                                  lambda files: self.case.update_run(run_id, motion_files=files))
             agent = build_analyst(DaytonaSandbox(sandbox=sb), self.cfg.analyst_model)
             inp = {"messages": [{"role": "user", "content": self.domain.task_prompt(self.cfg)}]}
             msgs = await asyncio.wait_for(
-                self._drive(agent, inp, f"{self.id}-{run_id}", scope, self.cfg.analyst_model, log, self._run_event(run_id)),
+                self._drive(agent, inp, f"{self.id}-{run_id}", scope, self.cfg.analyst_model, log, on_event),
                 RUN_TIMEOUT_S,
             )
             (rdir / "messages.json").write_text(json.dumps(messages_to_dict(msgs)))
+            if watch is not None:
+                await watch.stop()
             motion = await asyncio.to_thread(vms.download_outputs, sb, rdir / "outputs", **self._vm_domain)
             charts = await asyncio.to_thread(vms.download_charts, sb, rdir / "live")
             await self._finish_run(run_id, rdir, log)
             if charts:
                 self.case.update_run(run_id, charts=[f"runs/{run_id}/live/{name}" for name in charts])
-            if motion:
+            if watch is not None:
+                watch.finish(motion or [])
+            elif motion:
                 self.case.update_run(run_id, motion_files=[f"runs/{run_id}/outputs/{path}" for path in motion])
         except Exception as e:  # noqa: BLE001 - one bad run must not sink the batch
             self.case.update_run(run_id, status="failed", reason=f"{type(e).__name__}: {e}"[:500])
         finally:
+            if watch is not None:
+                await watch.stop()
             log.close()
             # The VM is used once: delete it now, so it stops costing anything. Its lab page goes with it.
             if await self._release(run_id, scope):
@@ -417,6 +515,7 @@ class Batch:
             cid, scope = f"{arm}-{i + 1}", f"fork:{fork_id}:{arm}-{i + 1}"
             cdir = self.forks_dir / fork_id / cid
             log = self._log(cdir / "events.jsonl", f"{fork_id}/{cid}")
+            watch: MotionWatch | None = None
             async with sem:
                 try:
                     try:
@@ -455,11 +554,15 @@ class Batch:
                     def on_event(ev: dict) -> None:
                         self._emit({"kind": "fork_event", "fork": fork_id, "child": cid, "event": ev})
 
+                    watch = _watch_motion(self.domain, vm, cdir / "outputs", f"forks/{fork_id}/{cid}/outputs", log,
+                                          on_event, lambda files: self._set_child(fork_id, cid, motion_files=files))
                     await asyncio.wait_for(
                         self._drive(agent, {"messages": history}, f"{self.id}-{fork_id}-{cid}", scope,
                                     self.cfg.analyst_model, log, on_event),
                         RUN_TIMEOUT_S,
                     )
+                    if watch is not None:
+                        await watch.stop()
                     motion = await asyncio.to_thread(vms.download_outputs, vm, cdir / "outputs", **self._vm_domain)
                     charts = await asyncio.to_thread(vms.download_charts, vm, cdir / "live")
                     score = await asyncio.to_thread(
@@ -468,13 +571,17 @@ class Batch:
                     (cdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
                     results[cid] = {"arm": arm, **score.to_dict()}
                     extra = {"charts": [f"forks/{fork_id}/{cid}/live/{name}" for name in charts]} if charts else {}
-                    if motion:
+                    if watch is None and motion:
                         extra["motion_files"] = [f"forks/{fork_id}/{cid}/outputs/{path}" for path in motion]
                     self._set_child(fork_id, cid, **results[cid], **extra)
+                    if watch is not None:
+                        watch.finish(motion or [])
                 except Exception as e:  # noqa: BLE001
                     results[cid] = {"arm": arm, "status": "failed", "reason": f"{type(e).__name__}: {e}"[:300]}
                     self._set_child(fork_id, cid, **results[cid])
                 finally:
+                    if watch is not None:
+                        await watch.stop()
                     log.close()
                     if await self._release(f"{fork_id}-{cid}", scope):
                         self._set_child(fork_id, cid, lab_url=None)
