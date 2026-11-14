@@ -16,15 +16,9 @@
 .cs-dim { color:var(--fg-55); font-size:12.5px; }
 
 /* ── the header link ── */
-.cs-link { height:28px; padding:0 10px; border:1px solid var(--border); border-radius:var(--r-ctl); }
-.cs-link:hover { border-color:var(--border-strong); }
-.cs-link[aria-current="page"] { color:var(--accent); background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 40%, var(--border)); cursor:default; }
-.cs-link:focus-visible, .cs-back:focus-visible, .cs-id:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.cs-id:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
 /* ── back, and the loading, empty and error states ── */
-.cs-back { align-self:flex-start; display:inline-flex; align-items:center; gap:4px; height:28px; margin:0 0 -12px -8px; padding:0 10px 0 6px; border-radius:var(--r-ctl); font-size:12.5px; font-weight:500; color:var(--fg-55); min-width:0; max-width:100%; transition:background var(--fx-fast) var(--fx-ease), color var(--fx-fast) var(--fx-ease); }
-.cs-back > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cs-back:hover { color:var(--fg); background:var(--hover); }
 .cs-state { display:flex; align-items:center; gap:8px; min-height:120px; font-size:13px; color:var(--fg-55); }
 .cs-err { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 12px; padding:10px 10px 10px 14px; border:1px solid color-mix(in srgb, var(--red) 35%, var(--border)); border-radius:var(--r-ctl); background:color-mix(in srgb, var(--red) 6%, var(--surface)); color:var(--red); overflow-wrap:anywhere; }
 .cs-empty { padding:48px 0; }
@@ -152,10 +146,9 @@
   .cs-split { grid-template-columns:minmax(0, 1fr); }
   .cs-card { padding:14px; }
   .cs-stat-v { font-size:20px; }
-  .cs-link { padding:0 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .cs { animation:none !important; }
-  .cs-bar-fill, .cs-seg, .cs-row, .cs-back { transition:none !important; }
+  .cs-bar-fill, .cs-seg, .cs-row { transition:none !important; }
 }

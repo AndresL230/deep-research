@@ -1,10 +1,10 @@
-// The home screen and the header cost bar (src/batch/home.ts), against the demo batch's real config and costs.
+// The home screen, the New batch form and the header cost bar (src/batch/home.ts), against the demo batch's real config and costs.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import type { BatchConfig, CaseFile, ControllerInfo, Costs, Defaults, Estimate } from "../src/api";
 import {
-  HM_ACT, MODEL_CHOICES, costBar, costGroups, domainDraft, draftModels, homeView, initialDraft, pickDomain, recallDomain, rememberDomain,
+  HM_ACT, MODEL_CHOICES, NEW_BATCH_TITLE, costBar, costGroups, domainDraft, draftModels, homeView, initialDraft, newBatchView, pickDomain, recallDomain, rememberDomain,
   resetDraft, startBlocked, startPayload, toggleModel,
 } from "../src/batch/home";
 import type { HomeVm } from "../src/batch/model";
@@ -31,7 +31,7 @@ const MAIN = ["n_runs", "trap_strength", "hint_level", "budget_usd"];
 const ADVANCED = ["trap_noise", "model_hint", "holdout_fraction", "seed", "forks_per_choice", "inflation_threshold", "analyst_model", "investigator_model"];
 
 describe("homeView", () => {
-  it("shows batches as cards with their kind and open actions", () => {
+  it("shows batches as table rows with their kind and open actions", () => {
     const html = homeView(vm());
     expect(html).toContain('data-act="open-batch" data-arg="demo-batch"');
     expect(html).toContain('data-morph-key="b-20261114"');
@@ -55,24 +55,57 @@ describe("homeView", () => {
     expect(err).toContain("&lt;x&gt;");
   });
 
+  it("is Needs you, then the batches, and no longer holds the New batch form", () => {
+    for (const html of [homeView(vm()), homeView(vm({ advanced: true, error: "HTTP 500" })), homeView(vm({ draft: null, defaults: null }))]) {
+      expect(html).not.toContain("data-cfg=");
+      expect(html).not.toContain('data-act="start"');
+      expect(html).not.toContain('data-act="toggle-advanced"');
+      expect(html).not.toContain("New batch");
+      expect(html).not.toContain("hm-panel");
+      expect(html).not.toContain("hm-foot");
+      expect(html).not.toContain("HTTP 500");
+    }
+    expect(text(homeView(vm({ advanced: true })))).toBe(
+      "Nothing needs you. Batches 2 batches, newest first, simulated last "
+      + "Batch Domain Started Runs Claimed vs measured Step found Verdict Models Spend "
+      + "b-20261114 Live demo-batch Replay");
+  });
+});
+
+describe("newBatchView, the New batch dialog's form", () => {
   it("has no lead, no help paragraphs and no prose: labels and readouts only", () => {
-    for (const html of [homeView(vm()), homeView(vm({ advanced: true }))]) {
+    for (const html of [newBatchView(vm()), newBatchView(vm({ advanced: true }))]) {
       expect(html).not.toContain("hm-lead");
       expect(html).not.toContain("hm-help");
       // The only paragraphs are the one-line estimate and status lines in the footer.
       for (const p of html.match(/<p\b[^>]*>/g) ?? []) expect(p).toMatch(/class="hm-(est|warn|errtext)"/);
       expect(html).not.toMatch(/<(fieldset|legend|details)\b/);
     }
-    expect(text(homeView(vm({ advanced: true })))).toBe(
-      "Batches demo-batch Replay b-20261114 Live New batch Pima diabetes · planted duplicate rows "
+    expect(text(newBatchView(vm({ advanced: true })))).toBe(
+      "New batch Pima diabetes · planted duplicate rows "
       + "Runs Duplicated rows 50% Hint None Light Budget $ "
       + "Advanced Reset Trap noise 0.00 Holdout fraction 20% Inflation threshold 8 pts Model hint Random forest Any "
       + "Forks per arm Seed Analyst model Investigator model "
       + "About $2.40 for 12 runs and 8 forks Start batch");
   });
 
+  it("is titled for the dialog, closes from its X, and keeps Start in the footer after the form", () => {
+    const html = newBatchView(vm({ advanced: true }));
+    expect(html).toContain(`<h2 class="hm-h2" id="${NEW_BATCH_TITLE}">New batch</h2>`);
+    expect(html).toMatch(/<button type="button" class="nbd-x" data-act="close-new-batch" aria-label="Close"/);
+    // The title bar, the form that scrolls, then the footer: three parts, in that order.
+    const head = html.indexOf('data-morph-key="nbd-head"');
+    const body = html.indexOf('data-morph-key="nbd-body"');
+    const foot = html.indexOf('class="hm-foot" data-morph-key="foot"');
+    expect(head).toBeGreaterThanOrEqual(0);
+    expect(body).toBeGreaterThan(head);
+    expect(foot).toBeGreaterThan(body);
+    expect(html.indexOf('data-cfg="investigator_model"')).toBeLessThan(foot);
+    expect(html.indexOf('data-act="start"')).toBeGreaterThan(foot);
+  });
+
   it("shows the four main settings with the draft's values, and the dataset and trap as one fixed line", () => {
-    const html = homeView(vm());
+    const html = newBatchView(vm());
     for (const f of MAIN) expect(html).toContain(`data-cfg="${f}"`);
     expect(html).toMatch(/type="number"[^>]*min="1" max="48"[^>]*value="12" data-cfg="n_runs"/);
     expect(html).toMatch(/type="range" min="0" max="1" step="0.05" value="0.5"[^>]*data-cfg="trap_strength"/);
@@ -84,19 +117,19 @@ describe("homeView", () => {
     expect(html).toContain("planted duplicate rows");
     expect(html).not.toContain('data-cfg="dataset"');
     expect(html).not.toContain('data-cfg="trap"');
-    expect(homeView(vm({ draft: { ...cfg, hint_level: "light", trap_strength: 0.35 } })))
+    expect(newBatchView(vm({ draft: { ...cfg, hint_level: "light", trap_strength: 0.35 } })))
       .toContain('<input type="radio" name="hint_level" data-cfg="hint_level" value="light" checked>');
-    expect(homeView(vm({ draft: { ...cfg, trap_strength: 0.35 } }))).toContain(">35%</output>");
+    expect(newBatchView(vm({ draft: { ...cfg, trap_strength: 0.35 } }))).toContain(">35%</output>");
   });
 
   it("hides the advanced settings until vm.advanced, behind a toggle", () => {
-    const closed = homeView(vm());
+    const closed = newBatchView(vm());
     expect(closed).toMatch(/<button[^>]*data-act="toggle-advanced" aria-expanded="false"[^>]*>/);
     for (const f of ADVANCED) expect(closed).not.toContain(`data-cfg="${f}"`);
     expect(closed).not.toContain('data-act="reset-config"');
-    expect(homeView(vm({ advanced: false }))).toBe(closed);
+    expect(newBatchView(vm({ advanced: false }))).toBe(closed);
 
-    const open = homeView(vm({ advanced: true }));
+    const open = newBatchView(vm({ advanced: true }));
     expect(open).toMatch(/<button[^>]*data-act="toggle-advanced" aria-expanded="true"[^>]*>/);
     for (const f of [...MAIN, ...ADVANCED]) expect(open).toContain(`data-cfg="${f}"`);
     expect(open).toContain('data-act="reset-config"');
@@ -108,94 +141,94 @@ describe("homeView", () => {
   });
 
   it("shows a skeleton while the defaults load", () => {
-    const html = homeView(vm({ batches: { state: "loading" }, draft: null, defaults: null, estimate: null, advanced: true }));
+    const html = newBatchView(vm({ batches: { state: "loading" }, draft: null, defaults: null, estimate: null, advanced: true }));
     expect(html).toContain("hm-skel");
     expect(html).toContain("Loading defaults");
     expect(html).not.toContain("data-cfg=");
     expect(html).toMatch(/<button[^>]*data-act="toggle-advanced" aria-expanded="false"[^>]* disabled>/);
     expect(startTag(html)).toContain("disabled");
     // The list has settled without defaults: they failed, so nothing keeps spinning.
-    const failed = homeView(vm({ batches: { state: "error", message: "down" }, draft: null, defaults: null, estimate: null }));
+    const failed = newBatchView(vm({ batches: { state: "error", message: "down" }, draft: null, defaults: null, estimate: null }));
     expect(failed).toContain("Defaults did not load");
     expect(failed).not.toContain("Loading defaults");
     expect(startTag(failed)).toContain("disabled");
   });
 
   it("shows the estimate as one line", () => {
-    expect(text(homeView(vm()))).toContain("About $2.40 for 12 runs and 8 forks");
-    expect(homeView(vm())).not.toContain('data-tone="bad"');
-    expect(text(homeView(vm({ draft: { ...cfg, n_runs: 1, forks_per_choice: 2 } })))).toContain("for 1 run and 4 forks");
-    const none = homeView(vm({ estimate: { state: "ready", value: { ...est, avg_run_usd: null, runs_usd: null, forks_usd: null, total_usd: null, basis: "no earlier runs yet" } } }));
+    expect(text(newBatchView(vm()))).toContain("About $2.40 for 12 runs and 8 forks");
+    expect(newBatchView(vm())).not.toContain('data-tone="bad"');
+    expect(text(newBatchView(vm({ draft: { ...cfg, n_runs: 1, forks_per_choice: 2 } })))).toContain("for 1 run and 4 forks");
+    const none = newBatchView(vm({ estimate: { state: "ready", value: { ...est, avg_run_usd: null, runs_usd: null, forks_usd: null, total_usd: null, basis: "no earlier runs yet" } } }));
     expect(none).toContain("No earlier runs to estimate from");
-    expect(homeView(vm({ estimate: { state: "loading" } }))).toContain("Estimating");
-    expect(homeView(vm({ estimate: null }))).toContain("Estimating");
-    const failed = homeView(vm({ estimate: { state: "error", message: "HTTP 500 <oops>" } }));
+    expect(newBatchView(vm({ estimate: { state: "loading" } }))).toContain("Estimating");
+    expect(newBatchView(vm({ estimate: null }))).toContain("Estimating");
+    const failed = newBatchView(vm({ estimate: { state: "error", message: "HTTP 500 <oops>" } }));
     expect(failed).toContain("No estimate. HTTP 500 &lt;oops&gt;");
     expect(startTag(failed)).not.toContain("disabled");
-    for (const html of [homeView(vm()), none, failed]) expect(html.match(/class="hm-est"/g)).toHaveLength(1);
+    for (const html of [newBatchView(vm()), none, failed]) expect(html.match(/class="hm-est"/g)).toHaveLength(1);
   });
 
   it("shows one short line when prices are missing", () => {
-    expect(homeView(vm({ defaults: { config: cfg, prices_missing: true } }))).toContain("Prices missing, budget not enforced");
-    expect(homeView(vm())).not.toContain("Prices missing");
+    expect(newBatchView(vm({ defaults: { config: cfg, prices_missing: true } }))).toContain("Prices missing, budget not enforced");
+    expect(newBatchView(vm())).not.toContain("Prices missing");
   });
 
   it("names a key only when it is missing", () => {
-    const ok = homeView(vm());
+    const ok = newBatchView(vm());
     expect(ok).not.toContain("key missing");
     expect(ok).not.toContain("key set");
     expect(ok).not.toContain("hm-why");
-    expect(homeView(vm({ health: null }))).not.toContain("key missing");
+    expect(newBatchView(vm({ health: null }))).not.toContain("key missing");
 
-    const noDaytona = homeView(vm({ health: { ok: true, keys: { anthropic: true, daytona: false } } }));
+    const noDaytona = newBatchView(vm({ health: { ok: true, keys: { anthropic: true, daytona: false } } }));
     expect(noDaytona).toContain("Daytona key missing");
     expect(noDaytona).not.toContain("Anthropic key missing");
-    const noAnthropic = homeView(vm({ health: { ok: true, keys: { anthropic: false, daytona: true } } }));
+    const noAnthropic = newBatchView(vm({ health: { ok: true, keys: { anthropic: false, daytona: true } } }));
     expect(noAnthropic).toContain("Anthropic key missing");
     expect(noAnthropic).not.toContain("Daytona key missing");
-    const neither = homeView(vm({ health: { ok: false, keys: { anthropic: false, daytona: false } } }));
+    const neither = newBatchView(vm({ health: { ok: false, keys: { anthropic: false, daytona: false } } }));
     expect(neither).toContain("Anthropic key missing");
     expect(neither).toContain("Daytona key missing");
   });
 
   it("enables Start only when keys are set, the estimate fits and nothing is in flight", () => {
     expect(startBlocked(vm())).toBeNull();
-    expect(startTag(homeView(vm()))).not.toContain("disabled");
-    expect(startTag(homeView(vm({ health: null })))).not.toContain("disabled");
+    expect(startTag(newBatchView(vm()))).not.toContain("disabled");
+    expect(startTag(newBatchView(vm({ health: null })))).not.toContain("disabled");
 
     const over = vm({ estimate: { state: "ready", value: { ...est, total_usd: 12, over_budget: true } } });
     expect(startBlocked(over)).toBe("Over budget");
-    expect(startTag(homeView(over))).toContain("disabled");
-    expect(homeView(over)).toContain('<span class="hm-why" data-morph-key="why">Over budget</span>');
-    expect(homeView(over)).toMatch(/<p class="hm-est"[^>]*data-tone="bad"/);
-    expect(text(homeView(over))).toContain("About $12.0 for 12 runs and 8 forks");
+    expect(startTag(newBatchView(over))).toContain("disabled");
+    expect(newBatchView(over)).toContain('<span class="hm-why" data-morph-key="why">Over budget</span>');
+    expect(newBatchView(over)).toMatch(/<p class="hm-est"[^>]*data-tone="bad"/);
+    expect(text(newBatchView(over))).toContain("About $12.0 for 12 runs and 8 forks");
 
     const noKey = vm({ health: { ok: true, keys: { anthropic: true, daytona: false } } });
     expect(startBlocked(noKey)).toBe("Daytona key missing");
-    expect(startTag(homeView(noKey))).toContain("disabled");
-    expect(homeView(noKey)).toContain('<span class="hm-why" data-morph-key="why">Daytona key missing</span>');
+    expect(startTag(newBatchView(noKey))).toContain("disabled");
+    expect(newBatchView(noKey)).toContain('<span class="hm-why" data-morph-key="why">Daytona key missing</span>');
 
-    const starting = homeView(vm({ starting: true, advanced: true }));
+    const starting = newBatchView(vm({ starting: true, advanced: true }));
     expect(startBlocked(vm({ starting: true }))).not.toBeNull();
     expect(startTag(starting)).toContain("disabled");
     expect(starting).toContain(">Starting<");
     expect(starting).not.toContain("hm-why");
     expect(starting).toMatch(/<button[^>]*data-act="reset-config" disabled>/);
-    expect(homeView(vm({ advanced: true }))).toMatch(/<button[^>]*data-act="reset-config">/);
+    expect(newBatchView(vm({ advanced: true }))).toMatch(/<button[^>]*data-act="reset-config">/);
 
     expect(startBlocked(vm({ draft: null }))).not.toBeNull();
   });
 
   it("shows the start error near Start", () => {
-    const html = homeView(vm({ error: "HTTP 500 & more" }));
+    const html = newBatchView(vm({ error: "HTTP 500 & more" }));
     expect(html).toContain('role="alert">HTTP 500 &amp; more</p>');
     expect(html.indexOf("HTTP 500")).toBeGreaterThan(html.indexOf('data-act="start"'));
-    expect(homeView(vm())).not.toContain('role="alert"');
+    expect(newBatchView(vm())).not.toContain('role="alert"');
   });
 
   it("never uses an em dash", () => {
     for (const v of [vm(), vm({ advanced: true }), vm({ draft: null }), vm({ health: { ok: false, keys: { anthropic: false, daytona: false } } })]) {
-      expect(homeView(v)).not.toContain("\u2014");
+      expect(newBatchView(v)).not.toContain("\u2014");
     }
   });
 });
@@ -220,12 +253,12 @@ describe("the domain picker", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("shows no picker when the server lists one domain or none", () => {
-    expect(homeView(vm())).not.toContain("hm-dom");
-    expect(homeView(vm({ defaults: { ...withDomains, domains: withDomains.domains!.slice(1) } }))).not.toContain("hm-dom");
+    expect(newBatchView(vm())).not.toContain("hm-dom");
+    expect(newBatchView(vm({ defaults: { ...withDomains, domains: withDomains.domains!.slice(1) } }))).not.toContain("hm-dom");
   });
 
   it("offers Data science first and chosen, with the tabular form as before", () => {
-    const html = homeView(vm({ defaults: withDomains, draft: tabCfg, advanced: true }), inputs);
+    const html = newBatchView(vm({ defaults: withDomains, draft: tabCfg, advanced: true }), inputs);
     const opts = html.match(/<button[^>]*data-act="hm-domain"[^>]*>[^<]*<\/button>/g)!;
     expect(opts).toHaveLength(2);
     expect(opts[0]).toContain('data-arg="tabular"');
@@ -237,14 +270,14 @@ describe("the domain picker", () => {
     expect(HM_ACT.domain).toBe("hm-domain");
     // Everything below the picker is the form as it was.
     const below = (h: string) => h.slice(h.indexOf('data-morph-key="main"'));
-    expect(below(html)).toBe(below(homeView(vm({ draft: tabCfg, advanced: true }), inputs)));
+    expect(below(html)).toBe(below(newBatchView(vm({ draft: tabCfg, advanced: true }), inputs)));
     expect(html).toContain("DATASET ROWS");
     expect(html).toContain("Pima diabetes · planted duplicate rows");
     for (const f of [...MAIN, ...ADVANCED]) expect(html).toContain(`data-cfg="${f}"`);
   });
 
   it("hides the tabular settings for the robot arm and says what the task is", () => {
-    const html = homeView(vm({ defaults: withDomains, draft: robotCfg, advanced: true }), inputs);
+    const html = newBatchView(vm({ defaults: withDomains, draft: robotCfg, advanced: true }), inputs);
     expect(html).toMatch(/<button[^>]*aria-checked="true" data-act="hm-domain" data-arg="robot_arm"/);
     expect(html).toContain(ROBOT_LINE);
     expect(html).not.toContain("DATASET ROWS");
@@ -263,7 +296,7 @@ describe("the domain picker", () => {
     expect(text(html)).toContain("About $2.40 for 12 runs and 8 forks");
     expect(html).not.toContain("\u2014");
     // Locked while a batch starts.
-    expect(homeView(vm({ defaults: withDomains, draft: robotCfg, starting: true }))).toMatch(/data-act="hm-domain" data-arg="tabular"[^>]* disabled>/);
+    expect(newBatchView(vm({ defaults: withDomains, draft: robotCfg, starting: true }))).toMatch(/data-act="hm-domain" data-arg="tabular"[^>]* disabled>/);
   });
 
   it("switches the draft between domains, keeping the shared settings", () => {
@@ -341,20 +374,20 @@ const startOpt = (html: string, val: string) => html.match(new RegExp(`<input ty
 
 describe("the uploaded controller", () => {
   it("draws the controller row in the robot domain only", () => {
-    const robot = homeView(vm({ defaults: withCt, draft: robotCt }), ctInputs);
+    const robot = newBatchView(vm({ defaults: withCt, draft: robotCt }), ctInputs);
     expect(robot).toContain("CONTROLLER ROW");
     expect(robot).not.toContain("DATASET ROWS");
     expect(robot.indexOf("CONTROLLER ROW")).toBeGreaterThan(robot.indexOf("New batch"));
     expect(robot.indexOf("CONTROLLER ROW")).toBeLessThan(robot.indexOf('data-morph-key="main"'));
-    const tab = homeView(vm({ defaults: withCt, draft: tabCt }), ctInputs);
+    const tab = newBatchView(vm({ defaults: withCt, draft: tabCt }), ctInputs);
     expect(tab).toContain("DATASET ROWS");
     expect(tab).not.toContain("CONTROLLER ROW");
     // Nothing to draw: the panel is as it was.
-    expect(homeView(vm({ defaults: withCt, draft: robotCt }), inputs)).not.toContain("CONTROLLER ROW");
+    expect(newBatchView(vm({ defaults: withCt, draft: robotCt }), inputs)).not.toContain("CONTROLLER ROW");
   });
 
   it("offers Your upload only once a controller is uploaded", () => {
-    const none = homeView(vm({ defaults: withCt, draft: robotCt, advanced: true }), ctInputs);
+    const none = newBatchView(vm({ defaults: withCt, draft: robotCt, advanced: true }), ctInputs);
     expect(startOpt(none, "blank")).toContain(" checked");
     expect(startOpt(none, "colleague")).not.toContain("disabled");
     expect(startOpt(none, "uploaded")).toBe('<input type="radio" name="robot_start" data-cfg="robot_start" value="uploaded" disabled>');
@@ -363,13 +396,13 @@ describe("the uploaded controller", () => {
     expect(none).not.toContain("hm-fixed");
 
     const draft: BatchConfig = { ...robotCt, robot_start: "uploaded", robot_controller: controller.id };
-    const some = homeView(vm({ defaults: withCt, draft, advanced: true }), { ...ctInputs, controller });
+    const some = newBatchView(vm({ defaults: withCt, draft, advanced: true }), { ...ctInputs, controller });
     expect(startOpt(some, "uploaded")).toBe('<input type="radio" name="robot_start" data-cfg="robot_start" value="uploaded" checked>');
     expect(startOpt(some, "blank")).not.toContain("checked");
     expect(some).toContain('<span class="hm-fixed">Starting from my_&lt;arm&gt;.py</span>');
     expect(some).not.toContain("<arm>");
     // A tabular draft never says it, and never shows the robot start.
-    const tab = homeView(vm({ defaults: withCt, draft: { ...tabCt, robot_controller: controller.id }, advanced: true }), { ...ctInputs, controller });
+    const tab = newBatchView(vm({ defaults: withCt, draft: { ...tabCt, robot_controller: controller.id }, advanced: true }), { ...ctInputs, controller });
     expect(tab).not.toContain("Starting from");
     expect(tab).not.toContain('data-cfg="robot_start"');
   });
@@ -397,7 +430,7 @@ describe("the Models control", () => {
   const chips = (html: string) => html.match(/<button[^>]*data-act="hm-model"[^>]*>[^<]*<\/button>/g) ?? [];
 
   it("offers Haiku 5.5 and Sonnet 5.5 as chips in the robot main row, the draft's lineup pressed", () => {
-    const html = homeView(vm({ defaults: withDomains, draft: lineupCfg }));
+    const html = newBatchView(vm({ defaults: withDomains, draft: lineupCfg }));
     const c = chips(html);
     expect(c).toHaveLength(2);
     expect(c[0]).toContain(`data-arg="${HAIKU}"`);
@@ -409,20 +442,20 @@ describe("the Models control", () => {
     expect(HM_ACT.model).toBe("hm-model");
     expect(MODEL_CHOICES.map(([id]) => id)).toEqual([HAIKU, SONNET]);
     // The tabular form keeps its text field and has no chips.
-    const tab = homeView(vm({ advanced: true }));
+    const tab = newBatchView(vm({ advanced: true }));
     expect(chips(tab)).toHaveLength(0);
     expect(tab).toContain(`data-cfg="analyst_model"`);
   });
 
   it("keeps at least one model on, and locks while starting", () => {
     const one: BatchConfig = { ...lineupCfg, analyst_models: [SONNET] };
-    const c = chips(homeView(vm({ defaults: withDomains, draft: one })));
+    const c = chips(newBatchView(vm({ defaults: withDomains, draft: one })));
     expect(c[0]).toContain('aria-pressed="false"');
     expect(c[0]).not.toContain("disabled");
     expect(c[1]).toContain('aria-pressed="true"');
     expect(c[1]).toContain("disabled");
     expect(toggleModel(one, SONNET)).toBe(one);
-    expect(chips(homeView(vm({ defaults: withDomains, draft: lineupCfg, starting: true }))).every((b) => b.includes("disabled"))).toBe(true);
+    expect(chips(newBatchView(vm({ defaults: withDomains, draft: lineupCfg, starting: true }))).every((b) => b.includes("disabled"))).toBe(true);
   });
 
   it("toggles models in the control's order", () => {
