@@ -190,9 +190,18 @@ describe("keyPoints: the step", () => {
     expect(point(open, "step")!.tone).toBe("muted");
   });
 
-  it("reads a verdict saved without evidence as not settled", () => {
-    const c = caseOf(ROBOT_CONFIG, sixRuns(), { split: robotSplit, verdict: verdictOf(null) });
-    expect(point(c, "step")!.text).toBe(`${STEP_LINE} The fork experiment does not settle whether this is the cause.`);
+  it("judges a verdict saved without evidence by its counts, with the server's rule", () => {
+    // 8 of 8 inflated without the step, 0 of 8 with it: 8 pairs and a Fisher p under 0.05 (evidence.ts evidenceFrom).
+    const enough = caseOf(ROBOT_CONFIG, sixRuns(), { split: robotSplit, verdict: verdictOf(null) });
+    expect(point(enough, "step")!.text).toBe(`${STEP_LINE} The fork experiment supports this as the cause.`);
+    // 4 of 4 against 0 of 4: too few pairs, whatever the investigator's sentence says.
+    const few = { ...verdictOf(null), sentence: "Skipping the step caused the inflated claims.", numbers: { control_inflated: 4, control_total: 4, forced_inflated: 0, forced_total: 4 } };
+    expect(point(caseOf(ROBOT_CONFIG, sixRuns(), { split: robotSplit, verdict: few }), "step")!.text)
+      .toBe(`${STEP_LINE} The fork experiment does not settle whether this is the cause.`);
+    // The same counts, no difference between the arms.
+    const flat = { ...verdictOf(null), numbers: { control_inflated: 4, control_total: 8, forced_inflated: 4, forced_total: 8 } };
+    expect(point(caseOf(ROBOT_CONFIG, sixRuns(), { split: robotSplit, verdict: flat }), "step")!.text)
+      .toBe(`${STEP_LINE} The fork experiment does not settle whether this is the cause.`);
   });
 
   it("says so when no step separates the runs", () => {
@@ -399,7 +408,10 @@ describe("the split fold", () => {
     expect(html).not.toContain("ln-strip");
     expect(html).not.toContain("Next, to test whether");
     // The finding and what it did to the score stay.
-    expect(html).toContain('<span class="ln-headline-a">Honest runs removed duplicate rows before splitting into train and test.</span>');
+    // The headline arrives a character at a time (motion.ts `reveal`): the whole finding is there for a screen reader.
+    expect(html).toContain('<p class="ln-headline"><span class="mo-sr">Honest runs removed duplicate rows before splitting into train and test. Inflated runs did not.</span>');
+    expect(html).toContain('<span class="ln-headline-a">');
+    expect(html).toContain('<span class="ln-headline-b"');
     expect(html).toContain("6 of 6 honest runs, 0 of 6 inflated did this before splitting into train and test.");
     expect(html).toContain('<h3 class="ln-h3">What it did to the score</h3>');
     expect(html).toContain('data-morph-key="grp-honest"');
@@ -471,7 +483,7 @@ describe("the investigator fold", () => {
     const html = inv();
     expectClosed(html);
     expect(html).toContain('aria-label="Investigator"');
-    expect(html).toContain("<span>Done</span>");
+    expect(html).toContain('<span class="ln-phase-t"><span class="mo-sr">Done</span>');
   });
 
   it("opens when asked", () => {
@@ -541,7 +553,7 @@ describe("a fork experiment's fold", () => {
   const expectOpen = (html: string): void => {
     expect(html).toContain(fold("exp:f1", true, what));
     expect(html).toContain('data-arg="exp:f1" aria-expanded="true"');
-    expect(count(html, '<div class="ln-kids" data-morph-list>')).toBe(2);
+    expect(count(html, '<div class="ln-kids" data-morph-key="kids" data-morph-list>')).toBe(2);
     expect(count(html, 'data-act="open-child"')).toBe(8);
     expect(html).toContain('data-arg="f1/control-1"');
     expect(html).toContain('data-arg="f1/forced-4"');
@@ -552,7 +564,7 @@ describe("a fork experiment's fold", () => {
     expect(f1.status).toBe("done");
     const html = forkView(demoVm());
     expectClosed(html);
-    expect(html).toContain('<p class="ln-outcome" data-morph-key="outcome">');
+    expect(html).toContain('<div class="ln-outcome-w" data-io data-morph-key="outcome"><p class="ln-outcome">The claim moved ');
     // The button closes the experiment's card, after its arms.
     expect(html.lastIndexOf('data-morph-key="arm-')).toBeLessThan(html.indexOf('data-arg="exp:f1"'));
   });
@@ -560,9 +572,9 @@ describe("a fork experiment's fold", () => {
   it("opens when asked: a tile per copy and each arm's summary line", () => {
     const html = forkView(demoVm({}, { open: { "exp:f1": true } }));
     expectOpen(html);
-    expect(count(html, '<p class="ln-arm-sum">')).toBe(2);
-    expect(html).toContain('<p class="ln-arm-sum">3 of 4 inflated, mean claimed 87.8% vs measured 73.5%</p>');
-    expect(html).toContain('<p class="ln-arm-sum">0 of 4 inflated, mean claimed 76.2% vs measured 75.0%</p>');
+    expect(count(html, '<p class="ln-arm-sum" data-morph-key="sum">')).toBe(2);
+    expect(html).toContain('<p class="ln-arm-sum" data-morph-key="sum">3 of 4 inflated, mean claimed 87.8% vs measured 73.5%</p>');
+    expect(html).toContain('<p class="ln-arm-sum" data-morph-key="sum">0 of 4 inflated, mean claimed 76.2% vs measured 75.0%</p>');
   });
 
   it.each(["running", "rebuilding", "stopped"] as const)("is open by default while the fork is %s", (status) => {
@@ -587,11 +599,11 @@ describe("a fork experiment's fold", () => {
     expect(second).toContain(fold("exp:f1", false, "the 8 copies"));
     expect(second).toContain(fold("exp:f2", true, "the 3 copies"));
     // The fix fork's three arms, one copy each.
-    expect(count(second, '<div class="ln-kids" data-morph-list>')).toBe(3);
+    expect(count(second, '<div class="ln-kids" data-morph-key="kids" data-morph-list>')).toBe(3);
     expect(count(second, 'data-act="open-child"')).toBe(3);
     expect(second).toContain('data-arg="f2/fixed-1"');
     expect(second).not.toContain('data-arg="f1/control-1"');
-    expect(second).toContain('<p class="ln-arm-sum">3 of 4 succeeded on the hidden positions, mean true 72.0% vs control 45.0%</p>');
+    expect(second).toContain('<p class="ln-arm-sum" data-morph-key="sum">3 of 4 claims matched what was measured, mean measured 72.0% vs control 45.0%</p>');
     // A key that is not this fork's does nothing.
     expect(forkView(demoVm({ forks }, { open: { exp: true, "exp:f3": true, f1: true } }))).toBe(closed);
   });
@@ -657,13 +669,13 @@ describe("the fix fold", () => {
     expect(html).not.toContain("ln-fix-why");
     expect(html).not.toContain("whips");
     // What the fix does and the text it changes stay.
-    expect(html).toContain('<p class="ln-fix-t">Scale the carry time with the carry distance</p>');
+    expect(html).toContain('<p class="ln-fix-t"><span class="mo-sr">Scale the carry time with the carry distance</span>');
     expect(html).toContain('<pre class="ln-fix-pre">    t_move=0.4,</pre>');
     expect(html).toContain('<pre class="ln-fix-pre">    t_move=0.4 + 1.2 * dist,</pre>');
   };
   const expectOpen = (html: string): void => {
     expect(html).toContain(fold("fix-why", true, what) + reason);
-    expect(html).toContain('<p class="ln-fix-t">Scale the carry time with the carry distance</p>');
+    expect(html).toContain('<p class="ln-fix-t"><span class="mo-sr">Scale the carry time with the carry distance</span>');
   };
 
   it("is closed by default: the fix and its diff, without the reasoning", () => {
@@ -683,7 +695,7 @@ describe("the fix fold", () => {
   it("keeps what the fix measured outside the fold", () => {
     const html = fixView(demoVm({ fix: { ...proposedFix, status: "tested", measured: measuredOf(0.7, 0.8), verdict: "The fix raised the rate by 10 points." } }));
     expect(html).toContain('class="ln-fix-measured ln-fix-measured--up"');
-    expect(html).toContain('<p class="ln-sentence">The fix raised the rate by 10 points.</p>');
+    expect(html).toContain('<p class="ln-sentence"><span class="mo-sr">The fix raised the rate by 10 points.</span>');
     expect(html).toContain(fold("fix-why", false, what));
     expect(html).not.toContain("ln-fix-why");
   });

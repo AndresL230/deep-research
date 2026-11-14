@@ -1,7 +1,10 @@
 // The app: one canvas whose state follows the batch (docs/api-contract.md, web/src/batch/model.ts).
 //
-//   #/                         home: saved and live batches, and the config screen to start one
-//   #/b/<id>                   a batch: phase panel, the wall of runs, the split lanes, the fork experiment, the verdict
+//   #/                         the landing page: a nav and a hero over a 3D scene of the pipeline (landing/)
+//   #/start                    home: saved and live batches, and the config screen to start one
+//   #/b/<id>                   a batch, first page: the overview and the wall of runs
+//   #/b/<id>/<step>            a batch's later pages, one per stage: changed, investigator, fork, verdict,
+//                              diagnosis, fix (model.ts BATCH_STEPS)
 //   #/b/<id>/run/<run>         one run in the Ask conversation view
 //   #/b/<id>/fork/<f>/<child>  one fork child in the conversation view
 //   #/costs                    what every batch cost, in total and one by one
@@ -13,21 +16,24 @@
 // patches the regions in place on every change (batched to a frame), so iframes and images never reload.
 
 import "./style.css";
+import "./system.css";
 import "./batch/page.css";
 import { attr, esc } from "./ui";
 import { symbolTile, wordmark } from "./brand";
 import { morphInner } from "./morph";
 import { AWAY_PX, conversationView, initialConversationUi, jumpButton, stickAfterScroll, thinkingLabel, type ConversationUi } from "./ask-conversation";
 import { scheduleOrbs } from "./thinking-orb";
+import { PAGE_BACKGROUND, readStoredTheme, resolveTheme, storeTheme, themeChoice, themeSwitch, type Theme, type ThemeChoice } from "./theme";
 import {
   applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
   fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, uploadController, uploadDataset, uploadScript, startInvestigation, stopBatch,
   type AgentEvent, type HubStatus, type BatchConfig, type BatchSocket, type CaseFile,
 } from "./api";
-import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
+import { ACT, BATCH_STEPS, STEP_LABEL, childKey, parseRoute, routeHash, type BatchStep, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
 import { DEFAULT_DOMAIN, HM_ACT, costBar, domainOf, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload, toggleModel } from "./batch/home";
 import { hubBadge } from "./batch/hub-badge";
 import { DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
+import { notYetView, overviewView, pageHeadView, pagerView } from "./batch/overview";
 import { wallView } from "./batch/wall";
 import { feedView, notebookWithCaptions, wallWithFeed } from "./batch/commentary";
 import { diagnosisView, fixView, forkView, investigatorView, keyPointsView, splitView, verdictView } from "./batch/lanes";
@@ -38,7 +44,11 @@ import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook
 import { fetchCosts, type CostReport } from "./api";
 import type { Loadable } from "./batch/model";
 import { costsLink, costsView } from "./batch/costs";
+import { landingView } from "./landing/landing";
+import { syncLanding } from "./landing/mount";
+import { syncMotion } from "./motion";
 import { refreshMotion } from "./robot/mount";
+import { smoothScroll } from "./scroll";
 import { isMotionBatch } from "./robot/markup";
 
 // ── state ────────────────────────────────────────────────────────────────────
@@ -78,6 +88,8 @@ interface AppState {
   costs: Loadable<CostReport>;
   /** Where the cost screen was opened from, for its back button. */
   costsBack: Route;
+  /** The page of a batch last open, so the way back from one of its runs lands on it. */
+  lastStep: { id: string; step: BatchStep } | null;
   /** This server's link to the team hub, for the header badge (refreshed every half minute). */
   hub: HubStatus | null;
   /** The batch page's live feed is unfolded (narrow screens only: on a wide one it is always open). */
@@ -99,6 +111,7 @@ const S: AppState = {
   workOpen: false,
   costs: { state: "loading" },
   costsBack: { name: "home" },
+  lastStep: null,
   hub: null,
   feedOpen: false,
   folds: {},
@@ -113,8 +126,14 @@ const message = (e: unknown, fallback: string): string => (e instanceof Error ? 
 const app = document.getElementById("app")!;
 const params = new URLSearchParams(location.search);
 const themeQ = matchMedia("(prefers-color-scheme: dark)");
-const forcedTheme = params.get("theme");
-const theme = (): "light" | "dark" => (forcedTheme === "dark" || forcedTheme === "light" ? forcedTheme : themeQ.matches ? "dark" : "light");
+// Black mode unless asked: the switch in the header (kept in this browser), or `?theme=light|dark|system`
+// (theme.ts). The landing page follows the same setting once one is made; until then it opens in white mode, the
+// look of the site it is modelled on.
+let themePick: ThemeChoice = themeChoice(params.get("theme"), readStoredTheme());
+let themeChosen = themePick !== themeChoice(null, null) || params.get("theme") !== null || readStoredTheme() !== null;
+const theme = (): Theme => (!themeChosen && S.route.name === "landing" ? "light" : resolveTheme(themePick, themeQ.matches));
+const syncPageTheme = (): void => { document.documentElement.style.colorScheme = theme(); document.body.style.background = PAGE_BACKGROUND[theme()]; };
+syncPageTheme();
 app.innerHTML = `<div class="app-root" data-cnpy-theme="${theme()}">
   <header class="cnpy-hdr pg-hdr" data-region="header"></header>
   <div class="pg-sub" data-region="sub" hidden></div>
@@ -124,7 +143,18 @@ const root = app.firstElementChild as HTMLElement;
 const headerEl = root.querySelector<HTMLElement>("[data-region=header]")!;
 const subEl = root.querySelector<HTMLElement>("[data-region=sub]")!;
 const scrollEl = root.querySelector<HTMLElement>("[data-region=scroll]")!;
-themeQ.addEventListener("change", () => { root.dataset.cnpyTheme = theme(); scheduleOrbs(); });
+// The page scrolls smoothly (scroll.ts, Lenis); the jumps the app makes itself go through it too.
+const smooth = smoothScroll(scrollEl);
+const applyTheme = (): void => { root.dataset.cnpyTheme = theme(); syncPageTheme(); scheduleOrbs(); paint(); };
+themeQ.addEventListener("change", () => { if (themePick === "system") applyTheme(); });
+/** The switch: white or black, kept in this browser. */
+function pickTheme(t: Theme): void {
+  if (t === theme() && themePick !== "system") return;
+  themePick = t;
+  themeChosen = true;
+  storeTheme(t);
+  applyTheme();
+}
 
 // ── view models ──────────────────────────────────────────────────────────────
 
@@ -211,7 +241,9 @@ function paint(): void {
 function headerView(vm: BatchVm | null): string {
   const r = S.route;
   const crumbs: string[] = [];
-  if ("id" in r) crumbs.push(`<button type="button" class="pg-crumb${r.name === "batch" ? " is-cur" : ""}" data-act="${ACT.back}">${esc(r.id)}</button>`);
+  const onFirst = r.name === "batch" && !r.step;
+  if ("id" in r) crumbs.push(`<button type="button" class="pg-crumb${onFirst ? " is-cur" : ""}" data-act="${ACT.back}">${esc(r.id)}</button>`);
+  if (r.name === "batch" && r.step) crumbs.push(`<span class="pg-crumb is-cur">${esc(STEP_LABEL[r.step])}</span>`);
   if (r.name === "costs") crumbs.push(`<span class="pg-crumb is-cur">Costs</span>`);
   if (r.name === "run") crumbs.push(`<span class="pg-crumb is-cur">${esc(r.run)}</span>`);
   if (r.name === "child") crumbs.push(`<span class="pg-crumb is-cur">${esc(`${r.fork} ${r.child}`)}</span>`);
@@ -220,26 +252,31 @@ function headerView(vm: BatchVm | null): string {
     ${crumbs.map((c) => `<span class="ask-crumb-sep">›</span>${c}`).join("")}
   </div>`;
   const bar = vm ? costBar(vm.case.costs ?? {}, { simulated: !!(vm.case.config as BatchConfig).simulated }) : "";
-  const right = `<div class="pg-hdr-r">${bar}${hubBadge(S.hub)}${costsLink(r.name === "costs")}</div>`;
+  const right = `<div class="pg-hdr-r">${bar}${hubBadge(S.hub)}${costsLink(r.name === "costs")}${themeSwitch(theme())}</div>`;
   return left + right;
 }
 
-function batchBody(vm: BatchVm): string {
-  // The story in order: the runs, the key points, then each part in full: where the runs split, what the
-  // investigator makes of it, the fork, the verdict, the diagnosis and the fix.
-  const sections: [string, string][] = [
-    ["wall", wallWithFeed(wallView(vm), feedView(vm, S.feedOpen))],
-    ["points", keyPointsView(vm)],
-    ["split", splitView(vm)],
-    ["phase", investigatorView(vm)],
-    ["fork", forkView(vm)],
-    ["verdict", verdictView(vm)],
-    ["diagnosis", diagnosisView(vm)],
-    ["fix", fixView(vm)],
-  ];
+/** Each later page's one section. */
+const STEP_VIEW: Record<Exclude<BatchStep, "wall">, (vm: BatchVm) => string> = {
+  split: splitView, phase: investigatorView, fork: forkView, verdict: verdictView, diagnosis: diagnosisView, fix: fixView,
+};
+
+/**
+ * A batch, a page at a time instead of one long scroll. The first page is where the batch stands and its agents, with
+ * the live feed of notable moments beside them (commentary.ts); each stage after them (where the runs split, the
+ * investigator, the fork, the verdict, and a robot batch's diagnosis and fix) is a page of its own. Every page ends in
+ * Back / Next (overview.ts `pagerView`).
+ */
+function batchBody(vm: BatchVm, step: BatchStep): string {
+  const sections: [string, string][] = step === "wall"
+    // The first page ends in the key points: what the batch found so far, one line each (lanes.ts keyPointsView).
+    ? [["overview", overviewView(vm)], ["wall", wallWithFeed(wallView(vm), feedView(vm, S.feedOpen))], ["points", keyPointsView(vm)]]
+    : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || notYetView(vm, step)]];
+  // The bar is a new element on every page, so it arrives with the page.
+  sections.push([`pager:${step}`, pagerView(vm, step)]);
   return `<div class="pg-batch" data-morph-key="batch:${attr(vm.id)}" data-morph-list>${sections
     .filter(([, html]) => html)
-    .map(([k, html]) => `<section class="pg-sec pg-sec--${k}" data-morph-key="sec:${k}">${html}</section>`)
+    .map(([k, html]) => `<section class="pg-sec pg-sec--${k.replace(/:.*/, "")}" data-morph-key="sec:${k}">${html}</section>`)
     .join("")}</div>`;
 }
 
@@ -276,15 +313,22 @@ function render(): void {
   frame = 0;
   const r = S.route;
   const b = S.batch;
-  const vm = r.name !== "home" && b?.full ? batchVm(b, b.full) : null;
+  const vm = "id" in r && b?.full ? batchVm(b, b.full) : null;
 
+  // The landing page brings its own nav, and its own palettes in the app's two themes.
+  const landing = r.name === "landing";
+  const landingTone = theme();
+  headerEl.hidden = landing;
+  root.dataset.cnpyTheme = theme();
+  syncPageTheme();
   morphInner(headerEl, headerView(vm));
   const showReplay = !!(vm && vm.replay);
   subEl.hidden = !showReplay;
   if (showReplay && vm?.replay) morphInner(subEl, replayBar(vm.replay));
 
   let body: string;
-  if (r.name === "home") {
+  if (landing) body = landingView(landingTone);
+  else if (r.name === "home") {
     body = homeView(S.home, {
       html: inputsView(S.ds, S.home.starting), label: inputsLabel(S.ds),
       controllerHtml: controllerRow(S.ds, S.home.starting), controller: S.ds.controller,
@@ -293,7 +337,7 @@ function render(): void {
   else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
   else if (!vm) body = messageView("loading", "Opening the batch", "Loading its case file and event logs…");
-  else if (r.name === "batch") body = batchBody(vm);
+  else if (r.name === "batch") body = batchBody(vm, r.step ?? "wall");
   else body = runBody(vm, routeKey(r)!);
   scrollEl.dataset.view = r.name;
   root.dataset.view = r.name;
@@ -301,27 +345,50 @@ function render(): void {
   afterPaint();
 }
 
-/** Sections on screen last paint, so a replay can bring a newly revealed one into view. */
+/** What a playing replay follows on a batch page: its sections, and what arrives inside one as the story goes on (a
+ *  page's stage replacing "Nothing here yet", a hypothesis, an experiment). */
+const FOLLOWED = ".pg-sec[data-morph-key], .ln-sec[data-morph-key], .ln-card[data-morph-key]";
+/** The batch page on screen last paint, and what on it a replay follows, so a newly revealed part can be brought into view. */
+let shownPage = "";
 let shownSections = new Set<string>();
 /** When the person last scrolled the page themselves (the listeners are with the other events below). */
 const follow = new ScrollFollow();
 
+/**
+ * Follow the story while a replay plays: a part of the page that appears scrolls into view (through Lenis, scroll.ts),
+ * unless the person scrolled in the last few seconds (then the page stays where they put it). The replay never turns
+ * the page: each stage is a page of its own, and opening one is the person's to do. A page just opened is not news, it
+ * starts at its top.
+ */
+function followStory(): void {
+  const r = S.route;
+  if (r.name !== "batch") {
+    shownPage = "";
+    shownSections = new Set();
+    return;
+  }
+  const page = `${r.id}/${r.step ?? "wall"}`;
+  const els = Array.from(scrollEl.querySelectorAll<HTMLElement>(FOLLOWED));
+  const keys = new Set(els.map((el) => el.dataset.morphKey!));
+  if (page === shownPage && S.batch?.replay?.playing && shownSections.size && follow.follows(Date.now())) {
+    // The outermost new parts (a new section brings its cards with it), and of those the last: the latest news.
+    const fresh = els.filter((el) => !shownSections.has(el.dataset.morphKey!));
+    const outer = fresh.filter((el) => !fresh.some((o) => o !== el && o.contains(el)));
+    const target = outer[outer.length - 1];
+    if (target) smooth.to(target, { offset: -16, immediate: matchMedia("(prefers-reduced-motion: reduce)").matches });
+  }
+  shownPage = page;
+  shownSections = keys;
+}
+
 let ticker: ReturnType<typeof setInterval> | null = null;
 function afterPaint(): void {
-  if (S.route.name === "batch") {
-    const els = Array.from(scrollEl.querySelectorAll<HTMLElement>(".pg-sec[data-morph-key]"));
-    const keys = new Set(els.map((el) => el.dataset.morphKey!));
-    const fresh = els.filter((el) => !shownSections.has(el.dataset.morphKey!));
-    // Follow the story while a replay plays: the split, the fork and the verdict scroll in as they appear, unless
-    // the person scrolled in the last few seconds (then the page stays where they put it).
-    if (S.batch?.replay?.playing && shownSections.size && fresh.length && follow.follows(Date.now())) {
-      const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-      fresh[fresh.length - 1].scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
-    }
-    shownSections = keys;
-  } else {
-    shownSections = new Set();
-  }
+  // First, before the browser styles the page: what morph took off the elements that move (motion.ts).
+  syncMotion(scrollEl, scrollEl);
+  // The landing page's 3D scenes are canvases, not markup: start them when the page is there, stop them when it is
+  // not, and show the open item's device.
+  syncLanding(scrollEl);
+  followStory();
   const k = routeKey(S.route);
   // The conversation keeps to the bottom while the person has not scrolled up, as in the chat. Not on a finished robot
   // run's page: its 3D replay at the top is what the page is for.
@@ -444,8 +511,8 @@ async function loadReplay(b: BatchState, full: CaseFile): Promise<void> {
     b.full = full;
     b.live = false;
     const duration = replayDuration(full, b.events);
-    // Opened straight onto a run: show it whole. Opened onto the batch: play it from the start.
-    const atEnd = S.route.name !== "batch" || params.has("end");
+    // Opened straight onto a run or a later page: show it whole. Opened onto the batch: play it from the start.
+    const atEnd = S.route.name !== "batch" || !!S.route.step || params.has("end");
     b.replay = { t: atEnd ? duration : replayStart(b), duration, playing: !atEnd && duration > 0, speed: DEFAULT_SPEED };
     if (b.replay.playing) runClock();
   } catch (e) {
@@ -670,8 +737,13 @@ function onRoute(): void {
   const r = S.route;
   const key = routeKey(r) ?? "";
   if (key !== S.cvKey) { S.cv = initialConversationUi(); S.cvKey = key; S.workOpen = false; }
-  if (prev.name !== r.name || routeKey(prev) !== routeKey(r)) scrollEl.scrollTop = 0;
-  if (r.name === "home") {
+  // A new page starts at its top.
+  const stepOf = (x: Route): string => (x.name === "batch" ? x.step ?? "wall" : "");
+  if (prev.name !== r.name || routeKey(prev) !== routeKey(r) || stepOf(prev) !== stepOf(r)) smooth.top();
+  if (r.name === "batch") S.lastStep = { id: r.id, step: r.step ?? "wall" };
+  if (r.name === "landing") {
+    closeBatch();
+  } else if (r.name === "home") {
     closeBatch();
     void loadHome();
   } else if (r.name === "costs") {
@@ -692,6 +764,16 @@ window.addEventListener("hashchange", onRoute);
 // ── events ───────────────────────────────────────────────────────────────────
 
 root.addEventListener("click", (e) => {
+  // The landing page's section buttons: glide down to the section.
+  const section = (e.target as Element | null)?.closest<HTMLElement>("[data-lp-go]")?.dataset.lpGo;
+  if (section) {
+    const to = scrollEl.querySelector<HTMLElement>(`[data-lp-at="${CSS.escape(section)}"]`);
+    if (to) smooth.to(to, { offset: section === "intro" ? 0 : -24 });
+    return;
+  }
+  // The white / black switch, in the header and on the landing page.
+  const pick = (e.target as Element | null)?.closest<HTMLElement>("[data-theme-pick]")?.dataset.themePick;
+  if (pick === "light" || pick === "dark") { pickTheme(pick); return; }
   const el = (e.target as Element | null)?.closest<HTMLElement>("[data-act]");
   if (!el || (el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") return;
   if (el.tagName === "A") return; // real links (charts, lab pages) open on their own
@@ -745,7 +827,21 @@ root.addEventListener("click", (e) => {
       if ("id" in r && fork && child) go({ name: "child", id: r.id, fork, child });
       return;
     }
-    case ACT.back: if ("id" in r) go({ name: "batch", id: r.id }); else if (r.name === "costs") go(S.costsBack); return;
+    case ACT.back: {
+      // The batch's name in the header goes to its first page; a run's Back goes to the page it was opened from.
+      if (r.name === "batch") go({ name: "batch", id: r.id });
+      else if ("id" in r) {
+        const step = S.lastStep?.id === r.id ? S.lastStep.step : "wall";
+        go(step === "wall" ? { name: "batch", id: r.id } : { name: "batch", id: r.id, step });
+      } else if (r.name === "costs") go(S.costsBack);
+      return;
+    }
+    case ACT.goto: {
+      // A step of the batch, or Back / Next: open its page.
+      const step = BATCH_STEPS.find((k) => k === arg);
+      if ("id" in r && step) go(step === "wall" ? { name: "batch", id: r.id } : { name: "batch", id: r.id, step });
+      return;
+    }
     case ACT.investigate:
       if (b && !b.live && b.resumable) void resumeAndInvestigate(b);
       else void liveAction("investigate", (id) => startInvestigation(id));
@@ -774,8 +870,7 @@ root.addEventListener("click", (e) => {
     case ACT.jump: {
       S.cv.stick = true;
       S.cv.away = false;
-      const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
-      scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+      smooth.to(scrollEl.scrollHeight);
       paint();
       return;
     }
@@ -833,7 +928,7 @@ root.addEventListener("drop", (e) => {
 
 // The person scrolling the page themselves: a playing replay then stops following new sections for a few seconds.
 // Only input counts (wheel, touch, scroll keys, a press on the scrollbar), not the `scroll` event, which the replay's
-// own scrollIntoView fires too.
+// own glide (followStory, through Lenis) fires too.
 const userScrolled = (): void => follow.userScrolled(Date.now());
 scrollEl.addEventListener("wheel", userScrolled, { passive: true });
 scrollEl.addEventListener("touchmove", userScrolled, { passive: true });
@@ -854,7 +949,7 @@ scrollEl.addEventListener("scroll", () => {
 }, { passive: true });
 
 // A live batch's notebooks type between server messages.
-setInterval(() => { if (S.batch?.live && S.route.name !== "home") paint(); }, 150);
+setInterval(() => { if (S.batch?.live && "id" in S.route) paint(); }, 150);
 // The cost screen follows a batch that is still running.
 setInterval(() => { if (S.route.name === "costs" && S.costs.state === "ready" && S.costs.value.batches.some((b) => b.kind === "live")) void loadCosts(); }, 5000);
 

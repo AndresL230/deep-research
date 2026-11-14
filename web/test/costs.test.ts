@@ -305,7 +305,8 @@ describe("the header link and the route", () => {
   it("parses and writes #/costs", () => {
     expect(parseRoute("#/costs")).toEqual({ name: "costs" });
     expect(routeHash({ name: "costs" })).toBe("#/costs");
-    expect(parseRoute("#/")).toEqual({ name: "home" });
+    // "#/" is the landing page; the start panel ("home") moved to "#/start".
+    expect(parseRoute("#/start")).toEqual({ name: "home" });
     expect(parseRoute("#/b/costs")).toEqual({ name: "batch", id: "costs" });
   });
 });

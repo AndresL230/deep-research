@@ -1,6 +1,6 @@
 /* The hub badge in the header (hub-badge.ts). Prefix hb-. */
 
-.hb { display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 9px; border:1px solid var(--border-strong); border-radius:999px; font-size:12px; font-weight:500; color:var(--fg-70); white-space:nowrap; cursor:default; }
+.hb { display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 9px; border:1px solid var(--border-strong); border-radius:var(--r-ctl); font-size:12px; font-weight:500; color:var(--fg-70); white-space:nowrap; cursor:default; }
 .hb-dot { width:7px; height:7px; border-radius:50%; background:var(--fg-40); flex:none; }
 .hb--ok { color:var(--fg); border-color:color-mix(in srgb, var(--green) 40%, var(--border)); }
 .hb--ok .hb-dot { background:var(--green); box-shadow:0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }

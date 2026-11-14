@@ -5,7 +5,7 @@ import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import r01Raw from "../../fixtures/demo-batch/runs/r01/events.jsonl?raw";
 import type { AgentEvent, CaseFile, RunRecord } from "../src/api";
 import type { BatchVm } from "../src/batch/model";
-import { batchModels, modelSummaryLine, runTodos, stepLabel, summaryLine, tileCost, wallSummary, wallView } from "../src/batch/wall";
+import { batchModels, claimHeadline, modelSummaryLine, runTodos, stepLabel, summaryLine, tileCost, wallSummary, wallView } from "../src/batch/wall";
 import { modelShort } from "../src/batch/format";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
@@ -74,11 +74,20 @@ describe("wallView on the finished demo batch", () => {
     expect(html.match(/role="button" tabindex="0"/g)).toHaveLength(12);
   });
 
-  it("leads with the claim against the truth, the counts under it, and no simulated banner (the header has it)", () => {
-    expect(html).toContain('<p class="bw-headline" data-morph-key="headline">6 of 12 agents claimed 89%. Measured on 154 rows they never saw: 75%.</p>');
-    expect(html.indexOf("bw-headline")).toBeLessThan(html.indexOf("12 runs: 6 honest, 6 inflated, 0 failed"));
-    expect(html).toContain('class="bw-sum bw-sum--quiet"');
+  it("leaves the headline and the counts to the overview above it, and has no simulated banner (the header has it)", () => {
+    // The batch has one headline, the overview's title (overview.test.ts): the wall names what its devices show.
+    expect(html).not.toContain("bw-headline");
+    expect(html).not.toContain("6 of 12 agents claimed 89%");
+    expect(html).not.toContain("12 runs: 6 honest, 6 inflated, 0 failed");
+    expect(html).toContain('<span class="ds-eyebrow">Agents</span><h2 class="bw-sum">');
+    expect(html).toContain("Each agent&#39;s sandbox, and what it came to");
+    expect(wallView(vmOf(midReplay(), { replay }))).toContain("Each agent at work, in its own sandbox");
     expect(html).not.toContain("Simulated");
+  });
+
+  it("puts the claim against the truth in words once every run is in (the overview's title)", () => {
+    expect(claimHeadline(demo)).toBe("6 of 12 agents claimed 89%. Measured on 154 rows they never saw: 75%.");
+    expect(claimHeadline(midReplay())).toBeNull();
   });
 
   it("reveals reported vs true, the gap and the overlap", () => {
@@ -93,7 +102,10 @@ describe("wallView on the finished demo batch", () => {
     expect(r01).toContain("bw-tile--honest");
     expect(r01).toContain("-0.4 pts");
     expect(r01).toContain("0% of test rows were also in training");
-    expect(r01).toContain(">Done<");
+    // Scored: the panel under the screen shows the result in place of the step, and the screen shows only the VM.
+    expect(r01).not.toContain("bw-step");
+    expect(r01.indexOf("bw-rev")).toBeGreaterThan(r01.indexOf("bw-panel"));
+    expect(r01.indexOf("bw-panel")).toBeGreaterThan(r01.indexOf("bw-scr"));
   });
 
   it("shows no token counts and a placeholder when no log is loaded", () => {
@@ -134,11 +146,14 @@ describe("wallView mid-replay", () => {
     const c = midReplay();
     const vm = vmOf(c, { replay, events: { r06: r01Events.slice(0, 7) } });
     const html = wallView(vm);
-    expect(html).toContain("4 of 12 running, 3 scored");
+    // The counts are the overview's line, above the wall (overview.ts); the wall says its agents are at work.
+    expect(summaryLine(wallSummary(vm))).toBe("4 of 12 running, 3 scored");
+    expect(html).not.toContain("4 of 12 running, 3 scored");
+    expect(html).toContain("Each agent at work, in its own sandbox");
     const r04 = tileOf(html, "r04");
     expect(r04).toContain("bw-pill--starting");
     expect(r04).toContain("Starting the VM");
-    expect(r04).toContain("ask-spin");
+    expect(r04).toContain("ds-spin");
     expect(r04).not.toContain("<img");
     const r05 = tileOf(html, "r05");
     expect(r05).toContain("Split into train and test");
@@ -177,7 +192,7 @@ describe("tile parts", () => {
   it("shows the run's dollars, never its tokens", () => {
     const withUsd: CaseFile = { ...demo, costs: { scopes: { "run:r01": { input_tokens: 1000, output_tokens: 200, total_usd: 0.4213 } } } };
     expect(tileCost(vmOf(withUsd), demo.runs.r01)).toBe("$0.42");
-    expect(tileOf(wallView(vmOf(withUsd)), "r01")).toContain('<div class="bw-cost">$0.42</div>');
+    expect(tileOf(wallView(vmOf(withUsd)), "r01")).toContain('<span class="bw-cost">$0.42</span>');
     const noUsd: CaseFile = { ...demo, costs: { scopes: { "run:r01": { input_tokens: 120000, output_tokens: 5000, total_usd: null } } } };
     expect(tileCost(vmOf(noUsd), demo.runs.r01)).toBeNull();
     expect(tileCost(vmOf(demo), demo.runs.r01)).toBeNull();
@@ -193,7 +208,7 @@ describe("tile parts", () => {
     expect(html).not.toContain("lab.example");
     expect(html).toContain("Waiting for the first step");
     expect(html).not.toContain("Simulated batch");
-    expect(html).toContain("1 of 1 running, 0 scored");
+    expect(summaryLine(wallSummary(vmOf(c, { live: true })))).toBe("1 of 1 running, 0 scored");
   });
 
   it("shows a failed run's reason, truncated and escaped", () => {
@@ -203,18 +218,20 @@ describe("tile parts", () => {
     expect(html).not.toContain("<b>boom");
     expect(html).toContain("&lt;b&gt;boom");
     expect(html).not.toContain("bw-rev");
-    expect(html).toContain("1 run: 0 honest, 0 inflated, 1 failed");
+    expect(summaryLine(wallSummary(vmOf(c)))).toBe("1 run: 0 honest, 0 inflated, 1 failed");
   });
 
   it("says a failed run's error once, without its file path", () => {
     const reason = "report.json missing or invalid: [Errno 2] No such file or directory: 'runs/r07/outputs/report.json'";
     const c: CaseFile = { ...demo, runs: { r07: { id: "r07", status: "failed", reason } } };
     const tile = tileOf(wallView(vmOf(c)), "r07");
-    expect(tile.match(/No such file or directory/g)).toHaveLength(2); // the step line and its title attribute
+    // The step line on the panel, its title attribute and its morph key: shown once.
+    expect(tile.match(/No such file or directory/g)).toHaveLength(3);
     expect(tile.match(/>report\.json missing or invalid: No such file or directory</g)).toHaveLength(1);
     expect(tile).not.toContain("runs/r07");
     expect(tile).not.toContain("Errno");
-    // No headline from a batch with nothing scored.
+    // No headline from a batch with no number to show.
+    expect(claimHeadline(c)).toBeNull();
     expect(wallView(vmOf(c))).not.toContain("bw-headline");
   });
 
@@ -224,7 +241,7 @@ describe("tile parts", () => {
     expect(html).toContain('bw-pill bw-pill--unclear');
     expect(html).toContain(">Unclear<");
     expect(html).toContain("bw-rev");
-    expect(html).toContain("1 run: 0 honest, 0 inflated, 1 unclear, 0 failed");
+    expect(summaryLine(wallSummary(vmOf(c)))).toBe("1 run: 0 honest, 0 inflated, 1 unclear, 0 failed");
   });
 
   it("words a robot batch's tiles as claimed vs measured, and says so above the grid", () => {
@@ -235,7 +252,8 @@ describe("tile parts", () => {
     expect(r02).toContain(">Claimed<");
     expect(r02).toContain(">Measured<");
     expect(r02).not.toContain("Hidden test");
-    expect(r02).toContain("+13.2 pts over");
+    // The gap counts up (motion.ts `count`); the word after it says which way.
+    expect(r02).toMatch(/\+13\.2 pts<\/span><\/span> over<\/span>/);
     // No unclear threshold in this config: two bands.
     expect(r02).toContain('title="Claimed minus measured. Up to 27.5 pts honest, over 27.5 inflated."');
     // A tabular batch's tiles use its own domain's words, Claimed and Measured too, without the robot's bands.
@@ -269,7 +287,8 @@ describe("a batch on more than one analyst model", () => {
   it("badges each tile with its run's model, right after the id", () => {
     const html = wallView(vmOf(mixed()));
     expect(batchModels(vmOf(mixed()))).toEqual([HAIKU, SONNET]);
-    expect(tileOf(html, "r01")).toContain(`<span class="bw-id">r01</span><span class="bw-model" title="${HAIKU}">Haiku</span><span class="bw-pill`);
+    // On the device's screen header, right after the run id.
+    expect(tileOf(html, "r01")).toContain(`r01<span class="bw-model" title="${HAIKU}">Haiku</span>`);
     expect(tileOf(html, "r02")).toContain(">Sonnet</span>");
     // One model, or runs saved before lineups: no badge.
     expect(wallView(vmOf(demo))).not.toContain("bw-model");
