@@ -114,9 +114,18 @@ Full contract, including the case file and the websocket messages: `docs/api-con
 | POST | `/api/batches/{id}/investigate` | Start the investigator |
 | POST | `/api/batches/{id}/decision` | `{"approve": true}` answers the fork approval |
 | POST | `/api/batches/{id}/stop` | Stop a live batch and its VMs |
+| POST | `/api/batches/{id}/resume` | Bring a saved batch that stopped at its split back live (`?investigate=true` also starts the investigator) |
 | WS | `/api/batches/{id}/ws` | A snapshot, then `case`, `event`, `fork_event` and `investigator` messages |
 
 The case file's `phase` moves through `config`, `running`, `analyzing`, `ready` (or `no_split`), `investigating`, `awaiting_approval`, `forking`, `forked`, `done`.
+
+### Picking a batch up again
+
+A batch lives in the server's memory while it runs. After a restart it is a replay, but one whose runs are scored and
+whose split was found, with no verdict yet, shows "Ready to investigate" on the home screen and an Investigate
+button on its page. Pressing it resumes the batch (the task files, each run's messages and the case file are all on
+disk) and starts the investigator; the fork experiment rebuilds its VMs by replay as it always does. An investigator
+that was mid-way when the server stopped does not come back: the batch starts again from `ready`.
 
 ### VM cleanup
 

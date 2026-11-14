@@ -431,3 +431,75 @@ def test_upload_a_script_and_start_checks_it(client, tmp_path, monkeypatch):
     missing = client.post("/api/batches", json={**cfg, "script": "sc-00000000"})
     assert missing.status_code == 422 and "unknown script" in missing.json()["detail"]
     assert client.post("/api/batches", json={**cfg, "script": "../../etc/passwd"}).status_code == 422
+
+
+# ---- resuming a saved batch ----
+
+
+def _saved_batch(tmp_path, name="saved", **case_over):
+    """A copy of the demo batch under the test's batches dir, made to look like a real batch that stopped at `ready`."""
+    import shutil
+
+    from deep_research.batch import resume_problem
+
+    d = tmp_path / "batches" / name
+    shutil.copytree(api.FIXTURES_DIR / DEMO, d)
+    case_path = d / "case" / "case.json"
+    case = json.loads(case_path.read_text())
+    case["config"].pop("simulated", None)
+    case["runs"]["r01"]["lab_url"] = "https://8080-dead.proxy.daytona.example/"  # a VM that is long gone
+    case.update({"phase": "ready", "verdict": None, "forks": {}, "hypotheses": []}, **case_over)
+    case_path.write_text(json.dumps(case))
+    src = case["split"]["fork_run_id"]
+    (d / "runs" / src / "messages.json").write_text("[]")
+    return d, case, resume_problem
+
+
+def test_resume_problem_names_what_blocks_it(tmp_path):
+    d, case, resume_problem = _saved_batch(tmp_path)
+    assert resume_problem(case, d) is None
+    assert "verdict" in resume_problem({**case, "verdict": {"sentence": "x"}}, d)
+    assert "nothing to investigate" in resume_problem({**case, "phase": "no_split"}, d)
+    assert "never finished" in resume_problem({**case, "runs": {**case["runs"], "r01": {"status": "running"}}}, d)
+    assert "split" in resume_problem({**case, "split": None}, d)
+    assert "simulated" in resume_problem({**case, "config": {**case["config"], "simulated": True}}, d)
+    (d / "runs" / case["split"]["fork_run_id"] / "messages.json").unlink()
+    assert "missing" in resume_problem(case, d)
+
+
+def test_saved_batch_is_listed_as_resumable_and_comes_back_live(client, tmp_path, monkeypatch):
+    from deep_research import batch as batch_mod
+
+    _saved_batch(tmp_path, forks={"pending": {"status": "awaiting_approval", "n_per_arm": 4}})
+    monkeypatch.setattr(batch_mod, "BATCHES_DIR", tmp_path / "batches")
+    assert {"id": "saved", "kind": "replay", "resumable": True} in client.get("/api/batches").json()
+    # The fixture itself is never resumable: it is simulated and has its verdict.
+    demo = next(it for it in client.get("/api/batches").json() if it["id"] == DEMO)
+    assert "resumable" not in demo
+    with client.websocket_connect("/api/batches/saved/ws") as ws:
+        snap = ws.receive_json()
+    assert snap["live"] is False and snap["resumable"] is True
+
+    res = client.post("/api/batches/saved/resume")
+    assert res.status_code == 200 and res.json() == {"id": "saved", "phase": "ready"}
+    assert {"id": "saved", "kind": "live"} in client.get("/api/batches").json()
+    case = client.get("/api/batches/saved/case").json()
+    assert case["phase"] == "ready" and "pending" not in case["forks"]
+    assert case["runs"]["r01"]["lab_url"] is None  # its VM is gone
+    # Costs carry over from the saved case file.
+    b = api.BATCHES["saved"]
+    assert b.tracker.snapshot()["scopes"].keys() == case["costs"]["scopes"].keys()
+    assert b.task.data.is_file() and b.task.given_files() == {}
+    with client.websocket_connect("/api/batches/saved/ws") as ws:
+        assert ws.receive_json()["live"] is True
+    # A second resume is a no-op on the live batch.
+    assert client.post("/api/batches/saved/resume").json()["phase"] == "ready"
+    api.BATCHES.pop("saved")
+
+
+def test_resume_refuses_what_cannot_be_resumed(client, tmp_path):
+    _saved_batch(tmp_path, name="finished", phase="done", verdict={"sentence": "x", "step_label": "deduplicate", "numbers": {}})
+    res = client.post("/api/batches/finished/resume")
+    assert res.status_code == 409 and "verdict" in res.json()["detail"]
+    assert client.post(f"/api/batches/{DEMO}/resume").status_code == 409  # a fixture: no messages to fork from
+    assert client.post("/api/batches/nope/resume").status_code == 404

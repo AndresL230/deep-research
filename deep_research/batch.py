@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
 import time
 import uuid
@@ -26,15 +27,48 @@ from .costs import CostTracker, OverBudget, UsageCallback
 from .events import EventLog, current_step, events_from_update, read_events
 from .forks import cut_history, forced_turn, intervention_for
 from .scoring import score_run
-from .task import build_task, task_prompt
+from .task import TaskFiles, build_task, task_prompt
+
+log = logging.getLogger("deep_research.batch")
 
 RUN_TIMEOUT_S = 900
 RECURSION_LIMIT = 200
 MAX_PARALLEL_VMS = 12
 
+# Run statuses that mean the run is over.
+SCORED = ("honest", "inflated", "failed")
+
+
+def resume_problem(case: dict, batch_dir: Path) -> str | None:
+    """Why a saved batch cannot be picked up again, or None when it can.
+
+    A batch can be resumed once its runs are scored and a split was found, as long as no verdict is in yet. Everything
+    the investigator and the fork experiment need is then on disk: the task files, each run's events and messages, and
+    the case file. Nothing that was mid-flight survives a restart (the VMs are gone, the investigator's memory too), so
+    a resumed batch starts again from `ready`.
+    """
+    cfg = case.get("config") or {}
+    if cfg.get("simulated"):
+        return "a simulated batch has no real runs to fork"
+    phase = str(case.get("phase") or "")
+    if phase == "done" or case.get("verdict"):
+        return "this batch already has its verdict"
+    if phase == "no_split":
+        return "no step separated the runs, so there is nothing to investigate"
+    runs = case.get("runs") or {}
+    if not runs or any(r.get("status") not in SCORED for r in runs.values()):
+        return "its runs never finished"
+    split = case.get("split") or {}
+    src = split.get("fork_run_id")
+    if not src:
+        return "no split was found"
+    if not (batch_dir / "runs" / src / "messages.json").is_file() or not (batch_dir / "task" / "data.csv").is_file():
+        return "the files needed to fork are missing"
+    return None
+
 
 class Batch:
-    def __init__(self, cfg: BatchConfig, batch_id: str | None = None, root: Path = BATCHES_DIR):
+    def __init__(self, cfg: BatchConfig, batch_id: str | None = None, root: Path = BATCHES_DIR, resume: bool = False):
         self.cfg = cfg
         self.id = batch_id or time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
         self.dir = root / self.id
@@ -42,13 +76,17 @@ class Batch:
         self.forks_dir = self.dir / "forks"
         fresh = not self.dir.exists()
         self.runs_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            # First, and before the case file exists: if the task cannot be built there is no batch.
-            self.task = build_task(cfg, self.dir / "task")
-        except BaseException:
-            if fresh:
-                shutil.rmtree(self.dir, ignore_errors=True)
-            raise
+        if resume:
+            # The task files are already there from the first time round.
+            self.task = TaskFiles.in_dir(self.dir / "task")
+        else:
+            try:
+                # First, and before the case file exists: if the task cannot be built there is no batch.
+                self.task = build_task(cfg, self.dir / "task")
+            except BaseException:
+                if fresh:
+                    shutil.rmtree(self.dir, ignore_errors=True)
+                raise
         self.case = CaseFile(self.dir / "case" / "case.json")
         self.tracker = CostTracker(budget_usd=cfg.budget_usd)
         self.vms: dict[str, Any] = {}
@@ -58,7 +96,42 @@ class Batch:
         self._investigator = None
         self._inv_config: dict | None = None
         self.case.subscribe(lambda section, value: self._emit({"kind": "case", "section": section, "value": value}))
-        self.case.set_config(cfg.model_dump())
+        if resume:
+            self.tracker.restore(self.case.data.get("costs") or {})
+        else:
+            self.case.set_config(cfg.model_dump())
+
+    @classmethod
+    def resume(cls, batch_id: str, root: Path = BATCHES_DIR) -> "Batch":
+        """Pick a saved batch up again where it can be: scored runs and a split, no verdict yet.
+
+        Raises ValueError with the reason when it cannot (`resume_problem`). The batch comes back in phase `ready`,
+        so the investigator can be started as if the server had never stopped. A fork request that was waiting for
+        approval is dropped: the investigator that asked for it is gone.
+        """
+        case_path = root / batch_id / "case" / "case.json"
+        if not case_path.is_file():
+            raise ValueError(f"no batch {batch_id}")
+        case = json.loads(case_path.read_text())
+        problem = resume_problem(case, root / batch_id)
+        if problem:
+            raise ValueError(problem)
+        b = cls(BatchConfig(**case["config"]), batch_id=batch_id, root=root, resume=True)
+        if "pending" in b.case.data["forks"]:
+            b.case.remove_fork("pending")
+        b._forget_lab_pages()  # the VMs behind them are long gone
+        b.case.set_phase("ready")
+        return b
+
+    def _forget_lab_pages(self) -> None:
+        """Null every `lab_url`: the VMs that served them are gone. The saved charts stay."""
+        for run_id, run in list(self.case.data["runs"].items()):
+            if run.get("lab_url"):
+                self.case.update_run(run_id, lab_url=None)
+        for fork_id, fork in list(self.case.data["forks"].items()):
+            for cid, child in list((fork.get("children") or {}).items()):
+                if child.get("lab_url"):
+                    self._set_child(fork_id, cid, lab_url=None)
 
     # ---- live updates to the UI ----
     def subscribe(self) -> asyncio.Queue:
@@ -258,7 +331,8 @@ class Batch:
                         vm = await asyncio.to_thread(vms.fork_vm, base, f"{self.id}-{fork_id}-{cid}")
                         self.vms[f"{fork_id}-{cid}"] = vm
                         how = "fork"
-                    except Exception:  # noqa: BLE001 - fall back to rebuilding by replay
+                    except Exception as e:  # noqa: BLE001 - fall back to rebuilding by replay
+                        log.warning("fork of the base VM failed for %s/%s, rebuilding by replay: %r", fork_id, cid, e)
                         vm = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-{cid}")
                         self.vms[f"{fork_id}-{cid}"] = vm
                         await asyncio.to_thread(vms.load_task, vm, self.task)
@@ -376,17 +450,10 @@ class Batch:
     async def close(self) -> None:
         """Delete every VM this batch still has: runs, fork bases and fork children. Safe to call again."""
         left, self.vms = self.vms, {}
-        if not left:
-            return
-        await asyncio.gather(*(asyncio.to_thread(vms.delete_vm, sb) for sb in left.values()))
+        if left:
+            await asyncio.gather(*(asyncio.to_thread(vms.delete_vm, sb) for sb in left.values()))
         # The lab pages went with the VMs. Charts were saved when each run finished.
-        for run_id, run in list(self.case.data["runs"].items()):
-            if run.get("lab_url"):
-                self.case.update_run(run_id, lab_url=None)
-        for fork_id, fork in list(self.case.data["forks"].items()):
-            for cid, child in list((fork.get("children") or {}).items()):
-                if child.get("lab_url"):
-                    self._set_child(fork_id, cid, lab_url=None)
+        self._forget_lab_pages()
 
 
 def _arm_summary(rows: list[dict]) -> dict:

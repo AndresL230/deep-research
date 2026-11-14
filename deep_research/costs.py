@@ -155,6 +155,20 @@ class CostTracker:
                 "scopes": {k: v.to_dict() for k, v in self.scopes.items()},
             }
 
+    def restore(self, snapshot: dict) -> None:
+        """Load the scopes a saved case file holds, so a resumed batch keeps counting from what it already spent."""
+        with self._lock:
+            for key, s in (snapshot.get("scopes") or {}).items():
+                self.scopes[key] = ScopeCost(
+                    input_tokens=int(s.get("input_tokens") or 0),
+                    output_tokens=int(s.get("output_tokens") or 0),
+                    cache_read_tokens=int(s.get("cache_read_tokens") or 0),
+                    cache_write_tokens=int(s.get("cache_write_tokens") or 0),
+                    model_usd=s.get("model_usd"),
+                    vm_seconds=float(s.get("vm_seconds") or 0.0),
+                    vm_usd=s.get("vm_usd"),
+                )
+
 
 def estimate_batch_usd(n_runs: int, avg_run_usd: float | None) -> float | None:
     return None if avg_run_usd is None else n_runs * avg_run_usd

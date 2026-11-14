@@ -219,7 +219,8 @@ export type AgentEvent = { t: number; /** Investigator only: which agent or suba
 
 /** Messages on `/api/batches/{id}/ws`. A replay sends one snapshot and closes; a live batch keeps streaming. */
 export type BatchMessage =
-  | { kind: "snapshot"; case: CaseFile; live: boolean }
+  /** `resumable`: a saved batch of ours that stopped at a split; `POST .../resume` brings it back live. */
+  | { kind: "snapshot"; case: CaseFile; live: boolean; resumable?: boolean }
   | { [S in CaseSection]: { kind: "case"; section: S; value: CaseFile[S] } }[CaseSection]
   | { kind: "event"; run: string; event: AgentEvent }
   | { kind: "fork_event"; fork: string; child: string; event: AgentEvent }
@@ -255,7 +256,8 @@ export function batchSocketUrl(batchId: string, loc: Pick<Location, "protocol" |
 
 // ── REST ─────────────────────────────────────────────────────────────────────
 
-export interface BatchListItem { id: string; kind: "live" | "replay" }
+/** `resumable`: a saved batch with scored runs, a split and no verdict yet, that `resumeBatch` can pick up again. */
+export interface BatchListItem { id: string; kind: "live" | "replay"; resumable?: boolean }
 
 export interface DatasetColumn {
   name: string;
@@ -383,6 +385,10 @@ export const fetchForkEvents = (id: string, fork: string, child: string, o: Opts
 export const fetchInvestigatorEvents = (id: string, o: Opts = {}) => call<AgentEvent[]>(`${batchPath(id)}/investigator/events`, o);
 /** Live batches only: start the investigator once the phase is `ready`. */
 export const startInvestigation = (id: string, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/investigate`, { ...o, method: "POST" });
+/** Bring a saved, resumable batch back live on this server (phase `ready`); with `investigate`, start the investigator
+ *  in the same call. 409 with the reason when the batch cannot be resumed. */
+export const resumeBatch = (id: string, investigate = false, o: Opts = {}) =>
+  call<{ id: string; phase: string }>(`${batchPath(id)}/resume${investigate ? "?investigate=true" : ""}`, { ...o, method: "POST" });
 /** Live batches only: answer `forks.pending` while the phase is `awaiting_approval`. */
 export const postDecision = (id: string, approve: boolean, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/decision`, { ...o, json: { approve } });
 /** Live batches only: cancel the work and stop every VM. */

@@ -509,6 +509,11 @@ describe("investigatorView", () => {
   it("offers Investigate when ready and Stop while working, live only", () => {
     expect(investigatorView(vmOf({ phase: "ready" }, { live: true }))).toContain('data-act="investigate"');
     expect(investigatorView(vmOf({ phase: "ready" }))).not.toContain('data-act="investigate"');
+    // A saved batch that stopped at its split can be investigated too (the server resumes it first), but not stopped.
+    const saved = investigatorView(vmOf({ phase: "ready" }, { resumable: true }));
+    expect(saved).toContain('data-act="investigate"');
+    expect(saved).not.toContain('data-act="stop"');
+    expect(investigatorView(vmOf({ phase: "done" }, { resumable: true }))).not.toContain('data-act="investigate"');
     const running = investigatorView(vmOf({ phase: "running" }, { live: true, busy: "stop", error: "Nope <b>" }));
     expect(running).toContain('data-act="stop" disabled');
     expect(running).toContain("Nope &lt;b&gt;");

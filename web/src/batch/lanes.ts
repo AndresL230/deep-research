@@ -696,11 +696,12 @@ export function investigatorView(vm: BatchVm): string {
   const working = ["running", "analyzing", "investigating", "forking"].includes(phase);
 
   let actions = "";
+  const dis = vm.busy != null ? " disabled" : "";
+  // A saved batch that stopped at its split can be investigated too: the server brings it back live first.
+  if (phase === "ready" && (vm.live || vm.resumable)) {
+    actions += `<button type="button" class="ask-btn ln-approve" data-act="${ACT.investigate}"${dis}>${vm.busy === ACT.investigate ? askSpinner(12) : ""}Investigate</button>`;
+  }
   if (vm.live) {
-    const dis = vm.busy != null ? " disabled" : "";
-    if (phase === "ready") {
-      actions += `<button type="button" class="ask-btn ln-approve" data-act="${ACT.investigate}"${dis}>${vm.busy === ACT.investigate ? askSpinner(12) : ""}Investigate</button>`;
-    }
     if (STOPPABLE.has(phase)) {
       actions += `<button type="button" class="ask-ghostbtn ask-ghostbtn--outline" data-act="${ACT.stop}"${dis}>${vm.busy === ACT.stop ? askSpinner(12) : ""}Stop</button>`;
     }

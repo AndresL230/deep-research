@@ -95,6 +95,8 @@ export interface BatchVm {
   id: string;
   /** Started on this server: the live-only actions (investigate, approve, decline, stop) work. */
   live: boolean;
+  /** A saved batch that stopped at its split: Investigate brings it back live first (`resumeBatch`). */
+  resumable?: boolean;
   /** The case file. During a replay it is the case AT `replay.t` (replay.ts `caseAt`), not the final one. */
   case: CaseFile;
   /** Event logs loaded so far, keyed by EventKey. During a replay, cut to `replay.t`. Missing key = not loaded. */

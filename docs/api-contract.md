@@ -16,7 +16,7 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | GET | `/api/datasets` | `[DatasetInfo]`: the built-in `pima` first, then uploaded files |
 | POST | `/api/datasets?name=<file name>` | The body is the CSV file itself (up to 20 MB). Saves it under `datasets/` and returns its `DatasetInfo`. `422 {"detail"}` says why a file cannot be used; `413` when it is too large |
 | POST | `/api/scripts?name=<file name>` | The body is a Python training script (up to 200 KB). The server parses it and never runs it. Saves it under `user_scripts/` and returns its `ScriptInfo`; `422 {"detail"}` when it is not valid Python |
-| GET | `/api/batches` | `[{"id", "kind": "live" or "replay"}]`: batches started on this server, saved batches in `batches/`, and replays in `fixtures/` |
+| GET | `/api/batches` | `[{"id", "kind": "live" or "replay", "resumable"?: true}]`: batches started on this server, saved batches in `batches/`, and replays in `fixtures/`. `resumable` marks a saved batch that `resume` would accept |
 | POST | `/api/batches` | Body: a `BatchConfig`. Starts a batch, returns `{"id"}`. `422 {"detail"}` when the dataset, target or script cannot be used |
 | GET | `/api/batches/{id}/case` | The case file (below) |
 | GET | `/api/batches/{id}/runs/{run}/events` | One run's `events.jsonl` as a JSON array |
@@ -26,6 +26,7 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | POST | `/api/batches/{id}/investigate` | Live only. Starts the investigator (phase `ready`) |
 | POST | `/api/batches/{id}/decision` | Live only. `{"approve": bool}` answers `forks.pending` (phase `awaiting_approval`) |
 | POST | `/api/batches/{id}/stop` | Live only. Cancels the work and stops every VM |
+| POST | `/api/batches/{id}/resume?investigate=<bool>` | Bring a saved batch of ours back live, in phase `ready`, so the investigator and the fork experiment can run on it after a server restart. With `investigate=true` the investigator starts in the same call. Only a batch whose runs are all scored, with a split and no verdict yet; `409 {"detail"}` says why otherwise. The list and the websocket snapshot flag such a batch with `resumable: true` |
 | WS | `/api/batches/{id}/ws` | See below |
 
 Errors: unknown batch is `404 {"detail": ...}`; a live-only call on a replay is `409`; any other unknown `/api/*`
@@ -101,8 +102,8 @@ activity step's run and done, and `todos` onto the plan step.
 
 ## Websocket
 
-`/api/batches/{id}/ws` first sends `{"kind": "snapshot", "case": <case file>, "live": bool}`. A replay then
-closes. A live batch keeps sending:
+`/api/batches/{id}/ws` first sends `{"kind": "snapshot", "case": <case file>, "live": bool}`. A replay adds
+`"resumable": bool` and then closes. A live batch keeps sending:
 
 ```ts
 { kind: "case", section, value }                  // one case file section changed; replace it
