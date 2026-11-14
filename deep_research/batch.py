@@ -1063,7 +1063,7 @@ class Batch:
         self.case.update_fork(fork_id, children=children)
 
     # ---- the investigator ----
-    async def investigate(self) -> None:
+    async def investigate(self, opening: str = "Investigate this batch.") -> None:
         self._loop = asyncio.get_running_loop()
         self._investigator = build_investigator(self, self.cfg.investigator_model)
         self._inv_config = {
@@ -1074,7 +1074,7 @@ class Batch:
         self.case.set_phase("investigating")
         # The rubric turns on the grader (RubricMiddleware) that checks the verdict before the investigator finishes.
         await self._stream_investigator(
-            {"messages": [{"role": "user", "content": "Investigate this batch."}], "rubric": RUBRIC}
+            {"messages": [{"role": "user", "content": opening}], "rubric": RUBRIC}
         )
 
     async def decide(self, approve: bool) -> None:
