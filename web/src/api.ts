@@ -580,6 +580,36 @@ export interface BatchListItem {
   /** Run on another machine and read from the team hub; `machine` says which. */
   remote?: boolean;
   machine?: string | null;
+  /** The batch in a few numbers, for the home table (deep_research/batch_summary.py). Null when its case file could
+   *  not be read; absent from a server older than the table. */
+  summary?: BatchSummary | null;
+}
+
+/** Where the fork experiment and the verdict are. `open` and `supported` are the verdict's evidence level
+ *  (deep_research/evidence.py); `fork_stopped` is a fork the batch stopped before it finished. */
+export type VerdictState = "none" | "awaiting_approval" | "fork_running" | "fork_stopped" | "forked" | "open" | "supported";
+
+export interface BatchSummary {
+  /** The domain's name (`config.domain`, "tabular" for batches saved before domains) and title. */
+  domain: { name: string; title: string | null } | null;
+  /** Local time, `YYYY-MM-DDTHH:MM:SS`, or null when nothing says (fixtures). */
+  started_at: string | null;
+  phase: string | null;
+  simulated: boolean;
+  /** The analyst model, or the lineup the runs took in turn. */
+  analyst_models: string[];
+  investigator_model: string | null;
+  n_runs: number;
+  /** `stopped`: runs that never finished in a batch that is over. `running` counts starting runs too. */
+  counts: { honest: number; inflated: number; unclear: number; failed: number; running: number; queued: number; stopped: number };
+  /** The claim against the truth, as the overview's headline (wall.ts `claimHeadline`): means over the inflated runs
+   *  (`of: "inflated"`), else over the honest and unclear ones. Null while runs are still going. */
+  claim: { of: "inflated" | "honest"; n: number; claimed: number; measured: number; n_hidden: number | null } | null;
+  /** The step that separates honest from inflated runs: its label and its name in the domain's words. */
+  step: { label: string; name: string } | null;
+  verdict: { state: VerdictState; pairs?: number | null; needed_pairs?: number | null };
+  /** Dollars when prices are known (null for simulated batches or missing prices); tokens are input plus output. */
+  spend: { usd: number | null; usd_partial: boolean; tokens: number };
 }
 
 export interface DatasetColumn {

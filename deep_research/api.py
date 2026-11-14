@@ -30,6 +30,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 from . import controllers, datasets, domains, hub, notebook, robot_view, traps, user_scripts  # noqa: E402
 from .batch import Batch, resume_problem  # noqa: E402 - needs the environment loaded first
+from .batch_summary import summarize  # noqa: E402
 from .case_file import with_evidence  # noqa: E402
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
@@ -414,6 +415,53 @@ def _resumable(batch_id: str) -> bool:
     return resume_problem(case, d) is None
 
 
+# The home table's summaries (batch_summary.py), kept while their case file is unchanged: a saved batch's by its
+# file's (mtime, size), a hub batch's by the hub's revision. A live batch's is worked out from memory each time.
+_DISK_SUMMARIES: dict[Path, tuple[tuple, dict | None]] = {}
+_HUB_SUMMARIES: dict[str, tuple[object, dict | None]] = {}
+
+
+def _disk_summary(batch_id: str, path: Path, fixture: bool) -> dict | None:
+    """A saved batch's or a fixture's summary from its case file, or None when the file cannot be read."""
+    b = BATCHES.get(batch_id)
+    try:
+        if b is not None:
+            # Fixtures carry no date: their files' times are the checkout's, not the batch's (as in /api/costs).
+            return summarize(batch_id, b.case.read(), None if fixture else path.stat().st_mtime)
+        st = path.stat()
+        key = (st.st_mtime_ns, st.st_size)
+        hit = _DISK_SUMMARIES.get(path)
+        if hit and hit[0] == key:
+            return hit[1]
+        summary = summarize(batch_id, json.loads(path.read_text()), None if fixture else st.st_mtime)
+    except (OSError, ValueError):
+        return None
+    _DISK_SUMMARIES[path] = (key, summary)
+    return summary
+
+
+def _hub_summaries(rows: list[dict]) -> dict[str, dict | None]:
+    """Summaries of the hub's batches. The list says each batch's revision; the case files (one bigger read, shared
+    with the cost screen) are fetched only when a revision is new to this server."""
+    out: dict[str, dict | None] = {}
+    need = []
+    for row in rows:
+        hit = _HUB_SUMMARIES.get(row["id"])
+        if hit and row.get("revision") is not None and hit[0] == row.get("revision"):
+            out[row["id"]] = hit[1]
+        else:
+            need.append(row)
+    if need:
+        cases = {c["id"]: c for c in _hub_cached("cases", hub.all_cases) or [] if isinstance(c, dict) and "id" in c}
+        for row in need:
+            c = cases.get(row["id"])
+            summary = summarize(row["id"], c.get("case"), None, c.get("started_at") or row.get("started_at")) if c else None
+            out[row["id"]] = summary
+            if c and c.get("revision") is not None:
+                _HUB_SUMMARIES[row["id"]] = (c["revision"], summary)
+    return out
+
+
 @app.get("/api/batches")
 def list_batches():
     out = []
@@ -422,16 +470,21 @@ def list_batches():
     for root in (BATCHES_DIR, FIXTURES_DIR):
         if root.exists():
             for d in sorted(root.iterdir()):
-                if (d / "case" / "case.json").exists():
+                path = d / "case" / "case.json"
+                if path.exists():
                     item = {"id": d.name, "kind": "live" if _running(d.name) else "replay"}
                     if root is BATCHES_DIR and _resumable(d.name):
                         item["resumable"] = True
+                    item["summary"] = _disk_summary(d.name, path, root == FIXTURES_DIR)
                     out.append(item)
     # Batches other machines ran, from the team hub. They open as replays, read from the hub.
     seen = {b["id"] for b in out}
-    for row in (_hub_cached("batches", hub.list_batches) if hub.enabled() else None) or []:
-        if isinstance(row, dict) and row.get("id") not in seen:
-            out.append({"id": row["id"], "kind": "replay", "machine": row.get("machine"), "remote": True})
+    rows = [r for r in (_hub_cached("batches", hub.list_batches) if hub.enabled() else None) or []
+            if isinstance(r, dict) and isinstance(r.get("id"), str) and r["id"] not in seen]
+    summaries = _hub_summaries(rows) if rows else {}
+    for row in rows:
+        out.append({"id": row["id"], "kind": "replay", "machine": row.get("machine"), "remote": True,
+                    "summary": summaries.get(row["id"])})
     return out
 
 

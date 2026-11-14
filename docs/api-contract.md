@@ -17,7 +17,7 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | POST | `/api/datasets?name=<file name>` | The body is the CSV file itself (up to 20 MB). Saves it under `datasets/` and returns its `DatasetInfo`. `422 {"detail"}` says why a file cannot be used; `413` when it is too large |
 | POST | `/api/scripts?name=<file name>` | The body is a Python training script (up to 200 KB). The server parses it and never runs it. Saves it under `user_scripts/` and returns its `ScriptInfo`; `422 {"detail"}` when it is not valid Python |
 | POST | `/api/controllers?name=<file name>` | The body is a robot controller, a Python file (up to 200 KB). The server parses it and never runs it. Returns its `ControllerInfo`; `422 {"detail"}` when it is refused (not valid Python, or no `class Controller` with `reset` and `act` methods); `413` when it is too large |
-| GET | `/api/batches` | `[{"id", "kind": "live" or "replay", "resumable"?: true}]`: batches started on this server, saved batches in `batches/`, and replays in `fixtures/`. `resumable` marks a saved batch that `resume` would accept |
+| GET | `/api/batches` | `[{"id", "kind": "live" or "replay", "resumable"?: true, "remote"?: true, "machine"?, "summary": BatchSummary or null}]`: batches started on this server, saved batches in `batches/`, replays in `fixtures/`, and the team hub's batches (`remote`, run on `machine`). `resumable` marks a saved batch that `resume` would accept. `summary` is below ([The batch list](#the-batch-list)) |
 | POST | `/api/batches` | Body: a `BatchConfig`. Starts a batch, returns `{"id"}`. `422 {"detail"}` when the dataset, target, script or trap cannot be used |
 | GET | `/api/costs` | The cost report (below): spend across every batch, live ones from memory and saved ones from disk |
 | GET | `/api/batches/{id}/case` | The case file (below) |
@@ -225,6 +225,45 @@ Usd { total, runs, forks, investigator, other, model, vm }
 - `started_at` is local time, `YYYY-MM-DDTHH:MM:SS`, read from the batch id (`MMDD-HHMMSS-xxxx`); a batch with
   another kind of id gets its case file's last change, and a fixture gets null.
 - `vm_seconds` run from the moment a VM is up until it is deleted. A VM that is still up is counted to now.
+
+## The batch list
+
+Each item of `GET /api/batches` carries `summary`, the batch in a few numbers for the home screen's table
+(`web/src/batch/batch-table.ts`), built by `deep_research/batch_summary.py` from the case file: a live batch's from
+memory, a saved batch's and a fixture's from disk, a hub batch's from the hub's copy. It is null when the case file
+cannot be read. A batch saved before a field existed gets null, an empty list or zero counts for it.
+
+```ts
+BatchSummary {
+  domain: { name, title } | null,                 // config.domain ("tabular" when absent) and its title
+  started_at: string | null,                      // as in BatchCost; a hub batch whose id has no date uses the hub's
+  phase: string | null,
+  simulated: boolean,
+  analyst_models: string[],                       // the lineup, else [analyst_model], else []
+  investigator_model: string | null,
+  n_runs,                                         // runs in the case file, else config.n_runs
+  counts: { honest, inflated, unclear, failed, running, queued, stopped },
+  claim: { of: "inflated" | "honest", n, claimed, measured, n_hidden: number | null } | null,
+  step: { label, name } | null,                   // split.label, and its name in the domain's words
+  verdict: { state, pairs?, needed_pairs? },
+  spend: { usd: number | null, usd_partial: boolean, tokens },
+}
+```
+
+- `counts.running` counts starting runs too. Once the batch is over (done, no split, stopped, error, blocked) a run
+  that never finished counts as `stopped`, not running.
+- `claim` is the overview headline's (`claimHeadline` in web/src/batch/wall.ts): the means of the claimed and the
+  measured number over the inflated runs, or over the honest and unclear runs (`of: "honest"`) when none inflated.
+  Null while a run is still going in a batch that is not over. `n_hidden` is the hidden case count when the runs agree.
+- `step.name` comes from `config.domain_info.words.steps` (the registered domain's words for a case file that has
+  none), else the planted trap's words (`config.trap_info`), else "the <label in words> step". Never the raw label.
+- `verdict.state`: `none` (no fork yet), `awaiting_approval` (a fork waits for approval), `fork_running`,
+  `fork_stopped`, `forked` (the fork finished, no verdict yet), or the verdict's evidence level `open` or `supported`
+  (deep_research/evidence.py) with its `pairs` and `needed_pairs`.
+- `spend` comes from the cost report's per batch row (`cost_report._batch`). `usd` is null for a simulated batch,
+  and when prices are missing and nothing was priced; `tokens` is input plus output.
+- Summaries are kept between calls while a saved case file's mtime and size, or a hub batch's revision, stay the
+  same. The hub's case files are fetched (one read shared with `/api/costs`) only when a revision is new.
 
 ## Event logs
 
