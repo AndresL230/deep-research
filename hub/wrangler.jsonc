@@ -5,6 +5,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
+  // The team's address for the hub. Kept here so a deploy never drops the custom domain set up for it.
+  "routes": [{ "pattern": "research-hub.andresl.dev", "custom_domain": true }],
   "d1_databases": [
     {
       "binding": "DB",
