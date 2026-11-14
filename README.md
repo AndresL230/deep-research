@@ -1,8 +1,295 @@
-# deep-research
+# Orro — Experimental Auditing for AI Research Agents
 
-AI agents are starting to run data analyses for research, and they make method errors that still produce a clean, confident number. This project runs one data science agent many times in parallel Daytona VMs, checks each run's reported score against the truth, finds the step where honest and inflated runs split, then rewinds to that step, forks the VM, and replays both choices to prove which step caused the wrong result.
+**When an AI scientist reports a breakthrough, how do we know the methodology was sound?**
 
-HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amazon.
+Orro is a HackPrinceton Fall 2026 **Science + Discovery** project that investigates methodological failures in autonomous AI research. Instead of merely asking another language model to critique a result, it **runs independent agents, checks their claims against hidden evaluation data, reconstructs a suspicious decision point, and experimentally tests what changes when that decision is corrected**.
+
+> **Project status:** Real tabular and robot batches have run in Daytona, and a fork experiment has run to completion on a real tabular batch. The investigator has not yet written a verdict on a real batch. The demo replays in `fixtures/` are simulated, and the app labels them that way.
+
+**Tracks noted in the repository:** Science + Discovery · LangChain Deep Agents · Amazon
+
+## At a glance
+
+| Question | Answer |
+|---|---|
+| **Problem** | Autonomous research agents can produce polished code, plots, and confident performance claims despite flawed experimental methods. |
+| **Approach** | Observe multiple independent executions, compare claimed and independently measured performance, isolate a suspected decision, and test an intervention. |
+| **What is measured?** | Reported versus hidden-holdout accuracy for tabular ML; reported versus hidden-position success rate for robotics. |
+| **What makes it different?** | A controlled **fork experiment** with unchanged, forced-intervention, placebo, and (when available) information-only branches. |
+| **Primary stack** | Python, LangChain Deep Agents, LangGraph, Anthropic, Daytona, FastAPI, WebSockets, Vite/TypeScript, Cloudflare Worker/D1. |
+| **Scientific caution** | Evidence can support a causal explanation; a single fork or statistically significant result is not proof of universal causality. |
+
+## The problem: a convincing result can still be wrong
+
+Imagine an AI data scientist receives a diabetes-classification dataset. It trains a random forest, draws a confusion matrix, and announces **89% accuracy**. The code runs. The visualization looks credible. But duplicate observations appear in both its training and test sets: the model partly recognizes previously seen records rather than generalizing to new patients.
+
+A separate, clean holdout may reveal that actual accuracy is closer to **75%**.
+
+The question is not just **“Is the reported number wrong?”** It is **“Which methodological decision explains the gap, and what evidence supports that explanation?”**
+
+Orro is designed to investigate that question by changing the experimental process itself.
+
+## End-to-end workflow
+
+```mermaid
+flowchart TD
+    A["Select domain, dataset and experimental settings"] --> B["Construct task and hidden evaluation"]
+    B --> C["Launch independent analyst agents"]
+    C --> D["Isolated Daytona workspaces"]
+    D --> E["Collect code, actions, outputs and reported scores"]
+    E --> F["Evaluate against hidden ground truth"]
+    F --> G{"Honest and inflated runs both present?"}
+    G -- "No" --> H["Record outcome / no split found"]
+    G -- "Yes" --> I["Label actions and identify a divergent step"]
+    I --> J["Investigator examines runs and records hypothesis"]
+    J --> K["Request fork experiment"]
+    K --> L{"Human approves cost?"}
+    L -- "No" --> M["Record limited-evidence verdict"]
+    L -- "Yes" --> N["Reconstruct pre-decision state"]
+    N --> O["Continue control and intervention branches"]
+    O --> P["Score branch outcomes and evidence"]
+    P --> Q["Evidence-qualified verdict"]
+    Q --> R["Case file, UI, replay and optional diagnosis"]
+```
+
+### Stage 1 — Prepare an experiment
+
+A batch specifies the research **domain**, task inputs, trap or challenge settings, number of analyst runs, models, fork settings, and budget. The default `tabular` domain uses the Pima diabetes dataset; users can also upload a CSV and choose its classification target. The `robot_arm` domain asks agents to write and test a pick-and-place controller for a simulated Franka Panda arm.
+
+The task builder keeps evaluation truth on the server side. Analyst sandboxes receive the task materials and prediction inputs, **not the holdout labels**.
+
+### Stage 2 — Let independent researchers work
+
+Each analyst is a separate, flat Deep Agent with its own Daytona sandbox and task history. Analysts do not share files or see other runs' outcomes. Their tools execute actual code, save artifacts, and produce a claimed score.
+
+```mermaid
+flowchart LR
+    T["One research task"] --> A1["Analyst 01"]
+    T --> A2["Analyst 02"]
+    T --> A3["Analyst 03"]
+    T --> AN["Analyst N"]
+    A1 --> V1["Daytona VM 01"]
+    A2 --> V2["Daytona VM 02"]
+    A3 --> V3["Daytona VM 03"]
+    AN --> VN["Daytona VM N"]
+    V1 --> C["Orchestrator / event logs"]
+    V2 --> C
+    V3 --> C
+    VN --> C
+    C --> S["Independent scorer"]
+```
+
+Repeated executions expose methodological variation: one run may clean the data, another may skip cleaning, and another may choose a different validation procedure.
+
+### Stage 3 — Check claims against hidden evaluation
+
+For each completed run, the scorer compares its **reported metric** with its **independently evaluated metric**.
+
+$$
+\text{Inflation gap} = \text{reported score} - \text{hidden-evaluation score}
+$$
+
+A run is classified using domain-specific thresholds. For tabular tasks, the default inflation threshold is **8 percentage points**. Robotics uses separate success-rate thresholds and can classify intermediate cases as `unclear`.
+
+### Stage 4 — Find where execution histories diverge
+
+The action analyzer labels operations such as data inspection, deduplication, splitting, model training, and reporting. It compares the frequency and position of these steps between honest and inflated runs to identify a candidate divergence.
+
+**Important:** This candidate finder is a heuristic, not an independent causal discovery algorithm. The current investigator also follows a guided prompt; the more autonomous, blind multi-hypothesis investigator described in `docs/MASTER_PLAN.md` is a development plan, not a completed capability in this snapshot.
+
+### Stage 5 — Reconstruct and fork a decision
+
+The system reconstructs the run at a selected pre-decision point, using saved messages and sandbox actions, then attempts to fork the sandbox (or replay when forking is unavailable).
+
+```mermaid
+flowchart TD
+    P["Saved execution prefix"] --> F["Reconstructed decision point"]
+    F --> C["CONTROL<br/>Continue unchanged"]
+    F --> I["FORCED<br/>Apply corrective step"]
+    F --> L["PLACEBO<br/>Run harmless extra command"]
+    F --> S["SHOW<br/>Explain issue, let agent decide"]
+    C --> E["Evaluate all scored branches"]
+    I --> E
+    L --> E
+    S --> E
+    E --> V["Compare inflation rates and issue qualified verdict"]
+```
+
+The `show` arm exists only where a corresponding informational intervention is defined. The `placebo` arm helps distinguish the effect of a corrective action from the effect of inserting another tool interaction. These comparisons reduce confounding but do not make nondeterministic agent continuation perfectly controlled.
+
+### Stage 6 — Evaluate the intervention
+
+The original implementation counts how many scored copies remain inflated in each arm. `deep_research/evidence.py` requires **at least eight scored control/forced pairs** and a **one-sided Fisher exact p-value below 0.05** before labeling the result `supported`; otherwise it is `open`. The verdict-writing logic prevents unsupported causal wording.
+
+This is a practical evidence gate, **not a universal causal guarantee**. In particular, the Fisher test treats arm counts as a 2×2 table rather than explicitly modeling the matched-pair structure, and any hidden differences introduced during reconstruction or agent continuation remain potential limitations.
+
+### Stage 7 — Record and replay the investigation
+
+Each batch produces a case file that powers the UI. The interface supports a wall of live agent notebooks, step comparisons, fork branches, verdicts, and saved replay timelines with play/pause, scrubbing, and speed controls. A FastAPI server exposes the batch state and pushes updates over WebSockets.
+
+## Scientific experiments
+
+### Experiment A — Duplicate-record leakage
+
+**Failure mode:** copied examples are allowed into both training and test sets.
+
+**Candidate correction:** remove duplicates before the train/test split.
+
+**Measured evidence:** the share of test rows that also appear in training, alongside the reported/true accuracy gap.
+
+### Experiment B — Target-derived feature leakage
+
+**Failure mode:** a `followup_score` feature derived from the target makes validation look excellent but carries no useful information in the holdout.
+
+**Candidate correction:** exclude the leaky feature.
+
+**Measured evidence:** the collapse in hidden-holdout performance when the feature stops conveying target information.
+
+### Experiment C — Repeated-subject leakage
+
+**Failure mode:** multiple visits from the same subject are split across training and testing as if they were independent people.
+
+**Candidate correction:** split by subject or reduce to one visit per subject.
+
+**Measured evidence:** overlap of subject IDs between training and test data.
+
+### Calibration results
+
+The following figures come from the repository's **five-seed scripted random-forest calibration**, not from independent live AI-agent runs.
+
+| Planted flaw | Naive reported | Naive hidden truth | Inflation | Corrected reported | Corrected hidden truth |
+|---|---:|---:|---:|---:|---:|
+| Duplicate rows | 89.1% | 75.2% | +13.9 pp | 75.8% | 75.6% |
+| Target-derived column | 94.3% | 56.5% | +37.8 pp | 75.9% | 74.5% |
+| Repeated subjects | 93.2% | 75.5% | +17.7 pp | 78.2% | 76.4% |
+
+These controlled calibrations establish that the planted traps can produce measurable inflation under the tested model and settings. They do **not** establish the detection accuracy of the live investigator.
+
+## Robotics domain — testing generalization beyond one successful demonstration
+
+In the `robot_arm` domain, an analyst writes `controller.py` for a **Franka Panda pick-and-place task in MuJoCo**. A controller may work at the practice can position yet fail when the can is moved elsewhere on the table.
+
+```mermaid
+flowchart TD
+    A["Agent writes controller.py"] --> B["Practice-position simulation"]
+    B --> C["Agent reports success rate"]
+    C --> D["Server evaluates hidden can positions"]
+    D --> E{"Reported success matches generalization?"}
+    E -- "No" --> F["Identify insufficient testing / failure"]
+    F --> G["Replay motion and trace symptoms"]
+    G --> H["Propose code-level patch"]
+    H --> I["Control vs fixed fork experiment"]
+    I --> J["Compare true success rates"]
+    E -- "Yes" --> K["Record honest outcome"]
+```
+
+### From the demo replay
+
+These screenshots are from `fixtures/robot-demo-batch`, a simulated replay.
+
+6 of the 12 agents claimed 99% on average. Measured at 20 positions they never tested, their controllers succeeded 59% of the time.
+
+![The run wall: each agent's claimed and measured success rate](docs/images/runs.png)
+
+Run r02 claimed 100% from the practice spot. At the hidden positions it placed the can 11 times out of 20.
+
+![One run's hidden test: the practice spot, and where the can was placed or dropped](docs/images/hidden-test.png)
+
+Every honest run tried the can at other positions before writing its report. No inflated run did.
+
+![The step where honest and inflated runs differ](docs/images/what-changed.png)
+
+Forking run r02 just before its report: only the copies forced to test 10 other positions became honest.
+
+![The four arms of the fork experiment](docs/images/fork.png)
+
+With 4 pairs, the verdict stays open: `supported` needs 8.
+
+![The verdict](docs/images/verdict.png)
+
+The implementation includes motion recordings for scored hidden episodes, symptom extraction, code tracing, and an optional second experiment to test a proposed controller patch. These are **implemented paths**, but a complete live robotics diagnosis-and-fix demonstration should be verified before being claimed as a measured result.
+
+## Architecture and responsibilities
+
+```mermaid
+flowchart LR
+    UI["Vite / TypeScript UI"] <-->|"HTTP + WebSocket"| API["FastAPI"]
+    API --> B["Python batch orchestrator"]
+    B --> AG["Analyst Deep Agents"]
+    B --> INV["Investigator Deep Agent"]
+    AG --> VM["Daytona sandboxes"]
+    B --> SC["Domain scorer"]
+    B --> CF["Case file"]
+    INV --> CF
+    INV --> B
+    CF --> API
+    B --> HUB["Cloudflare Worker / D1 team hub"]
+    VM --> ART["Code, charts, motion, logs"]
+    ART --> B
+```
+
+| Layer | Responsibility | Source |
+|---|---|---|
+| Batch orchestration | Run lifecycle, sandbox scheduling, experiments, scoring, costs | `deep_research/batch.py` |
+| Analyst | Independent Deep Agent executing the research task | `deep_research/agents/analyst.py` |
+| Investigator | Step tagging, hypothesis, fork approval, verdict, optional code tracing | `deep_research/agents/investigator.py` |
+| Domain adapters | Task construction, labels, interventions, visual mode, scoring | `deep_research/domains/` |
+| Data traps | Planted flaws and their correction/evidence definitions | `deep_research/traps/` |
+| Action analysis | Label execution actions and locate a divergence | `deep_research/analysis.py` |
+| Fork construction | Cut/replay history and apply interventions | `deep_research/forks.py` |
+| Statistical evidence | Fisher exact calculation and verdict wording gate | `deep_research/evidence.py` |
+| Sandbox integration | Create, replay, fork, stop, and collect outputs | `deep_research/sandboxes.py` |
+| Case file | Structured record and controlled investigator-facing view | `deep_research/case_file.py` |
+| API / UI | HTTP, WebSocket, live visualizations and replay | `deep_research/api.py`, `web/` |
+| Team hub | Cross-machine batches, events, cost data, runner credentials | `hub/`, `deep_research/hub.py` |
+
+### Trust boundaries
+
+- **Analysts** have isolated workspaces and cannot access holdout labels or other agents' case files.
+- **The server-side scorer** owns hidden evaluation truth.
+- **The investigator** receives a filtered case view and read-only run data; writes to the case file are restricted to validated tools.
+- **Human approval** is required before the investigator's paid fork and fix experiments.
+- **Simulated fixtures** are marked as simulated in their case file and in the app.
+- **Team hub credentials** are sensitive: anyone with the shared hub token may access team data and runner keys. Do not publish tokens or commit `.env`.
+
+## How to read the live interface
+
+The interface is designed around the research narrative:
+
+1. **Configure:** choose the domain, dataset, trap, run count, models, and budget.
+2. **Observe:** watch separate agent notebooks execute and produce artifacts.
+3. **Compare:** inspect honest and inflated runs side by side.
+4. **Investigate:** see the candidate divergence and investigator hypothesis.
+5. **Approve:** authorize a costed fork experiment.
+6. **Experiment:** watch control, intervention, and optional placebo/show branches.
+7. **Conclude:** inspect branch outcomes and an evidence-qualified verdict.
+8. **Replay:** revisit a saved case on a timeline.
+
+## Current limitations and research questions
+
+1. **Investigator independence:** the current guided investigator is not fully blind to planted flaws. The master plan proposes stronger blinding and competing hypotheses.
+2. **Reconstruction fidelity:** replaying tool actions and messages is not guaranteed to reproduce the exact original runtime state or model behavior.
+3. **Scope of evaluation:** three tabular traps and one robotics challenge do not establish general coverage of all scientific-method errors.
+4. **Statistical design:** the evidence gate is useful but does not fully model paired outcomes or multiple tested hypotheses.
+5. **Generalization:** calibration on Pima and a random forest does not imply identical inflation on arbitrary datasets or model families.
+6. **End-to-end validation:** offline tests and fixtures do not substitute for measured real-agent, real-sandbox, real-fork demonstrations.
+7. **Cost and reliability:** agent runs and sandbox experiments consume paid resources; budget limits, cleanup, and error handling require operational attention.
+
+## Hackathon demo narrative (two minutes)
+
+| Time | What to show | What to say |
+|---|---|---|
+| 0:00–0:20 | A confident reported score | “An AI researcher can produce a clean, convincing result using the wrong methodology.” |
+| 0:20–0:40 | Parallel run wall and hidden evaluation | “We run independent agents and measure whether their claims survive a hidden test.” |
+| 0:40–1:05 | Honest/inflated comparison | “We identify the methodological step where the executions diverged.” |
+| 1:05–1:35 | Rewind/fork and branch results | “We change that step and measure what happens, with a control and placebo where supported.” |
+| 1:35–2:00 | Verdict and limitations | “Our goal is not an AI opinion about a mistake; it is an experimental test of an explanation.” |
+
+---
+
+# Technical reference
+
+Setup, commands, API, settings and calibration.
 
 ## How it fits together
 
@@ -99,6 +386,7 @@ uv run python scripts/batch_numbers.py <batch_id>                 # the numbers 
 times, and only on a batch whose budget is 3 dollars or less. `forks` and `investigate` reopen the saved batch with the
 spend it already recorded, so the budget covers the whole batch, not each command.
 
+```bash
 uv run python -m deep_research.cli vms               # how many VMs are running on the Daytona key
 uv run python -m deep_research.cli cleanup           # stop every running deep-research VM, from any machine
 ```
@@ -293,8 +581,11 @@ Verified here, without keys:
 - The API serves the demo batch, the websocket snapshot, health, JSON 404s and the web app, and never serves the holdout labels (`tests/test_api.py`)
 - The web client's types match the demo batch (`web/test/api.test.ts`)
 
-Not yet run, because it needs Anthropic and Daytona keys:
-- Real analyst runs in Daytona, the lab page through a signed preview URL, the fork experiment, and the investigator end to end. Signatures were checked against the installed SDKs, but behaviour was not. Run milestone 1 first.
+Run with real keys:
+- Real tabular and robot batches of 12 analyst runs in Daytona, and a fork experiment on a real tabular batch.
+
+Not yet run:
+- The investigator to a verdict on a real batch.
 
 ## Notes from calibrating the duplicates trap
 
@@ -338,12 +629,6 @@ Every arm starts from the same moment of the same run and differs only in what i
 
 `placebo` and `show` are on by default and each costs another `forks_per_choice` VMs; turn them off with
 `placebo_arm` and `show_arm`. `show` exists only for a step with a weaker version defined, so a step without one
-runs three arms. Only `deduplicate` has an intervention today: a batch that splits on any other step reports the
-finding and the fork experiment refuses with its reason. A fix experiment (`forks[*].kind == "fix"`, the one that
+runs three arms. Each trap's step and the robot's `vary_positions` have an intervention. A batch that splits on a step without one
+reports the finding, and the fork experiment refuses with its reason. A fix experiment (`forks[*].kind == "fix"`, the one that
 tests the investigator's proposed patch) has a `fixed` arm, the run with the patch applied, in place of `forced`.
-
-## Next
-
-1. Milestone 1 and 2 with real keys. Confirm a mix of honest and inflated runs; adjust `trap_strength`, `trap_noise` or `hint_level` if not.
-2. Frontend: built against `fixtures/demo-batch`. Still to check on a real batch: lab pages in the tile iframes, live websocket updates, and the fork approval round trip.
-3. One live fork wired to the approval button.
