@@ -50,6 +50,17 @@ describe("auth", () => {
     expect((await call("/v1/batches")).status).toBe(200);
   });
 
+  test("ping says the token works and what the hub holds", async () => {
+    expect((await call("/v1/ping", { token: "wrong" })).status).toBe(401);
+    expect(await (await call("/v1/ping")).json()).toEqual({ ok: true, batches: 0, machines: 0, last_update: null });
+    await call("/v1/batches/b1", { method: "PUT", json: { machine: "a", revision: 1, case: CASE } });
+    await call("/v1/batches/b2", { method: "PUT", json: { machine: "b", revision: 1, case: CASE } });
+    const after = await (await call("/v1/ping")).json() as { batches: number; machines: number; last_update: string };
+    expect(after.batches).toBe(2);
+    expect(after.machines).toBe(2);
+    expect(typeof after.last_update).toBe("string");
+  });
+
   test("hands the runner keys to a token holder", async () => {
     expect(await (await call("/v1/runner-env")).json()).toEqual({ ANTHROPIC_API_KEY: "sk-ant-test", DAYTONA_API_KEY: "dtn-test" });
   });

@@ -305,3 +305,61 @@ def test_push_all_uploads_a_saved_batch(fake, tmp_path):
     assert fake.batches["1114-024515-6bad"]["started_at"].startswith(f"{__import__('time').localtime().tm_year}-11-14T02:45:15")
     assert sorted(fake.events) == [("1114-024515-6bad", "f1/control-1"), ("1114-024515-6bad", "r01")]
     assert hub.started_from_id("demo-batch") is None
+
+
+# ---- status, for the badge ----
+
+
+def test_status_is_off_without_settings(monkeypatch):
+    monkeypatch.delenv("HUB_URL", raising=False)
+    assert hub.status() == {"state": "off"}
+
+
+def test_status_reports_connected_wrong_token_and_unreachable(fake):
+    def ping(req):
+        if req.url.path == "/v1/ping" and req.headers.get("authorization") == "Bearer t0k":
+            return httpx.Response(200, json={"ok": True, "batches": 4, "machines": 2, "last_update": "2026-11-14T10:00:00Z"})
+        return fake(req)
+
+    def client(handler):
+        cfg = hub.config()
+        return httpx.Client(base_url=cfg.url, headers=cfg.headers, transport=httpx.MockTransport(handler))
+
+    ok = hub.status(client(ping))
+    assert ok["state"] == "connected" and ok["batches"] == 4 and ok["machines"] == 2 and ok["machine"] == "laptop-a"
+    assert "t0k" not in json.dumps(ok)
+    fake.token = "something-else"
+    bad = hub.status(client(fake))
+    assert bad["state"] == "wrong_token" and "token" in bad["error"]
+    fake.down = True
+    assert hub.status(client(fake))["state"] == "unreachable"
+
+
+def test_the_pusher_remembers_its_last_success_and_what_waits(fake):
+    c = client_for(fake)
+    p = hub.Pusher(hub.config(), client=c)
+    p.push_event("b1", "r01", 0, {"t": 0})
+    assert p.queued() == 1 and p.last_ok_at is None
+    fake.down = True
+    p.flush(c)
+    assert p.queued() == 1 and p.last_error == "the hub could not be reached"
+    fake.down = False
+    p.flush(c)
+    assert p.queued() == 0 and p.last_ok_at is not None and p.last_error is None
+
+
+def test_health_carries_the_hub_status(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from deep_research import api
+
+    monkeypatch.setattr(api, "_hub_status", None)
+    with TestClient(api.app) as c:
+        assert c.get("/api/health").json()["hub"] == {"state": "off"}
+    monkeypatch.setenv("HUB_URL", "https://hub.test")
+    monkeypatch.setenv("HUB_TOKEN", "t0k")
+    monkeypatch.setattr(api.hub, "load_runner_env", lambda client=None: [])
+    monkeypatch.setattr(api.hub, "status", lambda client=None: {"state": "connected", "url": "https://hub.test", "machine": "m", "batches": 3})
+    with TestClient(api.app) as c:
+        h = c.get("/api/health").json()["hub"]
+    assert h["state"] == "connected" and h["batches"] == 3 and h["queued"] == 0

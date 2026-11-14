@@ -140,3 +140,7 @@
   .hm, .hm-skel, .hm-adv-grid { animation:none !important; }
   .hm-batch, .hm-input, .hm-seg-o span, .hm-adv-t, .hm-adv-t svg, .hm-go, .hm-cb-fill { transition:none !important; }
 }
+
+/* A teammate's batch, from the hub: whose machine ran it. */
+.hm-batch-from { display:block; margin-top:1px; font-family:var(--sans); font-size:10.5px; color:var(--fg-55); overflow:hidden; text-overflow:ellipsis; }
+.hm-batch:has(.hm-batch-from) { height:auto; min-height:40px; padding-top:5px; padding-bottom:5px; }

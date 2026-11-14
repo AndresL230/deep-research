@@ -157,6 +157,14 @@ class Pusher:
         self._revisions: dict[str, int] = {}
         self._thread: threading.Thread | None = None
         self.failures = 0
+        # For the status badge: when a push last went through, and the last error since then.
+        self.last_ok_at: float | None = None
+        self.last_error: str | None = None
+
+    def queued(self) -> int:
+        """Case files and events waiting to be sent."""
+        with self._lock:
+            return len(self._pending.cases) + sum(len(v) for v in self._pending.events.values())
 
     # The revision only has to grow per batch, also across restarts of this server: milliseconds since 1970 do.
     def _revision(self, batch_id: str) -> int:
@@ -226,9 +234,11 @@ class Pusher:
                 log.warning("the hub refused %s %s: %s", method, path, res.text[:200])
                 return True
             res.raise_for_status()
+            self.last_ok_at, self.last_error = time.time(), None
             return True
         except Exception as e:  # noqa: BLE001
             self.failures += 1
+            self.last_error = _describe(e)
             if self.failures in (1, 10) or self.failures % 100 == 0:
                 log.warning("hub push %s %s failed (%d so far): %s", method, path, self.failures, e)
             return False
@@ -239,6 +249,47 @@ class Pusher:
         self._wake.set()
         if self._thread is not None:
             self._thread.join(timeout)
+
+
+def _describe(e: Exception) -> str:
+    """An error in a few words, for the badge's tooltip. Never includes the token."""
+    if isinstance(e, httpx.HTTPStatusError):
+        code = e.response.status_code
+        if code == 401:
+            return "the hub refused the token (HUB_TOKEN is wrong)"
+        if code == 503:
+            return "the hub has no team token set yet"
+        return f"the hub answered HTTP {code}"
+    if isinstance(e, httpx.TimeoutException):
+        return "the hub did not answer in time"
+    if isinstance(e, httpx.TransportError):
+        return "the hub could not be reached"
+    return type(e).__name__
+
+
+def status(client: httpx.Client | None = None) -> dict[str, Any]:
+    """Whether this server is connected to the hub, for the badge in the UI and /api/health.
+
+    `state` is one of: off (not set up), connected, wrong_token, unreachable. Never includes the token.
+    """
+    cfg = config()
+    if cfg is None:
+        return {"state": "off"}
+    out: dict[str, Any] = {"url": cfg.url, "machine": cfg.machine}
+    try:
+        c = client or _client(cfg, READ_TIMEOUT)
+        res = c.get("/v1/ping")
+        res.raise_for_status()
+        body = res.json()
+        out.update(state="connected", batches=body.get("batches"), machines=body.get("machines"), last_update=body.get("last_update"))
+    except httpx.HTTPStatusError as e:
+        out.update(state="wrong_token" if e.response.status_code == 401 else "unreachable", error=_describe(e))
+    except Exception as e:  # noqa: BLE001
+        out.update(state="unreachable", error=_describe(e))
+    p = _pusher if _pusher is not None and _pusher.cfg == cfg else None
+    if p is not None:
+        out.update(queued=p.queued(), last_push_at=p.last_ok_at, push_error=p.last_error)
+    return out
 
 
 _pusher: Pusher | None = None

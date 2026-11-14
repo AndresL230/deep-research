@@ -22,10 +22,11 @@ import { scheduleOrbs } from "./thinking-orb";
 import {
   applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
   fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, uploadDataset, uploadScript, startInvestigation, stopBatch,
-  type AgentEvent, type BatchConfig, type BatchSocket, type CaseFile,
+  type AgentEvent, type HubStatus, type BatchConfig, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
 import { costBar, homeView } from "./batch/home";
+import { hubBadge } from "./batch/hub-badge";
 import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { wallView } from "./batch/wall";
 import { forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
@@ -72,6 +73,8 @@ interface AppState {
   costs: Loadable<CostReport>;
   /** Where the cost screen was opened from, for its back button. */
   costsBack: Route;
+  /** This server's link to the team hub, for the header badge (refreshed every half minute). */
+  hub: HubStatus | null;
 }
 
 const S: AppState = {
@@ -85,6 +88,7 @@ const S: AppState = {
   runView: "notebook",
   costs: { state: "loading" },
   costsBack: { name: "home" },
+  hub: null,
 };
 
 const DEFAULT_SPEED = 4;
@@ -201,7 +205,7 @@ function headerView(vm: BatchVm | null): string {
     ${crumbs.map((c) => `<span class="ask-crumb-sep">›</span>${c}`).join("")}
   </div>`;
   const bar = vm ? costBar(vm.case.costs ?? {}, { simulated: !!(vm.case.config as BatchConfig).simulated }) : "";
-  const right = `<div class="pg-hdr-r">${bar}${costsLink(r.name === "costs")}</div>`;
+  const right = `<div class="pg-hdr-r">${bar}${hubBadge(S.hub)}${costsLink(r.name === "costs")}</div>`;
   return left + right;
 }
 
@@ -770,5 +774,18 @@ scrollEl.addEventListener("scroll", () => {
 setInterval(() => { if (S.batch?.live && S.route.name !== "home") paint(); }, 150);
 // The cost screen follows a batch that is still running.
 setInterval(() => { if (S.route.name === "costs" && S.costs.state === "ready" && S.costs.value.batches.some((b) => b.kind === "live")) void loadCosts(); }, 5000);
+
+// The hub badge: whether this server reaches the team hub and its batches get there. Checked now and every 30s.
+async function refreshHub(): Promise<void> {
+  try {
+    const h = await fetchHealth();
+    S.hub = h.hub ?? { state: "off" };
+  } catch {
+    S.hub = { state: "unreachable", error: "this server did not answer" };
+  }
+  paint();
+}
+void refreshHub();
+setInterval(() => { void refreshHub(); }, 30_000);
 
 onRoute();

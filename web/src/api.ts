@@ -299,7 +299,14 @@ export function batchSocketUrl(batchId: string, loc: Pick<Location, "protocol" |
 // ── REST ─────────────────────────────────────────────────────────────────────
 
 /** `resumable`: a saved batch with scored runs, a split and no verdict yet, that `resumeBatch` can pick up again. */
-export interface BatchListItem { id: string; kind: "live" | "replay"; resumable?: boolean }
+export interface BatchListItem {
+  id: string;
+  kind: "live" | "replay";
+  resumable?: boolean;
+  /** Run on another machine and read from the team hub; `machine` says which. */
+  remote?: boolean;
+  machine?: string | null;
+}
 
 export interface DatasetColumn {
   name: string;
@@ -334,7 +341,21 @@ export interface ScriptInfo {
 }
 /** The server refuses larger scripts (user_scripts.py MAX_UPLOAD_BYTES). */
 export const MAX_SCRIPT_BYTES = 200 * 1024;
-export interface Health { ok: boolean; keys: { anthropic: boolean; daytona: boolean } }
+/** This server's link to the team hub (deep_research/hub.py `status`). Never carries the token. */
+export interface HubStatus {
+  state: "off" | "connected" | "wrong_token" | "unreachable";
+  url?: string;
+  machine?: string;
+  batches?: number | null;
+  machines?: number | null;
+  last_update?: string | null;
+  error?: string;
+  /** Updates waiting to be sent, when the last push, and its error since then. */
+  queued?: number;
+  last_push_at?: number | null;
+  push_error?: string | null;
+}
+export interface Health { ok: boolean; keys: { anthropic: boolean; daytona: boolean }; hub?: HubStatus }
 export interface Defaults {
   config: BatchConfig;
   prices_missing: boolean;

@@ -73,7 +73,7 @@ function batchesSection(b: Loadable<BatchListItem[]>): string {
       const kind = it.kind === "live" ? "live" : it.resumable ? "ready" : "replay";
       const word = kind === "live" ? "Live" : kind === "ready" ? "Ready to investigate" : "Replay";
       return `<button type="button" class="hm-batch" data-morph-key="${attr(it.id)}" data-act="${ACT.openBatch}" data-arg="${attr(it.id)}" title="${attr(it.id)}">
-        <span class="hm-batch-id">${esc(it.id)}</span>
+        <span class="hm-batch-id">${esc(it.id)}${it.remote && it.machine ? `<span class="hm-batch-from">${esc(it.machine)}</span>` : ""}</span>
         <span class="hm-kind" data-kind="${kind}">${word}</span>
       </button>`;
     }).join("");

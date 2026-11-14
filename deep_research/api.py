@@ -212,7 +212,29 @@ def _save_stats(b: Batch) -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "keys": key_status()}
+    # The hub check is a network call: shared for a few seconds, like the other hub reads.
+    hub_status = _hub_cached_status()
+    return {"ok": True, "keys": key_status(), "hub": hub_status}
+
+
+HUB_STATUS_SECONDS = 15.0
+_hub_status: tuple[float, dict] | None = None
+
+
+def _hub_cached_status() -> dict:
+    global _hub_status
+    if not hub.enabled():
+        return {"state": "off"}
+    if _hub_status and time.monotonic() - _hub_status[0] < HUB_STATUS_SECONDS:
+        cached = dict(_hub_status[1])
+    else:
+        cached = hub.status()
+        _hub_status = (time.monotonic(), cached)
+    # What is queued changes every second: always fresh.
+    p = hub.pusher()
+    if p is not None:
+        cached.update(queued=p.queued(), last_push_at=p.last_ok_at, push_error=p.last_error)
+    return cached
 
 
 @app.get("/api/defaults")

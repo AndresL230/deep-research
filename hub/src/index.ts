@@ -6,6 +6,7 @@
 // the runner keys, so it is as private as the keys themselves.
 //
 //   GET    /health                          no auth; whether the hub is set up
+//   GET    /v1/ping                         the token works: how many batches and machines the hub holds
 //   GET    /v1/runner-env                   the runner keys stored as secrets on this Worker
 //   GET    /v1/batches                      every batch, newest first, without the case file
 //   GET    /v1/cases                        every batch with its case file (for the cost report)
@@ -205,6 +206,13 @@ async function getEvents(env: HubEnv, id: string, url: URL): Promise<Response> {
   return json(results.map((r) => JSON.parse(r.event)));
 }
 
+/** For a server's status badge: the token works, and what the hub holds. One small read. */
+async function ping(env: HubEnv): Promise<Response> {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS batches, COUNT(DISTINCT machine) AS machines, MAX(updated_at) AS last_update FROM batches")
+    .first<{ batches: number; machines: number; last_update: string | null }>();
+  return json({ ok: true, batches: row?.batches ?? 0, machines: row?.machines ?? 0, last_update: row?.last_update ?? null });
+}
+
 function runnerEnv(env: HubEnv): Response {
   const out: Record<string, string> = {};
   for (const k of RUNNER_KEYS) if (env[k]) out[k] = env[k] as string;
@@ -225,6 +233,7 @@ async function route(request: Request, env: HubEnv): Promise<Response> {
   if (!env.TEAM_TOKEN) throw new HttpError(503, "the hub has no TEAM_TOKEN yet: run `wrangler secret put TEAM_TOKEN`");
   if (!(await authorized(request, env))) throw new HttpError(401, "missing or wrong team token");
 
+  if (parts.length === 2 && parts[1] === "ping" && method === "GET") return ping(env);
   if (parts.length === 2 && parts[1] === "runner-env" && method === "GET") return runnerEnv(env);
   if (parts.length === 2 && parts[1] === "cases" && method === "GET") return listBatches(env, true);
   if (parts[1] !== "batches") throw new HttpError(404, "not found");
