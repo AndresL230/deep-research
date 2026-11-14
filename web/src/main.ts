@@ -23,12 +23,13 @@ import {
   fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, startBatch, startInvestigation, stopBatch,
   type AgentEvent, type BatchConfig, type BatchSocket, type CaseFile,
 } from "./api";
-import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type HomeVm, type ReplayState, type Route } from "./batch/model";
+import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
 import { costBar, homeView } from "./batch/home";
 import { wallView } from "./batch/wall";
 import { forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { eventsToConvo, runSummaryView, taskText } from "./batch/run";
-import { caseAt, eventsAt, replayBar, replayDuration } from "./batch/replay";
+import { agentTimes, caseAt, eventsAt, replayBar, replayDuration, replaySchedule } from "./batch/replay";
+import { LABEL_PATTERNS, chartUrl, logOf, notebookCells, notebookView } from "./batch/notebook";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,8 @@ interface BatchState {
   full: CaseFile | null;
   live: boolean;
   events: Record<EventKey, AgentEvent[]>;
+  /** Live only: per log, the last event's time and when it arrived, to run that log's clock between events. */
+  ticks: Record<EventKey, { t: number; at: number }>;
   replay: ReplayState | null;
   busy: string | null;
   error: string | null;
@@ -53,6 +56,8 @@ interface AppState {
   /** The conversation view's UI state (open steps, sticking to the bottom); reset per run. */
   cv: ConversationUi;
   cvKey: string;
+  /** A run's page: its notebook, or the same log as conversation steps. */
+  runView: "notebook" | "steps";
 }
 
 const S: AppState = {
@@ -62,6 +67,7 @@ const S: AppState = {
   batch: null,
   cv: initialConversationUi(),
   cvKey: "",
+  runView: "notebook",
 };
 
 const DEFAULT_SPEED = 4;
@@ -87,13 +93,53 @@ themeQ.addEventListener("change", () => { root.dataset.cnpyTheme = theme(); sche
 
 // ── view models ──────────────────────────────────────────────────────────────
 
+const timesCache = new WeakMap<AgentEvent[], number[]>();
+function ownTimes(events: AgentEvent[]): number[] {
+  let t = timesCache.get(events);
+  if (!t) { t = agentTimes(events); timesCache.set(events, t); }
+  return t;
+}
+
+const SCORED = ["honest", "inflated", "failed"];
+
+/** Each log with its own clock, for the notebooks: a replay's from the timeline, a live batch's from the wall clock. */
+function logViews(b: BatchState, full: CaseFile, c: CaseFile): Record<EventKey, LogView> {
+  const out: Record<EventKey, LogView> = {};
+  const r = b.replay;
+  if (r) {
+    const sched = replaySchedule(full, b.events);
+    const starts: Record<EventKey, number> = {};
+    for (const f of sched.forks) for (const [cid, slot] of Object.entries(f.children)) starts[childKey(f.id, cid)] = slot.start;
+    for (const [key, events] of Object.entries(b.events)) {
+      if (key === "investigator") continue;
+      // Runs start with the timeline; a fork child starts when its VM does.
+      const clock = r.t >= r.duration ? Infinity : r.t - (starts[key] ?? 0);
+      out[key] = { events, times: ownTimes(events), clock, lookahead: true };
+    }
+    return out;
+  }
+  const now = Date.now();
+  for (const [key, events] of Object.entries(b.events)) {
+    if (key === "investigator") continue;
+    const slash = key.indexOf("/");
+    const f = slash < 0 ? null : c.forks[key.slice(0, slash)];
+    const status = slash < 0 ? c.runs[key]?.status : f && !isPendingForks(f) ? f.children?.[key.slice(slash + 1)]?.status : undefined;
+    const tick = b.ticks[key];
+    const over = !b.live || status == null || SCORED.includes(status) || !tick;
+    out[key] = { events, times: ownTimes(events), clock: over ? Infinity : tick.t + (now - tick.at) / 1000, lookahead: false };
+  }
+  return out;
+}
+
 function batchVm(b: BatchState, full: CaseFile): BatchVm {
   const r = b.replay;
+  const c = r ? caseAt(full, b.events, r.t) : full;
   return {
     id: b.id,
     live: b.live,
-    case: r ? caseAt(full, b.events, r.t) : full,
+    case: c,
     events: r ? eventsAt(full, b.events, r.t) : b.events,
+    logs: logViews(b, full, c),
     replay: r,
     busy: b.busy,
     error: b.error,
@@ -156,8 +202,19 @@ function batchBody(vm: BatchVm): string {
 
 function runBody(vm: BatchVm, key: EventKey): string {
   const events = vm.events[key];
-  const summary = `<div class="pg-runsum" data-morph-key="sum:${attr(key)}">${runSummaryView(vm, key)}</div>`;
+  const tab = (view: AppState["runView"], label: string): string =>
+    `<button type="button" class="pg-tab" data-act="${ACT.runView}" data-arg="${view}" aria-pressed="${S.runView === view}">${label}</button>`;
+  const summary = `<div class="pg-runsum" data-morph-key="sum:${attr(key)}">${runSummaryView(vm, key)}<div class="pg-tabs" role="group" aria-label="View">${tab("notebook", "Notebook")}${tab("steps", "Steps")}</div></div>`;
   if (!events) return `${summary}<p class="pg-note" data-morph-key="loading">Loading the event log…</p>`;
+  if (S.runView === "notebook") {
+    const log = logOf(vm, key);
+    const cells = log ? notebookCells(log) : [];
+    const label = vm.case.split?.label;
+    const body = cells.length
+      ? notebookView(cells, { image: (name) => chartUrl(vm, key, name), mark: label ? LABEL_PATTERNS[label] ?? null : null })
+      : `<p class="pg-note">Nothing has run yet.</p>`;
+    return `${summary}<div class="pg-nb" data-morph-key="nb:${attr(key)}">${body}</div>`;
+  }
   const convo = eventsToConvo(key, events, { task: taskText(vm), finished: finished(vm.case, S.route), now: Date.now() });
   const v = { convo, ui: S.cv };
   return `${summary}${conversationView(v)}${jumpButton(v)}`;
@@ -254,7 +311,7 @@ function closeBatch(): void {
 function openBatch(id: string): void {
   if (S.batch?.id === id) return;
   closeBatch();
-  const b: BatchState = { id, full: null, live: false, events: {}, replay: null, busy: null, error: null, loadError: null, socket: null };
+  const b: BatchState = { id, full: null, live: false, events: {}, ticks: {}, replay: null, busy: null, error: null, loadError: null, socket: null };
   S.batch = b;
   let snapshotSeen = false;
   b.socket = openBatchSocket(id, {
@@ -270,6 +327,7 @@ function openBatch(id: string): void {
         return;
       }
       b.full = applyMessage(b.full, m);
+      if (m.kind === "case" && (m.section === "runs" || m.section === "forks")) void loadLiveLogs(b);
       if (m.kind === "event") append(b, m.run, m.event);
       else if (m.kind === "fork_event") append(b, childKey(m.fork, m.child), m.event);
       else if (m.kind === "investigator") append(b, "investigator", m.event);
@@ -287,8 +345,15 @@ function openBatch(id: string): void {
 }
 
 function append(b: BatchState, key: EventKey, ev: AgentEvent): void {
-  // Only logs already loaded grow; the rest load in full when opened.
-  if (b.events[key]) b.events[key] = [...b.events[key], ev];
+  b.events[key] = [...(b.events[key] ?? []), ev];
+  b.ticks[key] = { t: ev.t, at: Date.now() };
+}
+
+/** Where a replay starts playing: just before the first agent acts, skipping the wait for the VMs to start. */
+function replayStart(b: BatchState): number {
+  if (!b.full) return 0;
+  const firsts = Object.values(replaySchedule(b.full, b.events).runs).map((r) => r.first).filter((x) => Number.isFinite(x));
+  return firsts.length ? Math.max(0, Math.min(...firsts) - 3) : 0;
 }
 
 /** Every log a saved batch has: each run, each fork child, and the investigator. */
@@ -319,7 +384,7 @@ async function loadReplay(b: BatchState, full: CaseFile): Promise<void> {
     const duration = replayDuration(full, b.events);
     // Opened straight onto a run: show it whole. Opened onto the batch: play it from the start.
     const atEnd = S.route.name !== "batch" || params.has("end");
-    b.replay = { t: atEnd ? duration : 0, duration, playing: !atEnd && duration > 0, speed: DEFAULT_SPEED };
+    b.replay = { t: atEnd ? duration : replayStart(b), duration, playing: !atEnd && duration > 0, speed: DEFAULT_SPEED };
     if (b.replay.playing) runClock();
   } catch (e) {
     b.loadError = message(e, "Couldn't load the batch.");
@@ -327,11 +392,27 @@ async function loadReplay(b: BatchState, full: CaseFile): Promise<void> {
   paint();
 }
 
-/** A live batch: load the investigator's log, and the log of the run or child on screen. */
+const eventId = (e: AgentEvent): string => `${e.t}|${e.type}|${"id" in e ? e.id ?? "" : ""}`;
+const loadedLogs = new WeakMap<BatchState, Set<EventKey>>();
+
+/** A live batch: load what every log already holds (the tiles are notebooks), then the websocket appends to it. */
 async function loadLiveLogs(b: BatchState): Promise<void> {
-  const keys = ["investigator", ...(routeKey(S.route) ? [routeKey(S.route)!] : [])].filter((k) => !b.events[k]);
+  if (!b.full) return;
+  const done = loadedLogs.get(b) ?? new Set<EventKey>();
+  loadedLogs.set(b, done);
+  const keys = logKeys(b.full).filter((k) => !done.has(k));
+  for (const k of keys) done.add(k);
   await Promise.all(keys.map(async (k) => {
-    try { const evs = await fetchLog(b.id, k); if (S.batch === b && !b.events[k]) b.events[k] = evs; } catch { /* shown as loading */ }
+    try {
+      const saved = await fetchLog(b.id, k);
+      if (S.batch !== b) return;
+      // Events that arrived over the websocket while this loaded come after what the server had saved.
+      const have = new Set(saved.map(eventId));
+      const merged = [...saved, ...(b.events[k] ?? []).filter((e) => !have.has(eventId(e)))];
+      b.events[k] = merged;
+      const last = merged.at(-1);
+      if (last && !b.ticks[k]) b.ticks[k] = { t: last.t, at: Date.now() };
+    } catch { done.delete(k); /* tried again on the next case update */ }
   }));
   paint();
 }
@@ -467,6 +548,8 @@ root.addEventListener("click", (e) => {
     case ACT.home: go({ name: "home" }); if (S.home.batches.state === "error") void loadHome(true); return;
     case ACT.openBatch: go({ name: "batch", id: arg }); return;
     case ACT.start: void start(); return;
+    case ACT.toggleAdvanced: S.home = { ...S.home, advanced: !S.home.advanced }; paint(); return;
+    case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
     case ACT.resetConfig:
       if (S.home.defaults) { S.home = { ...S.home, draft: { ...S.home.defaults.config }, error: null }; paint(); scheduleEstimate(); }
       return;
@@ -484,14 +567,14 @@ root.addEventListener("click", (e) => {
     case ACT.replayToggle: {
       const rp = b?.replay;
       if (!rp) return;
-      if (rp.t >= rp.duration) rp.t = 0;
+      if (rp.t >= rp.duration && b) rp.t = replayStart(b);
       rp.playing = !rp.playing;
       if (rp.playing) runClock(); else stopClock();
       paint();
       return;
     }
     case ACT.replaySpeed: { const rp = b?.replay; const n = Number(arg); if (rp && n > 0) { rp.speed = n; paint(); } return; }
-    case ACT.replayRestart: { const rp = b?.replay; if (rp) { rp.t = 0; rp.playing = true; runClock(); paint(); } return; }
+    case ACT.replayRestart: { const rp = b?.replay; if (rp && b) { rp.t = replayStart(b); rp.playing = true; runClock(); paint(); } return; }
     case ACT.replayEnd: { const rp = b?.replay; if (rp) { rp.t = rp.duration; rp.playing = false; stopClock(); paint(); } return; }
     case ACT.toggle: {
       const was = el.getAttribute("aria-expanded") === "true";
@@ -544,7 +627,7 @@ scrollEl.addEventListener("scroll", () => {
   if (S.cv.away !== away) { S.cv.away = away; paint(); }
 }, { passive: true });
 
-// A live batch's "running for 42s" labels move without server messages.
-setInterval(() => { if (S.batch?.live && S.route.name !== "home") paint(); }, 1000);
+// A live batch's notebooks type between server messages.
+setInterval(() => { if (S.batch?.live && S.route.name !== "home") paint(); }, 150);
 
 onRoute();

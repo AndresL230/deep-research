@@ -23,6 +23,13 @@ button.pg-crumb.is-cur:hover { background:none; cursor:default; }
 .pg-runsum { width:100%; max-width:960px; margin:0 auto; padding:16px 28px 0; box-sizing:border-box; }
 .pg-scroll[data-view="run"] .ask-col, .pg-scroll[data-view="child"] .ask-col { max-width:960px; }
 
+.pg-tabs { display:inline-flex; gap:2px; margin-top:12px; padding:2px; border:1px solid var(--border); border-radius:8px; }
+.pg-tab { padding:3px 10px; border-radius:6px; font-size:12px; font-weight:500; color:var(--fg-55); }
+.pg-tab:hover { color:var(--fg); }
+.pg-tab[aria-pressed="true"] { background:var(--hover); color:var(--fg); }
+.pg-nb { width:100%; max-width:960px; margin:0 auto; padding:18px 28px 64px; box-sizing:border-box; }
+@media (max-width: 640px) { .pg-nb { padding:14px 12px 48px; } }
+
 .pg-note { max-width:720px; margin:24px auto; padding:0 28px; color:var(--fg-55); font-size:13px; }
 .pg-msg { margin:auto; padding:40px 28px; max-width:520px; text-align:center; }
 .pg-msg h2 { margin:0 0 6px; font-size:20px; font-weight:600; letter-spacing:-0.02em; }
