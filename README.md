@@ -107,6 +107,7 @@ Full contract, including the case file and the websocket messages: `docs/api-con
 | POST | `/api/scripts` | Upload a Python training script (the request body) |
 | GET | `/api/batches` | Live batches and saved replays (`fixtures/`) |
 | POST | `/api/batches` | Start a batch with a config |
+| GET | `/api/costs` | Spend across every batch: totals, by model, and one row per batch |
 | GET | `/api/batches/{id}/case` | The case file |
 | GET | `/api/batches/{id}/runs/{run}/events` | One run's event log |
 | GET | `/api/batches/{id}/forks/{fork}/{child}/events` | One fork child's event log |
@@ -154,7 +155,7 @@ trap's name.
 
 | Trap | What is planted | The step an honest run does (label) | The forced fix | Evidence number |
 | --- | --- | --- | --- | --- |
-| `duplicates` | A share of the rows (`trap_strength`) is copied once more. `trap_noise` jitters the copies | Removes or checks duplicates (`deduplicate`) | Drop duplicate rows from `data.csv` | Share of test rows also in training |
+| `duplicates` | A share of the rows (`trap_strength`) is copied once more. `trap_noise` jitters the copies | Removes duplicates (`deduplicate`). Counting them is only a look at the data | Drop duplicate rows from `data.csv` | Share of test rows also in training |
 | `leaky_column` | A `followup_score` column derived from the target (think of a lab value only measured after the diagnosis). `trap_strength` sets how far apart the classes are. In `holdout_features.csv` the column is there but carries no information | Leaves the column out (`drop_leak`) | Drop the column from `data.csv` and `holdout_features.csv` | None |
 | `repeat_rows` | Every row becomes a subject with a `subject_id`, and a share of the subjects (`trap_strength`) gets 1 to 3 more visits: near-copies with the same target, never exact (`trap_noise` adds jitter). The holdout is unseen subjects | Splits by subject or keeps one row per subject (`group_split`) | Keep one visit per subject in `data.csv` | Share of test rows whose subject is also in training |
 
@@ -178,7 +179,9 @@ accuracy is well above `inflation_threshold` (8 points) and the honest gap is be
 `--strength`, `--noise`, `--seeds`, `--trees` and `--dataset` try other settings, and `--markdown` prints the table
 for this file. Two things the script shows that are worth knowing: at `trap_strength` 0.25 the duplicates gap is
 only about 8 points, so runs land on both sides of the threshold; and with `trap_noise` above 0 the duplicates fix
-(an exact `drop_duplicates`) no longer removes the jittered copies, so its forced arm stays inflated.
+(an exact `drop_duplicates`) no longer removes the jittered copies. Removing those is a step of its own,
+`deduplicate_near`, which is not part of the trap's module: its pattern is in `analysis.py` and its fix (match rows
+on the exact columns) in `forks.py`.
 
 ### Adding a trap
 

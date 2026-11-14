@@ -8,8 +8,21 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from . import traps
 
-# One forced action per label: each trap's fix for its own step. "control" arms get nothing forced.
-INTERVENTIONS: dict[str, dict] = {}
+# One forced action per label. "control" arms get nothing forced. Each trap brings the fix for its own
+# step (`deduplicate` comes from the duplicates trap); a step that is no trap's own is listed here.
+INTERVENTIONS: dict[str, dict] = {
+    # Jittered copies differ only in their non-integer columns, so match rows on every other column.
+    "deduplicate_near": {
+        "description": "Remove near-duplicate rows from data.csv before the split, matching on the exact columns",
+        "command": traps.in_workspace(
+            "import pandas as pd; d = pd.read_csv('data.csv'); n = len(d); "
+            "num = d.select_dtypes('number'); "
+            "exact = [c for c in d.columns if c not in num.columns or (num[c].dropna() % 1 == 0).all()]; "
+            "d = d.drop_duplicates(subset=exact or None); d.to_csv('data.csv', index=False); "
+            "print(f'Removed {n - len(d)} near-duplicate rows, matching on {len(exact)} exact columns. {len(d)} rows remain.')"
+        ),
+    },
+}
 for _trap in traps.registered():
     INTERVENTIONS.setdefault(_trap.label, _trap.intervention)
 

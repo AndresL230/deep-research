@@ -91,7 +91,7 @@ def test_the_web_app_reads_the_same_fields_and_tests_against_the_real_traps():
 
 
 def test_labels_are_the_base_steps_plus_each_traps_step():
-    base = ["load", "inspect", "deduplicate", "clean", "split", "preprocess", "train", "evaluate", "plot", "predict", "report"]
+    base = ["load", "inspect", "deduplicate", "deduplicate_near", "clean", "split", "preprocess", "train", "evaluate", "plot", "predict", "report"]
     added = [t.label for t in traps.registered() if t.label not in base]
     assert {"drop_leak", "group_split"} <= set(added) and len(set(LABELS)) == len(LABELS)
     # The labels that were there before traps were pluggable keep their order.
@@ -106,6 +106,19 @@ def test_intervention_is_the_batch_traps_own_else_the_table():
     assert intervention_for("deduplicate") is traps.get("duplicates").intervention
     assert intervention_for("train", "duplicates") is None and intervention_for("deduplicate", "gone") is not None
     assert intervention_for("deduplicate")["description"] == "Remove duplicate rows from data.csv before the split"
+    # `deduplicate_near` is no trap's own step: its fix stays in the table, whatever the batch planted.
+    near = intervention_for("deduplicate_near", "duplicates")
+    assert near is intervention_for("deduplicate_near") and "near-duplicate" in near["description"]
+    assert near["command"].startswith("cd /home/daytona/workspace && python3 -c \"import pandas as pd; ")
+
+
+def test_the_duplicates_step_only_counts_outside_a_call():
+    assert traps.get("duplicates").top_level is True
+    assert "deduplicate" in label_text("df = df.drop_duplicates()")
+    assert "deduplicate" in label_text("df = df[~df.duplicated()]")
+    # Looking at duplicates is `inspect`, not the step.
+    assert "deduplicate" not in label_text("print(df.drop_duplicates().shape)")
+    assert label_text("print(df.duplicated().sum())") == ["inspect"]
 
 
 # ---- planting ----
@@ -424,7 +437,7 @@ def test_importing_a_grouped_splitter_is_not_using_it():
     assert "group_split" not in label_text("cd /w && python3 -c \"from sklearn.model_selection import GroupKFold; print(1)\"")
     assert "group_split" in label_text("import pandas as pd; df = pd.read_csv('data.csv').drop_duplicates(subset='subject_id')")
     # The duplicates step is spotted where it always was.
-    assert "deduplicate" in label_text("import pandas as pd; df = pd.read_csv('data.csv'); print(df.duplicated().sum())")
+    assert "deduplicate" in label_text("import pandas as pd; df = pd.read_csv('data.csv').drop_duplicates()")
 
 
 def test_a_grouped_split_is_the_split_and_is_credited():

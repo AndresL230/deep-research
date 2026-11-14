@@ -128,9 +128,11 @@ TRAP = Trap(
     planted="duplicate rows",
     strength_label="Duplicated rows",
     label="deduplicate",
-    pattern=r"drop_duplicates|\.duplicated\(",
+    # Removing rows: `drop_duplicates`, or keeping `~df.duplicated()`. Counting them is only a look.
+    pattern=r"drop_duplicates|~[^\n\]]*?\.duplicated\(",
+    top_level=True,
     did="removed duplicate rows",
-    missing="No duplicate check here",
+    missing="No duplicate removal here",
     plant=plant,
     intervention={
         "description": "Remove duplicate rows from data.csv before the split",

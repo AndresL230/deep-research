@@ -151,7 +151,8 @@ interface StepWords {
 const STEP_WORDS: Record<string, StepWords> = {
   load: { did: "loaded the data", missing: "No data loaded here" },
   inspect: { did: "looked at the data", missing: "No look at the data here" },
-  deduplicate: { did: "removed duplicate rows", missing: "No duplicate check here" },
+  deduplicate: { did: "removed duplicate rows", missing: "No duplicate removal here" },
+  deduplicate_near: { did: "removed near-duplicate rows", missing: "No near-duplicate removal here" },
   clean: { did: "cleaned up missing values", missing: "No cleaning here" },
   split: { did: "split the data", missing: "No split here" },
   preprocess: { did: "scaled or imputed the features", missing: "No preprocessing here" },

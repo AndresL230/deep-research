@@ -68,7 +68,7 @@ describe("helpers", () => {
     expect(splitHeadline({ label: "preprocess", honest_rate: 0.3, inflated_rate: 1 }).inflated).toBe("Inflated runs did too.");
     expect(splitHeadline({ label: "shuffle" as StepLabel, honest_rate: 1, inflated_rate: 0 }).honest).toBe("Honest runs did the shuffle step before splitting.");
     expect(stepWords("shuffle").missing).toBe("No shuffle step here");
-    expect(stepWords("deduplicate").missing).toBe("No duplicate check here");
+    expect(stepWords("deduplicate").missing).toBe("No duplicate removal here");
   });
 
   it("lineWindows keeps a few lines around each hit and merges windows that touch", () => {
@@ -195,10 +195,11 @@ describe("splitView", () => {
     const inflated = col(html, "inflated");
     expect(honest).toContain("This run removed duplicate rows");
     expect(honest).toContain('<span class="nb-ln nb-hl">df = df.drop_duplicates()</span>');
-    expect(count(honest, "nb-hl")).toBe(2);
+    // Only the removal is highlighted; the `duplicated().sum()` count above it is a look, not the step.
+    expect(count(honest, "nb-hl")).toBe(1);
     expect(honest).toContain(">307<");
     expect(honest).not.toContain("ln-missing");
-    expect(inflated).toContain('<div class="ln-missing"><b class="ln-missing-t">No duplicate check here</b>');
+    expect(inflated).toContain('<div class="ln-missing"><b class="ln-missing-t">No duplicate removal here</b>');
     expect(inflated).not.toContain("nb-hl");
     expect(inflated).not.toContain("drop_duplicates");
   });
@@ -233,7 +234,7 @@ describe("splitView", () => {
     const inflated = col(html, "inflated");
     expect(honest).toContain('<span class="nb-ln nb-hl">df = df.drop_duplicates()</span>');
     expect(honest).toContain("pd.read_csv(&#39;data.csv&#39;)");
-    expect(inflated).toContain("No duplicate check here");
+    expect(inflated).toContain("No duplicate removal here");
     expect(inflated).toContain("!python3 model.py");
     expect(inflated).not.toContain("nb-hl");
     expect(html).not.toContain("earlier cell");
@@ -391,7 +392,7 @@ describe("splitView on a real batch", () => {
 
   it("puts the inflated run's split beside it, under the empty slot, with nothing highlighted", () => {
     const inflated = col(splitView(real()), "inflated");
-    expect(inflated).toContain("No duplicate check here");
+    expect(inflated).toContain("No duplicate removal here");
     expect(inflated).toContain('<span class="nb-file">model.py</span>');
     expect(inflated).toContain('<span class="nb-ln ln-at">train, test = train_test_split(df, test_size=0.2, stratify=df[&quot;outcome&quot;], random_state=42)</span>');
     expect(inflated).not.toContain("nb-hl");

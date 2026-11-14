@@ -17,9 +17,11 @@ from sklearn.model_selection import train_test_split
 from . import datasets, traps, user_scripts
 from .config import VM_LIVE_DIR, VM_WORKSPACE, BatchConfig
 from .datasets import PIMA_TARGET
+from .traps.duplicates import PIMA_NOISY, plant_duplicates  # noqa: F401 - still imported from here by the tests
 
-# Pima's target, kept for the fixture script and the tests. Other datasets carry theirs in `meta.json`.
+# Pima's names, kept for the fixture script and the tests. Other datasets carry theirs in `meta.json`.
 TARGET = PIMA_TARGET
+NOISY_COLUMNS = PIMA_NOISY
 
 # Files the agent must write, relative to its workspace.
 OUTPUT_FILES = ["report.json", "predictions.csv", "train.csv", "test.csv"]

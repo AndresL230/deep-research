@@ -71,6 +71,10 @@ class Trap:
     # The step can be part of the split itself, or come after it in the same script (a grouped split is
     # the split). It then counts whenever it is in the action that splits, not only before the split there.
     at_split: bool = False
+    # The pattern only counts outside any call on its line: `df = df.drop_duplicates()` removes rows,
+    # `print(df.drop_duplicates().shape)` only looks at them. The web app's highlight does not make
+    # this difference.
+    top_level: bool = False
 
     def public(self) -> dict:
         """Everything but the callables, as JSON, for the API and the case file."""

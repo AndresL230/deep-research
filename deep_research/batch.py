@@ -152,7 +152,7 @@ class Batch:
             (rdir / "messages.json").write_text(json.dumps(messages_to_dict(msgs)))
             await asyncio.to_thread(vms.download_outputs, sb, rdir / "outputs")
             charts = await asyncio.to_thread(vms.download_charts, sb, rdir / "live")
-            self._finish_run(run_id, rdir, log)
+            await self._finish_run(run_id, rdir, log)
             if charts:
                 self.case.update_run(run_id, charts=[f"runs/{run_id}/live/{name}" for name in charts])
         except Exception as e:  # noqa: BLE001 - one bad run must not sink the batch
@@ -174,10 +174,14 @@ class Batch:
             self.push_costs(force=True)
         return sb is not None
 
-    def _finish_run(self, run_id: str, rdir: Path, log: EventLog) -> None:
-        score = score_run(rdir / "outputs", self.task, self.cfg.inflation_threshold)
+    async def _finish_run(self, run_id: str, rdir: Path, log: EventLog) -> None:
+        # Scoring reads whole CSVs, which takes seconds on a large upload. Off the event loop, the other runs and
+        # the websocket pushes carry on meanwhile.
+        score = await asyncio.to_thread(score_run, rdir / "outputs", self.task, self.cfg.inflation_threshold)
         (rdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
-        actions = actions_from_events(read_events(log.path), self.task.given_files())
+        actions = await asyncio.to_thread(
+            lambda: actions_from_events(read_events(log.path), self.task.given_files())
+        )
         (rdir / "actions.json").write_text(
             json.dumps([{"index": a.index, "tool": a.tool, "args": a.args, "labels": a.labels} for a in actions], indent=2)
         )
@@ -259,14 +263,16 @@ class Batch:
                     try:
                         vm = await asyncio.to_thread(vms.fork_vm, base, f"{self.id}-{fork_id}-{cid}")
                         self.vms[f"{fork_id}-{cid}"] = vm
+                        self.tracker.vm_started(scope)
                         how = "fork"
                     except Exception:  # noqa: BLE001 - fall back to rebuilding by replay
                         vm = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-{cid}")
                         self.vms[f"{fork_id}-{cid}"] = vm
+                        # From here, not after the rebuild: the VM is up and billing while it replays.
+                        self.tracker.vm_started(scope)
                         await asyncio.to_thread(vms.load_task, vm, self.task)
                         await asyncio.to_thread(vms.replay_actions, vm, prefix_actions)
                         how = "replay"
-                    self.tracker.vm_started(scope)
                     url = await _try(asyncio.to_thread(vms.start_lab_page, vm))
                     self._set_child(fork_id, cid, arm=arm, status="running", lab_url=url, how=how)
 
@@ -289,7 +295,9 @@ class Batch:
                     )
                     await asyncio.to_thread(vms.download_outputs, vm, cdir / "outputs")
                     charts = await asyncio.to_thread(vms.download_charts, vm, cdir / "live")
-                    score = score_run(cdir / "outputs", self.task, self.cfg.inflation_threshold)
+                    score = await asyncio.to_thread(
+                        score_run, cdir / "outputs", self.task, self.cfg.inflation_threshold
+                    )
                     (cdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
                     results[cid] = {"arm": arm, **score.to_dict()}
                     extra = {"charts": [f"forks/{fork_id}/{cid}/live/{name}" for name in charts]} if charts else {}

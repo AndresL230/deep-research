@@ -9,7 +9,8 @@ Each of these lets the model see test information during training, or makes the 
 
 | Label | Error | What an honest run does before the train/test split | What to look for in commands |
 | --- | --- | --- | --- |
-| deduplicate | Duplicate rows land in both train and test | Removes or checks duplicates | `drop_duplicates`, `duplicated()` |
+| deduplicate | Duplicate rows land in both train and test | Removes duplicates. Counting them (`duplicated().sum()`) is only `inspect` | `df = df.drop_duplicates()`, `df[~df.duplicated()]` |
+| deduplicate_near | Copies with small changes in a few columns land in both train and test, and an exact check misses them | Removes rows that match on the other columns, or after rounding | `drop_duplicates(subset=...)`, `.round(...)` before `drop_duplicates`, `np.isclose` |
 | drop_leak | A column derived from the target (`followup_score`, measured after the outcome was known). It will not exist when the model is used | Leaves the column out of the features | `drop(columns=[... 'followup_score' ...])`, `del df['followup_score']`, `c != 'followup_score'` |
 | group_split | Several rows per subject (`subject_id`) split at random, so the same subject is in train and test | Splits by subject, or keeps one row per subject | `GroupKFold`, `GroupShuffleSplit`, `groups=`, `drop_duplicates(subset='subject_id')`, `df['subject_id'].isin(train_ids)` |
 | preprocess | Scaling or feature selection fitted on all rows | Splits first, fits on train only | `fit_transform` before `train_test_split` |

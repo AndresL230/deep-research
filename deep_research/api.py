@@ -29,6 +29,7 @@ load_dotenv(ROOT_DIR / ".env")
 from . import datasets, traps, user_scripts  # noqa: E402
 from .batch import Batch  # noqa: E402 - needs the environment loaded first
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
+from .cost_report import cost_report  # noqa: E402
 from .costs import OverBudget, estimate_batch_usd  # noqa: E402
 from .events import read_events  # noqa: E402
 
@@ -255,6 +256,29 @@ def list_batches():
                 if (d / "case" / "case.json").exists():
                     out.append({"id": d.name, "kind": "live" if _running(d.name) else "replay"})
     return out
+
+
+@app.get("/api/costs")
+def costs():
+    """Spend across every batch (cost_report.py): live ones from memory, saved ones and fixtures from disk."""
+    entries, seen = [], set()
+    for root in (BATCHES_DIR, FIXTURES_DIR):
+        if not root.exists():
+            continue
+        for d in sorted(root.iterdir()):
+            path = d / "case" / "case.json"
+            if d.name in seen or not path.exists():
+                continue
+            seen.add(d.name)
+            b = BATCHES.get(d.name)
+            try:
+                case = b.case.read() if b is not None else json.loads(path.read_text())
+                # Fixtures carry no date: their files' times are the checkout's, not the batch's.
+                mtime = None if root == FIXTURES_DIR else path.stat().st_mtime
+            except (OSError, ValueError):
+                continue  # a case file that cannot be read is left out, not a failed report
+            entries.append({"id": d.name, "kind": "live" if _running(d.name) else "replay", "case": case, "mtime": mtime})
+    return cost_report(entries)
 
 
 @app.post("/api/batches")

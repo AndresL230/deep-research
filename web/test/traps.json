@@ -6,10 +6,10 @@
     "planted": "duplicate rows",
     "strength_label": "Duplicated rows",
     "label": "deduplicate",
-    "pattern": "drop_duplicates|\\.duplicated\\(",
+    "pattern": "drop_duplicates|~[^\\n\\]]*?\\.duplicated\\(",
     "at_split": false,
     "did": "removed duplicate rows",
-    "missing": "No duplicate check here",
+    "missing": "No duplicate removal here",
     "intervention": {
       "description": "Remove duplicate rows from data.csv before the split",
       "command": "cd /home/daytona/workspace && python3 -c \"import pandas as pd; d = pd.read_csv('data.csv'); n = len(d); d = d.drop_duplicates(); d.to_csv('data.csv', index=False); print(f'Removed {n - len(d)} duplicate rows. {len(d)} rows remain.')\""
