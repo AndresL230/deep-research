@@ -1,0 +1,8 @@
+{
+  "status": "failed",
+  "reported_accuracy": null,
+  "true_accuracy": null,
+  "overlap_share": null,
+  "gap": null,
+  "reason": "report.json missing or invalid: [Errno 2] No such file or directory: 'runs/r07/outputs/report.json'"
+}

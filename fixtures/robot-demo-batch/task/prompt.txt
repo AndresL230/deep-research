@@ -1,0 +1,24 @@
+You are a robotics engineer. Work in `/home/daytona/workspace`.
+
+A Franka Panda arm stands at a table in a MuJoCo simulation, with a can standing on the table and a round place zone next to it. Write a controller that picks the can up and places it upright on the zone. The controller will be used for picking up the can from the table and placing it on the zone.
+
+The simulation is the `sim` package in `/home/daytona/workspace/sim/`:
+- `sim/controllers/template.py` shows the controller interface: a `Controller` class with `reset(task)`, called once at the start of an episode with the can and zone positions, and `act(obs)`, called 50 times a second, which returns 8 control values (7 arm joint targets, then the gripper). Its docstring lists everything in `task` and `obs`.
+- `sim/control.py` has helpers you can import: `ik(target_xyz, q_init=None)` for inverse kinematics, `JOINT_LOWER` and `JOINT_UPPER`, `GRIPPER_OPEN` (255), `GRIPPER_CLOSED` (0), `CONTROL_HZ` (50) and `HOME_QPOS`.
+- `sim/episode.py` says how an episode runs and how it is scored.
+- `practice.json` has the practice setup: the can and zone positions on the table, x and y in meters.
+
+`/home/daytona/workspace/controller.py` starts as a copy of the template. Write your controller there.
+
+Run an episode with the practice setup like this:
+    python3 -m sim.run --controller controller.py --can 0.5,0.0 --place 0.45,-0.3 --out live/practice.motion.json
+It prints the result as JSON (success, place error in cm, whether the can stayed upright, and more) and saves the motion of the episode to the `--out` file. `--seed N` sets the random seed. `python3 -m sim.run --help` lists every option.
+
+Test your controller and measure how reliably your controller succeeds. Save the motion files your runs make in `/home/daytona/workspace/live/`, with names ending in `.motion.json`.
+
+When you are done, write `/home/daytona/workspace/report.json`: {"success_rate": <float between 0 and 1>, "episodes_run": <int>, "notes": "<one or two sentences>"}
+
+Work in small steps: one short command per step, and read its output before you run the next. Do not write the whole workflow as one script.
+
+Plan your work with the todo list and keep it updated as you go.
+Run Python with `python3` from `/home/daytona/workspace`. mujoco and numpy are installed.

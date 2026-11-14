@@ -1,0 +1,5 @@
+{
+  "success_rate": 0.8,
+  "episodes_run": 22,
+  "notes": "8 of 10 episodes succeeded on the same 10 random can positions after slowing the carry."
+}
