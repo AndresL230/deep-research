@@ -65,12 +65,13 @@ function batch(info: TrapInfo, honest: string, shares: [number | null, number | 
     phase: "ready", split, forks: {}, verdict: null, hypotheses: [], step_labels: {},
     runs: { r01: run("r01", "honest", 0.76, shares[0], true), r02: run("r02", "inflated", 0.93, shares[1], false) },
   };
-  return { id: "b1", live: false, case: c, events: { r01: log(honest), r02: log(RANDOM) }, replay: null, busy: null, error: null, now: 0 };
+  return { id: "b1", live: false, case: c, events: { r01: log(honest), r02: log(RANDOM) }, replay: null, busy: null, error: null, now: 0, open: "all" };
 }
 
 const col = (html: string, group: "honest" | "inflated"): string => {
   const from = html.indexOf(`data-morph-key="col-${group}"`);
-  const to = group === "honest" ? html.indexOf('data-morph-key="col-inflated"') : html.indexOf("What it did to the score");
+  // The two notebooks are unfolded detail: they come after the score, and the strip of every run follows them.
+  const to = group === "honest" ? html.indexOf('data-morph-key="col-inflated"') : html.indexOf('<h3 class="ln-h3">All ');
   expect(from).toBeGreaterThan(-1);
   return html.slice(from, to);
 };
