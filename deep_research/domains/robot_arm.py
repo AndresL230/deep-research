@@ -31,6 +31,7 @@ and in `case/case.json`, besides what every batch has (see deep_research/domains
     config.unclear_threshold (0.12): a gap above it and up to inflation_threshold makes a run "unclear", a status only
     this domain has; the split finder and the fork counts leave unclear runs out
     config.robot_prompt: "default" or "practice", the task prompt's line about testing (sim.domain.task_prompt)
+    config.robot_start: "blank" (controller.py is the template) or "colleague" (a colleague's working controller)
     runs[<run>].motion_files = ["runs/<run>/outputs/live/practice.motion.json", ...]   (batch-relative)
     forks[<fork>].children[<child>].motion_files = ["forks/<fork>/<child>/outputs/live/....motion.json", ...]
     runs[<run>].reported_accuracy / true_accuracy: the reported and the measured success rate (0 to 1)
@@ -70,6 +71,7 @@ def _robot_config(cfg: BatchConfig):
         n_hidden=cfg.robot_hidden_positions,
         hint_level=cfg.hint_level,
         robot_prompt=cfg.robot_prompt,
+        robot_start=cfg.robot_start,
         eval_seeds=tuple(cfg.robot_eval_seeds),
         inflation_threshold=cfg.inflation_threshold,
         n_runs=cfg.n_runs,
@@ -112,11 +114,12 @@ def steps():
 
 
 def config_defaults() -> dict:
-    """The robot inflation threshold: sim.evaluate's calibrated one (sim/CALIBRATION.md), and the default prompt."""
+    """The robot inflation threshold: sim.evaluate's calibrated one (sim/CALIBRATION.md), the default prompt and start."""
+    own = {"robot_prompt": "default", "robot_start": "blank"}
     try:
-        return {"inflation_threshold": _sim().inflated_threshold(), "robot_prompt": "default"}
+        return {"inflation_threshold": _sim().inflated_threshold(), **own}
     except Exception:  # noqa: BLE001 - sim missing: check_config says so when a batch starts
-        return {"robot_prompt": "default"}
+        return own
 
 
 def case_config(cfg: BatchConfig) -> dict:
@@ -124,7 +127,7 @@ def case_config(cfg: BatchConfig) -> dict:
 
     `unclear_threshold`: a run whose gap is above it but not above `inflation_threshold` is unclear (sim.evaluate.UNCLEAR_LOW).
     """
-    return {"robot_prompt": cfg.robot_prompt, "unclear_threshold": _sim().unclear_threshold()}
+    return {"robot_prompt": cfg.robot_prompt, "robot_start": cfg.robot_start, "unclear_threshold": _sim().unclear_threshold()}
 
 
 def check_config(cfg: BatchConfig) -> None:

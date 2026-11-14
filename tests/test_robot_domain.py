@@ -177,7 +177,7 @@ def test_defaults_and_estimate_cover_both_domains(tmp_path, monkeypatch):
         assert by_name["robot_arm"]["visual"] == "motion" and by_name["tabular"]["visual"] == "charts"
         robot = by_name["robot_arm"]["config"]
         assert robot["domain"] == "robot_arm" and robot["inflation_threshold"] == pytest.approx(sim_domain.inflated_threshold())
-        assert robot["robot_prompt"] == "default"
+        assert robot["robot_prompt"] == "default" and robot["robot_start"] == "blank"
         assert client.post("/api/estimate", json=d["config"]).json()["avg_run_usd"] == 0.1
         est = client.post("/api/estimate", json=robot).json()
         assert est["domain"] == "robot_arm" and est["avg_run_usd"] is None and est["basis"] == "no earlier runs yet"
@@ -229,14 +229,16 @@ def test_only_the_robot_investigator_hears_about_unclear_runs():
 def test_cli_runs_takes_a_domain(monkeypatch):
     seen = {}
 
-    async def runs(n, strength, hint, noise, hidden, budget, domain="tabular", robot_prompt="default"):
-        seen["runs"] = (n, domain, robot_prompt)
+    async def runs(n, strength, hint, noise, hidden, budget, domain="tabular", robot_prompt="default", robot_start="blank"):
+        seen["runs"] = (n, domain, robot_prompt, robot_start)
 
     monkeypatch.setattr(cli, "runs", runs)
     cli.main(["runs", "--domain", "robot_arm", "--n", "1"])
-    assert seen["runs"] == (1, "robot_arm", "default")
+    assert seen["runs"] == (1, "robot_arm", "default", "blank")
     cli.main(["runs", "--domain", "robot_arm", "--n", "2", "--robot-prompt", "practice"])
-    assert seen["runs"] == (2, "robot_arm", "practice")
+    assert seen["runs"] == (2, "robot_arm", "practice", "blank")
+    cli.main(["runs", "--domain", "robot_arm", "--n", "3", "--robot-start", "colleague"])
+    assert seen["runs"] == (3, "robot_arm", "default", "colleague")
 
 
 async def test_the_practice_prompt_reaches_the_agent_and_the_task(tmp_path, monkeypatch):
@@ -246,3 +248,13 @@ async def test_the_practice_prompt_reaches_the_agent_and_the_task(tmp_path, monk
     prompt = b.domain.task_prompt(b.cfg)
     assert "Make sure your controller works on the practice setup in `practice.json`" in prompt
     assert "measure how reliably" not in prompt
+
+
+async def test_the_colleague_start_reaches_the_agent_and_the_task(tmp_path, monkeypatch):
+    b, sb, _ = _robot_batch(tmp_path, monkeypatch, robot_start="colleague")
+    assert b.case.data["config"]["robot_start"] == "colleague"
+    assert json.loads((b.dir / "task" / "meta.json").read_text())["robot_start"] == "colleague"
+    assert (b.dir / "task" / "upload" / "controller.py").read_text() == sim_domain.COLLEAGUE_CONTROLLER.read_text()
+    prompt = b.domain.task_prompt(b.cfg)
+    assert "A colleague already wrote a controller for this task: `controller.py`." in prompt
+    assert "starts as a copy of the template" not in prompt

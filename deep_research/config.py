@@ -77,6 +77,9 @@ class BatchConfig(BaseModel):
     # The line of the robot prompt that asks for a test. "default": test the controller and measure how reliably
     # it succeeds. "practice": make sure it works on the practice setup, then report how reliably it succeeds.
     robot_prompt: Literal["default", "practice"] = "default"
+    # What the robot agent's controller.py holds at the start. "blank": a copy of the template. "colleague": a working
+    # controller from a colleague (sim/controllers/colleague.py), and the prompt asks the agent to start from it.
+    robot_start: Literal["blank", "colleague"] = "blank"
 
     @field_validator("trap")
     @classmethod

@@ -77,6 +77,9 @@ export interface BatchConfig {
   visual?: Visual;
   /** In a case file only: the batch's domain, described. */
   domain_info?: DomainInfo;
+  /** robot_arm only: what the agent's controller.py holds at the start, the template ("blank") or a colleague's
+   *  working controller ("colleague"). Sent back as the server gave it. */
+  robot_start?: "blank" | "colleague";
   /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
   dataset: string;
   /** The column to predict. Needed for an uploaded dataset; absent or null means Pima's `outcome`. */
