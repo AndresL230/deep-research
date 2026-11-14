@@ -149,7 +149,7 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
 - `forks`: by id (`f1`...): `status` (`rebuilding`, `running`, `done`), `source_run`, `fork_at`, `label`,
   `intervention`, `n_per_arm`, `arm_steps`, `children` (each with `arm`, `status`, scores, `how`), and `arms`
   summaries when done. While the investigator waits for approval there is also `forks.pending` with `n_per_arm`,
-  `vm_count` and `estimate_usd`.
+  `vm_count` and `estimate_usd` (an average run's spend per copy, rounded up to the cent).
 
   `arm_steps` maps each arm, in the order it runs, to the step forced on it before it continues (null for
   `control`). `control` and `forced` are always there. `placebo` (`config.placebo_arm`) runs a harmless command so
@@ -222,15 +222,25 @@ New children continue each arm's numbers: after `control-1..4` and `forced-1..4`
 
 ```json
 {"fork_id": "f1", "n_per_arm": 4, "max_per_arm": 8, "arms": ["control", "forced"], "vm_count": 9,
- "estimate_usd": 1.12, "pairs_now": 4, "pairs_after": 8, "needed_pairs": 8, "level_now": "open",
- "p_value_now": 0.0714, "budget_usd": 10.0, "spent_usd": 3.4, "over_budget": false, "budget_problem": null}
+ "estimate_usd": 0.03, "basis": "8 new copies at $0.0025 each (the average of 8 earlier finished copies of f1),
+ plus $0.0011 for the base VM (what f1's base VM cost). Model tokens and VM time, rounded up to the cent.",
+ "pairs_now": 4, "pairs_after": 8, "needed_pairs": 8, "level_now": "open", "p_value_now": 0.2143,
+ "budget_usd": 10.0, "spent_usd": 0.55, "over_budget": false, "budget_problem": null}
 ```
 
 `n` defaults to `needed_pairs - pairs_now`, at least 1, and is held to 1..8 (`max_per_arm`). `vm_count` is one base
-VM plus `n` per arm. `pairs_after` assumes every new copy is scored. `estimate_usd` is the average spend of this
-fork's copies so far per new copy (else of a run on the source run's model, else of any run), plus one base VM at
-what the first one cost; null when prices or earlier spend are unknown. `over_budget` with `budget_problem`: the
-POST would refuse it.
+VM plus `n` per arm. `pairs_after` assumes every new copy is scored.
+
+`estimate_usd` is one copy's spend, model tokens and VM time, times the new copies, plus one base VM; rounded up to
+the cent, never down, so a small round is never quoted as $0.00. One copy's spend is the average of this fork's
+copies that finished (scored `honest`, `inflated` or `unclear`; a failed or stopped copy may have ended early),
+else of a whole run on the source run's model, else of any run. A copy's spend includes the source run's history
+it starts from, which it sends again as cache reads and writes. The base VM is priced at the most one of this
+fork's base VMs cost, else at one copy's VM time. More pairs ask no other model (the verdict is reworded in code),
+so the investigator's spend, most of a batch's, is no part of it. Not counted: VM create and fork time before a VM
+is up, and disk kept by stopped VMs (as in the cost report). Null when prices or earlier spend are unknown.
+`basis` says the same in words for this quote (`"No estimate: ..."` when it is null). `over_budget` with
+`budget_problem`: the POST would refuse it, checked with the rounded-up estimate.
 
 `POST /api/batches/{id}/more-pairs?n=4` answers the same fields plus `{"id", "phase": "forking", "children":
 ["control-5", ..., "forced-8"]}`. The batch is live from then on: open the websocket again to follow it. It sends

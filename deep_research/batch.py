@@ -29,7 +29,7 @@ from .analysis import find_split
 from .case_file import CaseFile, with_evidence
 from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
-from .costs import CostTracker, OverBudget, UsageCallback
+from .costs import CostTracker, OverBudget, ScopeCost, UsageCallback, usd_up
 from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, prefix_events, read_events
 from .evidence import verdict_evidence, verdict_sentence
 from .evidence import describe as describe_evidence
@@ -240,14 +240,57 @@ def more_pairs_problem(case: dict, batch_dir: Path) -> str | None:
     return None
 
 
+# A fork copy that ran to its end and was scored: what a whole new copy will cost. A failed or stopped copy may have
+# stopped early, so its spend would undersell one.
+FINISHED_COPY = ("honest", "inflated", "unclear")
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return one if n == 1 else many
+
+
+def _average_cost(costs: dict[str, ScopeCost]) -> tuple[float, float] | None:
+    """Average (total, VM part) of these scopes' spend, or None when there are none or a price is unknown."""
+    totals = [c.total_usd for c in costs.values()]
+    if not totals or any(t is None for t in totals):
+        return None
+    return sum(totals) / len(totals), sum(c.vm_usd or 0.0 for c in costs.values()) / len(costs)  # type: ignore[arg-type]
+
+
+def _per_copy_usd(case: dict, tracker: CostTracker, fork_id: str, fork: dict) -> tuple[float, float, str] | None:
+    """What one new copy of `fork` should cost, as (total, VM part, where the figure comes from): the average spend
+    (model tokens and VM time) of its own copies that finished, else of the runs on its source run's model, else of
+    every run. A copy's spend covers all it sends, the source run's history it starts from included (as cache reads
+    and writes). None when nothing has a known price."""
+    children = fork.get("children") or {}
+    own = tracker.scope_costs({f"fork:{fork_id}:{cid}" for cid, c in children.items()
+                               if isinstance(c, dict) and c.get("status") in FINISHED_COPY})
+    if (avg := _average_cost(own)) is not None:
+        return (*avg, f"the average of {len(own)} earlier finished {_plural(len(own), 'copy', 'copies')} of {fork_id}")
+    runs = case.get("runs") or {}
+    model_of = lambda r: (runs.get(r) or {}).get("model") or (case.get("config") or {}).get("analyst_model")  # noqa: E731
+    model = model_of(fork.get("source_run"))
+    same = tracker.scope_costs({f"run:{r}" for r in runs if model_of(r) == model})
+    if (avg := _average_cost(same)) is not None:
+        return (*avg, f"no copy of {fork_id} finished yet, so the average whole run on {model} "
+                      f"({len(same)} {_plural(len(same), 'run', 'runs')})")
+    every = tracker.scope_costs({k for k in list(tracker.scopes) if k.startswith("run:")})
+    if (avg := _average_cost(every)) is not None:
+        return (*avg, f"no copy of {fork_id} finished yet, so the average whole run "
+                      f"({len(every)} {_plural(len(every), 'run', 'runs')})")
+    return None
+
+
 def more_pairs_quote(case: dict, tracker: CostTracker, n_per_arm: int | None = None) -> dict:
     """What `n_per_arm` more copies per arm of the verdict's fork would add and cost, before anyone confirms it.
 
     `n_per_arm` defaults to what reaches the needed pairs (at least 1) and is held between 1 and MAX_MORE_PAIRS.
-    `pairs_after` assumes every new copy is scored. The estimate is the average spend of the fork's own copies so far
-    (they start at the same moment), else of a run on the source run's model, else of any run, per new copy, plus one
-    base VM rebuilt at the fork point. `over_budget` is what `reserve_more_pairs` refuses. Expects a fork to exist
-    (`more_pairs_problem` is None).
+    `pairs_after` assumes every new copy is scored. The estimate is what one copy of this fork costs, model tokens
+    and VM time (`_per_copy_usd`), times the new copies, plus one base VM rebuilt at the fork point at the most one
+    of this fork's base VMs has cost (else at one copy's VM time). It is rounded up to the cent, never down: a person
+    approves real money with it. `basis` says in words what it includes. More pairs ask no model besides the copies'
+    own (the verdict is reworded in code), so the investigator's spend is no part of it. `over_budget` is what
+    `reserve_more_pairs` refuses. Expects a fork to exist (`more_pairs_problem` is None).
     """
     found = verdict_fork(case)
     if found is None:
@@ -257,32 +300,41 @@ def more_pairs_quote(case: dict, tracker: CostTracker, n_per_arm: int | None = N
     ev = _fork_evidence(fork)
     n = max(ev["needed_pairs"] - ev["pairs"], 1) if n_per_arm is None else n_per_arm
     n = max(1, min(int(n), MAX_MORE_PAIRS))
+    copies = len(arms) * n
 
-    own = {f"fork:{fork_id}:{cid}" for cid in fork.get("children") or {}}
-    per_copy = tracker.average_run_usd(prefix="fork:", keys=own)
-    if per_copy is None:
-        runs = case.get("runs") or {}
-        model_of = lambda r: (runs.get(r) or {}).get("model") or (case.get("config") or {}).get("analyst_model")  # noqa: E731
-        same = {f"run:{r}" for r in runs if model_of(r) == model_of(fork.get("source_run"))}
-        per_copy = (same and tracker.average_run_usd(keys=same)) or tracker.average_run_usd()
-    base_key = f"fork:{fork_id}:base"
-    base = tracker.average_run_usd(prefix=base_key, keys={base_key}) or 0.0
-    estimate = None if per_copy is None else per_copy * len(arms) * n + base
+    estimate, basis = None, "No estimate: no earlier copy or run of this batch has a known price."
+    per_copy = _per_copy_usd(case, tracker, fork_id, fork)
+    if per_copy is not None:
+        copy_usd, copy_vm_usd, source = per_copy
+        # The first round's base VM is `base`, the k-th round of more pairs' `base-{k + 1}`.
+        rounds = len(fork.get("more_pairs") or [])
+        bases = tracker.scope_costs({f"fork:{fork_id}:base"} | {f"fork:{fork_id}:base-{i}" for i in range(2, rounds + 2)})
+        known = [c.total_usd for c in bases.values() if c.total_usd is not None]
+        if len(known) == 1:
+            base_usd, base_words = known[0], f"what {fork_id}'s base VM cost"
+        elif known:
+            base_usd, base_words = max(known), f"the most one of {fork_id}'s {len(known)} base VMs cost"
+        else:
+            base_usd, base_words = copy_vm_usd, "priced as one copy's VM time"
+        estimate = usd_up(copy_usd * copies + base_usd)
+        basis = (f"{copies} new {_plural(copies, 'copy', 'copies')} at ${copy_usd:.4f} each ({source}), plus "
+                 f"${base_usd:.4f} for the base VM ({base_words}). Model tokens and VM time, rounded up to the cent.")
 
     spent, budget = tracker.total_usd(), tracker.budget_usd
     problem = None
     if spent is not None and spent >= budget:
         problem = f"the batch has spent ${spent:.2f} of its ${budget:.2f} budget"
     elif spent is not None and estimate is not None and spent + estimate > budget:
-        problem = (f"{len(arms) * n} more fork runs would cost about ${estimate:.2f}; spent ${spent:.2f} of the "
+        problem = (f"{copies} more fork runs would cost about ${estimate:.2f}; spent ${spent:.2f} of the "
                    f"${budget:.2f} budget")
     return {
         "fork_id": fork_id,
         "n_per_arm": n,
         "max_per_arm": MAX_MORE_PAIRS,
         "arms": arms,
-        "vm_count": len(arms) * n + 1,
-        "estimate_usd": None if estimate is None else round(estimate, 2),
+        "vm_count": copies + 1,
+        "estimate_usd": estimate,
+        "basis": basis,
         "pairs_now": ev["pairs"],
         "pairs_after": ev["pairs"] + n,
         "needed_pairs": ev["needed_pairs"],
@@ -1241,7 +1293,7 @@ class Batch:
         est = self.estimate_forks_usd(n, n_arms)
         self.case.update_fork(
             "pending", status="awaiting_approval", kind=kind, n_per_arm=n, vm_count=n_arms * n + 1,
-            estimate_usd=None if est is None else round(est, 2),
+            estimate_usd=usd_up(est),
         )
         self.case.set_phase("awaiting_approval")
 

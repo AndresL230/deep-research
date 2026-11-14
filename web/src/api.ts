@@ -363,6 +363,8 @@ export interface MorePairsQuote {
   vm_count: number;
   /** null when prices or earlier spend are unknown. */
   estimate_usd: number | null;
+  /** What `estimate_usd` includes, in words: per-copy spend and where it comes from, plus the base VM. */
+  basis: string;
   pairs_now: number;
   /** If every new copy is scored. */
   pairs_after: number;
