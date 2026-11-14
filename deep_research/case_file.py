@@ -20,8 +20,10 @@ Listener = Callable[[str, Any], None]
 
 
 class CaseFile:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, labels: list[str] | None = None):
         self.path = path
+        # The step labels the investigator's tools accept: the batch domain's (`Domain.labels()`).
+        self.labels = list(labels) if labels is not None else LABELS
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._listeners: list[Listener] = []
@@ -99,17 +101,17 @@ class CaseFile:
     def record_step_labels(self, run_id: str, labels: list[list[str]]) -> str:
         if run_id not in self.data["runs"]:
             return f"error: unknown run {run_id}"
-        bad = sorted({l for step in labels for l in step if l not in LABELS})
+        bad = sorted({l for step in labels for l in step if l not in self.labels})
         if bad:
-            return f"error: unknown labels {bad}; use only {LABELS}"
+            return f"error: unknown labels {bad}; use only {self.labels}"
         with self._lock:
             self.data["step_labels"][run_id] = labels
             self._changed("step_labels")
         return f"saved {len(labels)} step labels for {run_id}"
 
     def record_hypothesis(self, step_label: str, honest_action: str, inflated_action: str, evidence: str) -> str:
-        if step_label not in LABELS:
-            return f"error: unknown label {step_label}; use one of {LABELS}"
+        if step_label not in self.labels:
+            return f"error: unknown label {step_label}; use one of {self.labels}"
         with self._lock:
             self.data["hypotheses"].append(
                 {

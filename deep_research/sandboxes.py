@@ -5,6 +5,7 @@ All functions here are blocking. Call them with `asyncio.to_thread` from async c
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import os
 import time
@@ -21,9 +22,9 @@ from daytona import (
 )
 from langchain_daytona import DaytonaSandbox
 
+from . import domains
 from .analysis import Action
 from .config import ROOT_DIR, LAB_PAGE_PORT, VM_LIVE_DIR, VM_WORKSPACE
-from .task import OUTPUT_FILES, TaskFiles
 
 log = logging.getLogger(__name__)
 
@@ -51,30 +52,39 @@ def lab_image() -> Image:
     return Image.debian_slim("3.12").pip_install(PY_PACKAGES)
 
 
-def build_snapshot(name: str) -> None:
-    """One-time: bake the Python packages into a snapshot so VMs start fast."""
-    client().snapshot.create(CreateSnapshotParams(name=name, image=lab_image()), on_logs=print)
+def build_snapshot(name: str, domain: str | None = None) -> None:
+    """One-time: bake a domain's lab image (`Domain.lab_image`) into a snapshot so VMs start fast."""
+    client().snapshot.create(CreateSnapshotParams(name=name, image=domains.get(domain).lab_image()), on_logs=print)
 
 
-def create_vm(label: str) -> Sandbox:
-    snapshot = os.getenv("DAYTONA_SNAPSHOT")
+def create_vm(label: str, domain: str | None = None) -> Sandbox:
+    """A VM for one run of a `domain` batch (None: the default domain), from its snapshot when there is one."""
+    d = domains.get(domain)
+    snapshot = os.getenv(d.snapshot_env)
     labels = {"app": "deep-research", "run": label}
     lifetimes = {"auto_stop_interval": AUTO_STOP_MINUTES, "auto_delete_interval": AUTO_DELETE_MINUTES}
     if snapshot:
         params = CreateSandboxFromSnapshotParams(snapshot=snapshot, labels=labels, **lifetimes)
     else:
         # Slower: builds the image on first use.
-        params = CreateSandboxFromImageParams(image=lab_image(), labels=labels, **lifetimes)
+        params = CreateSandboxFromImageParams(image=d.lab_image(), labels=labels, **lifetimes)
     return client().create(params, timeout=300)
 
 
-def load_task(sb: Sandbox, task: TaskFiles) -> None:
-    """Copy the task files the agent may see. Never the holdout labels."""
+def load_task(sb: Sandbox, task) -> None:
+    """Copy the task files the agent may see (`Domain.upload_files`). Never the hidden truth."""
+    d = domains.for_task(task)
+    files = d.upload_files(task)
     sb.process.exec(f"mkdir -p {VM_LIVE_DIR}")
-    sb.fs.upload_file(task.data.read_bytes(), f"{VM_WORKSPACE}/data.csv")
-    sb.fs.upload_file(task.holdout_features.read_bytes(), f"{VM_WORKSPACE}/holdout_features.csv")
-    if task.script.is_file():
-        sb.fs.upload_file(task.script.read_bytes(), f"{VM_WORKSPACE}/{task.script.name}")
+    folders = sorted({str(Path(remote).parent) for _, remote in files} - {VM_WORKSPACE, VM_LIVE_DIR})
+    if folders:
+        sb.process.exec("mkdir -p " + " ".join(folders))
+    for local, remote in files:
+        sb.fs.upload_file(local.read_bytes(), remote)
+    for command in d.vm_setup():
+        res = sb.process.exec(command)
+        if getattr(res, "exit_code", 0) not in (0, None):
+            raise RuntimeError(f"VM setup failed ({command}): {getattr(res, 'result', '')}"[:300])
 
 
 def start_lab_page(sb: Sandbox) -> str:
@@ -92,15 +102,54 @@ def start_lab_page(sb: Sandbox) -> str:
     return sb.create_signed_preview_url(LAB_PAGE_PORT, expires_in_seconds=6 * 3600).url
 
 
-def download_outputs(sb: Sandbox, dest: Path) -> None:
+def download_outputs(sb: Sandbox, dest: Path, domain: str | None = None) -> list[str]:
+    """Save the run's output files (`Domain.output_files`) in `dest`, then the files its `output_globs` match.
+
+    Returns the glob matches saved, as paths relative to `dest` (the motion files of a robot run). A missing file
+    is skipped: the scoring says what is wrong with the run.
+    """
+    d = domains.get(domain)
     dest.mkdir(parents=True, exist_ok=True)
-    for name in OUTPUT_FILES:
+    for name in d.output_files:
         try:
             data = sb.fs.download_file(f"{VM_WORKSPACE}/{name}")
         except Exception:  # noqa: BLE001 - a missing file is scored as a failed run
             continue
         if data:
             (dest / name).write_bytes(data)
+    return download_globs(sb, d.output_globs, dest, d.max_output_globs) if d.output_globs else []
+
+
+def download_globs(sb: Sandbox, patterns: list[str], dest: Path, limit: int) -> list[str]:
+    """Save the workspace files matching `patterns` (globs relative to the workspace, one folder deep at most)
+    under `dest`, keeping their relative paths. Returns those paths, at most `limit`. Never raises."""
+    found: list[str] = []
+    listed: dict[str, list[str]] = {}
+    for pattern in patterns:
+        folder, _, name_glob = pattern.rpartition("/")
+        if folder not in listed:
+            try:
+                path = f"{VM_WORKSPACE}/{folder}" if folder else VM_WORKSPACE
+                listed[folder] = sorted(e.name for e in sb.fs.list_files(path) if not e.is_dir)
+            except Exception as e:  # noqa: BLE001 - no such folder
+                log.warning("listing %s/%s failed: %r", VM_WORKSPACE, folder, e)
+                listed[folder] = []
+        for name in listed[folder]:
+            rel = f"{folder}/{Path(name).name}" if folder else Path(name).name
+            if fnmatch.fnmatch(Path(name).name, name_glob) and rel not in found:
+                found.append(rel)
+    saved: list[str] = []
+    for rel in found[:limit]:
+        try:
+            data = sb.fs.download_file(f"{VM_WORKSPACE}/{rel}")
+        except Exception as e:  # noqa: BLE001
+            log.warning("downloading %s failed: %r", rel, e)
+            continue
+        if data:
+            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+            (dest / rel).write_bytes(data)
+            saved.append(rel)
+    return saved
 
 
 CHART_SUFFIXES = (".png", ".jpg", ".jpeg", ".svg")
