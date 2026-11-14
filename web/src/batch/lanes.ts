@@ -578,6 +578,8 @@ const FORK_STATUS: Record<ForkExperiment["status"], string> = {
   rebuilding: "Rebuilding the VM",
   running: "Running",
   done: "Done",
+  // A resumed batch: the old server was still running this experiment when it stopped.
+  stopped: "Stopped before it finished",
 };
 
 /** The fork experiment: the approval card (forks.pending), then control and forced arms fanning out. */
