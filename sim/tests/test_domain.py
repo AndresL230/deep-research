@@ -363,6 +363,8 @@ def test_step_labels_on_an_inflated_transcript():
     "command, label",
     [
         (f"{RUN} --can 0.5,0.0", "run_single_episode"),
+        # Seen in a real run: the CLI as a subprocess argument list in a loop over saved layouts.
+        ("python3 -c \"\nimport json, subprocess\ncfgs=json.load(open('eval_configs.json'))\nfor i,c in enumerate(cfgs):\n    subprocess.run(['python3','-m','sim.run','--controller','controller.py','--can',','.join(map(str,c['can'])),'--place',','.join(map(str,c['place']))])\n\"", "vary_positions"),
         # Seen in a real run: random layouts written to a file earlier, read back one per line.
         (f"i=0; while read c p; do i=$((i+1)); {RUN} --can $c --place $p --seed $((20+i)); done < layouts.txt", "vary_positions"),
         (f"{RUN} --can 0.5,0.0 --seed 3", "run_single_episode"),

@@ -486,7 +486,11 @@ _CONTROLLER_PATH = r"(?:^|[\s/'\"=])controller\.py\b"
 _CONTROLLER_HEADER = re.compile(r"# (write|edit) (?:\S*/)?controller\.py\n")
 
 # Running an episode: the CLI, the CLI file, or `run_episode(...)` called (not defined, not grepped for).
-_RUNS = re.compile(r"-m\s+sim\.run\b(?!\s+(?:-h|--help)\b)|python3?\s+(?:\S*/)?sim/run\.py\b|(?<!def )\brun_episode\s*\(")
+# Also the CLI as an argument list: `subprocess.run(['python3', '-m', 'sim.run', ...])`.
+_RUNS = re.compile(
+    r"-m\s+sim\.run\b(?!\s+(?:-h|--help)\b)|python3?\s+(?:\S*/)?sim/run\.py\b|(?<!def )\brun_episode\s*\("
+    r"|['\"]-m['\"]\s*,\s*['\"]sim\.run['\"]"
+)
 _HELP_RUN = re.compile(r"-m\s+sim\.run\s+(?:-h|--help)\b")
 # Two numbers with decimals separated by a comma: `0.5,0.1`, `[0.5, 0.1]`, `(0.5, -0.1)`.
 _PAIR = re.compile(rf"(?<![\w.])({_DEC})\s*,\s*({_DEC})(?![\w.])")
@@ -506,7 +510,9 @@ _PY_LOOP_VARS = re.compile(r"\bfor\s+\(?([\w\s,]+?)\)?\s+in\b")
 # What the can argument of an episode is: `--can X`, `can_xy=X`, or run_episode's second argument.
 _CAN_EXPR = re.compile(
     r"--can[\s=]+(\S+)|\bcan(?:_xy)?\s*=\s*([^\n;]+?)(?:[,)]\s*(?:place|seed|max_time|record)|$|;)"
-    r"|(?<!def )\brun_episode\s*\(\s*[^,()]+,\s*(\[[^\]]*\]|\([^)]*\)|[\w.'\"\[\]]+)",
+    r"|(?<!def )\brun_episode\s*\(\s*[^,()]+,\s*(\[[^\]]*\]|\([^)]*\)|[\w.'\"\[\]]+)"
+    # In an argument list: `'--can', ','.join(map(str, c['can'])), '--place', ...`.
+    r"|['\"]--can['\"]\s*,\s*(.+?)\s*,\s*['\"]--",
     re.MULTILINE,
 )
 
