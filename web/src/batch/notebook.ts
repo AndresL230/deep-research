@@ -221,7 +221,8 @@ const ACTIVITY: [string, string][] = [
   ["split", "Splitting train and test"],
   ["preprocess", "Preparing the features"],
   ["clean", "Cleaning the data"],
-  ["deduplicate", "Checking for duplicate rows"],
+  ["deduplicate_near", "Removing near-duplicate rows"],
+  ["deduplicate", "Removing duplicate rows"],
   ["plot", "Drawing charts"],
   ["inspect", "Inspecting the data"],
   ["load", "Loading the data"],
@@ -270,13 +271,16 @@ export function chartUrl(vm: BatchVm, key: EventKey, name: string): string | nul
 
 // ── drawing ──────────────────────────────────────────────────────────────────
 
-/** What marks a step in code, as the backend labels it (deep_research/analysis.py _RULES). */
+/** What marks a step in code, as the backend labels it (deep_research/analysis.py _RULES).
+ * The backend also skips a dedupe call nested inside another call; these only highlight lines. */
 export const LABEL_PATTERNS: Record<string, RegExp> = {
   load: /read_csv/,
-  inspect: /\.describe\(|\.info\(|\.head\(|value_counts|\.isnull\(|\.isna\(|\.shape\b/,
-  deduplicate: /drop_duplicates|\.duplicated\(/,
+  inspect: /\.describe\(|\.info\(|\.head\(|value_counts|\.isnull\(|\.isna\(|\.shape\b|\.duplicated\(/,
+  deduplicate: /drop_duplicates|~[^\n\]]*?\.duplicated\(/,
+  deduplicate_near:
+    /drop_duplicates\(\s*subset|~[^\n\]]*?\.duplicated\(\s*subset|\.round\([^)\n]*\)[^\n]*?drop_duplicates|~[^\n\]]*?\.round\([^)\n]*\)[^\n]*?\.duplicated\(|NearestNeighbors|np\.isclose|cdist\(/,
   clean: /fillna|dropna|replace\(\s*0|\.median\(\)/,
-  split: /train_test_split|KFold|StratifiedKFold|\.sample\(\s*frac/,
+  split: /train_test_split|(?:Stratified)?(?:Group)?(?:KFold|ShuffleSplit)|\.sample\(\s*frac/,
   preprocess: /StandardScaler|MinMaxScaler|fit_transform|SimpleImputer/,
   train: /\.fit\(/,
   evaluate: /accuracy_score|\.score\(|classification_report|confusion_matrix|cross_val_score/,

@@ -19,7 +19,7 @@ export type Phase = KnownPhase | (string & {});
 
 /** Step labels the split finder and the investigator use (deep_research/analysis.py LABELS). */
 export const STEP_LABELS = [
-  "load", "inspect", "deduplicate", "clean", "split", "preprocess", "train", "evaluate", "plot", "predict", "report",
+  "load", "inspect", "deduplicate", "deduplicate_near", "clean", "split", "preprocess", "train", "evaluate", "plot", "predict", "report",
 ] as const;
 export type StepLabel = (typeof STEP_LABELS)[number];
 
@@ -301,6 +301,54 @@ export interface Estimate {
   basis: string;
 }
 
+// The cost report (deep_research/cost_report.py, `GET /api/costs`): spend across every batch.
+export interface CostTokens { input: number; output: number; cache_read: number; cache_write: number }
+/** One total split two ways: by group (runs + forks + investigator + other) and by kind (model + vm). */
+export interface CostUsd { total: number; runs: number; forks: number; investigator: number; other: number; model: number; vm: number }
+export interface BatchCost {
+  id: string;
+  kind: "live" | "replay";
+  /** Local time, `YYYY-MM-DDTHH:MM:SS`, or null when nothing says (fixtures). */
+  started_at: string | null;
+  phase: Phase | null;
+  dataset: string | null;
+  trap: string | null;
+  analyst_model: string | null;
+  investigator_model: string | null;
+  simulated: boolean;
+  prices_missing: boolean;
+  counts: { runs: number; honest: number; inflated: number; failed: number; fork_runs: number };
+  /** Null for a simulated batch: tokens only. */
+  usd: CostUsd | null;
+  /** Some price was unknown: `usd` is the sum of what is known, and the real figure is higher. */
+  usd_partial: boolean;
+  tokens: CostTokens;
+  vm_seconds: number;
+}
+export interface ModelCost {
+  model: string;
+  roles: ("analyst" | "investigator")[];
+  batches: number;
+  /** Model spend only: VM time belongs to no model. */
+  usd: number;
+  usd_by_group: { runs: number; forks: number; investigator: number };
+  usd_partial: boolean;
+  tokens: CostTokens;
+}
+export interface CostReport {
+  /** Real batches only. */
+  totals: {
+    batches: number; runs: number; honest: number; inflated: number; failed: number; fork_runs: number;
+    usd: CostUsd; usd_partial: boolean; tokens: CostTokens; vm_seconds: number; excludes_simulated: true;
+  };
+  /** What the totals leave out. */
+  simulated: { batches: number; runs: number; tokens: CostTokens };
+  by_model: ModelCost[];
+  /** Newest first, simulated ones last. */
+  batches: BatchCost[];
+  not_counted: string[];
+}
+
 /** A request the server refused or could not answer: `message` is what to tell the person. */
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -374,6 +422,7 @@ export const uploadScript = (file: Blob & { name?: string }, o: Opts = {}) =>
     ...o, method: "POST", body: file, headers: { "content-type": "text/x-python" },
   });
 export const fetchBatches = (o: Opts = {}) => call<BatchListItem[]>("/api/batches", o);
+export const fetchCosts = (o: Opts = {}) => call<CostReport>("/api/costs", o);
 export const startBatch = (cfg: BatchConfig, o: Opts = {}) => call<{ id: string }>("/api/batches", { ...o, json: cfg });
 export const fetchCase = (id: string, o: Opts = {}) => call<CaseFile>(`${batchPath(id)}/case`, o);
 export const fetchRunEvents = (id: string, run: string, o: Opts = {}) =>

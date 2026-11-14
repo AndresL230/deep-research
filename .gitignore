@@ -18,3 +18,6 @@ dist/
 
 # Training scripts uploaded through the UI
 /user_scripts/
+
+# Claude Code worktrees
+.claude/

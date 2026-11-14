@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -121,9 +121,22 @@ class CostTracker:
             else:
                 s.vm_usd += seconds / 3600 * rate
 
+    def _current(self) -> dict[str, ScopeCost]:
+        """Every scope as of now: a VM that is still up is counted to this moment, not only once it is deleted."""
+        now, rate = time.monotonic(), self.prices.get("daytona_vm_per_hour")
+        out = {}
+        for k in [*self.scopes, *(k for k in list(self._vm_started) if k not in self.scopes)]:
+            s, start = self.scopes.get(k) or ScopeCost(), self._vm_started.get(k)
+            if start is not None:
+                seconds = max(0.0, now - start)
+                usd = None if rate is None or s.vm_usd is None else s.vm_usd + seconds / 3600 * rate
+                s = replace(s, vm_seconds=s.vm_seconds + seconds, vm_usd=usd)
+            out[k] = s
+        return out
+
     # ---- totals and the guard ----
     def total_usd(self) -> float | None:
-        totals = [s.total_usd for s in self.scopes.values()]
+        totals = [s.total_usd for s in self._current().values()]
         if any(t is None for t in totals):
             return None
         return sum(totals)  # type: ignore[arg-type]
@@ -148,11 +161,14 @@ class CostTracker:
 
     def snapshot(self) -> dict:
         with self._lock:
+            scopes = self._current()
+            totals = [s.total_usd for s in scopes.values()]
+            spent = None if any(t is None for t in totals) else sum(totals)  # type: ignore[arg-type]
             return {
                 "budget_usd": self.budget_usd,
-                "spent_usd": _r(self.total_usd()),
-                "prices_missing": self.total_usd() is None,
-                "scopes": {k: v.to_dict() for k, v in self.scopes.items()},
+                "spent_usd": _r(spent),
+                "prices_missing": spent is None,
+                "scopes": {k: v.to_dict() for k, v in scopes.items()},
             }
 
 

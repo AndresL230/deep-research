@@ -5,6 +5,7 @@
 .app-root { --pg-w:1240px; --pg-pad:24px; }
 .app-root[data-view="run"], .app-root[data-view="child"] { --pg-w:960px; }
 .app-root[data-view="home"] { --pg-w:808px; }
+.app-root[data-view="costs"] { --pg-w:1040px; }
 .pg-hdr, .pg-sub { padding-inline:max(var(--pg-pad), calc((100% - var(--pg-w)) / 2 + var(--pg-pad))); }
 .pg-hdr { gap:12px; }
 .pg-hdr-l { min-width:0; flex:1; overflow:hidden; }

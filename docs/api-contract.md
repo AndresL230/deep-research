@@ -18,6 +18,7 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | POST | `/api/scripts?name=<file name>` | The body is a Python training script (up to 200 KB). The server parses it and never runs it. Saves it under `user_scripts/` and returns its `ScriptInfo`; `422 {"detail"}` when it is not valid Python |
 | GET | `/api/batches` | `[{"id", "kind": "live" or "replay"}]`: batches started on this server, saved batches in `batches/`, and replays in `fixtures/` |
 | POST | `/api/batches` | Body: a `BatchConfig`. Starts a batch, returns `{"id"}`. `422 {"detail"}` when the dataset, target or script cannot be used |
+| GET | `/api/costs` | The cost report (below): spend across every batch, live ones from memory and saved ones from disk |
 | GET | `/api/batches/{id}/case` | The case file (below) |
 | GET | `/api/batches/{id}/runs/{run}/events` | One run's `events.jsonl` as a JSON array |
 | GET | `/api/batches/{id}/forks/{fork}/{child}/events` | One fork child's events, `child` like `control-1` or `forced-2` |
@@ -83,6 +84,48 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
 - `costs`: `budget_usd`, `spent_usd` (null when a price is unknown), `prices_missing`, and `scopes`
   (`run:r01`, `fork:f1:base`, `fork:f1:control-1`, `investigator`), each with input, output, cache read and
   cache write tokens, `model_usd`, `vm_seconds`, `vm_usd`, `total_usd`.
+
+## The cost report
+
+`GET /api/costs`, built by `deep_research/cost_report.py` from every batch's `costs` section. The web screen is
+`#/costs` (`web/src/batch/costs.ts`).
+
+```ts
+CostReport {
+  totals: {                                       // real batches only
+    batches, runs, honest, inflated, failed, fork_runs,
+    usd: Usd, usd_partial: boolean,
+    tokens: { input, output, cache_read, cache_write },
+    vm_seconds,
+    excludes_simulated: true,
+  },
+  simulated: { batches, runs, tokens },           // what the totals leave out
+  by_model: [{ model, roles: ("analyst" | "investigator")[], batches, usd, usd_by_group: { runs, forks, investigator }, usd_partial, tokens }],
+  batches: [BatchCost],                           // newest first, simulated ones last
+  not_counted: string[],                          // what no figure here includes
+}
+BatchCost {
+  id, kind: "live" | "replay", started_at: string | null, phase,
+  dataset, trap, analyst_model, investigator_model,
+  simulated, prices_missing,
+  counts: { runs, honest, inflated, failed, fork_runs },
+  usd: Usd | null, usd_partial: boolean,
+  tokens, vm_seconds,
+}
+Usd { total, runs, forks, investigator, other, model, vm }
+```
+
+- `Usd` splits one total two ways: by group (`runs + forks + investigator + other`) and by kind (`model + vm`).
+  `other` is any scope that is not a run, a fork or the investigator; it is normally 0.
+- Dollars are the sum of what is known. `usd_partial` is true when some scope had tokens or VM time with no
+  price, so the real figure is higher. A null price never turns a total into null.
+- A simulated batch (`config.simulated`, the committed fixture) has `usd: null` and is left out of `totals` and
+  `by_model`; its tokens are in `simulated`.
+- `by_model` is model spend only (VM time belongs to no model). Run and fork scopes count for
+  `config.analyst_model`, the investigator scope for `config.investigator_model`.
+- `started_at` is local time, `YYYY-MM-DDTHH:MM:SS`, read from the batch id (`MMDD-HHMMSS-xxxx`); a batch with
+  another kind of id gets its case file's last change, and a fixture gets null.
+- `vm_seconds` run from the moment a VM is up until it is deleted. A VM that is still up is counted to now.
 
 ## Event logs
 

@@ -53,6 +53,29 @@ export function inputsLabel(s: DatasetUi): string {
   return [data, "planted duplicate rows", s.script ? "starting from your script" : ""].filter(Boolean).join(" · ");
 }
 
+/** What a finished upload brings back. */
+export type Uploaded = { kind: "dataset"; info: DatasetInfo } | { kind: "script"; info: ScriptInfo };
+
+/** Taken when an upload starts: its number, and the dataset that was chosen then. */
+export interface UploadTicket { seq: number; selected: string }
+
+/**
+ * The state once an upload has finished, built from the state as it is now: what the person changed while the file
+ * was on its way is kept. `latestSeq` is the number of the newest upload, and the result of an older one is dropped.
+ * A new dataset is always added to the choices, but it becomes the chosen one only if the person did not pick
+ * another one meanwhile.
+ */
+export function withUpload(now: DatasetUi, ticket: UploadTicket, latestSeq: number, done: Uploaded): DatasetUi {
+  if (ticket.seq !== latestSeq) return now;
+  const upload = { state: "idle" } as const;
+  if (done.kind === "script") return { ...now, script: done.info, upload };
+  const selected = now.selected === ticket.selected ? done.info.id : now.selected;
+  return { ...now, datasets: [...(now.datasets ?? []), done.info], selected, upload };
+}
+
+/** The upload state after the person changes a row: an old error goes, but an upload on its way stays busy. */
+export const uploadAfterEdit = (u: DatasetUi["upload"]): DatasetUi["upload"] => (u.state === "busy" ? u : { state: "idle" });
+
 /** What a chosen or dropped file is, or why it cannot be uploaded. Checked before it is sent. */
 export function fileKind(file: { name: string; size: number }): { kind: UploadKind } | { problem: string } {
   const kind: UploadKind | null = /\.(csv|txt)$/i.test(file.name) ? "dataset" : /\.py$/i.test(file.name) ? "script" : null;
