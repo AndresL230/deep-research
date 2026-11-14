@@ -98,10 +98,10 @@ export function wheel(s: Sculpt, r = 0.27, thick = 0.2, guard = true): void {
 // ── carts and trucks ─────────────────────────────────────────────────────────
 
 /** A cart: an open box on four wheels, the two that show on its -z side. It rolls along its own x. The origin
- *  is the middle of its footprint. `inner` is how deep the box is inside. */
+ *  is the middle of its footprint. `inner` is how deep the box is inside, `h` how tall its walls are. */
 export const CART = { w: 1.0, d: 1.0, h: 0.85, lift: 0.28, wall: 0.08 } as const;
-export function cart(s: Sculpt, inner = 0.28): void {
-  const { w, d, h, lift, wall } = CART;
+export function cart(s: Sculpt, inner = 0.28, h: number = CART.h): void {
+  const { w, d, lift, wall } = CART;
   const ring = roundRect(w, d, 0.012);
   ring.holes.push(roundHole(w - wall * 2, d - wall * 2, 0.008));
   s.sweep(ring, h, 0, lift, 0, "white");
@@ -367,7 +367,8 @@ export function wiredBlock(s: Sculpt): void {
     s.cyl(0.025, 0.026, x, y + 0.03, z, "white", { seg: 12 });
   }
   for (const [x, z] of [POSTS[0], POSTS[2]]) {
-    s.tube([[x * 0.5, y, 0.12], [x * 0.6, y + 0.26, 0.085], [x * 0.9, y + 0.3, -0.02], [x, y + 0.05, z]], 0.021, "amber", { seg: 24 });
+    // Kept out near the outer posts, so a hand plugging the middle one fits between them.
+    s.tube([[x * 0.8, y, 0.12], [x * 0.85, y + 0.26, 0.085], [x * 0.95, y + 0.3, -0.02], [x, y + 0.05, z]], 0.021, "amber", { seg: 24 });
   }
 }
 
@@ -392,10 +393,12 @@ export function cable(s: Sculpt, u: number): void {
   s.ball(0.034, end[0], end[1], end[2], "white");
 }
 
-/** The tool that drives a bolt: a barrel with a collar and a socket at its tip. It points along -y from its
- *  origin, which is where the hand holds it. */
+/** The tool that drives a bolt: a barrel with a collar and a hex socket at its tip, a little wider than a bolt's
+ *  head so it fits over one. It points along -y from its origin, which is where the hand holds it; its tip is
+ *  `DRIVER_TIP` below that. */
+export const DRIVER_TIP = 0.42;
 export function driver(s: Sculpt): void {
   s.cyl(0.11, 0.36, 0, -0.2, 0, "white", { seg: 24 });
   s.cyl(0.118, 0.09, 0, -0.29, 0, "amber", { seg: 24 });
-  s.cyl(0.085, 0.13, 0, -0.42, 0, "accent", { seg: 6 });
+  s.cyl(0.1, 0.13, 0, -DRIVER_TIP, 0, "accent", { seg: 6 });
 }

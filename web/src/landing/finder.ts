@@ -31,6 +31,9 @@ export interface FinderOptions {
   pin: HTMLElement | null;
   /** The element the page scrolls in, or null for the window. */
   scroller: Element | null;
+  /** Play the chapter on its own clock instead of the page's: through in `PLAY_SECONDS`, a rest on the found split,
+   *  then again from the coins. For a card that does not pin. */
+  play?: boolean;
   /** One coin for each run: its name, and whether its score was honest. */
   runs: readonly { id: string; honest: boolean }[];
   /** The split's tag: the step's name, the share of each kind of run that took it, and a line of code that is it. */
@@ -38,8 +41,14 @@ export interface FinderOptions {
 }
 
 export interface Finder {
+  /** Start the played chapter again from its coins (when its card is shown again). */
+  restart(): void;
   dispose(): void;
 }
+
+/** A played chapter: how long it takes, and how long it rests on the split before it starts again. */
+const PLAY_SECONDS = 9;
+const PLAY_REST = 3.5;
 
 /** The web: how many points, and how near each other two must be to be tied. */
 const POINTS = 120;
@@ -187,7 +196,7 @@ const noise = (seed: number): (() => number) => () => {
 /** Mount the chapter in `host` and start it. `host` gets `data-ready` once it has drawn. */
 export function mountFinder(host: HTMLElement, options: FinderOptions): Finder {
   const kit = createKit(host, options.tone);
-  if (!kit) return { dispose() { /* no WebGL: the copy beside it still reads */ } };
+  if (!kit) return { restart() { /* nothing to play */ }, dispose() { /* no WebGL: the copy beside it still reads */ } };
   const { renderer, canvas, ink, keep, own, gloss, stroke, solid, strokes, flat } = kit;
   // Two scenes are drawn into one picture, so the canvas is cleared by hand.
   renderer.autoClear = false;
@@ -380,8 +389,10 @@ export function mountFinder(host: HTMLElement, options: FinderOptions): Finder {
   // ── drawing ────────────────────────────────────────────────────────────────
 
   const { pin, scroller } = options;
+  let played = 0;
   /** Where the page stands in the chapter, or null when the chapter is not pinned and shows its still picture. */
   const readClock = (): number | null => {
+    if (options.play) return Math.min(1, (played % (PLAY_SECONDS + PLAY_REST)) / PLAY_SECONDS) * CHAPTER;
     if (!pin) return null;
     const box = pin.getBoundingClientRect();
     const portTop = scroller ? scroller.getBoundingClientRect().top : 0;
@@ -406,13 +417,15 @@ export function mountFinder(host: HTMLElement, options: FinderOptions): Finder {
   let last = "";
 
   const frame = (seconds: number, still: boolean): void => {
+    if (options.play && !still) played += seconds;
     const want = still ? null : readClock();
     let view: ChapterView;
     if (want === null) {
       view = chapterPoster();
       clock = NaN;
     } else {
-      clock = Number.isNaN(clock) ? want : want + (clock - want) * Math.exp(-seconds * CATCH_UP);
+      // Played on its own clock it starts again from the coins at once; following the page it trails it a little.
+      clock = Number.isNaN(clock) || options.play ? want : want + (clock - want) * Math.exp(-seconds * CATCH_UP);
       if (Math.abs(clock - want) < 0.05) clock = want;
       view = chapterAt(clock);
     }
@@ -550,6 +563,7 @@ export function mountFinder(host: HTMLElement, options: FinderOptions): Finder {
   });
 
   return {
+    restart() { played = 0; },
     dispose() {
       if (disposed) return;
       disposed = true;

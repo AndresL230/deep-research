@@ -1,6 +1,6 @@
 // How the robot floor is drawn: flat colour in two steps of light, and a dark line along every contour.
 //
-// Each frame is four passes into one canvas:
+// Each frame is four passes into one multisampled buffer, then a fifth onto the canvas:
 //
 //   1  the marks    every solid again, into a buffer nobody sees: the way each surface faces, and a number (its
 //                   "mark") that is different for every part
@@ -9,6 +9,7 @@
 //   3  the lines    one screen-wide pass that reads the marks: wherever two parts meet, a surface folds or one
 //                   thing stands in front of another, it draws the line
 //   4  the clouds   the robots' bodies, which are not solid: a screen-wide pattern of dots, squares and crosses
+//   5  the finish   FXAA, so the lines' edges come out straight and smooth instead of in steps
 //
 // Every solid is made by rig.ts and carries its colour and its mark in its vertices, so one material paints them
 // all and one more writes all their marks. Nothing is lit by three.js lights and no colour is converted on the way
@@ -20,6 +21,7 @@ import {
   type PerspectiveCamera, type WebGLRenderer,
 } from "three";
 import type { SceneTone } from "./kit";
+import { FXAAShader } from "three/examples/jsm/shaders/FXAAShader.js";
 import { TILE, TRAIL_CELLS, type TrailCell } from "./floorplan";
 
 /** What a part is painted with. `arm` is a robot's sleeves and `steel` its hands. */
@@ -39,25 +41,25 @@ export interface FloorInk {
   dot: number; square: number; cross: number;
 }
 
-// The light palette is the reference's, measured from its page, with the landing page's purple where the reference
-// has teal. The dark one keeps its order of lightness on the page's near-black, with lines lighter than what they
+// The light palette is the reference's, measured from its page, with the dashboard's light purple (system.css #b07af2)
+// where the reference has teal. Purple is one flat colour: a purple part is never put in shade. The dark one keeps its order of lightness on the page's near-black, with lines lighter than what they
 // are drawn on.
 export const FLOOR_INK: Record<SceneTone, FloorInk> = {
   light: {
     floor: 0xe7e5e0, grid: 0xd3d0c5, trail: 0x2a2926,
     line: 0x061a1e,
-    tints: { white: 0xeeece7, paper: 0xe9e7e2, accent: 0x6a72b8, amber: 0xf5c042, red: 0xd9675b, steel: 0xe6e4df, arm: 0xf1efea },
+    tints: { white: 0xeeece7, paper: 0xe9e7e2, accent: 0xb07af2, amber: 0xf5c042, red: 0xd9675b, steel: 0xe6e4df, arm: 0xf1efea },
     shade: 0.955,
     shadow: 0xbfbfbf,
-    dot: 0xf6f4f0, square: 0xdad7cb, cross: 0x5a63b0,
+    dot: 0xf6f4f0, square: 0xdad7cb, cross: 0xb07af2,
   },
   dark: {
     floor: 0x15171b, grid: 0x23272c, trail: 0x8a9199,
     line: 0x9299a1,
-    tints: { white: 0x30353b, paper: 0x2b3035, accent: 0x7c85c6, amber: 0xe0a235, red: 0xd9675b, steel: 0x6a727b, arm: 0x555d66 },
+    tints: { white: 0x30353b, paper: 0x2b3035, accent: 0xb07af2, amber: 0xe0a235, red: 0xd9675b, steel: 0x6a727b, arm: 0x555d66 },
     shade: 0.86,
     shadow: 0x0b0c0f,
-    dot: 0xe4e7ea, square: 0x4d545c, cross: 0x9aa4df,
+    dot: 0xe4e7ea, square: 0x4d545c, cross: 0xb07af2,
   },
 };
 
@@ -70,7 +72,7 @@ const LIGHT = new Vector3(0.21838, 0.97549, 0.02706);
 const LIGHT_STEP = 0.15;
 /** A line's width in CSS pixels, the fold a surface must make to get one (as the cosine of the angle), and how
  *  far apart in depth two surfaces of one part must be, as a share of how far away they are. */
-const LINE_WIDTH = 1.5;
+const LINE_WIDTH = 1.6;
 const CREASE = Math.cos((40 * Math.PI) / 180);
 const DEPTH_STEP = 0.006;
 /** The grid's line, in CSS pixels. */
@@ -101,12 +103,13 @@ const PAINT_FRAGMENT = /* glsl */ `
 uniform vec3 uLight;
 uniform float uStep;
 uniform float uShade;
+uniform vec3 uFlat;
 varying vec3 vTint;
 varying vec3 vFacing;
 void main() {
   vec3 n = normalize(vFacing);
   if (!gl_FrontFacing) n = -n;
-  float lit = step(uStep, dot(n, uLight));
+  float lit = max(step(uStep, dot(n, uLight)), step(distance(vTint, uFlat), 0.004));
   gl_FragColor = vec4(vTint * mix(uShade, 1.0, lit), 1.0);
 }`;
 
@@ -164,17 +167,18 @@ void main() {
   float mark = markOf(here);
   vec3 facing = facingOf(here);
   float far = farOf(vUv);
-  float w = uWidth;
-  float d = uWidth * 0.7071;
+  // Every pixel within the line's half width, whole pixels only (the marks are not filtered): a ring at that
+  // distance would land between pixels and make the line thicker in some places than others.
+  float reach = uWidth * uWidth + 0.01;
   float edge = 0.0;
-  edge = max(edge, edgeAt(vec2(w, 0.0), mark, facing, far));
-  edge = max(edge, edgeAt(vec2(-w, 0.0), mark, facing, far));
-  edge = max(edge, edgeAt(vec2(0.0, w), mark, facing, far));
-  edge = max(edge, edgeAt(vec2(0.0, -w), mark, facing, far));
-  edge = max(edge, edgeAt(vec2(d, d), mark, facing, far));
-  edge = max(edge, edgeAt(vec2(-d, d), mark, facing, far));
-  edge = max(edge, edgeAt(vec2(d, -d), mark, facing, far));
-  edge = max(edge, edgeAt(vec2(-d, -d), mark, facing, far));
+  for (int i = -3; i <= 3; i++) {
+    for (int j = -3; j <= 3; j++) {
+      vec2 off = vec2(float(i), float(j));
+      float r = dot(off, off);
+      if (r < 0.5 || r > reach) continue;
+      edge = max(edge, edgeAt(off, mark, facing, far));
+    }
+  }
   if (edge < 0.5) discard;
   gl_FragColor = vec4(uColor, 1.0);
 }`;
@@ -347,7 +351,7 @@ export function createContour(renderer: WebGLRenderer, ink: FloorInk): Contour {
   renderer.autoClear = false;
 
   const paint = new ShaderMaterial({
-    uniforms: { uLight: { value: LIGHT }, uStep: { value: LIGHT_STEP }, uShade: { value: ink.shade } },
+    uniforms: { uLight: { value: LIGHT }, uStep: { value: LIGHT_STEP }, uShade: { value: ink.shade }, uFlat: { value: rgb(ink.tints.accent) } },
     vertexShader: SOLID_VERTEX,
     fragmentShader: PAINT_FRAGMENT,
     side: DoubleSide,
@@ -376,6 +380,19 @@ export function createContour(renderer: WebGLRenderer, ink: FloorInk): Contour {
   postMesh.frustumCulled = false;
   post.add(postMesh);
   const postCamera = new Camera();
+
+  // The frame is drawn into a multisampled buffer (smooth edges on the solids), then copied to the canvas through
+  // FXAA, which smooths the lines' steps as well.
+  const frame = new WebGLRenderTarget(1, 1, { samples: 4, depthBuffer: true });
+  const finishUniforms = { tDiffuse: { value: frame.texture }, resolution: { value: new Vector2(1, 1) } };
+  const finish = new ShaderMaterial({
+    uniforms: finishUniforms, vertexShader: SCREEN_VERTEX, fragmentShader: FXAAShader.fragmentShader,
+    depthTest: false, depthWrite: false, blending: NoBlending,
+  });
+  const finishScene = new Scene();
+  const finishMesh = new Mesh(screen, finish);
+  finishMesh.frustumCulled = false;
+  finishScene.add(finishMesh);
 
   const cells = Array.from({ length: TRAIL_CELLS }, () => new Vector3(0, 0, 0));
   const floorUniforms = {
@@ -463,6 +480,8 @@ export function createContour(renderer: WebGLRenderer, ink: FloorInk): Contour {
     resize(width, height) {
       renderer.getDrawingBufferSize(size);
       marks.setSize(size.x, size.y);
+      frame.setSize(size.x, size.y);
+      finishUniforms.resolution.value.set(1 / size.x, 1 / size.y);
       ratio.value = size.x / Math.max(1, width);
       lineUniforms.uPixel.value.set(1 / size.x, 1 / size.y);
       lineUniforms.uWidth.value = (LINE_WIDTH * ratio.value) / 2;
@@ -486,7 +505,7 @@ export function createContour(renderer: WebGLRenderer, ink: FloorInk): Contour {
       renderer.render(scene, camera);
       scene.overrideMaterial = null;
 
-      renderer.setRenderTarget(null);
+      renderer.setRenderTarget(frame);
       renderer.clear();
       camera.layers.set(LAYER.ground);
       renderer.render(scene, camera);
@@ -495,12 +514,17 @@ export function createContour(renderer: WebGLRenderer, ink: FloorInk): Contour {
       renderer.render(post, postCamera);
       camera.layers.set(LAYER.over);
       renderer.render(scene, camera);
+
+      renderer.setRenderTarget(null);
+      renderer.render(finishScene, postCamera);
     },
     dispose() {
       paint.dispose();
       marking.dispose();
       marks.dispose();
       depth.dispose();
+      frame.dispose();
+      finish.dispose();
       lines.dispose();
       screen.dispose();
       floorMaterial.dispose();
