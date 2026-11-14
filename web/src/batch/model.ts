@@ -15,7 +15,10 @@ export const ACT = {
   home: "home",                 // go to the home screen
   openBatch: "open-batch",      // arg: batch id
   openCosts: "open-costs",      // go to the overall cost screen (also its Retry)
-  // home / config
+  newBatch: "new-batch",        // open the New batch dialog (the header's button)
+  closeNewBatch: "close-new-batch", // close it (its X)
+  navMenu: "nav-menu",          // open or close the header's menu of links (narrow screens)
+  // the New batch form
   start: "start",               // start a live batch with the draft config
   resetConfig: "reset-config",  // draft back to the server defaults
   toggleAdvanced: "toggle-advanced", // show or hide the less used settings
@@ -43,7 +46,6 @@ export const ACT = {
 
 // ── routes (location.hash) ───────────────────────────────────────────────────
 
-/** `landing` is the page a visitor arrives on; `home` is the app's own first screen (the batches and the start panel). */
 /**
  * A batch is read a page at a time, in this order: the overview and the agents, then each stage after them. The keys
  * are the page sections' own names (main.ts `batchBody`); the address says them in words (`#/b/<id>/changed`).
@@ -57,9 +59,14 @@ export const STEP_LABEL: Record<BatchStep, string> = {
   wall: "Agents", split: "What changed", phase: "Investigator", fork: "Fork", verdict: "Verdict", diagnosis: "Diagnosis", fix: "Fix",
 };
 
+/**
+ * `landing` is the page a visitor arrives on; `home` is the app's own first screen: what needs a person, then the
+ * batches. It has two addresses, one per link in the header: `#/start` opens it at its top (Needs you), `#/batches`
+ * at the batch table (`at: "batches"`).
+ */
 export type Route =
   | { name: "landing" }
-  | { name: "home" }
+  | { name: "home"; at?: "batches" }
   | { name: "costs" }
   /** `step` is left out on the first page (the overview and the agents). */
   | { name: "batch"; id: string; step?: BatchStep }
@@ -76,6 +83,7 @@ export function parseRoute(hash: string): Route {
   }
   if (parts[0] === "costs") return { name: "costs" };
   if (parts[0] === "start") return { name: "home" };
+  if (parts[0] === "batches") return { name: "home", at: "batches" };
   return { name: "landing" };
 }
 
@@ -83,7 +91,7 @@ export function routeHash(r: Route): string {
   const e = encodeURIComponent;
   switch (r.name) {
     case "landing": return "#/";
-    case "home": return "#/start";
+    case "home": return r.at === "batches" ? "#/batches" : "#/start";
     case "costs": return "#/costs";
     case "batch": return r.step && r.step !== "wall" ? `#/b/${e(r.id)}/${STEP_SLUG[r.step]}` : `#/b/${e(r.id)}`;
     case "run": return `#/b/${e(r.id)}/run/${e(r.run)}`;
@@ -143,6 +151,11 @@ export interface BatchVm {
 
 export type Loadable<T> = { state: "loading" } | { state: "ready"; value: T } | { state: "error"; message: string };
 
+/**
+ * The app's shared state behind the home screen, the header and the New batch dialog: the batch list (the home's
+ * Needs you and table, the header's count) and the form's draft. main.ts loads it on any app page, so the dialog and
+ * the count work from a batch page as well.
+ */
 export interface HomeVm {
   batches: Loadable<BatchListItem[]>;
   health: Health | null;

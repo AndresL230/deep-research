@@ -83,6 +83,13 @@ export function needsOf(items: readonly BatchListItem[]): Need[] {
   });
 }
 
+/** How many batches wait on a person's action, for the header's count: the list's rows less the running ones (those
+ *  only offer Open, nothing waits on the person). Null until the list has loaded. */
+export function needsCount(batches: Loadable<readonly BatchListItem[]>): number | null {
+  if (batches.state !== "ready") return null;
+  return needsOf(batches.value).filter((n) => n.kind !== "running").length;
+}
+
 /** The rows' states after the list changed: a row's state goes once its batch no longer needs that, unless a call
  *  for it is still in flight (its answer lands on it). */
 export function pruneNeeds(ui: Readonly<Record<string, NeedUi>> | undefined, items: readonly BatchListItem[]): Record<string, NeedUi> {
