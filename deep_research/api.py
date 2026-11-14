@@ -170,12 +170,18 @@ def _batch_dir(batch_id: str) -> Path:
 
 # Phases after which nothing more happens: the batch is a saved replay from then on, even in the server that ran it.
 OVER = {"done", "no_split", "stopped"}
+# A batch that crashed ("error: ...") or that the budget guard refused ("blocked: ...") is over too.
+OVER_PREFIXES = ("error:", "blocked:")
+
+
+def _is_over(phase: str | None) -> bool:
+    return phase in OVER or (phase or "").startswith(OVER_PREFIXES)
 
 
 def _running(batch_id: str) -> Batch | None:
     """The batch, while it is still live in this server: started here and not over yet."""
     b = BATCHES.get(batch_id)
-    return b if b is not None and b.case.data.get("phase") not in OVER else None
+    return b if b is not None and not _is_over(b.case.data.get("phase")) else None
 
 
 def _live(batch_id: str) -> Batch:
@@ -191,7 +197,10 @@ def _spawn(batch_id: str, coro) -> None:
 
     def done(t: asyncio.Task) -> None:
         if not t.cancelled() and t.exception() is not None:
-            BATCHES[batch_id].case.set_phase(f"error: {t.exception()}"[:300])
+            b = BATCHES[batch_id]
+            b.case.set_phase(f"error: {t.exception()}"[:300])
+            # The batch is over now, so Stop no longer reaches it: delete any VMs it still holds here.
+            TASKS[batch_id] = asyncio.get_running_loop().create_task(b.close())
 
     task.add_done_callback(done)
 
