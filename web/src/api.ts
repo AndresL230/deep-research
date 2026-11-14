@@ -110,7 +110,7 @@ export interface HiddenResult {
   y: number;
   seed: number;
   result: HiddenOutcome;
-  /** Distance from the zone center at the end, cm; null when the can never reached it. */
+  /** The final distance of the can from the zone center, cm, whatever the result; null only when the episode never ran. */
   place_error_cm: number | null;
   /** The episode's motion file, low frame rate, as a path for `batchFileUrl` (`runs/r02/hidden/07-s0.motion.json`). */
   motion: string | null;
@@ -191,7 +191,8 @@ export interface RunScore {
   reason: string;
   /** How many hidden cases the true score came from: can positions (robot_arm) or holdout rows (tabular). */
   n_hidden?: number | null;
-  /** robot_arm: the can positions the run's own episodes used, [x, y] in meters, deduplicated (what it checked). */
+  /** robot_arm: the can positions the run's own episodes used (printed results and saved motion files), [x, y] in
+   *  meters, rounded to the millimeter, deduplicated, in order of first appearance (what it checked). */
   checked_positions?: [number, number][];
   /** robot_arm: every hidden episode's real result. Only present once the run is scored. */
   hidden_results?: HiddenResult[];
