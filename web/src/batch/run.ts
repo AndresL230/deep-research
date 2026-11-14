@@ -23,6 +23,7 @@ import { duration, pct, pts, tokens, usd } from "./format";
 import { evidenceParts, trapOf } from "./trap";
 import { isMotionBatch, robotView, scoreWords } from "../robot/markup";
 import "../robot/mount";
+import { checkedView } from "./checked";
 
 // ── text helpers ─────────────────────────────────────────────────────────────
 
@@ -246,7 +247,8 @@ const STATUS_TEXT: Record<string, string> = {
 interface Subject {
   name: string;
   status: Status | null;
-  score: Partial<Pick<RunRecord, "reported_accuracy" | "true_accuracy" | "gap" | "overlap_share" | "reason">>;
+  score: Partial<Pick<RunRecord, "reported_accuracy" | "true_accuracy" | "gap" | "overlap_share" | "reason" | "n_hidden"
+    | "checked_positions" | "hidden_results" | "n_test" | "n_test_copies">>;
   labUrl: string | null;
   charts: string[];
   /** A robot run's motion files (`visual` "motion"). */
@@ -368,5 +370,8 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
     ? `<a class="rn-lab" href="${attr(labPageUrl(vm.id, key))}" target="_blank" rel="noopener">${askIcon("external", 12, null, 2)}<span>Open lab page</span></a>`
     : "";
 
-  return `<section class="rn" data-morph-key="rn:${attr(key)}">${top}${head}${note}<dl class="rn-stats">${stats}</dl>${charts}${lab}</section>`;
+  // What it checked next to what it is judged on (checked.ts), right under the numbers.
+  const checked = checkedView(vm.id, key, { ...s.score, status }, vm.case.config);
+
+  return `<section class="rn" data-morph-key="rn:${attr(key)}">${top}${head}${note}<dl class="rn-stats">${stats}</dl>${checked}${charts}${lab}</section>`;
 }

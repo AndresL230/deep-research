@@ -1,0 +1,74 @@
+/* "What it checked vs what it is judged on" (checked.ts): a run's claim next to the truth. Results have a shape and a
+   color each (placed circle, tipped triangle, missed cross, dropped diamond), so color is never the only cue. */
+
+.ck { display:flex; flex-direction:column; gap:12px; padding:14px 16px 16px; border:1px solid var(--border); border-radius:12px; background:var(--surface); min-width:0; }
+.ck-h { margin:0; font-family:var(--label); font-size:12px; font-weight:600; letter-spacing:.02em; color:var(--fg-55); }
+
+.ck-dot--placed { color:var(--green); }
+.ck-dot--tipped { color:var(--amber); }
+.ck-dot--missed { color:var(--red); }
+.ck-dot--dropped { color:var(--purple); }
+.ck-key--checked { color:var(--blue); }
+
+/* the claim and the truth */
+.ck-vs { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+.ck-num { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.ck-vs .ck-num { padding:8px 12px; border-radius:9px; background:var(--hover); }
+.ck-num-l { font-family:var(--label); font-size:11.5px; color:var(--fg-55); }
+.ck-num-v { font-size:22px; font-weight:600; letter-spacing:-0.01em; font-variant-numeric:tabular-nums; color:var(--fg); line-height:1.2; }
+.ck-num-s { font-size:12px; line-height:1.4; color:var(--fg-70); }
+
+/* the robot map */
+.ck-body { display:grid; grid-template-columns:minmax(0, 360px) minmax(0, 1fr); gap:14px 18px; align-items:start; }
+.ck-map { position:relative; width:100%; aspect-ratio:110 / 95; }
+.ck-svg { position:absolute; inset:0; width:100%; height:100%; display:block; overflow:visible; }
+.ck-table { fill:color-mix(in srgb, var(--fg) 4%, var(--surface)); stroke:var(--border-strong); stroke-width:.5; vector-effect:non-scaling-stroke; }
+.ck-zone { fill:color-mix(in srgb, var(--green) 16%, transparent); stroke:var(--green); stroke-width:1.5; stroke-dasharray:3 2; vector-effect:non-scaling-stroke; }
+.ck-base { fill:color-mix(in srgb, var(--fg) 14%, var(--surface)); stroke:var(--fg-55); stroke-width:1; vector-effect:non-scaling-stroke; }
+.ck-t { font-family:var(--label); font-size:3.6px; fill:var(--fg-55); }
+.ck-t--checked { fill:var(--blue); font-weight:600; }
+.ck-checked-ring { fill:none; stroke:var(--blue); stroke-width:2; vector-effect:non-scaling-stroke; }
+.ck-checked-dot { fill:var(--blue); }
+
+.ck-dot { position:absolute; display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; margin:0;
+  transform:translate(-50%, -50%); border-radius:50%; border:0; background:transparent; cursor:pointer; transition:background .12s ease, transform .12s ease; }
+.ck-dot .ck-shape { filter:drop-shadow(0 0 1px var(--surface)) drop-shadow(0 0 1px var(--surface)); }
+.ck-dot:hover { background:color-mix(in srgb, currentColor 16%, transparent); }
+.ck-dot:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.ck-dot[aria-pressed="true"] { background:color-mix(in srgb, currentColor 18%, transparent); box-shadow:0 0 0 2px var(--fg); }
+
+.ck-side { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.ck-legend { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:6px; }
+.ck-key { display:flex; align-items:center; gap:8px; font-size:13px; }
+.ck-key > span { color:var(--fg); }
+.ck-sum { margin:0; font-size:12.5px; line-height:1.5; color:var(--fg-70); text-wrap:pretty; }
+.ck-hint { margin:0; font-size:12.5px; color:var(--fg-55); }
+
+.ck-player { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.ck-player:empty { display:none; }
+.ck-ep-h { margin:0; display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:500; color:var(--fg); }
+.ck-ep-s { display:inline-flex; }
+
+/* the tabular bars */
+.ck-row { display:grid; grid-template-columns:minmax(0, 1fr) auto; grid-template-areas:"n v" "b v" "s s"; gap:4px 16px; align-items:center; }
+.ck-row-n { grid-area:n; font-size:13px; font-weight:500; color:var(--fg); }
+.ck-row .ck-num { grid-area:v; text-align:right; }
+.ck-row .ck-num-v { font-size:19px; }
+.ck-row-s { grid-area:s; font-size:12px; color:var(--fg-70); }
+.ck-bar { grid-area:b; height:14px; border-radius:4px; overflow:hidden; }
+.ck-bar-f { position:relative; height:100%; border-radius:4px; background:color-mix(in srgb, var(--blue) 30%, transparent); overflow:hidden; }
+
+.ck-bar-c { position:absolute; left:0; top:0; bottom:0; }
+.ck-legend--tab { flex-direction:row; flex-wrap:wrap; gap:6px 16px; }
+.ck-legend--tab .ck-key { font-size:12px; }
+.ck-legend--tab .ck-key > span:last-child { color:var(--fg-70); }
+.ck-sw { width:14px; height:10px; border-radius:2px; background:color-mix(in srgb, var(--blue) 30%, transparent); flex:none; }
+.ck-bar-c, .ck-sw--copy { background:repeating-linear-gradient(135deg, var(--red) 0 3px, color-mix(in srgb, var(--red) 45%, transparent) 3px 6px); }
+
+@media (max-width: 560px) {
+  .ck { padding:12px; }
+  .ck-body { grid-template-columns:minmax(0, 1fr); }
+  .ck-legend { flex-direction:row; flex-wrap:wrap; gap:6px 14px; }
+  .ck-num-v { font-size:19px; }
+}
+@media (prefers-reduced-motion: reduce) { .ck-dot { transition:none; } }
