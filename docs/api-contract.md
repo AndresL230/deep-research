@@ -16,7 +16,7 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | GET | `/api/datasets` | `[DatasetInfo]`: the built-in `pima` first, then uploaded files |
 | POST | `/api/datasets?name=<file name>` | The body is the CSV file itself (up to 20 MB). Saves it under `datasets/` and returns its `DatasetInfo`. `422 {"detail"}` says why a file cannot be used; `413` when it is too large |
 | POST | `/api/scripts?name=<file name>` | The body is a Python training script (up to 200 KB). The server parses it and never runs it. Saves it under `user_scripts/` and returns its `ScriptInfo`; `422 {"detail"}` when it is not valid Python |
-| GET | `/api/batches` | `[{"id", "kind": "live" or "replay"}]`: batches started on this server, saved batches in `batches/`, and replays in `fixtures/` |
+| GET | `/api/batches` | `[{"id", "kind": "live" or "replay", "resumable"?: true}]`: batches started on this server, saved batches in `batches/`, and replays in `fixtures/`. `resumable` marks a saved batch that `resume` would accept |
 | POST | `/api/batches` | Body: a `BatchConfig`. Starts a batch, returns `{"id"}`. `422 {"detail"}` when the dataset, target, script or trap cannot be used |
 | GET | `/api/costs` | The cost report (below): spend across every batch, live ones from memory and saved ones from disk |
 | GET | `/api/batches/{id}/case` | The case file (below) |
@@ -27,6 +27,7 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | POST | `/api/batches/{id}/investigate` | Live only. Starts the investigator (phase `ready`) |
 | POST | `/api/batches/{id}/decision` | Live only. `{"approve": bool}` answers `forks.pending` (phase `awaiting_approval`) |
 | POST | `/api/batches/{id}/stop` | Live only. Cancels the work and stops every VM |
+| POST | `/api/batches/{id}/resume?investigate=<bool>` | Bring a saved batch of ours back live, in phase `ready`, so the investigator and the fork experiment can run on it after a server restart. With `investigate=true` the investigator starts in the same call. Only a batch whose runs are all scored, with a split and no verdict yet; `409 {"detail"}` says why otherwise. The list and the websocket snapshot flag such a batch with `resumable: true` |
 | WS | `/api/batches/{id}/ws` | See below |
 
 Errors: unknown batch is `404 {"detail": ...}`; a live-only call on a replay is `409`; any other unknown `/api/*`
@@ -105,9 +106,15 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   `fork_at`, examples, `intervention`), or null.
 - `hypotheses`: the investigator's, in order.
 - `forks`: by id (`f1`...): `status` (`rebuilding`, `running`, `done`), `source_run`, `fork_at`, `label`,
-  `intervention`, `n_per_arm`, `children` (each with `arm`, `status`, scores, `how`), and `arms` summaries when
-  done. While the investigator waits for approval there is also `forks.pending` with `n_per_arm`, `vm_count` and
-  `estimate_usd`.
+  `intervention`, `n_per_arm`, `arm_steps`, `children` (each with `arm`, `status`, scores, `how`), and `arms`
+  summaries when done. While the investigator waits for approval there is also `forks.pending` with `n_per_arm`,
+  `vm_count` and `estimate_usd`.
+
+  `arm_steps` maps each arm, in the order it runs, to the step forced on it before it continues (null for
+  `control`). `control` and `forced` are always there. `placebo` (`config.placebo_arm`) runs a harmless command so
+  `forced` is not the only arm whose history carries an extra tool call, and `show` (`config.show_arm`) tells the
+  agent what `forced` fixes and leaves it to decide. A batch saved before these existed has no `arm_steps` and ran
+  `control` and `forced` only. `vm_count` is one base VM plus `n_per_arm` per arm.
 - `verdict`: `{sentence, step_label, numbers}` or null.
 - `costs`: `budget_usd`, `spent_usd` (null when a price is unknown), `prices_missing`, and `scopes`
   (`run:r01`, `fork:f1:base`, `fork:f1:control-1`, `investigator`), each with input, output, cache read and
@@ -172,8 +179,8 @@ activity step's run and done, and `todos` onto the plan step.
 
 ## Websocket
 
-`/api/batches/{id}/ws` first sends `{"kind": "snapshot", "case": <case file>, "live": bool}`. A replay then
-closes. A live batch keeps sending:
+`/api/batches/{id}/ws` first sends `{"kind": "snapshot", "case": <case file>, "live": bool}`. A replay adds
+`"resumable": bool` and then closes. A live batch keeps sending:
 
 ```ts
 { kind: "case", section, value }                  // one case file section changed; replace it

@@ -37,6 +37,12 @@ describe("homeView", () => {
     expect(html).toContain("data-morph-list");
   });
 
+  it("marks a saved batch that can be picked up again", () => {
+    const html = homeView(vm({ batches: { state: "ready", value: [{ id: "b-saved", kind: "replay", resumable: true }] } }));
+    expect(html).toContain('data-kind="ready">Ready to investigate<');
+    expect(html).not.toContain(">Replay<");
+  });
+
   it("shows loading, empty and error states for the batches", () => {
     expect(homeView(vm({ batches: { state: "loading" } }))).toContain("Loading batches");
     expect(homeView(vm({ batches: { state: "ready", value: [] } }))).toContain("No batches yet");

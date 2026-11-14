@@ -14,7 +14,7 @@ HackPrinceton Fall 2026. Tracks: Science + Discovery, LangChain deepagents, Amaz
 | Orchestrator | Plain Python: VMs, runs, scoring, split finding, fork experiment, costs | `batch.py` |
 | Scorer | Reported accuracy vs true holdout accuracy, plus the trap's evidence number (for duplicates: the share of test rows also in training) | `scoring.py` |
 | Split finder | Labels each action, finds the label honest runs do before the split and inflated runs skip | `analysis.py` |
-| Fork experiment | Rebuild the run just before its split, fork the VM, continue N copies unchanged (control) and N with the step forced | `batch.py`, `forks.py` |
+| Fork experiment | Rebuild the run just before its split, fork the VM, then run N copies in each arm: `control` unchanged, `forced` with the step done for it, and by default `placebo` (a harmless command, so `forced` is not the only arm with an extra tool call in its history) and `show` (told what `forced` fixes, left to decide) | `batch.py`, `forks.py` |
 | Investigator | Deepagent with `step-tagger` and `hypothesis` subagents, the `method-errors` skill, and an approval gate on `request_forks` | `agents/investigator.py` |
 | Case file | One JSON file per batch with everything the investigator knows. It is also the UI's data source | `case_file.py` |
 | Costs | Tokens from every model response, VM time, budget guard | `costs.py`, `prices.json` |
@@ -70,6 +70,9 @@ budget guard off and the UI shows token counts only.
 uv run uvicorn deep_research.api:app --reload --port 8000
 ```
 
+For a real, paid batch start the server without `--reload`. With it, saving any `.py` file restarts the server,
+which stops the batch's VMs and loses a pending approval.
+
 That serves the API and the built UI at http://localhost:8000. Open a batch to watch it; a saved batch replays on a
 timeline (play, pause, 1x/4x/16x, scrub, skip to end). Add `?end` to the URL to open a replay at its end. For UI work, also run `cd web && npm run dev`
 (Vite on 5173, proxying `/api` and the websocket to 8000).
@@ -80,6 +83,15 @@ Without the UI:
 uv run python -m deep_research.cli runs --n 1        # milestone 1: one real run end to end
 uv run python -m deep_research.cli runs --n 12       # milestone 2: a batch and the split finding
 uv run python -m deep_research.cli forks <batch_id> --n 4
+uv run python -m deep_research.cli runs --n 6 --budget 3          # a small batch under a 3 dollar budget
+uv run python -m deep_research.cli investigate <batch_id>         # the investigator on a saved batch
+uv run python scripts/batch_numbers.py <batch_id>                 # the numbers a saved batch backs
+```
+
+`investigate` asks on the terminal before each fork experiment. `--auto-approve` answers yes for you, at most three
+times, and only on a batch whose budget is 3 dollars or less. `forks` and `investigate` reopen the saved batch with the
+spend it already recorded, so the budget covers the whole batch, not each command.
+
 uv run python -m deep_research.cli vms               # how many VMs are running on the Daytona key
 uv run python -m deep_research.cli cleanup           # stop every running deep-research VM, from any machine
 ```
@@ -117,9 +129,18 @@ Full contract, including the case file and the websocket messages: `docs/api-con
 | POST | `/api/batches/{id}/investigate` | Start the investigator |
 | POST | `/api/batches/{id}/decision` | `{"approve": true}` answers the fork approval |
 | POST | `/api/batches/{id}/stop` | Stop a live batch and its VMs |
+| POST | `/api/batches/{id}/resume` | Bring a saved batch that stopped at its split back live (`?investigate=true` also starts the investigator) |
 | WS | `/api/batches/{id}/ws` | A snapshot, then `case`, `event`, `fork_event` and `investigator` messages |
 
 The case file's `phase` moves through `config`, `running`, `analyzing`, `ready` (or `no_split`), `investigating`, `awaiting_approval`, `forking`, `forked`, `done`.
+
+### Picking a batch up again
+
+A batch lives in the server's memory while it runs. After a restart it is a replay, but one whose runs are scored and
+whose split was found, with no verdict yet, shows "Ready to investigate" on the home screen and an Investigate
+button on its page. Pressing it resumes the batch (the task files, each run's messages and the case file are all on
+disk) and starts the investigator; the fork experiment rebuilds its VMs by replay as it always does. An investigator
+that was mid-way when the server stopped does not come back: the batch starts again from `ready`.
 
 ### VM cleanup
 
@@ -287,6 +308,23 @@ on the hidden holdout, and whether agents working from it catch the planted dupl
 The VMs have pandas, scikit-learn and matplotlib only. A script that imports anything else (PyTorch, for example)
 is accepted with a warning; the agents may fail on it or rewrite that part. Saved weights (`.pth`) are not
 accepted: a finished model has no steps to compare or fork.
+
+## The arms of the fork experiment
+
+Every arm starts from the same moment of the same run and differs only in what is run before it continues
+(`forks.py`, `arm_plan`):
+
+| Arm | Runs first | What it answers |
+| --- | --- | --- |
+| `control` | nothing | How often this moment inflates on its own |
+| `placebo` | a harmless command | Whether the forced arm's result comes from the step or from being interrupted with one more tool call |
+| `show` | the problem, reported but not fixed | Whether the run simply never noticed, or noticed and split the data anyway |
+| `forced` | the step itself | What doing the step is worth |
+
+`placebo` and `show` are on by default and each costs another `forks_per_choice` VMs; turn them off with
+`placebo_arm` and `show_arm`. `show` exists only for a step with a weaker version defined, so a step without one
+runs three arms. Only `deduplicate` has an intervention today: a batch that splits on any other step reports the
+finding and the fork experiment refuses with its reason.
 
 ## Next
 

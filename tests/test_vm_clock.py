@@ -80,7 +80,8 @@ async def test_a_run_that_fails_early_is_still_billed_for_its_vm(tmp_path, dayto
 
 
 def _ready_to_fork(tmp_path, monkeypatch):
-    b = batch_mod.Batch(BatchConfig(n_runs=1), batch_id="t", root=tmp_path)
+    # Control and forced only: the billing in these tests is worked out for two children.
+    b = batch_mod.Batch(BatchConfig(n_runs=1, placebo_arm=False, show_arm=False), batch_id="t", root=tmp_path)
     (b.runs_dir / "r01").mkdir(parents=True, exist_ok=True)
     (b.runs_dir / "r01" / "messages.json").write_text("[]")
     b.case.set_split({"label": "deduplicate", "fork_run_id": "r01", "fork_at": 0})

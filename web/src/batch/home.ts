@@ -69,10 +69,12 @@ function batchesSection(b: Loadable<BatchListItem[]>): string {
     body = `<div class="hm-note" data-morph-key="empty">No batches yet</div>`;
   } else {
     const cards = b.value.map((it) => {
-      const live = it.kind === "live";
+      // Live: running here. Ready: saved at its split, Investigate brings it back. Otherwise a replay.
+      const kind = it.kind === "live" ? "live" : it.resumable ? "ready" : "replay";
+      const word = kind === "live" ? "Live" : kind === "ready" ? "Ready to investigate" : "Replay";
       return `<button type="button" class="hm-batch" data-morph-key="${attr(it.id)}" data-act="${ACT.openBatch}" data-arg="${attr(it.id)}" title="${attr(it.id)}">
         <span class="hm-batch-id">${esc(it.id)}</span>
-        <span class="hm-kind" data-kind="${live ? "live" : "replay"}">${live ? "Live" : "Replay"}</span>
+        <span class="hm-kind" data-kind="${kind}">${word}</span>
       </button>`;
     }).join("");
     body = `<div class="hm-batches" data-morph-list data-morph-key="list">${cards}</div>`;

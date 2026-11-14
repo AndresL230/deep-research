@@ -5,7 +5,9 @@ runs the fork experiment, drives the investigator, and tracks cost.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
+import logging
 import shutil
 import time
 import uuid
@@ -26,17 +28,56 @@ from .case_file import CaseFile
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, UsageCallback
 from .events import EventLog, current_step, events_from_update, read_events
-from .forks import cut_history, forced_turn, intervention_for
+from .forks import arm_plan, cut_history, forced_turn, intervention_for
 from .scoring import score_run
-from .task import build_task, task_prompt
+from .task import TaskFiles, build_task, task_prompt
+
+logger = logging.getLogger(__name__)
 
 RUN_TIMEOUT_S = 900
 RECURSION_LIMIT = 200
+# One investigator turn is four graph steps, and reading the case file a hundred lines at a time is a
+# turn per read, so the analysts' limit would end an investigation after about 48 turns, with the fork
+# money already spent. The budget check is what limits the investigator's spend.
+INVESTIGATOR_RECURSION_LIMIT = 1000
 MAX_PARALLEL_VMS = 12
+
+# Run statuses that mean the run is over.
+SCORED = ("honest", "inflated", "failed")
+
+
+def resume_problem(case: dict, batch_dir: Path) -> str | None:
+    """Why a saved batch cannot be picked up again, or None when it can.
+
+    A batch can be resumed once its runs are scored and a split was found, as long as no verdict is in yet. Everything
+    the investigator and the fork experiment need is then on disk: the task files, each run's events and messages, and
+    the case file. Nothing that was mid-flight survives a restart (the VMs are gone, the investigator's memory too), so
+    a resumed batch starts again from `ready`.
+    """
+    cfg = case.get("config") or {}
+    if cfg.get("simulated"):
+        return "a simulated batch has no real runs to fork"
+    phase = str(case.get("phase") or "")
+    if phase == "done" or case.get("verdict"):
+        return "this batch already has its verdict"
+    if phase == "no_split":
+        return "no step separated the runs, so there is nothing to investigate"
+    if phase.startswith("blocked:"):
+        return "it stopped over its budget, and it would stop again on the same budget"
+    runs = case.get("runs") or {}
+    if not runs or any(r.get("status") not in SCORED for r in runs.values()):
+        return "its runs never finished"
+    split = case.get("split") or {}
+    src = split.get("fork_run_id")
+    if not src:
+        return "no split was found"
+    if not (batch_dir / "runs" / src / "messages.json").is_file() or not (batch_dir / "task" / "data.csv").is_file():
+        return "the files needed to fork are missing"
+    return None
 
 
 class Batch:
-    def __init__(self, cfg: BatchConfig, batch_id: str | None = None, root: Path = BATCHES_DIR):
+    def __init__(self, cfg: BatchConfig, batch_id: str | None = None, root: Path = BATCHES_DIR, resume: bool = False):
         self.cfg = cfg
         self.id = batch_id or time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
         self.dir = root / self.id
@@ -44,29 +85,39 @@ class Batch:
         self.forks_dir = self.dir / "forks"
         fresh = not self.dir.exists()
         self.runs_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            # First, and before the case file exists: if the task cannot be built there is no batch.
-            self.task = build_task(cfg, self.dir / "task")
-        except BaseException:
-            if fresh:
-                shutil.rmtree(self.dir, ignore_errors=True)
-            raise
+        if resume:
+            # The task files are already there from the first time round.
+            self.task = TaskFiles.in_dir(self.dir / "task")
+        else:
+            try:
+                # First, and before the case file exists: if the task cannot be built there is no batch.
+                self.task = build_task(cfg, self.dir / "task")
+            except BaseException:
+                if fresh:
+                    shutil.rmtree(self.dir, ignore_errors=True)
+                raise
         self.case = CaseFile(self.dir / "case" / "case.json")
         self.tracker = CostTracker(budget_usd=cfg.budget_usd)
+        # A reopened batch (Batch.resume, cli forks, cli investigate) has spend on record already.
+        self.tracker.restore(self.case.data.get("costs") or {})
         self.vms: dict[str, Any] = {}
         self._queues: set[asyncio.Queue] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._last_cost_push = 0.0
         self._investigator = None
         self._inv_config: dict | None = None
+        self._pending_requests = 1
         self.case.subscribe(lambda section, value: self._emit({"kind": "case", "section": section, "value": value}))
         # The team hub (hub.py), when it is set up: every change to the case file and every agent event goes there.
         self._hub = hub.pusher()
         self.started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         if self._hub is not None:
             self.case.subscribe(lambda section, value: self._push_case())
-        # `trap_info` is the trap in words and patterns, so the UI and the investigator need no list of traps.
-        self.case.set_config({**cfg.model_dump(), "trap_info": traps.get(cfg.trap).public()})
+        if not resume:
+            # `trap_info` is the trap in words and patterns, so the UI and the investigator need no list of traps.
+            self.case.set_config({**cfg.model_dump(), "trap_info": traps.get(cfg.trap).public()})
+        elif "trap_info" not in self.case.data.get("config", {}):
+            self.case.set_config({**self.case.data["config"], "trap_info": traps.get(cfg.trap).public()})
 
     # ---- the team hub ----
     def _push_case(self) -> None:
@@ -80,6 +131,53 @@ class Batch:
         if pusher is None:
             return EventLog(path)
         return EventLog(path, on_write=lambda seq, ev: pusher.push_event(self.id, key, seq, ev))
+
+    @classmethod
+    def resume(cls, batch_id: str, root: Path = BATCHES_DIR) -> "Batch":
+        """Pick a saved batch up again where it can be: scored runs and a split, no verdict yet.
+
+        Raises ValueError with the reason when it cannot (`resume_problem`). The batch comes back in phase `ready`,
+        so the investigator can be started as if the server had never stopped. A fork request that was waiting for
+        approval is dropped: the investigator that asked for it is gone.
+        """
+        case_path = root / batch_id / "case" / "case.json"
+        if not case_path.is_file():
+            raise ValueError(f"no batch {batch_id}")
+        case = json.loads(case_path.read_text())
+        problem = resume_problem(case, root / batch_id)
+        if problem:
+            raise ValueError(problem)
+        b = cls(BatchConfig(**case["config"]), batch_id=batch_id, root=root, resume=True)
+        if "pending" in b.case.data["forks"]:
+            b.case.remove_fork("pending")
+        b._close_unfinished_forks()
+        b._forget_lab_pages()  # the VMs behind them are long gone
+        b.case.set_phase("ready")
+        return b
+
+    def _close_unfinished_forks(self) -> None:
+        """A fork experiment the old server was still running is over: its VMs are gone and nothing will finish it.
+
+        Mark it stopped, and its children that never got a score failed, so neither the UI nor the new investigator
+        waits on it. Its finished children keep their scores.
+        """
+        for fork_id, fork in list(self.case.data["forks"].items()):
+            if fork_id == "pending" or fork.get("status") == "done":
+                continue
+            for cid, child in list((fork.get("children") or {}).items()):
+                if child.get("status") not in SCORED:
+                    self._set_child(fork_id, cid, status="failed", reason="the server stopped before this copy finished")
+            self.case.update_fork(fork_id, status="stopped")
+
+    def _forget_lab_pages(self) -> None:
+        """Null every `lab_url`: the VMs that served them are gone. The saved charts stay."""
+        for run_id, run in list(self.case.data["runs"].items()):
+            if run.get("lab_url"):
+                self.case.update_run(run_id, lab_url=None)
+        for fork_id, fork in list(self.case.data["forks"].items()):
+            for cid, child in list((fork.get("children") or {}).items()):
+                if child.get("lab_url"):
+                    self._set_child(fork_id, cid, lab_url=None)
 
     # ---- live updates to the UI ----
     def subscribe(self) -> asyncio.Queue:
@@ -104,6 +202,16 @@ class Batch:
             self._last_cost_push = now
             self.case.set_costs(self.tracker.snapshot())
 
+    def _check_budget(self) -> None:
+        """Stop work in flight once the batch has spent its budget.
+
+        The checks before a batch of runs or a fork experiment only see estimates, and a first
+        batch has no estimate at all. This one sees what was actually spent.
+        """
+        spent = self.tracker.total_usd()
+        if spent is not None and spent > self.cfg.budget_usd:
+            raise OverBudget(f"spent ${spent:.2f} of the ${self.cfg.budget_usd:.2f} budget")
+
     # ---- driving one agent ----
     async def _drive(self, agent, inp, thread_id: str, scope: str, model: str, log: EventLog, on_event) -> list:
         config = {
@@ -115,6 +223,7 @@ class Batch:
             for ev in events_from_update(chunk):
                 on_event(log.write(ev))
             self.push_costs()
+            self._check_budget()
         state = await agent.aget_state(config)
         return state.values.get("messages", [])
 
@@ -227,19 +336,33 @@ class Batch:
         self.case.set_phase("ready")
 
     # ---- phase 3: the fork experiment ----
+    def arm_plan(self) -> dict[str, dict | None]:
+        """The arms this batch's fork experiment would run, from its split and its config (forks.arm_plan)."""
+        split = self.case.data.get("split") or {}
+        return arm_plan(split.get("label") or "", self.cfg.placebo_arm, self.cfg.show_arm, self.cfg.trap)
+
     def estimate_forks_usd(self, n_per_arm: int) -> float | None:
         avg = self.tracker.average_run_usd()
         # Forks start partway through a run, so this overestimates a little.
-        return None if avg is None else avg * 2 * n_per_arm
+        return None if avg is None else avg * max(2, len(self.arm_plan())) * n_per_arm
+
+    def fork_blocker(self) -> str | None:
+        """Why the fork experiment cannot run on this batch, or None when it can."""
+        split = self.case.data.get("split")
+        if not split or split.get("fork_run_id") is None:
+            return "no split finding with a run to fork from"
+        if intervention_for(split["label"], self.cfg.trap) is None:
+            return f"no intervention is defined for '{split['label']}' yet"
+        return None
 
     async def run_forks(self, n_per_arm: int) -> str:
         self._loop = asyncio.get_running_loop()
-        split = self.case.data.get("split")
-        if not split or split.get("fork_run_id") is None:
-            return "error: no split finding with a run to fork from"
+        why_not = self.fork_blocker()
+        if why_not:
+            return f"error: {why_not}"
+        split = self.case.data["split"]
         iv = intervention_for(split["label"], self.cfg.trap)
-        if iv is None:
-            return f"error: no intervention is defined for '{split['label']}' yet"
+        plan = self.arm_plan()
         n_per_arm = max(1, min(int(n_per_arm), 8))
         try:
             self.tracker.check(self.estimate_forks_usd(n_per_arm), f"{2 * n_per_arm} fork runs")
@@ -248,23 +371,31 @@ class Batch:
 
         fork_id = f"f{sum(k.startswith('f') for k in self.case.data['forks']) + 1}"
         src = split["fork_run_id"]
-        msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
-        actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task.given_files())
-        prefix_msgs, n_prefix = cut_history(msgs, split["fork_at"])
-        prefix_actions = actions[:n_prefix]
-        self.case.set_phase("forking")
-        self.case.update_fork(
-            fork_id, status="rebuilding", source_run=src, fork_at=n_prefix, label=split["label"],
-            intervention=iv["description"], n_per_arm=n_per_arm, children={},
-        )
-
+        phase_before = self.case.data.get("phase")
         base_scope = f"fork:{fork_id}:base"
-        base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base")
-        self.vms[f"{fork_id}-base"] = base
-        self.tracker.vm_started(base_scope)
         try:
+            msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
+            actions = actions_from_events(read_events(self.runs_dir / src / "events.jsonl"), self.task.given_files())
+            prefix_msgs, n_prefix = cut_history(msgs, split["fork_at"])
+            prefix_actions = actions[:n_prefix]
+            self.case.set_phase("forking")
+            self.case.update_fork(
+                fork_id, status="rebuilding", source_run=src, fork_at=n_prefix, label=split["label"],
+                intervention=iv["description"], n_per_arm=n_per_arm, children={},
+                arm_steps={a: (step or {}).get("description") for a, step in plan.items()},
+            )
+            base = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-base")
+            self.vms[f"{fork_id}-base"] = base
+            self.tracker.vm_started(base_scope)
             await asyncio.to_thread(vms.load_task, base, self.task)
             await asyncio.to_thread(vms.replay_actions, base, prefix_actions)
+        except Exception as e:  # noqa: BLE001 - returned, so an agent calling this as a tool reads it instead of dying
+            logger.warning("fork %s: could not build the base VM: %s: %s", fork_id, type(e).__name__, e)
+            await self._release(f"{fork_id}-base", base_scope)
+            # No copy ran, so there is no experiment to show, and the batch is back where it was.
+            self.case.remove_fork(fork_id)
+            self.case.set_phase(phase_before)
+            return f"error: could not build the fork's base VM ({type(e).__name__}: {e})"[:400]
         except BaseException:
             await self._release(f"{fork_id}-base", base_scope)
             raise
@@ -284,7 +415,9 @@ class Batch:
                         self.vms[f"{fork_id}-{cid}"] = vm
                         self.tracker.vm_started(scope)
                         how = "fork"
-                    except Exception:  # noqa: BLE001 - fall back to rebuilding by replay
+                    except Exception as e:  # noqa: BLE001 - fall back to rebuilding by replay
+                        logger.warning("fork %s %s: could not fork the base VM (%s: %s); rebuilding it by replay",
+                                       fork_id, cid, type(e).__name__, e)
                         vm = await asyncio.to_thread(vms.create_vm, f"{self.id}-{fork_id}-{cid}")
                         self.vms[f"{fork_id}-{cid}"] = vm
                         # From here, not after the rebuild: the VM is up and billing while it replays.
@@ -296,11 +429,17 @@ class Batch:
                     self._set_child(fork_id, cid, arm=arm, status="running", lab_url=url, how=how)
 
                     history = list(prefix_msgs)
-                    if arm == "forced":
+                    step = plan[arm]
+                    if step is not None:
                         backend = DaytonaSandbox(sandbox=vm)
-                        res = await asyncio.to_thread(backend.execute, iv["command"])
-                        history += forced_turn(iv["command"], res.output)
-                        log.write({"type": "forced", "command": iv["command"], "output": res.output[:2000]})
+                        res = await asyncio.to_thread(backend.execute, step["command"])
+                        # A sandbox result without an exit code (an older SDK) counts as having succeeded.
+                        exit_code = getattr(res, "exit_code", None)
+                        if exit_code not in (0, None):
+                            # Nothing was forced here, so this copy must not be scored as a result of its arm.
+                            raise RuntimeError(f"the {arm} step failed with exit code {exit_code}: {res.output[:200]}")
+                        history += forced_turn(step["command"], res.output)
+                        log.write({"type": "forced", "command": step["command"], "output": res.output[:2000]})
 
                     agent = build_analyst(DaytonaSandbox(sandbox=vm), self.cfg.analyst_model)
 
@@ -329,21 +468,29 @@ class Batch:
                     if await self._release(f"{fork_id}-{cid}", scope):
                         self._set_child(fork_id, cid, lab_url=None)
 
+        # Each copy is its own run, so each starts in an empty context. When the investigator's tool calls
+        # this experiment, the copies would otherwise inherit the investigator's callbacks, and every fork
+        # token would be counted a second time under "investigator", at the investigator's price.
         try:
-            await asyncio.gather(*(child(arm, i) for arm in ("control", "forced") for i in range(n_per_arm)))
+            await asyncio.gather(*(
+                asyncio.create_task(child(arm, i), context=contextvars.Context())
+                for arm in plan for i in range(n_per_arm)
+            ))
         finally:
             await self._release(f"{fork_id}-base", base_scope)
 
-        arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in ("control", "forced")}
+        arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in plan}
         self.case.update_fork(fork_id, status="done", arms=arms)
         self.case.set_phase("forked")
-        c, f = arms["control"], arms["forced"]
-        return (
+        lines = [
             f"Fork {fork_id} from run {src} before action {n_prefix} ({split['label']}). "
-            f"Control: {c['inflated']} of {c['scored']} inflated. "
-            f"Forced '{iv['description']}': {f['inflated']} of {f['scored']} inflated. "
-            f"Failed runs are not counted: control {c['failed']}, forced {f['failed']}."
-        )
+            f"Every arm starts from the same moment of the same run. Failed copies are not counted."
+        ]
+        for arm, step in plan.items():
+            a = arms[arm]
+            what = "continues unchanged" if step is None else step["description"]
+            lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
+        return " ".join(lines)
 
     def _set_child(self, fork_id: str, cid: str, **fields: Any) -> None:
         children = dict(self.case.data["forks"][fork_id].get("children", {}))
@@ -357,7 +504,7 @@ class Batch:
         self._inv_config = {
             "configurable": {"thread_id": f"{self.id}-investigator"},
             "callbacks": [UsageCallback(self.tracker, "investigator", self.cfg.investigator_model)],
-            "recursion_limit": RECURSION_LIMIT,
+            "recursion_limit": INVESTIGATOR_RECURSION_LIMIT,
         }
         self.case.set_phase("investigating")
         await self._stream_investigator({"messages": [{"role": "user", "content": "Investigate this batch."}]})
@@ -365,13 +512,18 @@ class Batch:
     async def decide(self, approve: bool) -> None:
         """Answer the investigator's pending request_forks approval."""
         decision = {"type": "approve"} if approve else {"type": "reject", "message": "The person declined the cost."}
+        # One answer covers one experiment. If the investigator asked for several in one turn, the rest are declined.
+        rest = {"type": "reject", "message": "Only one experiment is approved at a time. Ask again if you still need it."}
+        decisions = [decision] + [rest] * (self._pending_requests - 1)
+        self._pending_requests = 1
         self.case.remove_fork("pending")
         self.case.set_phase("investigating")
-        await self._stream_investigator(Command(resume={"decisions": [decision]}))
+        await self._stream_investigator(Command(resume={"decisions": decisions}))
 
     async def _stream_investigator(self, inp) -> None:
         log = self._log(self.dir / "investigator" / "events.jsonl", "investigator")
         try:
+            self._check_budget()
             async for chunk in self._investigator.astream(inp, self._inv_config, stream_mode="updates", subgraphs=True):
                 ns, update = chunk if isinstance(chunk, tuple) else ((), chunk)
                 if "__interrupt__" in update:
@@ -381,23 +533,34 @@ class Batch:
                     ev = log.write({**ev, "agent": ns[-1].split(":")[0] if ns else "investigator"})
                     self._emit({"kind": "investigator", "event": ev})
                 self.push_costs()
+                self._check_budget()
             self.case.set_phase("done")
             # The investigator has finished and the verdict is in: the batch is over, so stop paying for its VMs.
             await self.close()
+        except OverBudget as e:
+            # The budget stops the investigator too. Nothing more will run, so the VMs can go.
+            self.case.set_phase(f"blocked: {e}")
+            await self.close()
+        except Exception:
+            # A crash ends the investigation as well: stop paying for the VMs, then let the error surface.
+            await self.close()
+            raise
         finally:
             log.close()
             self.push_costs(force=True)
 
     def _on_interrupt(self, interrupts) -> None:
         n = 4
+        self._pending_requests = 1
         try:
-            req = interrupts[0].value["action_requests"][0]
-            n = int(req["args"].get("n_per_arm", 4))
+            requests = interrupts[0].value["action_requests"]
+            self._pending_requests = max(1, len(requests))
+            n = int(requests[0]["args"].get("n_per_arm", 4))
         except Exception:  # noqa: BLE001
             pass
         est = self.estimate_forks_usd(n)
         self.case.update_fork(
-            "pending", status="awaiting_approval", n_per_arm=n, vm_count=2 * n + 1,
+            "pending", status="awaiting_approval", n_per_arm=n, vm_count=max(2, len(self.arm_plan())) * n + 1,
             estimate_usd=None if est is None else round(est, 2),
         )
         self.case.set_phase("awaiting_approval")
@@ -405,17 +568,10 @@ class Batch:
     async def close(self) -> None:
         """Delete every VM this batch still has: runs, fork bases and fork children. Safe to call again."""
         left, self.vms = self.vms, {}
-        if not left:
-            return
-        await asyncio.gather(*(asyncio.to_thread(vms.delete_vm, sb) for sb in left.values()))
+        if left:
+            await asyncio.gather(*(asyncio.to_thread(vms.delete_vm, sb) for sb in left.values()))
         # The lab pages went with the VMs. Charts were saved when each run finished.
-        for run_id, run in list(self.case.data["runs"].items()):
-            if run.get("lab_url"):
-                self.case.update_run(run_id, lab_url=None)
-        for fork_id, fork in list(self.case.data["forks"].items()):
-            for cid, child in list((fork.get("children") or {}).items()):
-                if child.get("lab_url"):
-                    self._set_child(fork_id, cid, lab_url=None)
+        self._forget_lab_pages()
 
 
 def _arm_summary(rows: list[dict]) -> dict:

@@ -140,7 +140,10 @@ export interface SplitFinding {
   intervention: string | null;
 }
 
-export type ForkArm = "control" | "forced";
+/** The experiment's arms (deep_research/forks.py `arm_plan`), in the order they are run.
+ *  `placebo` runs a harmless command so `forced` is not the only arm with an extra tool call in its history;
+ *  `show` is told what `forced` fixes and left to decide. Both are optional per batch. */
+export type ForkArm = "control" | "placebo" | "show" | "forced";
 
 export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   arm: ForkArm;
@@ -164,16 +167,20 @@ export interface ArmSummary {
 
 export interface ForkExperiment {
   id: string;
-  status: "rebuilding" | "running" | "done";
+  status: "rebuilding" | "running" | "done" | "stopped";
   source_run: string;
   fork_at: number;
   label: StepLabel;
+  /** What the `forced` arm runs first. */
   intervention: string;
   n_per_arm: number;
-  /** Keyed `control-1`, `forced-1`, ... */
+  /** Each arm in order, mapped to the step run before it continues (null for `control`).
+   *  Absent on batches saved before the extra arms existed: those ran `control` and `forced` only. */
+  arm_steps?: Partial<Record<ForkArm, string | null>>;
+  /** Keyed `control-1`, `placebo-1`, `show-1`, `forced-1`, ... */
   children: Record<string, ForkChild>;
   /** Set when status is "done". */
-  arms?: Record<ForkArm, ArmSummary>;
+  arms?: Partial<Record<ForkArm, ArmSummary>>;
 }
 
 /** forks["pending"]: the investigator asked for forks and is waiting for `postDecision`. */
@@ -254,7 +261,8 @@ export type AgentEvent = { t: number; /** Investigator only: which agent or suba
 
 /** Messages on `/api/batches/{id}/ws`. A replay sends one snapshot and closes; a live batch keeps streaming. */
 export type BatchMessage =
-  | { kind: "snapshot"; case: CaseFile; live: boolean }
+  /** `resumable`: a saved batch of ours that stopped at a split; `POST .../resume` brings it back live. */
+  | { kind: "snapshot"; case: CaseFile; live: boolean; resumable?: boolean }
   | { [S in CaseSection]: { kind: "case"; section: S; value: CaseFile[S] } }[CaseSection]
   | { kind: "event"; run: string; event: AgentEvent }
   | { kind: "fork_event"; fork: string; child: string; event: AgentEvent }
@@ -290,7 +298,8 @@ export function batchSocketUrl(batchId: string, loc: Pick<Location, "protocol" |
 
 // ── REST ─────────────────────────────────────────────────────────────────────
 
-export interface BatchListItem { id: string; kind: "live" | "replay" }
+/** `resumable`: a saved batch with scored runs, a split and no verdict yet, that `resumeBatch` can pick up again. */
+export interface BatchListItem { id: string; kind: "live" | "replay"; resumable?: boolean }
 
 export interface DatasetColumn {
   name: string;
@@ -472,6 +481,10 @@ export const fetchForkEvents = (id: string, fork: string, child: string, o: Opts
 export const fetchInvestigatorEvents = (id: string, o: Opts = {}) => call<AgentEvent[]>(`${batchPath(id)}/investigator/events`, o);
 /** Live batches only: start the investigator once the phase is `ready`. */
 export const startInvestigation = (id: string, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/investigate`, { ...o, method: "POST" });
+/** Bring a saved, resumable batch back live on this server (phase `ready`); with `investigate`, start the investigator
+ *  in the same call. 409 with the reason when the batch cannot be resumed. */
+export const resumeBatch = (id: string, investigate = false, o: Opts = {}) =>
+  call<{ id: string; phase: string }>(`${batchPath(id)}/resume${investigate ? "?investigate=true" : ""}`, { ...o, method: "POST" });
 /** Live batches only: answer `forks.pending` while the phase is `awaiting_approval`. */
 export const postDecision = (id: string, approve: boolean, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/decision`, { ...o, json: { approve } });
 /** Live batches only: cancel the work and stop every VM. */

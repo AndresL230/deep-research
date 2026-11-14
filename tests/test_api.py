@@ -430,7 +430,8 @@ async def test_scoring_a_fork_does_not_block_the_event_loop(tmp_path, monkeypatc
 
     monkeypatch.setattr(batch_mod, "score_run", score_run)
     monkeypatch.setattr(batch_mod.Batch, "_drive", drive)
-    b = batch_mod.Batch(BatchConfig(n_runs=1), batch_id="t", root=tmp_path)
+    # Control and forced only: this test is about where scoring runs, not about the extra arms.
+    b = batch_mod.Batch(BatchConfig(n_runs=1, placebo_arm=False, show_arm=False), batch_id="t", root=tmp_path)
     (b.runs_dir / "r01").mkdir(parents=True, exist_ok=True)
     (b.runs_dir / "r01" / "messages.json").write_text("[]")
     b.case.set_split({"label": "deduplicate", "fork_run_id": "r01", "fork_at": 0})
@@ -499,3 +500,152 @@ def test_upload_a_script_and_start_checks_it(client, tmp_path, monkeypatch):
     missing = client.post("/api/batches", json={**cfg, "script": "sc-00000000"})
     assert missing.status_code == 422 and "unknown script" in missing.json()["detail"]
     assert client.post("/api/batches", json={**cfg, "script": "../../etc/passwd"}).status_code == 422
+
+
+# ---- resuming a saved batch ----
+
+
+def _saved_batch(tmp_path, name="saved", **case_over):
+    """A copy of the demo batch under the test's batches dir, made to look like a real batch that stopped at `ready`."""
+    import shutil
+
+    from deep_research.batch import resume_problem
+
+    d = tmp_path / "batches" / name
+    shutil.copytree(api.FIXTURES_DIR / DEMO, d)
+    case_path = d / "case" / "case.json"
+    case = json.loads(case_path.read_text())
+    case["config"].pop("simulated", None)
+    case["runs"]["r01"]["lab_url"] = "https://8080-dead.proxy.daytona.example/"  # a VM that is long gone
+    case.update({"phase": "ready", "verdict": None, "forks": {}, "hypotheses": []}, **case_over)
+    case_path.write_text(json.dumps(case))
+    src = case["split"]["fork_run_id"]
+    (d / "runs" / src / "messages.json").write_text("[]")
+    return d, case, resume_problem
+
+
+def test_resume_problem_names_what_blocks_it(tmp_path):
+    d, case, resume_problem = _saved_batch(tmp_path)
+    assert resume_problem(case, d) is None
+    assert "verdict" in resume_problem({**case, "verdict": {"sentence": "x"}}, d)
+    assert "nothing to investigate" in resume_problem({**case, "phase": "no_split"}, d)
+    assert "never finished" in resume_problem({**case, "runs": {**case["runs"], "r01": {"status": "running"}}}, d)
+    assert "split" in resume_problem({**case, "split": None}, d)
+    assert "simulated" in resume_problem({**case, "config": {**case["config"], "simulated": True}}, d)
+    (d / "runs" / case["split"]["fork_run_id"] / "messages.json").unlink()
+    assert "missing" in resume_problem(case, d)
+
+
+def test_saved_batch_is_listed_as_resumable_and_comes_back_live(client, tmp_path, monkeypatch):
+    from deep_research import batch as batch_mod
+
+    _saved_batch(tmp_path, forks={"pending": {"status": "awaiting_approval", "n_per_arm": 4}})
+    monkeypatch.setattr(batch_mod, "BATCHES_DIR", tmp_path / "batches")
+    assert {"id": "saved", "kind": "replay", "resumable": True} in client.get("/api/batches").json()
+    # The fixture itself is never resumable: it is simulated and has its verdict.
+    demo = next(it for it in client.get("/api/batches").json() if it["id"] == DEMO)
+    assert "resumable" not in demo
+    with client.websocket_connect("/api/batches/saved/ws") as ws:
+        snap = ws.receive_json()
+    assert snap["live"] is False and snap["resumable"] is True
+
+    res = client.post("/api/batches/saved/resume")
+    assert res.status_code == 200 and res.json() == {"id": "saved", "phase": "ready"}
+    assert {"id": "saved", "kind": "live"} in client.get("/api/batches").json()
+    case = client.get("/api/batches/saved/case").json()
+    assert case["phase"] == "ready" and "pending" not in case["forks"]
+    assert case["runs"]["r01"]["lab_url"] is None  # its VM is gone
+    # Costs carry over from the saved case file.
+    b = api.BATCHES["saved"]
+    assert b.tracker.snapshot()["scopes"].keys() == case["costs"]["scopes"].keys()
+    assert b.task.data.is_file() and b.task.given_files() == {}
+    with client.websocket_connect("/api/batches/saved/ws") as ws:
+        assert ws.receive_json()["live"] is True
+    # A second resume is a no-op on the live batch.
+    assert client.post("/api/batches/saved/resume").json()["phase"] == "ready"
+    api.BATCHES.pop("saved")
+
+
+def test_resume_refuses_what_cannot_be_resumed(client, tmp_path):
+    _saved_batch(tmp_path, name="finished", phase="done", verdict={"sentence": "x", "step_label": "deduplicate", "numbers": {}})
+    res = client.post("/api/batches/finished/resume")
+    assert res.status_code == 409 and "verdict" in res.json()["detail"]
+    assert client.post(f"/api/batches/{DEMO}/resume").status_code == 409  # a fixture: no messages to fork from
+    assert client.post("/api/batches/nope/resume").status_code == 404
+
+
+# ---- resuming a saved batch: the fixes on top of #4 ----
+
+def _saved_ready_batch(root, batch_id="0101-000000-abcd", **case_extra):
+    """A saved batch at `ready`: scored runs, a split, the files a fork needs."""
+    from deep_research.batch import Batch
+    from deep_research.config import BatchConfig
+
+    b = Batch(BatchConfig(n_runs=2), batch_id=batch_id, root=root)
+    b.case.update_run("r01", status="honest")
+    b.case.update_run("r02", status="inflated")
+    (b.runs_dir / "r02").mkdir(parents=True, exist_ok=True)
+    (b.runs_dir / "r02" / "messages.json").write_text("[]")
+    b.case.set_split({"label": "deduplicate", "fork_run_id": "r02", "fork_at": 1})
+    for k, v in case_extra.items():
+        b.case.data[k] = v
+    b.case.set_phase(case_extra.get("phase", "ready"))
+    return b
+
+
+def test_a_batch_cut_off_mid_fork_comes_back_with_that_fork_stopped(tmp_path):
+    from deep_research.batch import Batch
+
+    b = _saved_ready_batch(tmp_path)
+    b.case.update_fork("f1", status="running", children={
+        "control-1": {"arm": "control", "status": "inflated"},
+        "forced-1": {"arm": "forced", "status": "running"},
+    })
+    again = Batch.resume(b.id, tmp_path)
+    fork = again.case.data["forks"]["f1"]
+    assert fork["status"] == "stopped"
+    assert fork["children"]["control-1"]["status"] == "inflated"  # a finished copy keeps its score
+    assert fork["children"]["forced-1"]["status"] == "failed" and "server stopped" in fork["children"]["forced-1"]["reason"]
+    assert again.case.data["phase"] == "ready"
+
+
+def test_a_batch_that_stopped_over_budget_is_not_resumable(tmp_path):
+    from deep_research.batch import Batch
+
+    b = _saved_ready_batch(tmp_path)
+    b.case.set_phase("blocked: 12 runs would cost about $4.00; spent $0.00 of $1.00")
+    with pytest.raises(ValueError, match="budget"):
+        Batch.resume(b.id, tmp_path)
+
+
+async def test_two_resumes_at_once_build_one_batch_and_one_investigator(tmp_path, monkeypatch):
+    import asyncio
+
+    from deep_research.batch import Batch
+
+    monkeypatch.setattr(api, "BATCHES_DIR", tmp_path)
+    monkeypatch.setattr(api, "BATCHES", {})
+    monkeypatch.setattr(api, "TASKS", {})
+    saved = _saved_ready_batch(tmp_path)
+    built, started = [], []
+    real_resume = Batch.resume.__func__
+
+    def slow_resume(cls, batch_id, root):
+        import time
+
+        time.sleep(0.2)  # long enough for the second request to arrive while the first is building
+        b = real_resume(cls, batch_id, root)
+        built.append(b)
+        return b
+
+    async def investigate(self):
+        started.append(self)
+        await asyncio.sleep(0.5)
+
+    monkeypatch.setattr(Batch, "resume", classmethod(slow_resume))
+    monkeypatch.setattr(Batch, "investigate", investigate)
+    first, second = await asyncio.gather(api._resume_locked(saved.id, True), api._resume_locked(saved.id, True))
+    assert first["id"] == second["id"] == saved.id
+    assert len(built) == 1 and len(started) == 1
+    for t in api.TASKS.values():
+        t.cancel()

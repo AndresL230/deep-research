@@ -27,9 +27,8 @@ from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
-from . import datasets, traps, user_scripts  # noqa: E402
-from .batch import Batch  # noqa: E402 - needs the environment loaded first
-from . import hub  # noqa: E402
+from . import datasets, hub, traps, user_scripts  # noqa: E402
+from .batch import Batch, resume_problem  # noqa: E402 - needs the environment loaded first
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
 from .costs import OverBudget, estimate_batch_usd  # noqa: E402
@@ -232,7 +231,10 @@ def defaults():
 def estimate(cfg: BatchConfig):
     avg = _avg_run_usd()
     runs = estimate_batch_usd(cfg.n_runs, avg)
-    forks = None if avg is None else avg * 2 * cfg.forks_per_choice
+    # No split yet, so this counts every arm the config allows. The `show` arm only exists for a step that
+    # has a weaker version defined, so this is an upper bound (forks.arm_plan).
+    n_arms = 2 + cfg.placebo_arm + cfg.show_arm
+    forks = None if avg is None else avg * n_arms * cfg.forks_per_choice
     return {
         "avg_run_usd": avg,
         "runs_usd": runs,
@@ -287,15 +289,31 @@ async def upload_script(request: Request, name: str = "train.py"):
         raise HTTPException(422, str(e)) from e
 
 
+def _resumable(batch_id: str) -> bool:
+    """A saved batch of ours (not a fixture, not live) that `Batch.resume` would accept."""
+    if _running(batch_id):
+        return False
+    d = BATCHES_DIR / batch_id
+    try:
+        case = json.loads((d / "case" / "case.json").read_text())
+    except Exception:  # noqa: BLE001 - a half-written case file is not resumable
+        return False
+    return resume_problem(case, d) is None
+
+
 @app.get("/api/batches")
 def list_batches():
     out = []
-    # Live means running in this server. Anything else on disk, ours or a fixture, is a replay.
+    # Live means running in this server. Anything else on disk, ours or a fixture, is a replay; one of ours that
+    # stopped at a split can be resumed.
     for root in (BATCHES_DIR, FIXTURES_DIR):
         if root.exists():
             for d in sorted(root.iterdir()):
                 if (d / "case" / "case.json").exists():
-                    out.append({"id": d.name, "kind": "live" if _running(d.name) else "replay"})
+                    item = {"id": d.name, "kind": "live" if _running(d.name) else "replay"}
+                    if root is BATCHES_DIR and _resumable(d.name):
+                        item["resumable"] = True
+                    out.append(item)
     # Batches other machines ran, from the team hub. They open as replays, read from the hub.
     seen = {b["id"] for b in out}
     for row in (_hub_cached("batches", hub.list_batches) if hub.enabled() else None) or []:
@@ -330,6 +348,43 @@ def costs():
             seen.add(row["id"])
             entries.append({"id": row["id"], "kind": "replay", "case": row["case"], "mtime": None, "machine": row.get("machine")})
     return cost_report(entries)
+
+
+# One resume at a time per batch: two clicks (two tabs) must not build two batches and start two investigators.
+_RESUME_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+@app.post("/api/batches/{batch_id}/resume")
+async def resume_batch(batch_id: str, investigate: bool = False):
+    """Load a saved batch back into this server so the investigator and the fork experiment can run on it.
+
+    Only a batch whose runs are scored, with a split and no verdict yet. It comes back in phase `ready`; with
+    `?investigate=true` the investigator starts right away.
+    """
+    return await _resume_locked(batch_id, investigate)
+
+
+async def _resume_locked(batch_id: str, investigate: bool) -> dict:
+    async with _RESUME_LOCKS.setdefault(batch_id, asyncio.Lock()):
+        return await _resume(batch_id, investigate)
+
+
+async def _resume(batch_id: str, investigate: bool) -> dict:
+    b = _running(batch_id)
+    if b is None:
+        _batch_dir(batch_id)  # 404 for an unknown id
+        # A batch that is over in this server (stopped, say) is a replay; resuming it starts from its files on disk.
+        BATCHES.pop(batch_id, None)
+        try:
+            b = await asyncio.to_thread(Batch.resume, batch_id, BATCHES_DIR)
+        except ValueError as e:
+            raise HTTPException(409, f"this batch cannot be resumed: {e}") from e
+        BATCHES[b.id] = b
+    # Only when nothing is already running for it: a second click must not start a second investigator.
+    task = TASKS.get(b.id)
+    if investigate and b.case.data.get("phase") == "ready" and (task is None or task.done()):
+        _spawn(b.id, b.investigate())
+    return {"id": b.id, "phase": b.case.data.get("phase")}
 
 
 @app.post("/api/batches")
@@ -507,7 +562,7 @@ async def ws(websocket: WebSocket, batch_id: str):
             await websocket.send_json({"kind": "error", "message": e.detail})
             await websocket.close(code=4404)
             return
-        await websocket.send_json({"kind": "snapshot", "case": case, "live": False})
+        await websocket.send_json({"kind": "snapshot", "case": case, "live": False, "resumable": _resumable(batch_id)})
         await websocket.close()
         return
     q = b.subscribe()

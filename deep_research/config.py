@@ -54,6 +54,11 @@ class BatchConfig(BaseModel):
     holdout_fraction: float = Field(0.2, gt=0.0, lt=0.5)
     n_runs: int = Field(12, ge=1, le=24)
     forks_per_choice: int = Field(4, ge=1, le=8)
+    # Extra arms in the fork experiment, each costing another `forks_per_choice` VMs (forks.arm_plan).
+    # `placebo` runs a harmless command, so the forced arm's history is not the only one with an extra
+    # tool call in it. `show` tells the agent what the forced arm fixes and lets it decide for itself.
+    placebo_arm: bool = True
+    show_arm: bool = True
     analyst_model: str = Field(default_factory=lambda: os.getenv("ANALYST_MODEL", "anthropic:claude-haiku-5-5"))
     investigator_model: str = Field(default_factory=lambda: os.getenv("INVESTIGATOR_MODEL", "anthropic:claude-sonnet-5-5"))
     budget_usd: float = Field(10.0, gt=0)

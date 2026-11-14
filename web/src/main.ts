@@ -21,7 +21,7 @@ import { AWAY_PX, conversationView, initialConversationUi, jumpButton, stickAfte
 import { scheduleOrbs } from "./thinking-orb";
 import {
   applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
-  fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, startBatch, uploadDataset, uploadScript, startInvestigation, stopBatch,
+  fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, uploadDataset, uploadScript, startInvestigation, stopBatch,
   type AgentEvent, type BatchConfig, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, childKey, parseRoute, routeHash, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
@@ -44,6 +44,8 @@ interface BatchState {
   /** Null until the websocket's snapshot (or the case fetch) arrives. */
   full: CaseFile | null;
   live: boolean;
+  /** A saved batch the server can bring back live (the snapshot said so). */
+  resumable: boolean;
   events: Record<EventKey, AgentEvent[]>;
   /** Live only: per log, the last event's time and when it arrived, to run that log's clock between events. */
   ticks: Record<EventKey, { t: number; at: number }>;
@@ -152,6 +154,7 @@ function batchVm(b: BatchState, full: CaseFile): BatchVm {
   return {
     id: b.id,
     live: b.live,
+    resumable: b.resumable,
     case: c,
     events: r ? eventsAt(full, b.events, r.t) : b.events,
     logs: logViews(b, full, c),
@@ -327,10 +330,10 @@ function closeBatch(): void {
   S.batch = null;
 }
 
-function openBatch(id: string): void {
-  if (S.batch?.id === id) return;
+function openBatch(id: string, reopen = false): void {
+  if (S.batch?.id === id && !reopen) return;
   closeBatch();
-  const b: BatchState = { id, full: null, live: false, events: {}, ticks: {}, replay: null, busy: null, error: null, loadError: null, socket: null };
+  const b: BatchState = { id, full: null, live: false, resumable: false, events: {}, ticks: {}, replay: null, busy: null, error: null, loadError: null, socket: null };
   S.batch = b;
   let snapshotSeen = false;
   b.socket = openBatchSocket(id, {
@@ -340,6 +343,7 @@ function openBatch(id: string): void {
       if (m.kind === "snapshot") {
         snapshotSeen = true;
         b.live = m.live;
+        b.resumable = !m.live && m.resumable === true;
         if (m.live) { b.full = m.case; void loadLiveLogs(b); }
         else void loadReplay(b, m.case);
         paint();
@@ -582,6 +586,25 @@ async function liveAction(name: string, call: (id: string) => Promise<unknown>):
   }
 }
 
+/** A saved batch at its split: ask the server to bring it back live and start the investigator, then follow it over
+ *  a fresh websocket (the replay's one closed after its snapshot). */
+async function resumeAndInvestigate(b: BatchState): Promise<void> {
+  if (b.busy) return;
+  b.busy = ACT.investigate;
+  b.error = null;
+  paint();
+  try {
+    await resumeBatch(b.id, true);
+    if (S.batch !== b) return;
+    stopClock();
+    openBatch(b.id, true);
+  } catch (e) {
+    b.error = message(e, "Couldn't resume the batch.");
+    b.busy = null;
+    paint();
+  }
+}
+
 // ── routing ──────────────────────────────────────────────────────────────────
 
 function go(r: Route): void {
@@ -648,7 +671,10 @@ root.addEventListener("click", (e) => {
       return;
     }
     case ACT.back: if ("id" in r) go({ name: "batch", id: r.id }); else if (r.name === "costs") go(S.costsBack); return;
-    case ACT.investigate: void liveAction("investigate", (id) => startInvestigation(id)); return;
+    case ACT.investigate:
+      if (b && !b.live && b.resumable) void resumeAndInvestigate(b);
+      else void liveAction("investigate", (id) => startInvestigation(id));
+      return;
     case ACT.approve: void liveAction("approve", (id) => postDecision(id, true)); return;
     case ACT.decline: void liveAction("decline", (id) => postDecision(id, false)); return;
     case ACT.stop: void liveAction("stop", (id) => stopBatch(id)); return;
