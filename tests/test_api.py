@@ -320,6 +320,54 @@ def test_a_batch_stops_being_live_once_it_is_over(client, tmp_path, monkeypatch)
     assert msg["kind"] == "snapshot" and msg["live"] is False and msg["case"]["phase"] == "done"
 
 
+
+def test_a_crashed_or_budget_blocked_batch_is_over(client, tmp_path, monkeypatch):
+    phases = {"b-err": "error: RuntimeError: boom", "b-blocked": "blocked: 12 runs would cost $3.00, over the $1.00 budget"}
+    for bid, phase in phases.items():
+        d = tmp_path / "batches" / bid / "case"
+        d.mkdir(parents=True)
+        (d / "case.json").write_text(json.dumps({"phase": phase, "runs": {}, "forks": {}}))
+    monkeypatch.setattr(api, "BATCHES", {bid: _FakeLiveBatch(phase) for bid, phase in phases.items()})
+    kinds = {b["id"]: b["kind"] for b in client.get("/api/batches").json()}
+    assert kinds["b-err"] == "replay" and kinds["b-blocked"] == "replay"
+    for bid in phases:
+        assert client.post(f"/api/batches/{bid}/investigate").status_code == 409
+        with client.websocket_connect(f"/api/batches/{bid}/ws") as ws:
+            assert ws.receive_json()["live"] is False
+    # A phase that only mentions an error is not one.
+    assert not api._is_over("running") and api._is_over("error: x") and not api._is_over(None)
+
+
+async def test_a_crash_ends_the_batch_and_deletes_its_vms(monkeypatch):
+    import asyncio
+
+    closed = []
+
+    class Crashing(_FakeLiveBatch):
+        def __init__(self):
+            super().__init__("running")
+            self.case.set_phase = lambda phase: self.case.data.update(phase=phase)
+
+        async def close(self):
+            closed.append(True)
+
+    b = Crashing()
+    monkeypatch.setattr(api, "BATCHES", {"b-crash": b})
+    monkeypatch.setattr(api, "TASKS", {})
+
+    async def boom():
+        raise RuntimeError("the analyst exploded")
+
+    api._spawn("b-crash", boom())
+    failed = api.TASKS["b-crash"]
+    for _ in range(10):  # the task fails, then its done callback schedules the cleanup
+        if api.TASKS["b-crash"] is not failed:
+            break
+        await asyncio.sleep(0)
+    await api.TASKS["b-crash"]
+    assert b.case.data["phase"] == "error: the analyst exploded"
+    assert api._running("b-crash") is None and closed == [True]
+
 # ---- each VM is deleted as soon as its run is scored ----
 
 class FakeVm:
