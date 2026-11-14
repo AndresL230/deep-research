@@ -7,5 +7,8 @@ __pycache__/
 node_modules/
 dist/
 
+# Server run logs (root only; fixtures/demo-batch/runs/ is committed)
+/runs/
+
 # Batch outputs written by real runs (fixtures/ is committed)
 backend/batches/
