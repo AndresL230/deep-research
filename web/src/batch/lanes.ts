@@ -1215,10 +1215,21 @@ function provenance(f: ForkExperiment, vm: BatchVm): string {
   }
   const tool = fixing ? "request_fix_test" : "request_forks";
   const nArms = armNames(f).length;
+  // After a round of more pairs `n_per_arm` counts every round's copies: the approval was for the first round's.
+  const rounds = f.more_pairs ?? [];
+  const approved = rounds[0]?.n_per_arm_before ?? f.n_per_arm;
   lines.push({
-    who: "person", src: `forks.${f.id}.n_per_arm`,
-    text: `${tool} paused the investigator for approval: ${nArms} arms x ${f.n_per_arm} + 1 base = ${nArms * f.n_per_arm + 1} VMs` +
+    who: "person", src: rounds.length ? `forks.${f.id}.more_pairs[0].n_per_arm_before` : `forks.${f.id}.n_per_arm`,
+    text: `${tool} paused the investigator for approval: ${nArms} arms x ${approved} + 1 base = ${nArms * approved + 1} VMs` +
       times(fixing ? asked?.requestFixTest : asked?.requestForks, `${tool} called`),
+  });
+  rounds.forEach((r, i) => {
+    const end = r.status === "done" ? (r.pairs_after != null ? `, ${r.pairs_after} pairs after` : "")
+      : r.status === "failed" ? ", failed" : r.status === "stopped" ? ", stopped" : ", running";
+    lines.push({
+      who: "person", src: `forks.${f.id}.more_pairs[${i}]`, beam: r.status === "rebuilding" || r.status === "running",
+      text: `More pairs confirmed: ${nArms} arms x ${r.n_per_arm} + 1 base = ${nArms * r.n_per_arm + 1} VMs, ${r.pairs_before} pairs before${end}`,
+    });
   });
   const kids = Object.entries(f.children ?? {});
   const nFork = kids.filter(([, k]) => k.how === "fork").length;

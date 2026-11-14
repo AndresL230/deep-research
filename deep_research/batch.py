@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -26,13 +27,14 @@ from . import sandboxes as vms
 from .agents.analyst import build_analyst
 from .agents.investigator import RUBRIC, build_investigator
 from .analysis import find_split, fork_point, label_table
-from .case_file import CaseFile
+from .case_file import CaseFile, with_evidence
 from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
-from .costs import CostTracker, OverBudget, UsageCallback
+from .costs import CostTracker, OverBudget, ScopeCost, UsageCallback, usd_up
 from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, prefix_events, read_events
+from .evidence import verdict_evidence, verdict_sentence
 from .evidence import describe as describe_evidence
-from .evidence import fix_evidence, fix_outcome, method_outcome, verdict_evidence
+from .evidence import fix_evidence, fix_outcome, method_outcome
 from .domains import actions_from_events, build_task, intervention_for, score_run
 from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
 
@@ -193,6 +195,186 @@ def resume_problem(case: dict, batch_dir: Path) -> str | None:
     return None
 
 
+# ---- more pairs: more copies per arm for a verdict whose evidence is still open ----
+
+# Copies per arm one request may add: the same cap as one experiment's `n_per_arm`.
+MAX_MORE_PAIRS = 8
+# Phases in which something of the batch is still running (or waiting on a person), so no new experiment may start.
+WORKING_PHASES = ("config", "running", "analyzing", "ready", "investigating", "awaiting_approval", "forking", "forked")
+
+
+class Refused(ValueError):
+    """Why more pairs cannot run on a batch now. The API answers it with 409 and this message."""
+
+
+def verdict_fork(case: dict) -> tuple[str, dict] | None:
+    """The fork experiment a verdict rests on, as (fork id, fork): the newest method experiment (not a fix test) whose
+    first round finished, so it has `control` and `forced` arm summaries. None when there is none."""
+    found = None
+    for fork_id, fork in (case.get("forks") or {}).items():
+        if fork_id == "pending" or not isinstance(fork, dict) or fork.get("kind", "method") == "fix":
+            continue
+        arms = fork.get("arms") or {}
+        if "control" in arms and "forced" in arms:
+            found = (fork_id, fork)
+    return found
+
+
+def _fork_evidence(fork: dict) -> dict:
+    """`verdict_evidence` of a fork's own arm summaries (scored copies, as a verdict counts them)."""
+    arms = fork.get("arms") or {}
+    return verdict_evidence({a: {"inflated": int(arms[a].get("inflated") or 0), "total": int(arms[a].get("scored") or 0)}
+                             for a in ("control", "forced") if isinstance(arms.get(a), dict)})
+
+
+def more_pairs_problem(case: dict, batch_dir: Path) -> str | None:
+    """Why more pairs cannot be added to a saved batch's fork experiment, or None when they can.
+
+    They can once the batch has a verdict whose evidence is still `open` and a finished method experiment to add to,
+    with the files needed to fork its source run again. Whether the batch is busy and whether the budget covers it
+    are checked when it is asked for (`Batch.reserve_more_pairs`).
+    """
+    cfg = case.get("config") or {}
+    if cfg.get("simulated"):
+        return "a simulated batch has no real runs to fork"
+    verdict = case.get("verdict")
+    if not isinstance(verdict, dict):
+        return "this batch has no verdict yet"
+    found = verdict_fork(case)
+    if found is None:
+        return "no fork experiment finished with a control and a forced arm, so there are no pairs to add to"
+    evidence = verdict.get("evidence") or verdict_evidence(verdict.get("arms"), verdict.get("numbers"))
+    if evidence.get("level") == "supported":
+        return "the verdict's evidence is already supported"
+    try:
+        marker = domains.get(cfg.get("domain")).task_marker
+    except ValueError:
+        return f"its domain '{cfg.get('domain')}' is not available here"
+    src = found[1].get("source_run")
+    if not src or not (batch_dir / "runs" / src / "messages.json").is_file() or not (batch_dir / "task" / marker).is_file():
+        return "the files needed to fork are missing"
+    return None
+
+
+# A fork copy that ran to its end and was scored: what a whole new copy will cost. A failed or stopped copy may have
+# stopped early, so its spend would undersell one.
+FINISHED_COPY = ("honest", "inflated", "unclear")
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return one if n == 1 else many
+
+
+def _average_cost(costs: dict[str, ScopeCost]) -> tuple[float, float] | None:
+    """Average (total, VM part) of these scopes' spend, or None when there are none or a price is unknown."""
+    totals = [c.total_usd for c in costs.values()]
+    if not totals or any(t is None for t in totals):
+        return None
+    return sum(totals) / len(totals), sum(c.vm_usd or 0.0 for c in costs.values()) / len(costs)  # type: ignore[arg-type]
+
+
+def _per_copy_usd(case: dict, tracker: CostTracker, fork_id: str, fork: dict) -> tuple[float, float, str] | None:
+    """What one new copy of `fork` should cost, as (total, VM part, where the figure comes from): the average spend
+    (model tokens and VM time) of its own copies that finished, else of the runs on its source run's model, else of
+    every run. A copy's spend covers all it sends, the source run's history it starts from included (as cache reads
+    and writes). None when nothing has a known price."""
+    children = fork.get("children") or {}
+    own = tracker.scope_costs({f"fork:{fork_id}:{cid}" for cid, c in children.items()
+                               if isinstance(c, dict) and c.get("status") in FINISHED_COPY})
+    if (avg := _average_cost(own)) is not None:
+        return (*avg, f"the average of {len(own)} earlier finished {_plural(len(own), 'copy', 'copies')} of {fork_id}")
+    runs = case.get("runs") or {}
+    model_of = lambda r: (runs.get(r) or {}).get("model") or (case.get("config") or {}).get("analyst_model")  # noqa: E731
+    model = model_of(fork.get("source_run"))
+    same = tracker.scope_costs({f"run:{r}" for r in runs if model_of(r) == model})
+    if (avg := _average_cost(same)) is not None:
+        return (*avg, f"no copy of {fork_id} finished yet, so the average whole run on {model} "
+                      f"({len(same)} {_plural(len(same), 'run', 'runs')})")
+    every = tracker.scope_costs({k for k in list(tracker.scopes) if k.startswith("run:")})
+    if (avg := _average_cost(every)) is not None:
+        return (*avg, f"no copy of {fork_id} finished yet, so the average whole run "
+                      f"({len(every)} {_plural(len(every), 'run', 'runs')})")
+    return None
+
+
+def more_pairs_quote(case: dict, tracker: CostTracker, n_per_arm: int | None = None) -> dict:
+    """What `n_per_arm` more copies per arm of the verdict's fork would add and cost, before anyone confirms it.
+
+    `n_per_arm` defaults to what reaches the needed pairs (at least 1) and is held between 1 and MAX_MORE_PAIRS.
+    `pairs_after` assumes every new copy is scored. The estimate is what one copy of this fork costs, model tokens
+    and VM time (`_per_copy_usd`), times the new copies, plus one base VM rebuilt at the fork point at the most one
+    of this fork's base VMs has cost (else at one copy's VM time). It is rounded up to the cent, never down: a person
+    approves real money with it. `basis` says in words what it includes. More pairs ask no model besides the copies'
+    own (the verdict is reworded in code), so the investigator's spend is no part of it. `over_budget` is what
+    `reserve_more_pairs` refuses. Expects a fork to exist (`more_pairs_problem` is None).
+    """
+    found = verdict_fork(case)
+    if found is None:
+        raise Refused("no fork experiment finished, so there are no pairs to add to")
+    fork_id, fork = found
+    arms = list(fork.get("arm_steps") or fork.get("arms") or {})
+    ev = _fork_evidence(fork)
+    n = max(ev["needed_pairs"] - ev["pairs"], 1) if n_per_arm is None else n_per_arm
+    n = max(1, min(int(n), MAX_MORE_PAIRS))
+    copies = len(arms) * n
+
+    estimate, basis = None, "No estimate: no earlier copy or run of this batch has a known price."
+    per_copy = _per_copy_usd(case, tracker, fork_id, fork)
+    if per_copy is not None:
+        copy_usd, copy_vm_usd, source = per_copy
+        # The first round's base VM is `base`, the k-th round of more pairs' `base-{k + 1}`.
+        rounds = len(fork.get("more_pairs") or [])
+        bases = tracker.scope_costs({f"fork:{fork_id}:base"} | {f"fork:{fork_id}:base-{i}" for i in range(2, rounds + 2)})
+        known = [c.total_usd for c in bases.values() if c.total_usd is not None]
+        if len(known) == 1:
+            base_usd, base_words = known[0], f"what {fork_id}'s base VM cost"
+        elif known:
+            base_usd, base_words = max(known), f"the most one of {fork_id}'s {len(known)} base VMs cost"
+        else:
+            base_usd, base_words = copy_vm_usd, "priced as one copy's VM time"
+        estimate = usd_up(copy_usd * copies + base_usd)
+        basis = (f"{copies} new {_plural(copies, 'copy', 'copies')} at ${copy_usd:.4f} each ({source}), plus "
+                 f"${base_usd:.4f} for the base VM ({base_words}). Model tokens and VM time, rounded up to the cent.")
+
+    spent, budget = tracker.total_usd(), tracker.budget_usd
+    problem = None
+    if spent is not None and spent >= budget:
+        problem = f"the batch has spent ${spent:.2f} of its ${budget:.2f} budget"
+    elif spent is not None and estimate is not None and spent + estimate > budget:
+        problem = (f"{copies} more fork runs would cost about ${estimate:.2f}; spent ${spent:.2f} of the "
+                   f"${budget:.2f} budget")
+    return {
+        "fork_id": fork_id,
+        "n_per_arm": n,
+        "max_per_arm": MAX_MORE_PAIRS,
+        "arms": arms,
+        "vm_count": copies + 1,
+        "estimate_usd": estimate,
+        "basis": basis,
+        "pairs_now": ev["pairs"],
+        "pairs_after": ev["pairs"] + n,
+        "needed_pairs": ev["needed_pairs"],
+        "level_now": ev["level"],
+        "p_value_now": ev["p_value"],
+        "budget_usd": budget,
+        "spent_usd": None if spent is None else round(spent, 2),
+        "over_budget": problem is not None,
+        "budget_problem": problem,
+    }
+
+
+def _child_arm(cid: str, child: dict) -> str:
+    """A fork child's arm: its `arm`, else the part of its id before the number (`control-3`)."""
+    return child.get("arm") or cid.rsplit("-", 1)[0]
+
+
+def _child_number(cid: str) -> int:
+    try:
+        return int(cid.rsplit("-", 1)[1])
+    except (IndexError, ValueError):
+        return 0
+
+
 class Batch:
     def __init__(self, cfg: BatchConfig, batch_id: str | None = None, root: Path = BATCHES_DIR, resume: bool = False):
         self.cfg = cfg
@@ -283,6 +465,33 @@ class Batch:
         b._close_unfinished_forks()
         b._forget_lab_pages()  # the VMs behind them are long gone
         b.case.set_phase("ready")
+        return b
+
+    @classmethod
+    def reopen(cls, batch_id: str, root: Path = BATCHES_DIR) -> "Batch":
+        """Load a finished batch back so more pairs can be added to its fork experiment (`reserve_more_pairs`).
+
+        Raises Refused with the reason when it cannot (`more_pairs_problem`). Unlike `resume`, the batch keeps its
+        verdict and its phase: nothing runs until more pairs are reserved. Work the old server left unfinished is
+        closed first: a round of more pairs is ended as stopped (its scored copies count), any other experiment is
+        marked stopped, and a pending approval is dropped.
+        """
+        case_path = root / batch_id / "case" / "case.json"
+        if not case_path.is_file():
+            raise Refused(f"no batch {batch_id}")
+        case = with_evidence(json.loads(case_path.read_text()))
+        problem = more_pairs_problem(case, root / batch_id)
+        if problem:
+            raise Refused(problem)
+        b = cls(BatchConfig(**case["config"]), batch_id=batch_id, root=root, resume=True)
+        if "pending" in b.case.data["forks"]:
+            b.case.remove_fork("pending")
+        b._settle_more_pairs("the server stopped before this copy finished")
+        b._close_unfinished_forks()
+        b._forget_lab_pages()
+        if b.case.data.get("phase") in WORKING_PHASES:
+            # Saved mid-way by a server that stopped after the verdict: nothing of that runs any more.
+            b.case.set_phase("done")
         return b
 
     def _close_unfinished_forks(self) -> None:
@@ -891,43 +1100,105 @@ class Batch:
 
         fork_id = f"f{sum(k.startswith('f') for k in self.case.data['forks']) + 1}"
         phase_before = self.case.data.get("phase")
-        base_scope = f"fork:{fork_id}:base"
+        base_key, base_scope = f"{fork_id}-base", f"fork:{fork_id}:base"
         try:
-            msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
-            src_events = read_events(self.runs_dir / src / "events.jsonl")
-            actions = actions_from_events(src_events, self.task)
-            prefix_msgs, n_prefix = cut_history(msgs, fork_at)
-            prefix_actions = actions[:n_prefix]
-            # Each copy keeps these next to its own log: the episodes the source ran before the cut are the copy's too.
-            prefix_log = "".join(json.dumps(e) + "\n" for e in prefix_events(src_events, n_prefix))
+            point = self._fork_point(src, fork_at)
             self.case.set_phase("forking")
             self.case.update_fork(
-                fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=n_prefix, n_per_arm=n_per_arm,
+                fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=point.n_prefix, n_per_arm=n_per_arm,
                 children={}, arm_steps={a: (step or {}).get("description") for a, step in plan.items()}, **record,
             )
-            base = await self._create_vm(f"{fork_id}-base", f"{self.id}-{fork_id}-base")
-            self.tracker.vm_started(base_scope)
-            await asyncio.to_thread(vms.load_task, base, self.task)
-            await asyncio.to_thread(vms.replay_actions, base, prefix_actions)
+            base = await self._build_base(base_key, f"{self.id}-{fork_id}-base", base_scope, point.actions)
         except Exception as e:  # noqa: BLE001 - returned, so an agent calling this as a tool reads it instead of dying
             logger.warning("fork %s: could not build the base VM: %s: %s", fork_id, type(e).__name__, e)
-            await self._release(f"{fork_id}-base", base_scope)
+            await self._release(base_key, base_scope)
             # No copy ran, so there is no experiment to show, and the batch is back where it was.
             self.case.remove_fork(fork_id)
             self.case.set_phase(phase_before)
             return f"error: could not build the fork's base VM ({type(e).__name__}: {e})"[:400]
         except BaseException:
-            await self._release(f"{fork_id}-base", base_scope)
+            await self._release(base_key, base_scope)
             raise
         self.case.update_fork(fork_id, status="running")
+        n_prefix = point.n_prefix
 
+        # Each copy is its own run, so each starts in an empty context (`_run_children`).
+        try:
+            results = await self._run_children(
+                fork_id, plan, [(arm, i + 1) for arm in plan for i in range(n_per_arm)], base, point, self.run_model(src),
+                kind=kind)
+        finally:
+            await self._release(base_key, base_scope)
+
+        arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in plan}
+        self.case.update_fork(fork_id, status="done", arms=arms)
+        found = self._fork_findings(fork_id, arms)
+        self.case.set_phase("forked")
+        lines = [
+            f"Fork {fork_id} from run {src} before action {n_prefix} {headline}. "
+            f"Every arm starts from the same moment of the same run. Failed copies are not counted."
+        ]
+        lines += _arm_lines(plan, arms, kind)
+        lines += _findings_lines(record, found)
+        if kind == "fix":
+            self.case.update_fix(status="tested", fork_id=fork_id,
+                                 result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
+        return " ".join(lines)
+
+    def _fork_findings(self, fork_id: str, arms: dict[str, dict]) -> dict:
+        """What a fork's stored copies say, recomputed from every child and the arm summaries `arms`: how the copies
+        were built, what the experiment measures, and for a method experiment its evidence and the outcome of the
+        hypothesis it tests, which goes onto that hypothesis too. Called when the first round ends and again when a
+        round of more pairs ends, so the outcome always follows every copy. The prediction, the falsification and
+        `preregistered_at` are never touched: they stay what was registered before the first copy ran."""
+        fork = self.case.data["forks"][fork_id]
+        kind = fork.get("kind", "method")
+        built = {"fork": 0, "replay": 0, "none": 0}
+        for c in (fork.get("children") or {}).values():
+            built[c.get("how") if c.get("how") in ("fork", "replay") else "none"] += 1
+        found: dict[str, Any] = {"built": built,
+                                 "measures": "controller_performance" if kind == "fix" else "reporting_accuracy"}
+        if kind != "fix" and "control" in arms and "forced" in arms:
+            ev = verdict_evidence({a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]}
+                                   for a in ("control", "forced")})
+            found.update(evidence=ev, outcome=method_outcome(ev))
+        self.case.update_fork(fork_id, **found)
+        if fork.get("hypothesis_id") and "outcome" in found:
+            self.case.set_hypothesis_status(fork["hypothesis_id"], found["outcome"], tested_by=fork_id)
+        return found
+
+    def _fork_point(self, src: str, fork_at: int) -> "_ForkPoint":
+        """What every copy of run `src` forked before action `fork_at` starts from: the cut history, how many actions
+        precede the cut, those actions (replayed to rebuild the base VM) and the source's events up to the cut."""
+        msgs = messages_from_dict(json.loads((self.runs_dir / src / "messages.json").read_text()))
+        src_events = read_events(self.runs_dir / src / "events.jsonl")
+        actions = actions_from_events(src_events, self.task)
+        prefix_msgs, n_prefix = cut_history(msgs, fork_at)
+        # Each copy keeps these next to its own log: the episodes the source ran before the cut are the copy's too.
+        prefix_log = "".join(json.dumps(e) + "\n" for e in prefix_events(src_events, n_prefix))
+        return _ForkPoint(prefix_msgs, n_prefix, actions[:n_prefix], prefix_log)
+
+    async def _build_base(self, key: str, label: str, scope: str, actions: list) -> Any:
+        """A VM at the fork point: a fresh VM with the task loaded and the source run's actions replayed. Kept under
+        `key` and billed to `scope` from the moment it exists, so a failure part way still releases and counts it."""
+        # Through the cancel-safe helper: a stop while Daytona is still making it deletes it on arrival.
+        base = await self._create_vm(key, label)
+        self.tracker.vm_started(scope)
+        await asyncio.to_thread(vms.load_task, base, self.task)
+        await asyncio.to_thread(vms.replay_actions, base, actions)
+        return base
+
+    async def _run_children(self, fork_id: str, plan: dict[str, dict | None], jobs: list[tuple[str, int]], base: Any,
+                            point: "_ForkPoint", model: str, *, kind: str = "method") -> dict[str, dict]:
+        """Continue one copy of the fork point per `(arm, number)` in `jobs`, named `{arm}-{number}`, each in a fork of
+        `base` (or a VM rebuilt by replay when forking fails), with its arm's step from `plan` done first. Scores each
+        and records it under the fork's `children`. Returns {child id: {"arm", status and scores}}."""
         sem = asyncio.Semaphore(min(MAX_PARALLEL_VMS, self.cfg.max_concurrent_runs))
         results: dict[str, dict] = {}
-        # Every copy continues the source run, on that run's model.
-        model = self.run_model(src)
+        prefix_msgs, prefix_actions, prefix_log = point.messages, point.actions, point.log
 
-        async def child(arm: str, i: int) -> None:
-            cid, scope = f"{arm}-{i + 1}", f"fork:{fork_id}:{arm}-{i + 1}"
+        async def child(arm: str, number: int) -> None:
+            cid, scope = f"{arm}-{number}", f"fork:{fork_id}:{arm}-{number}"
             cdir = self.forks_dir / fork_id / cid
             log = self._log(cdir / "events.jsonl", f"{fork_id}/{cid}")
             (cdir / PREFIX_EVENTS).write_text(prefix_log)
@@ -1009,58 +1280,203 @@ class Batch:
         # Each copy is its own run, so each starts in an empty context. When the investigator's tool calls
         # this experiment, the copies would otherwise inherit the investigator's callbacks, and every fork
         # token would be counted a second time under "investigator", at the investigator's price.
-        try:
-            await asyncio.gather(*(
-                asyncio.create_task(child(arm, i), context=contextvars.Context())
-                for arm in plan for i in range(n_per_arm)
-            ))
-        finally:
-            await self._release(f"{fork_id}-base", base_scope)
-
-        arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in plan}
-        children = self.case.data["forks"][fork_id].get("children") or {}
-        # How every copy was built: a real VM fork of the base, or a fresh VM brought to the same point by replaying the
-        # source run's commands. A copy that failed before it had a VM has neither.
-        built = {"fork": 0, "replay": 0, "none": 0}
-        for c in children.values():
-            built[c.get("how") if c.get("how") in ("fork", "replay") else "none"] += 1
-        extra: dict[str, Any] = {"built": built, "measures": "controller_performance" if kind == "fix" else "reporting_accuracy"}
-        if kind != "fix" and "control" in arms and "forced" in arms:
-            ev = verdict_evidence({a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]} for a in ("control", "forced")})
-            extra.update(evidence=ev, outcome=method_outcome(ev))
-        self.case.update_fork(fork_id, status="done", arms=arms, **extra)
-        if record.get("hypothesis_id") and "outcome" in extra:
-            self.case.set_hypothesis_status(record["hypothesis_id"], extra["outcome"], tested_by=fork_id)
-        self.case.set_phase("forked")
-        lines = [
-            f"Fork {fork_id} from run {src} before action {n_prefix} {headline}. "
-            f"Every arm starts from the same moment of the same run. Failed copies are not counted."
-        ]
-        for arm, step in plan.items():
-            a = arms[arm]
-            what = "continues unchanged" if step is None else step["description"]
-            if kind == "fix":
-                rate = "unknown" if a["mean_true"] is None else f"{a['mean_true']:.0%}"
-                lines.append(f"{arm.capitalize()}: mean true success rate {rate} over {a['scored']} copies "
-                             f"({what}; {a['failed']} failed).")
-            else:
-                lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
-        if "evidence" in extra:
-            # How strong this is, so the verdict's words can follow it (evidence.py).
-            lines.append(describe_evidence(extra["evidence"]))
-            if record.get("prediction"):
-                lines.append(f"Pre-registered prediction for {record['hypothesis_id']}: {record['prediction']} "
-                             f"Outcome, computed from the counts: {extra['outcome']}.")
-        lines.append(f"Copies built by VM fork: {built['fork']}, by replay: {built['replay']}, not built: {built['none']}.")
-        if kind == "fix":
-            self.case.update_fix(status="tested", fork_id=fork_id,
-                                 result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
-        return " ".join(lines)
+        await asyncio.gather(*(
+            asyncio.create_task(child(arm, number), context=contextvars.Context()) for arm, number in jobs
+        ))
+        return results
 
     def _set_child(self, fork_id: str, cid: str, **fields: Any) -> None:
         children = dict(self.case.data["forks"][fork_id].get("children", {}))
         children[cid] = {**children.get(cid, {}), **fields}
         self.case.update_fork(fork_id, children=children)
+
+    # ---- more pairs: the verdict's fork experiment, continued ----
+    def more_pairs_plan(self, fork: dict) -> dict[str, dict | None]:
+        """The steps of the arms `fork` ran, rebuilt from this batch's config: the same arms in the same order, each
+        with the same step. Raises Refused when an arm or its step cannot be rebuilt the way the fork ran it."""
+        ran = list(fork.get("arm_steps") or fork.get("arms") or {})
+        label = fork.get("label") or (self.case.data.get("split") or {}).get("label") or ""
+        full = self.domain.arm_plan(label, self.cfg)
+        missing = [a for a in ran if a not in full]
+        if missing:
+            raise Refused(f"the {', '.join(missing)} arm of {fork.get('id')} cannot be rebuilt for '{label}'")
+        steps = fork.get("arm_steps") or {}
+        for arm in ran:
+            if arm in steps and (full[arm] or {}).get("description") != steps[arm]:
+                raise Refused(f"the {arm} arm's step is not the one {fork.get('id')} ran, so new copies would not be "
+                              f"pairs of the same experiment")
+        return {arm: full[arm] for arm in ran}
+
+    def reserve_more_pairs(self, n_per_arm: int | None = None, fork_id: str | None = None) -> dict:
+        """Check that more pairs can run now and claim the batch for them, without starting anything.
+
+        Raises Refused with the reason when the batch has no open verdict on a finished fork (`more_pairs_problem`),
+        another experiment is running or waiting for approval (one experiment at a time), the arms cannot be rebuilt,
+        or the budget cannot cover the estimate. Otherwise records a new round on the fork (`more_pairs`), names its
+        children (`control-5`, ... after the highest number each arm has), sets the fork to `rebuilding` and the
+        phase to `forking`, and returns the quote (`more_pairs_quote`) with the new `children`. Synchronous, so two
+        requests can never both claim the batch. `run_more_pairs(reserved=...)` then runs it.
+        """
+        problem = more_pairs_problem(self.case.data, self.dir)
+        if problem:
+            raise Refused(problem)
+        busy = [fid for fid, f in self.case.data["forks"].items()
+                if fid == "pending" or (isinstance(f, dict) and f.get("status") in ("rebuilding", "running"))]
+        if busy or self.case.data.get("phase") in WORKING_PHASES:
+            raise Refused(f"another experiment is running on this batch ({', '.join(busy) or self.case.data.get('phase')}): "
+                          f"one at a time")
+        fid, fork = verdict_fork(self.case.data)
+        if fork_id is not None and fork_id != fid:
+            raise Refused(f"the verdict rests on fork {fid}, not {fork_id}")
+        plan = self.more_pairs_plan(fork)
+        quote = more_pairs_quote(self.case.data, self.tracker, n_per_arm)
+        if quote["over_budget"]:
+            raise Refused(quote["budget_problem"])
+
+        n = quote["n_per_arm"]
+        children = fork.get("children") or {}
+        last = {arm: max([_child_number(c) for c, child in children.items() if _child_arm(c, child) == arm], default=0)
+                for arm in plan}
+        new = [f"{arm}-{last[arm] + i + 1}" for arm in plan for i in range(n)]
+        round_ = {"at": time.time(), "n_per_arm": n, "children": new, "status": "rebuilding",
+                  "estimate_usd": quote["estimate_usd"], "pairs_before": quote["pairs_now"],
+                  "level_before": quote["level_now"], "n_per_arm_before": fork.get("n_per_arm")}
+        self.case.set_phase("forking")
+        self.case.update_fork(fid, status="rebuilding", n_per_arm=max(last.values(), default=0) + n,
+                              more_pairs=[*(fork.get("more_pairs") or []), round_])
+        return {**quote, "children": new}
+
+    async def run_more_pairs(self, n_per_arm: int | None = None, fork_id: str | None = None,
+                             reserved: dict | None = None) -> str:
+        """More pairs for an open verdict: `n_per_arm` more copies in each arm of the fork experiment the verdict rests
+        on, the same arms with the same steps from the same moment of the same run, then the fork's arm summaries,
+        the verdict's counts, its evidence and its sentence, all from every copy so far. The result as words.
+
+        The sentence is reworded in plain code (`evidence.verdict_sentence`), by the new evidence level, the way the
+        investigator is told to word it: "suggests", with the score and the pairs, while open; "caused" only once
+        supported. The investigator is not asked again: it finished with the batch and its memory went with it, and
+        the rule is mechanical. Its sentence is kept in `verdict.revisions`.
+
+        Reserves first (`reserve_more_pairs`, which raises Refused) unless `reserved` is what it returned. A base VM
+        that cannot be rebuilt ends the round as `failed` and changes nothing else; the result then starts with
+        "error:".
+        """
+        job = reserved if reserved is not None else self.reserve_more_pairs(n_per_arm, fork_id)
+        self._loop = asyncio.get_running_loop()
+        fid = job["fork_id"]
+        fork = self.case.data["forks"][fid]
+        plan = self.more_pairs_plan(fork)
+        # The first experiment was round 1, with base VM `base`; the k-th round of more pairs is round k + 1.
+        k = len(fork.get("more_pairs") or [])
+        base_key, base_scope = f"{fid}-base-{k + 1}", f"fork:{fid}:base-{k + 1}"
+        src = fork["source_run"]
+        jobs = [(c.rsplit("-", 1)[0], _child_number(c)) for c in job["children"]]
+        try:
+            point = self._fork_point(src, int(fork.get("fork_at") or 0))
+            base = await self._build_base(base_key, f"{self.id}-{fid}-base-{k + 1}", base_scope, point.actions)
+        except Exception as e:  # noqa: BLE001 - recorded on the round; nothing ran, so nothing else changes
+            logger.warning("fork %s: could not build the base VM for more pairs: %s: %s", fid, type(e).__name__, e)
+            await self._release(base_key, base_scope)
+            reason = f"could not build the fork's base VM ({type(e).__name__}: {e})"[:400]
+            self._end_round(fid, "failed", reason=reason, n_per_arm=self._last_round(fid).get("n_per_arm_before"))
+            self.case.set_phase("done")
+            return f"error: {reason}"
+        except BaseException:
+            await self._release(base_key, base_scope)
+            self._settle_more_pairs("stopped before this copy finished")
+            raise
+        self._update_round(fid, status="running")
+        self.case.update_fork(fid, status="running")
+        try:
+            await self._run_children(fid, plan, jobs, base, point, self.run_model(src),
+                                     kind=self.case.data["forks"][fid].get("kind", "method"))
+        except BaseException:
+            # Stopped: the copies that were scored count, the others failed. The verdict follows what was scored.
+            self._settle_more_pairs("stopped before this copy finished")
+            raise
+        finally:
+            await self._release(base_key, base_scope)
+
+        arms = self._end_round(fid, "done")
+        self.push_costs(force=True)
+        await self.close()
+        self.case.set_phase("done")
+        lines = [f"Fork {fid}: {len(jobs) // max(1, len(plan))} more copies per arm from run {src} before action "
+                 f"{point.n_prefix}, the same arms with the same steps. Counts are over every copy of {fid}; failed "
+                 f"copies are not counted."]
+        lines += _arm_lines(plan, arms, "method")
+        verdict = self.case.data.get("verdict") or {}
+        lines.append(f"The verdict now reads: {verdict.get('sentence')}")
+        return " ".join(lines)
+
+    def _last_round(self, fork_id: str) -> dict:
+        rounds = self.case.data["forks"][fork_id].get("more_pairs") or [{}]
+        return rounds[-1]
+
+    def _update_round(self, fork_id: str, **fields: Any) -> None:
+        rounds = list(self.case.data["forks"][fork_id].get("more_pairs") or [])
+        if rounds:
+            rounds[-1] = {**rounds[-1], **fields}
+            self.case.update_fork(fork_id, more_pairs=rounds)
+
+    def _end_round(self, fork_id: str, status: str, reason: str | None = None, **fork_fields: Any) -> dict:
+        """End a fork's latest round of more pairs: summarize its arms again from every child, set the fork `done`,
+        record the round's `status` and the pairs and level it left, and update the verdict to match. Returns the
+        arm summaries."""
+        fork = self.case.data["forks"][fork_id]
+        ran = list(fork.get("arm_steps") or fork.get("arms") or {})
+        children = fork.get("children") or {}
+        arms = {arm: _arm_summary([c for cid, c in children.items() if _child_arm(cid, c) == arm]) for arm in ran}
+        ev = _fork_evidence({"arms": arms})
+        self._update_round(fork_id, status=status, pairs_after=ev["pairs"], level_after=ev["level"],
+                           **({"reason": reason} if reason else {}))
+        self.case.update_fork(fork_id, status="done", arms=arms,
+                              **{k: v for k, v in fork_fields.items() if v is not None})
+        if status != "failed":  # a failed round ran no copy: the verdict stays as it was
+            # The computed outcome follows every copy so far; the registered prediction stays as it was.
+            self._fork_findings(fork_id, arms)
+            self._reword_verdict(fork_id, arms)
+        return arms
+
+    def _settle_more_pairs(self, reason: str) -> None:
+        """End every round of more pairs that is still marked running (stopped, or left so by an earlier server): its
+        children that were not scored failed, then `_end_round` as `stopped`. A round stopped before any copy started
+        gives the fork back its old `n_per_arm`."""
+        for fork_id, fork in list(self.case.data["forks"].items()):
+            if fork_id == "pending" or not isinstance(fork, dict):
+                continue
+            rounds = fork.get("more_pairs") or []
+            if not rounds or rounds[-1].get("status") not in ("rebuilding", "running"):
+                continue
+            for cid, child in list((fork.get("children") or {}).items()):
+                if child.get("status") not in SCORED:
+                    self._set_child(fork_id, cid, status="failed", reason=reason)
+            started = any(c in (fork.get("children") or {}) for c in rounds[-1].get("children") or [])
+            self._end_round(fork_id, "stopped", reason=reason,
+                            n_per_arm=None if started else rounds[-1].get("n_per_arm_before"))
+
+    def _reword_verdict(self, fork_id: str, arms: dict[str, dict]) -> bool:
+        """Bring the verdict in line with the fork's arm summaries: its `arms`, `numbers`, `evidence`, and a sentence
+        worded by the new level (`evidence.verdict_sentence`). The sentence it replaces is kept in `revisions`.
+        Nothing changes when the counts are the ones the verdict already has. Whether it changed."""
+        verdict = self.case.data.get("verdict")
+        if not isinstance(verdict, dict):
+            return False
+        # Every arm that scored a copy, as `record_structured_verdict` requires the investigator to give them.
+        given = {a: {"inflated": int(s.get("inflated") or 0), "total": int(s.get("scored") or 0)}
+                 for a, s in arms.items() if s.get("scored")}
+        if given == verdict.get("arms"):
+            return False
+        numbers = {f"{a}_{key}": v for a, c in given.items() for key, v in c.items()}
+        ev = verdict_evidence(given, numbers)
+        label = verdict.get("step_label") or self.case.data["forks"][fork_id].get("label") or ""
+        words = self.domain.words.steps.get(label)
+        sentence = verdict_sentence(words.name if words else label.replace("_", " "), ev, given)
+        before = {"at": time.time(), "by": "more_pairs", "fork_id": fork_id, "sentence": verdict.get("sentence"),
+                  "evidence": verdict.get("evidence") or verdict_evidence(verdict.get("arms"), verdict.get("numbers"))}
+        self.case.update_verdict(sentence=sentence, arms=given, numbers=numbers, evidence=ev,
+                                 revisions=[*(verdict.get("revisions") or []), before])
+        return True
 
     # ---- the investigator ----
     async def investigate(self, opening: str = "Investigate this batch.") -> None:
@@ -1154,7 +1570,7 @@ class Batch:
         est = self.estimate_forks_usd(n, n_arms)
         self.case.update_fork(
             "pending", status="awaiting_approval", kind=kind, n_per_arm=n, vm_count=n_arms * n + 1,
-            estimate_usd=None if est is None else round(est, 2), **about,
+            estimate_usd=usd_up(est), **about,
         )
         self.case.set_phase("awaiting_approval")
 
@@ -1201,6 +1617,46 @@ def _arm_summary(rows: list[dict]) -> dict:
         "mean_reported": mean("reported_accuracy"),
         "mean_true": mean("true_accuracy"),
     }
+
+
+def _findings_lines(record: dict, found: dict) -> list[str]:
+    """The pre-registered prediction against its computed outcome, and how the copies were built, in words."""
+    lines = []
+    if record.get("prediction") and "outcome" in found:
+        lines.append(f"Pre-registered prediction for {record['hypothesis_id']}: {record['prediction']} "
+                     f"Outcome, computed from the counts: {found['outcome']}.")
+    b = found["built"]
+    lines.append(f"Copies built by VM fork: {b['fork']}, by replay: {b['replay']}, not built: {b['none']}.")
+    return lines
+
+
+def _arm_lines(plan: dict[str, dict | None], arms: dict[str, dict], kind: str) -> list[str]:
+    """An experiment's result per arm in words, then, for a method experiment, how strong its evidence is."""
+    lines = []
+    for arm, step in plan.items():
+        a = arms[arm]
+        what = "continues unchanged" if step is None else step["description"]
+        if kind == "fix":
+            rate = "unknown" if a["mean_true"] is None else f"{a['mean_true']:.0%}"
+            lines.append(f"{arm.capitalize()}: mean true success rate {rate} over {a['scored']} copies "
+                         f"({what}; {a['failed']} failed).")
+        else:
+            lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
+    if kind != "fix" and "control" in arms and "forced" in arms:
+        # How strong this is, so the verdict's words can follow it (evidence.py).
+        lines.append(describe_evidence(verdict_evidence(
+            {a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]} for a in ("control", "forced")})))
+    return lines
+
+
+@dataclass(frozen=True)
+class _ForkPoint:
+    """Where the copies of a fork start (`Batch._fork_point`)."""
+
+    messages: list
+    n_prefix: int
+    actions: list
+    log: str
 
 
 def _put(q: asyncio.Queue, msg: dict) -> None:

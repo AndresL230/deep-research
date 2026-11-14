@@ -1,10 +1,13 @@
-// OWNER: subagent A. The home screen (batch cards, the new batch panel with its estimate and Start) and the header cost bar.
+// OWNER: subagent A. The home screen (Needs you from needs-you.ts, the batch table from batch-table.ts), the New batch
+// form with its estimate and Start (shown in a dialog, new-batch-dialog.ts), and the header cost bar.
 import "./home.css";
 import type { BatchConfig, BatchListItem, ControllerInfo, Costs, Defaults, Health, ScopeCost, TrapInfo } from "../api";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { pct, tokens, usd } from "./format";
+import { DEFAULT_VIEW, batchTable, type TableView } from "./batch-table";
 import { ACT, type HomeVm, type Loadable } from "./model";
+import { needsView } from "./needs-you";
 import { DEFAULT_PLANTED, chosenTrap } from "./trap";
 
 // ── home screen ──────────────────────────────────────────────────────────────
@@ -13,8 +16,23 @@ import { DEFAULT_PLANTED, chosenTrap } from "./trap";
  *  the robot arm domain's controller row with the uploaded controller it shows, if any. */
 export interface HomeInputs { html: string; label: string; controllerHtml?: string; controller?: ControllerInfo | null }
 
-/** The home screen: the batches to open, then one panel to start a new one. Labels only, no prose. */
-export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
+/** The home screen: what needs a person, then the batches to open. A new batch starts from the header's "+ New batch"
+ *  (`newBatchView`, in a dialog). Labels only, no prose. */
+export function homeView(vm: HomeVm): string {
+  return `<div class="hm" data-morph-key="home">
+    ${needsView(vm.batches, vm.needs)}
+    ${batchesSection(vm.batches, vm.table)}
+  </div>`;
+}
+
+/** The id of the New batch dialog's title, which the <dialog> names itself by (`aria-labelledby`). */
+export const NEW_BATCH_TITLE = "nbd-title";
+
+/**
+ * The New batch form, as the inside of its dialog (main.ts, new-batch-dialog.ts): the title and what the batch runs
+ * on, the form, then the estimate and Start in a footer that stays in view while the form scrolls.
+ */
+export function newBatchView(vm: HomeVm, inputs?: HomeInputs): string {
   const trap = chosenTrap(vm.defaults, vm.draft?.trap);
   // What the batch runs on, the trap and its strength only mean something in the tabular domain.
   const tabular = isTabular(vm.draft);
@@ -22,21 +40,21 @@ export function homeView(vm: HomeVm, inputs?: HomeInputs): string {
   const summary = tabular
     ? summaryLabel(inputs?.label ?? `Pima diabetes · ${DEFAULT_PLANTED}`, trap)
     : controller ? `Starting from ${controller.name}` : "";
-  return `<div class="hm" data-morph-key="home">
-    ${batchesSection(vm.batches)}
-    <section class="hm-panel" data-morph-key="new" aria-labelledby="hm-new-h">
-      <div class="hm-panel-h" data-morph-key="head">
-        <h2 class="hm-h2" id="hm-new-h">New batch</h2>
+  return `<div class="nbd-h" data-morph-key="nbd-head">
+      <div class="nbd-t">
+        <h2 class="hm-h2" id="${NEW_BATCH_TITLE}">New batch</h2>
         ${summary ? `<span class="hm-fixed">${esc(summary)}</span>` : ""}
       </div>
+      <button type="button" class="nbd-x" data-act="${ACT.closeNewBatch}" aria-label="Close" title="Close">${askIcon("close", 16)}</button>
+    </div>
+    <div class="nbd-body" data-morph-key="nbd-body">
       ${vm.draft ? domainRow(vm.draft, vm.defaults, vm.starting) : ""}
       ${tabular ? inputs?.html ?? "" : inputs?.controllerHtml ?? ""}
       ${vm.draft && tabular ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
       ${vm.draft ? mainRow(vm.draft, trap, vm.starting) : mainSkeleton(defaultsFailed(vm))}
       ${advancedBlock(vm, controller)}
-      ${footer(vm)}
-    </section>
-  </div>`;
+    </div>
+    ${footer(vm)}`;
 }
 
 /** The panel's one-line summary, saying what the chosen trap plants. The summary is written for the default trap. */
@@ -66,7 +84,7 @@ function missingKeys(h: Health | null): string[] {
 /** The batches and the defaults load together, so no draft once the list has settled means the defaults failed. */
 const defaultsFailed = (vm: HomeVm): boolean => !vm.draft && vm.batches.state !== "loading";
 
-function batchesSection(b: Loadable<BatchListItem[]>): string {
+function batchesSection(b: Loadable<BatchListItem[]>, view: TableView = DEFAULT_VIEW): string {
   let body: string;
   if (b.state === "loading") {
     body = `<div class="hm-note" data-morph-key="loading">${askSpinner(12)}<span>Loading batches</span></div>`;
@@ -76,18 +94,9 @@ function batchesSection(b: Loadable<BatchListItem[]>): string {
   } else if (!b.value.length) {
     body = `<div class="hm-note" data-morph-key="empty">No batches yet</div>`;
   } else {
-    const cards = b.value.map((it) => {
-      // Live: running here. Ready: saved at its split, Investigate brings it back. Otherwise a replay.
-      const kind = it.kind === "live" ? "live" : it.resumable ? "ready" : "replay";
-      const word = kind === "live" ? "Live" : kind === "ready" ? "Ready to investigate" : "Replay";
-      return `<button type="button" class="hm-batch" data-morph-key="${attr(it.id)}" data-act="${ACT.openBatch}" data-arg="${attr(it.id)}" title="${attr(it.id)}">
-        <span class="hm-batch-id">${esc(it.id)}${it.remote && it.machine ? `<span class="hm-batch-from">${esc(it.machine)}</span>` : ""}</span>
-        <span class="hm-kind" data-kind="${kind}">${word}</span>
-      </button>`;
-    }).join("");
-    body = `<div class="hm-batches" data-morph-list data-morph-key="list">${cards}</div>`;
+    body = batchTable(b.value, view);
   }
-  return `<section class="hm-sec" data-morph-key="batches" aria-labelledby="hm-batches-h">
+  return `<section class="hm-sec hm-sec--batches" data-morph-key="batches" aria-labelledby="hm-batches-h">
     <h2 class="hm-h2" id="hm-batches-h">Batches</h2>
     ${body}
   </section>`;

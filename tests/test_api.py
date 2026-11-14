@@ -1,6 +1,7 @@
 """The one FastAPI app: batch routes on the committed demo fixture, health, 404s, the SPA, shutdown."""
 
 import json
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,7 +26,9 @@ def client(tmp_path, monkeypatch):
 
 
 def test_lists_and_serves_the_demo_batch(client):
-    assert {"id": DEMO, "kind": "replay"} in client.get("/api/batches").json()
+    listed = {b["id"]: b for b in client.get("/api/batches").json()}
+    assert listed[DEMO]["kind"] == "replay" and listed[DEMO]["summary"]["simulated"] is True
+    assert listed[DEMO]["fixture"] is True
     case = client.get(f"/api/batches/{DEMO}/case").json()
     assert case["config"]["simulated"] is True and case["runs"]
     events = client.get(f"/api/batches/{DEMO}/runs/r01/events").json()
@@ -341,6 +344,65 @@ def test_a_crashed_or_budget_blocked_batch_is_over(client, tmp_path, monkeypatch
     assert not api._is_over("running") and api._is_over("error: x") and not api._is_over(None)
 
 
+# ---- the home table's summaries ----
+
+
+def test_the_list_summarises_each_batch_from_its_case_file(client):
+    listed = {b["id"]: b for b in client.get("/api/batches").json()}
+    robot = listed["robot-demo-batch"]["summary"]
+    assert robot["domain"] == {"name": "robot_arm", "title": "Robot arm pick and place"}
+    assert robot["simulated"] is True and robot["started_at"] is None  # fixtures carry no date
+    assert robot["counts"] == {"honest": 4, "inflated": 6, "unclear": 1, "failed": 1, "running": 0, "queued": 0, "stopped": 0}
+    assert robot["claim"]["of"] == "inflated" and robot["claim"]["n"] == 6 and robot["claim"]["n_hidden"] == 20
+    assert round(robot["claim"]["claimed"], 2) == 0.99 and round(robot["claim"]["measured"], 2) == 0.59
+    assert robot["step"] == {"label": "vary_positions", "name": "testing other can positions"}
+    assert robot["verdict"] == {"state": "open", "pairs": 4, "needed_pairs": 8}
+    assert robot["spend"] == {"usd": None, "usd_partial": False, "tokens": 769893 + 79665}
+    assert robot["analyst_models"] == ["anthropic:claude-haiku-5-5"]
+    demo = listed[DEMO]["summary"]
+    assert demo["domain"]["name"] == "tabular" and demo["step"]["name"] == "removing duplicate rows"
+
+
+def test_a_summary_is_kept_until_its_case_file_changes(client, tmp_path):
+    d = tmp_path / "batches" / "1114-050000-abcd" / "case"
+    d.mkdir(parents=True)
+    path = d / "case.json"
+    path.write_text(json.dumps({"phase": "running", "config": {"n_runs": 2},
+                                "runs": {"r01": {"id": "r01", "status": "running"}, "r02": {"id": "r02", "status": "queued"}}}))
+    first = {b["id"]: b for b in client.get("/api/batches").json()}["1114-050000-abcd"]["summary"]
+    assert first["counts"]["running"] == 1 and first["counts"]["queued"] == 1 and first["claim"] is None
+    assert first["started_at"].endswith("-11-14T05:00:00")
+    assert api._DISK_SUMMARIES[path][1] == first
+    path.write_text(json.dumps({"phase": "stopped", "config": {"n_runs": 2},
+                                "runs": {"r01": {"id": "r01", "status": "inflated", "reported_accuracy": 0.9, "true_accuracy": 0.6},
+                                         "r02": {"id": "r02", "status": "running"}}}))
+    os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 1_000_000))
+    again = {b["id"]: b for b in client.get("/api/batches").json()}["1114-050000-abcd"]["summary"]
+    # Over now: the run that never finished was stopped, and the finished one shows its claim.
+    assert again["counts"]["stopped"] == 1 and again["counts"]["running"] == 0
+    assert again["claim"] == {"of": "inflated", "n": 1, "claimed": 0.9, "measured": 0.6, "n_hidden": None}
+
+
+def test_an_unreadable_case_file_lists_the_batch_without_a_summary(client, tmp_path):
+    d = tmp_path / "batches" / "1114-060000-bad0" / "case"
+    d.mkdir(parents=True)
+    (d / "case.json").write_text("{half a file")
+    item = {b["id"]: b for b in client.get("/api/batches").json()}["1114-060000-bad0"]
+    assert item["kind"] == "replay" and item["summary"] is None
+
+
+def test_a_live_batch_is_summarised_from_memory(client, tmp_path, monkeypatch):
+    d = tmp_path / "batches" / "b-live" / "case"
+    d.mkdir(parents=True)
+    (d / "case.json").write_text(json.dumps({"phase": "running", "runs": {}}))  # stale on disk
+    live = _FakeLiveBatch("running")
+    live.case.read = lambda: {"phase": "running", "runs": {"r01": {"id": "r01", "status": "honest"}, "r02": {"id": "r02", "status": "running"}}}
+    monkeypatch.setattr(api, "BATCHES", {"b-live": live})
+    item = {b["id"]: b for b in client.get("/api/batches").json()}["b-live"]
+    assert item["kind"] == "live"
+    assert item["summary"]["counts"]["honest"] == 1 and item["summary"]["counts"]["running"] == 1
+
+
 async def test_a_crash_ends_the_batch_and_deletes_its_vms(monkeypatch):
     import asyncio
 
@@ -592,7 +654,10 @@ def test_saved_batch_is_listed_as_resumable_and_comes_back_live(client, tmp_path
 
     _saved_batch(tmp_path, forks={"pending": {"status": "awaiting_approval", "n_per_arm": 4}})
     monkeypatch.setattr(batch_mod, "BATCHES_DIR", tmp_path / "batches")
-    assert {"id": "saved", "kind": "replay", "resumable": True} in client.get("/api/batches").json()
+    saved = next(it for it in client.get("/api/batches").json() if it["id"] == "saved")
+    assert saved["kind"] == "replay" and saved["resumable"] is True and "fixture" not in saved
+    # Stopped at its fork, waiting for approval.
+    assert saved["summary"]["verdict"] == {"state": "awaiting_approval"}
     # The fixture itself is never resumable: it is simulated and has its verdict.
     demo = next(it for it in client.get("/api/batches").json() if it["id"] == DEMO)
     assert "resumable" not in demo
@@ -602,7 +667,7 @@ def test_saved_batch_is_listed_as_resumable_and_comes_back_live(client, tmp_path
 
     res = client.post("/api/batches/saved/resume")
     assert res.status_code == 200 and res.json() == {"id": "saved", "phase": "ready"}
-    assert {"id": "saved", "kind": "live"} in client.get("/api/batches").json()
+    assert {(b["id"], b["kind"]) for b in client.get("/api/batches").json()} >= {("saved", "live")}
     case = client.get("/api/batches/saved/case").json()
     assert case["phase"] == "ready" and "pending" not in case["forks"]
     assert case["runs"]["r01"]["lab_url"] is None  # its VM is gone
