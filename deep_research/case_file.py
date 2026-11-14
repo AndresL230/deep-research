@@ -43,11 +43,17 @@ class CaseFile:
                 # The diagnosis: symptoms traced to lines of the agent's code, and the fix proposed and tested.
                 "trace": [],
                 "fix": None,
+                # Whether the traced runs fail at the same line (`record_trace_comparison`).
+                "trace_comparison": None,
+                # The grader's checks of the verdict against the investigator's rubric, one per iteration.
+                "rubric": [],
             }
             self._save()
         # Case files saved before these sections existed.
         self.data.setdefault("trace", [])
         self.data.setdefault("fix", None)
+        self.data.setdefault("trace_comparison", None)
+        self.data.setdefault("rubric", [])
 
     # ---- plumbing ----
     def subscribe(self, fn: Listener) -> None:
@@ -115,9 +121,21 @@ class CaseFile:
             self._changed("step_labels")
         return f"saved {len(labels)} step labels for {run_id}"
 
-    def record_hypothesis(self, step_label: str, honest_action: str, inflated_action: str, evidence: str) -> str:
+    def record_hypothesis(self, step_label: str, honest_action: str, inflated_action: str, evidence: str,
+                          **structured: Any) -> str:
+        """Save a hypothesis. `structured`: the split it rests on as fields (`split_fields`) plus `confidence` and
+        `sentence`, set by the investigator's typed `record_hypothesis` tool; absent in older case files."""
         if step_label not in self.labels:
             return f"error: unknown label {step_label}; use one of {self.labels}"
+        extra: dict[str, Any] = {}
+        if structured:
+            err, extra = split_fields(structured)
+            if err:
+                return err
+            extra = {"step": step_label, **extra}
+            for key in ("confidence", "sentence"):
+                if structured.get(key) is not None:
+                    extra[key] = str(structured[key]).strip()[:500]
         with self._lock:
             self.data["hypotheses"].append(
                 {
@@ -126,6 +144,7 @@ class CaseFile:
                     "honest_action": honest_action[:2000],
                     "inflated_action": inflated_action[:2000],
                     "evidence": evidence[:2000],
+                    **extra,
                 }
             )
             self._changed("hypotheses")
@@ -182,8 +201,118 @@ class CaseFile:
             self._changed("fix")
         return "fix verdict saved"
 
-    def record_verdict(self, sentence: str, step_label: str, numbers: dict) -> str:
+    def record_verdict(self, sentence: str, step_label: str, numbers: dict, **structured: Any) -> str:
+        """Save the verdict: the sentence, the step and the old `numbers` ({arm}_inflated / {arm}_total), plus any
+        `structured` fields (`record_structured_verdict`)."""
         with self._lock:
-            self.data["verdict"] = {"sentence": sentence[:500], "step_label": step_label, "numbers": numbers}
+            self.data["verdict"] = {"sentence": sentence[:500], "step_label": step_label, "numbers": numbers, **structured}
             self._changed("verdict")
         return "verdict saved"
+
+    def method_fork_arms(self) -> dict[str, dict] | None:
+        """The arms of the newest finished method experiment (not a fix test), or None when none finished."""
+        done = [f for k, f in self.data["forks"].items()
+                if k != "pending" and f.get("kind", "method") != "fix" and f.get("status") == "done" and f.get("arms")]
+        return dict(done[-1]["arms"]) if done else None
+
+    def record_structured_verdict(self, sentence: str, step: str, honest_rate: float, inflated_rate: float,
+                                  n_honest: int, n_inflated: int, arms: dict[str, dict], confidence: str) -> str:
+        """The investigator's verdict as fields, checked against the case file before it is saved.
+
+        `arms`: {arm: {"inflated", "total"}}, `total` being the arm's scored copies (honest plus inflated, as the
+        fork experiment counts them). Every arm the newest method experiment scored must be there with its exact
+        counts, and no other; with no finished experiment, `arms` is empty. The old `numbers` are derived from it.
+        """
+        if not sentence.strip():
+            return "error: the sentence is empty"
+        if step not in self.labels:
+            return f"error: unknown label {step}; use one of {self.labels}"
+        if confidence not in CONFIDENCE:
+            return f"error: confidence must be one of {list(CONFIDENCE)}"
+        err, split = split_fields({"honest_rate": honest_rate, "inflated_rate": inflated_rate,
+                                   "n_honest": n_honest, "n_inflated": n_inflated})
+        if err:
+            return err
+        given: dict[str, dict[str, int]] = {}
+        for arm, c in (arms or {}).items():
+            c = c.model_dump() if hasattr(c, "model_dump") else dict(c)
+            try:
+                inflated, total = int(c["inflated"]), int(c["total"])
+            except (KeyError, TypeError, ValueError):
+                return f"error: arm {arm} needs whole numbers `inflated` and `total`"
+            if not 0 <= inflated <= total:
+                return f"error: arm {arm}: inflated must be between 0 and total"
+            given[arm] = {"inflated": inflated, "total": total}
+        ran = self.method_fork_arms()
+        if ran is None:
+            if given:
+                return "error: no fork experiment finished, so `arms` must be empty; say so in the sentence"
+        else:
+            truth = {a: {"inflated": int(s.get("inflated") or 0), "total": int(s.get("scored") or 0)}
+                     for a, s in ran.items() if s.get("scored")}
+            if given != truth:
+                want = ", ".join(f"{a} {t['inflated']}/{t['total']}" for a, t in truth.items()) or "none scored"
+                return f"error: the fork arms must match the experiment exactly ({want}, inflated/scored)"
+        numbers = {f"{a}_{k}": v for a, c in given.items() for k, v in c.items()}
+        return self.record_verdict(sentence.strip(), step, numbers, step=step, **split, arms=given,
+                                   confidence=confidence)
+
+    def record_trace_comparison(self, same: str, sentence: str, run_ids: list[str]) -> str:
+        """Whether the traced runs fail at the same line with the same symptom: "same", "different" or "mixed"."""
+        if same not in ("same", "different", "mixed"):
+            return "error: `same` must be same, different or mixed"
+        unknown = [r for r in run_ids if r not in self.data["runs"]]
+        if unknown:
+            return f"error: unknown runs {unknown}"
+        if not sentence.strip():
+            return "error: the sentence is empty"
+        with self._lock:
+            self.data["trace_comparison"] = {"at": time.time(), "same": same, "sentence": sentence.strip()[:500],
+                                             "run_ids": list(run_ids)}
+            self._changed("trace_comparison")
+        return "trace comparison saved"
+
+    def record_rubric(self, evaluation: dict) -> None:
+        """One grader check of the verdict (deepagents' RubricEvaluation), kept short."""
+        failing = [{"name": str(c.get("name", ""))[:200], "gap": str(c.get("gap", ""))[:300]}
+                   for c in evaluation.get("criteria") or [] if not c.get("passed")]
+        row = {
+            "at": time.time(),
+            "iteration": int(evaluation.get("iteration") or 0),
+            "result": str(evaluation.get("result")),
+            "explanation": str(evaluation.get("explanation") or "")[:500],
+            "criteria": len(evaluation.get("criteria") or []),
+            "failing": failing,
+        }
+        with self._lock:
+            self.data["rubric"].append(row)
+            self._changed("rubric")
+
+
+CONFIDENCE = ("low", "medium", "high")
+
+
+def split_fields(values: dict) -> tuple[str | None, dict]:
+    """The split's numbers as saved: rates between 0 and 1, run counts of 0 or more. (error, fields)."""
+    out: dict[str, Any] = {}
+    for key in ("honest_rate", "inflated_rate"):
+        if values.get(key) is None:
+            continue
+        try:
+            v = float(values[key])
+        except (TypeError, ValueError):
+            return f"error: {key} must be a number", {}
+        if not 0.0 <= v <= 1.0:
+            return f"error: {key} is a share between 0 and 1", {}
+        out[key] = round(v, 4)
+    for key in ("n_honest", "n_inflated"):
+        if values.get(key) is None:
+            continue
+        try:
+            n = int(values[key])
+        except (TypeError, ValueError):
+            return f"error: {key} must be a whole number", {}
+        if n < 0:
+            return f"error: {key} must be 0 or more", {}
+        out[key] = n
+    return None, out

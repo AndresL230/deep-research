@@ -9,6 +9,7 @@ import contextvars
 import json
 import logging
 import shutil
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -22,7 +23,7 @@ from langgraph.types import Command
 from . import domains, hub
 from . import sandboxes as vms
 from .agents.analyst import build_analyst
-from .agents.investigator import build_investigator
+from .agents.investigator import RUBRIC, build_investigator
 from .analysis import find_split
 from .case_file import CaseFile
 from .config import BATCHES_DIR, BatchConfig
@@ -40,6 +41,14 @@ RUN_TIMEOUT_S = 900
 INVESTIGATOR_RECURSION_LIMIT = 1000
 # Fork children at once, at most (and never more than the batch's `max_concurrent_runs`).
 MAX_PARALLEL_VMS = 12
+# Traces (`Batch.trace_failures`) that run at once in this server, across all batches. Each re-runs a controller in
+# `sim.domain.TRACE_WORKERS` worker processes, so at most MAX_PARALLEL_TRACES x TRACE_WORKERS of them run together.
+# More traces wait for a slot.
+MAX_PARALLEL_TRACES = 3
+_TRACE_SLOTS = threading.BoundedSemaphore(MAX_PARALLEL_TRACES)
+# One trace of a run at a time: a trace writes its recordings under the run's `trace/` folder.
+_TRACE_RUN_LOCKS: dict[Path, threading.Lock] = {}
+_TRACE_RUN_LOCKS_LOCK = threading.Lock()
 # A robot run's motion files are pulled from its VM this often while it runs, so its tile shows it practicing.
 MOTION_POLL_S = 15.0
 # How long the end of a run waits for a pull in flight before it gives up on it.
@@ -174,6 +183,8 @@ class Batch:
         # The VM calls name the domain only when it is not the default one, so a tabular batch calls them as before.
         self._vm_domain = {} if cfg.domain == domains.DEFAULT else {"domain": cfg.domain}
         self.id = batch_id or time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
+        # The batches folder. The investigator's notebooks live under it, in `_memory/` (notebook.py).
+        self.root = root
         self.dir = root / self.id
         self.runs_dir = self.dir / "runs"
         self.forks_dir = self.dir / "forks"
@@ -534,10 +545,23 @@ class Batch:
         if run_id not in self.case.data["runs"]:
             return {"error": f"unknown run {run_id}"}
         try:
-            return await asyncio.to_thread(self.domain.trace_run, self.task, self.runs_dir / run_id, int(max_episodes))
+            return await asyncio.to_thread(self._trace, run_id, int(max_episodes))
         except Exception as e:  # noqa: BLE001 - the tool reports it instead of ending the investigation
             logger.warning("trace of %s failed: %s: %s", run_id, type(e).__name__, e)
             return {"error": f"could not trace {run_id}: {type(e).__name__}: {e}"[:400]}
+
+    def _trace(self, run_id: str, max_episodes: int) -> dict:
+        """One trace, in a worker thread: waits for its run's lock, then for one of the server's trace slots.
+
+        Several traces (the investigator's code-tracer subagents, one per run) run at once this way. They share
+        nothing but the case file, which has its own lock: each re-runs its own run's controller in its own worker
+        processes and writes under its own run's folder.
+        """
+        run_dir = self.runs_dir / run_id
+        with _TRACE_RUN_LOCKS_LOCK:
+            lock = _TRACE_RUN_LOCKS.setdefault(run_dir.resolve(), threading.Lock())
+        with lock, _TRACE_SLOTS:
+            return self.domain.trace_run(self.task, run_dir, max_episodes)
 
     def propose_fix(self, run_id: str, old_string: str, new_string: str, description: str, why: str,
                     line: int | None = None) -> str:
@@ -781,7 +805,10 @@ class Batch:
             "recursion_limit": INVESTIGATOR_RECURSION_LIMIT,
         }
         self.case.set_phase("investigating")
-        await self._stream_investigator({"messages": [{"role": "user", "content": "Investigate this batch."}]})
+        # The rubric turns on the grader (RubricMiddleware) that checks the verdict before the investigator finishes.
+        await self._stream_investigator(
+            {"messages": [{"role": "user", "content": "Investigate this batch."}], "rubric": RUBRIC}
+        )
 
     async def decide(self, approve: bool) -> None:
         """Answer the investigator's pending request_forks approval."""
