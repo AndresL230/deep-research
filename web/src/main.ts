@@ -26,19 +26,19 @@ import { scheduleOrbs } from "./thinking-orb";
 import { PAGE_BACKGROUND, readStoredTheme, resolveTheme, storeTheme, themeChoice, themeSwitch, type Theme, type ThemeChoice } from "./theme";
 import {
   applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
-  fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, uploadDataset, uploadScript, startInvestigation, stopBatch,
+  fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, uploadController, uploadDataset, uploadScript, startInvestigation, stopBatch,
   type AgentEvent, type HubStatus, type BatchConfig, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, BATCH_STEPS, STEP_LABEL, childKey, parseRoute, routeHash, type BatchStep, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
-import { HM_ACT, costBar, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload, toggleModel } from "./batch/home";
+import { DEFAULT_DOMAIN, HM_ACT, costBar, domainOf, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload, toggleModel } from "./batch/home";
 import { hubBadge } from "./batch/hub-badge";
-import { DI_ACT, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
+import { DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { notYetView, overviewView, pageHeadView, pagerView } from "./batch/overview";
 import { wallView } from "./batch/wall";
 import { feedView, notebookWithCaptions, wallWithFeed } from "./batch/commentary";
 import { diagnosisView, fixView, forkView, investigatorView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
-import { eventsToConvo, runSummaryView, taskText } from "./batch/run";
+import { eventsToConvo, runSummaryView, taskText, workStrip } from "./batch/run";
 import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule } from "./batch/replay";
 import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook";
 import { fetchCosts, type CostReport } from "./api";
@@ -49,6 +49,7 @@ import { syncLanding } from "./landing/mount";
 import { syncMotion } from "./motion";
 import { refreshMotion } from "./robot/mount";
 import { smoothScroll } from "./scroll";
+import { isMotionBatch } from "./robot/markup";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ interface AppState {
   route: Route;
   home: HomeVm;
   homeLoaded: boolean;
-  /** What a new batch runs on: the dataset, the target column and the training script (dataset-input.ts). */
+  /** What a new batch runs on: the dataset, the target column and the training script, or the robot controller (dataset-input.ts). */
   ds: DatasetUi;
   batch: BatchState | null;
   /** The conversation view's UI state (open steps, sticking to the bottom); reset per run. */
@@ -83,6 +84,8 @@ interface AppState {
   runView: "notebook" | "steps";
   /** The landing page: which item of the list under the hero is open. */
   landingItem: number;
+  /** A robot run's page: the notebook is folded under the player until asked for. Reset per run. */
+  workOpen: boolean;
   /** The cost screen's report (GET /api/costs), loaded again on every visit. */
   costs: Loadable<CostReport>;
   /** Where the cost screen was opened from, for its back button. */
@@ -105,6 +108,7 @@ const S: AppState = {
   cvKey: "",
   runView: "notebook",
   landingItem: 0,
+  workOpen: false,
   costs: { state: "loading" },
   costsBack: { name: "home" },
   lastStep: null,
@@ -282,6 +286,11 @@ function runBody(vm: BatchVm, key: EventKey): string {
     const body = cells.length
       ? notebookWithCaptions(cells, log, { image: (name) => chartUrl(vm, key, name), mark: trapMark(trapOf(vm.case), label) ?? (label ? LABEL_PATTERNS[label] ?? null : null) })
       : `<p class="pg-note">Nothing has run yet.</p>`;
+    // A robot run: the player is the thing to look at, so the notebook stays folded under a line of what the agent did.
+    if (isMotionBatch(vm.case.config) && cells.length) {
+      const strip = workStrip(vm, key, cells.length, S.workOpen, ACT.workToggle);
+      return `${summary}${strip}${S.workOpen ? `<div class="pg-nb" data-morph-key="nb:${attr(key)}">${body}</div>` : ""}`;
+    }
     return `${summary}<div class="pg-nb" data-morph-key="nb:${attr(key)}">${body}</div>`;
   }
   const convo = eventsToConvo(key, events, { task: taskText(vm), finished: finished(vm.case, S.route), now: Date.now() });
@@ -311,7 +320,12 @@ function render(): void {
 
   let body: string;
   if (landing) body = landingView(landingTone, S.landingItem);
-  else if (r.name === "home") body = homeView(S.home, { html: inputsView(S.ds, S.home.starting), label: inputsLabel(S.ds) });
+  else if (r.name === "home") {
+    body = homeView(S.home, {
+      html: inputsView(S.ds, S.home.starting), label: inputsLabel(S.ds),
+      controllerHtml: controllerRow(S.ds, S.home.starting), controller: S.ds.controller,
+    });
+  }
   else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
   else if (!vm) body = messageView("loading", "Opening the batch", "Loading its case file and event logs…");
@@ -563,24 +577,36 @@ const refusal = (e: unknown, lead: string, fallback: string): string =>
   message(e, fallback).replace(/^The server answered HTTP 422: /, `${lead}: `);
 
 let uploadSeq = 0;
-/** Upload a CSV (a dataset) or a .py file (the training script). `expected` is what the picker was opened for. */
+const WRONG_FILE: Record<UploadKind, string> = {
+  dataset: "Choose a CSV file for the dataset.",
+  script: "Choose a Python file (.py) for the training script.",
+  controller: "Choose a Python file (.py) for the controller.",
+};
+/** Upload a CSV (a dataset) or a .py file: the training script in the tabular domain, the robot controller in the
+ *  robot one. `expected` is what the picker was opened for. */
 async function upload(file: File, expected?: UploadKind): Promise<void> {
   if (S.ds.upload.state === "busy" || S.home.starting) return;
   const k = fileKind(file);
-  const problem = "problem" in k ? k.problem
-    : expected && k.kind !== expected ? (expected === "dataset" ? "Choose a CSV file for the dataset." : "Choose a Python file (.py) for the training script.")
+  const kind: UploadKind | null = "problem" in k ? null : k.kind === "script" && domainOf(S.home.draft) !== DEFAULT_DOMAIN ? "controller" : k.kind;
+  const problem = expected === "controller" && !/\.py$/i.test(file.name) ? WRONG_FILE.controller
+    : "problem" in k ? k.problem
+    : expected && kind !== expected ? WRONG_FILE[expected]
     : null;
-  if (problem !== null || "problem" in k) { S.ds = { ...S.ds, upload: { state: "error", message: problem ?? "" } }; paint(); return; }
+  if (problem !== null || kind === null) { S.ds = { ...S.ds, upload: { state: "error", message: problem ?? "" } }; paint(); return; }
   const ticket: UploadTicket = { seq: ++uploadSeq, selected: S.ds.selected };
-  S.ds = { ...S.ds, upload: { state: "busy", kind: k.kind } };
+  S.ds = { ...S.ds, upload: { state: "busy", kind } };
   S.home = { ...S.home, error: null };
   paint();
   try {
     // Wait first, then merge into the state as it is by then: the person may have changed it meanwhile.
-    const done: Uploaded = k.kind === "dataset"
-      ? { kind: "dataset", info: await uploadDataset(file) }
-      : { kind: "script", info: await uploadScript(file) };
+    const done: Uploaded = kind === "dataset" ? { kind, info: await uploadDataset(file) }
+      : kind === "controller" ? { kind, info: await uploadController(file) }
+      : { kind, info: await uploadScript(file) };
     S.ds = withUpload(S.ds, ticket, uploadSeq, done);
+    // The agents start from the controller just uploaded, unless a newer upload has replaced this one.
+    if (done.kind === "controller" && ticket.seq === uploadSeq && S.home.draft) {
+      S.home = { ...S.home, draft: { ...S.home.draft, robot_start: "uploaded", robot_controller: done.info.id } };
+    }
   } catch (e) {
     if (ticket.seq !== uploadSeq) return;
     S.ds = { ...S.ds, upload: { state: "error", message: refusal(e, "That file can't be used", "The upload failed.") } };
@@ -702,7 +728,7 @@ function onRoute(): void {
   S.route = parseRoute(location.hash);
   const r = S.route;
   const key = routeKey(r) ?? "";
-  if (key !== S.cvKey) { S.cv = initialConversationUi(); S.cvKey = key; }
+  if (key !== S.cvKey) { S.cv = initialConversationUi(); S.cvKey = key; S.workOpen = false; }
   // A new page starts at its top.
   const stepOf = (x: Route): string => (x.name === "batch" ? x.step ?? "wall" : "");
   if (prev.name !== r.name || routeKey(prev) !== routeKey(r) || stepOf(prev) !== stepOf(r)) smooth.top();
@@ -749,11 +775,16 @@ root.addEventListener("click", (e) => {
     case ACT.start: void start(); return;
     case DI_ACT.dataset: S.ds = { ...S.ds, selected: arg, upload: uploadAfterEdit(S.ds.upload) }; S.home = { ...S.home, error: null }; paint(); return;
     case DI_ACT.upload: {
-      const kind: UploadKind = arg === "script" ? "script" : "dataset";
+      const kind: UploadKind = arg === "script" || arg === "controller" ? arg : "dataset";
       void pickFile(kind).then((f) => { if (f) void upload(f, kind); });
       return;
     }
     case DI_ACT.scriptRemove: S.ds = { ...S.ds, script: null, upload: uploadAfterEdit(S.ds.upload) }; paint(); return;
+    case DI_ACT.controllerRemove:
+      S.ds = { ...S.ds, controller: null, upload: uploadAfterEdit(S.ds.upload) };
+      if (S.home.draft) S.home = { ...S.home, draft: { ...S.home.draft, robot_start: "blank", robot_controller: null }, error: null };
+      paint();
+      return;
     case ACT.toggleAdvanced: S.home = { ...S.home, advanced: !S.home.advanced }; paint(); return;
     case HM_ACT.domain: {
       const next = pickDomain(S.home, arg);
@@ -764,6 +795,7 @@ root.addEventListener("click", (e) => {
       if (S.home.draft && !S.home.starting) { S.home = { ...S.home, draft: toggleModel(S.home.draft, arg), error: null }; paint(); scheduleEstimate(); }
       return;
     case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
+    case ACT.workToggle: S.workOpen = !S.workOpen; paint(); return;
     case ACT.toggleFeed: S.feedOpen = !S.feedOpen; paint(); return;
     case ACT.resetConfig:
       if (S.home.defaults) { S.home = { ...S.home, draft: resetDraft(S.home), error: null }; paint(); scheduleEstimate(); }
@@ -852,7 +884,7 @@ function onField(e: Event): void {
 root.addEventListener("input", onField);
 root.addEventListener("change", onField);
 
-// Dropping a CSV or a .py file on the new batch panel's data rows uploads it. Elsewhere a dropped file does nothing
+// Dropping a CSV or a .py file on the new batch panel's data rows (or the controller row) uploads it. Elsewhere a dropped file does nothing
 // (not a page load).
 const hasFiles = (e: DragEvent): boolean => Array.from(e.dataTransfer?.types ?? []).includes("Files");
 const overDrop = (e: DragEvent): boolean => !!(e.target as Element | null)?.closest?.("[data-drop]");

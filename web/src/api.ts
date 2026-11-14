@@ -123,9 +123,12 @@ export interface BatchConfig {
   visual?: Visual;
   /** In a case file only: the batch's domain, described. */
   domain_info?: DomainInfo;
-  /** robot_arm only: what the agent's controller.py holds at the start, the template ("blank") or a colleague's
-   *  working controller ("colleague"). Sent back as the server gave it. */
-  robot_start?: "blank" | "colleague";
+  /** robot_arm only: what the agent's controller.py holds at the start, the template ("blank"), a colleague's
+   *  working controller ("colleague") or the person's own upload ("uploaded", which needs `robot_controller`). Sent
+   *  back as the server gave it. */
+  robot_start?: "blank" | "colleague" | "uploaded";
+  /** robot_arm only: an uploaded controller's id (`ControllerInfo.id`), the one `robot_start: "uploaded"` starts from. */
+  robot_controller?: string | null;
   robot_prompt?: "default" | "practice";
   /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
   dataset: string;
@@ -612,6 +615,21 @@ export interface ScriptInfo {
 }
 /** The server refuses larger scripts (user_scripts.py MAX_UPLOAD_BYTES). */
 export const MAX_SCRIPT_BYTES = 200 * 1024;
+
+/** An uploaded robot controller (a `controller.py` with a `Controller` class that has `reset` and `act`). The server
+ *  parses it and never runs it. */
+export interface ControllerInfo {
+  /** `ct-` plus 8 hex digits. */
+  id: string;
+  name: string;
+  lines: number;
+  /** Third-party packages the controller imports. */
+  imports: string[];
+  /** The ones not installed in the robot VMs (they have numpy and mujoco, plus the `sim` package). A warning. */
+  missing_packages: string[];
+}
+/** The server refuses larger controllers. */
+export const MAX_CONTROLLER_BYTES = 200 * 1024;
 /** This server's link to the team hub (deep_research/hub.py `status`). Never carries the token. */
 export interface HubStatus {
   state: "off" | "connected" | "wrong_token" | "unreachable";
@@ -769,6 +787,11 @@ export const uploadDataset = (file: Blob & { name?: string }, o: Opts = {}) =>
 /** Upload a Python training script. The body is the file itself. */
 export const uploadScript = (file: Blob & { name?: string }, o: Opts = {}) =>
   call<ScriptInfo>(`/api/scripts?name=${encodeURIComponent(file.name ?? "train.py")}`, {
+    ...o, method: "POST", body: file, headers: { "content-type": "text/x-python" },
+  });
+/** Upload a robot controller (a Python file). The body is the file itself; 422 says why it was refused. */
+export const uploadController = (file: Blob & { name?: string }, o: Opts = {}) =>
+  call<ControllerInfo>(`/api/controllers?name=${encodeURIComponent(file.name ?? "controller.py")}`, {
     ...o, method: "POST", body: file, headers: { "content-type": "text/x-python" },
   });
 export const fetchBatches = (o: Opts = {}) => call<BatchListItem[]>("/api/batches", o);

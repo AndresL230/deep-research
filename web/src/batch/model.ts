@@ -23,6 +23,7 @@ export const ACT = {
   back: "back",                 // from a run or child back to its batch
   goto: "goto",                 // arg: a step of the batch (BatchStep); open its page
   runView: "run-view",          // arg: "notebook" | "steps", how a run's page shows its log
+  workToggle: "work-toggle",    // a robot run's page: unfold or fold the agent's notebook under the player
   investigate: "investigate",   // live only: start the investigator
   approve: "approve",           // live only: approve forks.pending
   decline: "decline",           // live only: decline forks.pending

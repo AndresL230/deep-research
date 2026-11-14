@@ -1,15 +1,19 @@
 // The data rows of the New batch panel: what Start sends, what the rows show, and which files are refused before upload.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MAX_DATASET_BYTES, uploadDataset, uploadScript, type DatasetInfo, type ScriptInfo } from "../src/api";
+import { MAX_DATASET_BYTES, uploadDataset, uploadScript, type ControllerInfo, type DatasetInfo, type ScriptInfo } from "../src/api";
 import { homeView } from "../src/batch/home";
 import type { HomeVm } from "../src/batch/model";
-import { fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, selectedTarget, uploadAfterEdit, withUpload, type DatasetUi } from "../src/dataset-input";
+import {
+  DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, selectedTarget, uploadAfterEdit, withUpload,
+  type DatasetUi,
+} from "../src/dataset-input";
 
 const col = (name: string, target_problem: string | null = null) => ({ name, kind: "number" as const, n_unique: 2, missing: 0, target_problem });
 const pima: DatasetInfo = { id: "pima", name: "Pima diabetes (built in)", builtin: true, rows: 768, columns: [col("glucose", "too many"), col("outcome")], target: "outcome" };
 const mine: DatasetInfo = { id: "ds-0123abcd", name: "<b>mine</b>.csv", builtin: false, rows: 1200, columns: [col("size", "too many"), col("kind"), col("label")], target: "label" };
 const script: ScriptInfo = { id: "sc-0123abcd", name: "train_<v2>.py", lines: 1240, imports: ["pandas", "torch"], missing_packages: ["torch"] };
+const controller: ControllerInfo = { id: "ct-89abcdef", name: "my_<arm>.py", lines: 312, imports: ["numpy", "scipy", "torch"], missing_packages: ["scipy", "torch"] };
 const busyUpload: DatasetUi["upload"] = { state: "busy", kind: "dataset" };
 const ready = (over: Partial<DatasetUi> = {}): DatasetUi => ({ ...initialDatasetUi(), datasets: [pima, mine], ...over });
 
@@ -107,10 +111,65 @@ describe("the data rows of a new batch", () => {
     expect(withUpload(now, { seq: 1, selected: "pima" }, 2, { kind: "script", info: script })).toBe(now);
   });
 
+  it("stores an uploaded controller without touching the tabular rows", () => {
+    expect(initialDatasetUi().controller).toBeNull();
+    const now = ready({ selected: mine.id, script, upload: { state: "busy", kind: "controller" } });
+    const after = withUpload(now, { seq: 3, selected: mine.id }, 3, { kind: "controller", info: controller });
+    expect(after).toEqual({ ...now, controller, upload: { state: "idle" } });
+    expect(after.script).toBe(script);
+    expect(inputsConfig(after)).toEqual({ dataset: mine.id, target: "label", script: script.id });
+    expect(inputsLabel(after)).not.toContain("controller");
+    expect(withUpload(now, { seq: 3, selected: mine.id }, 4, { kind: "controller", info: controller })).toBe(now);
+  });
+
   it("stays busy when a row changes during an upload", () => {
     expect(uploadAfterEdit(busyUpload)).toBe(busyUpload);
     expect(uploadAfterEdit({ state: "error", message: "the file has 3 rows" })).toEqual({ state: "idle" });
     expect(uploadAfterEdit({ state: "idle" })).toEqual({ state: "idle" });
+  });
+
+});
+
+describe("the controller row of a robot batch", () => {
+  it("offers the upload until a controller is there", () => {
+    const html = controllerRow(ready());
+    expect(html).toContain("Your controller (optional)");
+    expect(html).toContain(`data-act="di-upload" data-arg="controller"`);
+    expect(html).toContain("Upload controller.py");
+    expect(html).toContain(`data-morph-key="controller"`);
+    expect(html).toContain("data-drop");
+    expect(html).not.toContain("di-controller-remove");
+    expect(html).not.toContain("not installed");
+    expect(html).not.toContain("Dataset");
+    expect(html).not.toContain(`data-arg="script"`);
+    expect(DI_ACT.controllerRemove).toBe("di-controller-remove");
+    expect(controllerRow(ready({ upload: { state: "busy", kind: "controller" } }))).toContain("Uploading");
+    expect(controllerRow(ready({ upload: { state: "busy", kind: "dataset" } }))).not.toContain("Uploading");
+  });
+
+  it("shows the controller with its lines, a remove button and what the robot VMs lack, escaped", () => {
+    const html = controllerRow(ready({ controller }));
+    expect(html).toContain("my_&lt;arm&gt;.py");
+    expect(html).not.toContain("<arm>");
+    expect(html).toContain("312 lines");
+    expect(html).toContain(`data-act="di-controller-remove"`);
+    expect(html).toContain(`aria-label="Remove the controller"`);
+    expect(html).not.toContain(`data-arg="controller"`);
+    expect(html).toContain("This controller imports scipy, torch, which are not installed in the agents' VMs (they have numpy and mujoco).");
+    expect(controllerRow(ready({ controller: { ...controller, missing_packages: [] } }))).not.toContain("not installed");
+    expect(controllerRow(ready({ controller: { ...controller, missing_packages: ["scipy"] } }))).toContain("imports scipy, which is not installed");
+  });
+
+  it("shows an upload error, and locks while a batch starts", () => {
+    expect(controllerRow(ready({ upload: { state: "error", message: "no class <Controller>" } }))).toContain(`role="alert">no class &lt;Controller&gt;`);
+    expect(controllerRow(ready({ controller }), true)).toMatch(/data-act="di-controller-remove"[^>]* disabled>/);
+    expect(controllerRow(ready(), true)).toMatch(/data-arg="controller" disabled>/);
+    expect(controllerRow(ready())).not.toContain("disabled");
+  });
+
+  it("works before the datasets have loaded", () => {
+    expect(controllerRow(initialDatasetUi())).toContain("Upload controller.py");
+    expect(controllerRow(initialDatasetUi())).not.toContain("Loading datasets");
   });
 
   it("uploads a dataset and a script as the request body", async () => {
