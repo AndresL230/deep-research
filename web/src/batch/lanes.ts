@@ -13,7 +13,7 @@ import {
 import { askIcon } from "../ask-icons";
 import { badge, chip, count, reveal, spinner, type ChipMark, type ChipTone } from "../motion";
 import { attr, esc } from "../ui";
-import { duration, pct, pts, usd } from "./format";
+import { duration, pct, pts, usd, wholePct } from "./format";
 import { ACT, childKey, type BatchVm } from "./model";
 import { codeKind, highlightLines } from "./highlight";
 import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parseCommand, type NbCell } from "./notebook";
@@ -178,11 +178,112 @@ const GO = `<span class="ds-primary-go">${askIcon("arrow", 13, null, 2)}</span>`
 const head = (title: string, extra = ""): string =>
   `<div class="ln-head"><h2 class="ln-h">${esc(title)}</h2>${extra}</div>`;
 
+// Each section shows its key points and keeps its detail folded until asked for. A fold has a key; the page keeps
+// what the person opened or closed (`BatchVm.open`), and a fold nobody touched takes its own default.
+const isOpen = (vm: BatchVm, key: string, byDefault = false): boolean =>
+  vm.open === "all" ? true : vm.open?.[key] ?? byDefault;
+
+/** A fold's button: "Show the 12 copies" / "Hide the 12 copies". The caller renders the folded part only when open.
+ *  It is the outlined button the run page's "Show the agent's work" is (run.ts `workStrip`), with the chevron the New
+ *  batch form's Advanced toggle turns (home.ts). */
+const foldButton = (key: string, open: boolean, what: string): string =>
+  `<button type="button" class="ln-fold ask-ghostbtn ask-ghostbtn--outline" data-morph-key="fold-${attr(key)}" data-act="${ACT.fold}" data-arg="${attr(key)}" aria-expanded="${open}">` +
+  `${askIcon("chevRight", 13)}${esc(`${open ? "Hide" : "Show"} ${what}`)}</button>`;
+
 const code = (label: string, text: string | null, tone: Tone): string =>
   `<figure class="ln-code ln-code--${tone}"><figcaption class="ln-code-cap"><i class="ln-pill-dot"></i>${esc(label)}</figcaption>` +
   `<pre class="ln-code-pre">${text ? esc(text) : `<span class="ln-muted">No example</span>`}</pre></figure>`;
 
 const runLabels = (c: CaseFile, r: RunRecord): string[][] => (r.labels ?? c.step_labels?.[r.id] ?? []) as string[][];
+
+// ── 0. the key points ────────────────────────────────────────────────────────
+
+export interface KeyPoint {
+  /** Which point it is, for the list's keys: "best", "step", "fails", "fix". */
+  id: string;
+  /** Its short name: "Best run". */
+  label: string;
+  text: string;
+  /** Green for a result that went up, red for one that went down; muted otherwise. */
+  tone: Tone;
+}
+
+const NOT_OVER = new Set(["queued", "starting", "running"]);
+// A sentence cut short already ends in an ellipsis: no full stop after it.
+const sentence = (s: string): string => (/[.!?…]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`);
+const idList = (ids: readonly string[]): string =>
+  ids.length <= 2 ? ids.join(" and ") : `${ids.slice(0, 2).join(", ")} and ${ids.length - 2} more`;
+
+/**
+ * What the batch found, one line each, as far as it has got: the best run against where the runs started, the step
+ * that separates honest from inflated runs and how far the fork backs it, where the code fails, and what the fix
+ * did. Everything here is said in full, with its evidence, in the section below it.
+ */
+export function keyPoints(c: CaseFile): KeyPoint[] {
+  const out: KeyPoint[] = [];
+  const words = domainWords(c.config);
+  const truth = words.truth_label.toLowerCase();
+  const runs = Object.values(c.runs ?? {}).sort(byId);
+
+  // The best run by what was measured, never by what it claimed. Only once every run is over.
+  const measured = runs.filter((r) => r.true_accuracy != null);
+  if (measured.length && !runs.some((r) => NOT_OVER.has(r.status))) {
+    const best = Math.max(...measured.map((r) => r.true_accuracy as number));
+    const ids = measured.filter((r) => (r.true_accuracy as number) >= best - 1e-9).map((r) => r.id);
+    const base = c.baseline?.status === "scored" ? c.baseline.true_accuracy ?? null : null;
+    const from = base == null ? "" : ` The runs started from ${c.baseline!.name} at ${wholePct(base)}.`;
+    out.push({ id: "best", label: ids.length === 1 ? "Best run" : "Best runs", text: `${idList(ids)}: ${truth} ${wholePct(best)}.${from}`,
+      tone: base != null && best > base + UP ? "honest" : base != null && best < base - UP ? "inflated" : "muted" });
+  }
+
+  // The step, and how far the fork experiment backs it as the cause.
+  if (c.split) {
+    const line = splitHeadline(c.split, trapOf(c), words);
+    const ev = c.verdict ? verdictEvidence(c) : null;
+    const backed = !ev ? "" : ev.level === "supported" ? " The fork experiment supports this as the cause." : " The fork experiment does not settle whether this is the cause.";
+    out.push({ id: "step", label: "What differed", text: `${line.honest} ${line.inflated}${backed}`, tone: "muted" });
+  } else if (c.phase === "no_split") {
+    out.push({ id: "step", label: "What differed", text: "No step separates honest and inflated runs.", tone: "muted" });
+  }
+
+  // Where the code fails: the first traced symptom and its line.
+  const trace = c.trace ?? [];
+  if (trace.length) {
+    const t = trace[0];
+    const more = trace.length > 1 ? ` ${trace.length - 1} more below.` : "";
+    out.push({ id: "fails", label: "Where it fails", text: `${sentence(clip(t.symptom, 160))} Run ${t.run_id}, line ${t.line}.${more}`, tone: "muted" });
+  }
+
+  // The fix and what it measured.
+  const fix = c.fix;
+  if (fix) {
+    const what = sentence(fix.description || "A fix was proposed");
+    const m = fix.measured;
+    const fork = fixFork(c, fix);
+    const [before, after] = m ? [m.before.true_accuracy, m.after.true_accuracy]
+      : [fork?.arms?.control?.mean_true ?? null, fork?.arms?.fixed?.mean_true ?? null];
+    const result = before != null && after != null
+      ? `${capital(truth)} ${wholePct(before)} without it, ${wholePct(after)} with it${m ? "" : ", in fork copies"}.`
+      : fix.status === "testing" ? "Being tested." : fix.status === "tested" ? "Tested: see the result below." : "Not tested yet.";
+    const raised = m?.exceptions.length ? " The patched code raised an error." : "";
+    const tone: Tone = raised || (before != null && after != null && after < before - UP) ? "inflated"
+      : before != null && after != null && after > before + UP ? "honest" : "muted";
+    out.push({ id: "fix", label: "Fix", text: `${what} ${result}${raised}`, tone });
+  }
+  return out;
+}
+
+/** The key points as a short list under the runs. Empty until there is one to give. */
+export function keyPointsView(vm: BatchVm): string {
+  const points = keyPoints(vm.case);
+  if (!points.length) return "";
+  return `<section class="ln-sec ln-kp" data-morph-key="ln-kp" aria-label="Key points">` +
+    head("Key points") +
+    `<dl class="ln-kp-list" data-morph-list>${points.map((p) =>
+      `<div class="ln-kp-row ln-kp-row--${p.tone}" data-morph-key="kp-${attr(p.id)}"><dt class="ln-kp-k"><i class="ln-pill-dot"></i>${esc(p.label)}</dt>` +
+      `<dd class="ln-kp-v">${esc(p.text)}</dd></div>`).join("")}</dl>` +
+    `</section>`;
+}
 
 // ── 1. what changed ──────────────────────────────────────────────────────────
 
@@ -603,6 +704,8 @@ export function splitView(vm: BatchVm): string {
   const trap = trapOf(c);
   const line = splitHeadline(split, trap, words);
   const pick = pickRuns(c);
+  // The finding and what it did to the score stay; the two notebooks, every run and the next step are the detail.
+  const open = isOpen(vm, "split");
   // The second sentence starts arriving as the first one's last characters do.
   const wait = Math.round(line.honest.length * 5.6);
   return `<section class="ln-sec ln-split ds-rise" data-io data-morph-key="ln-split" aria-label="What changed">` +
@@ -612,10 +715,9 @@ export function splitView(vm: BatchVm): string {
     `<p class="ln-headline"><span class="mo-sr">${esc(`${line.honest} ${line.inflated}`)}</span><span aria-hidden="true">` +
     `<span class="ln-headline-a">${reveal(line.honest)}</span> <span class="ln-headline-b" style="--mo-d:${wait}ms">${reveal(line.inflated)}</span></span></p>` +
     `<p class="ln-sub">${esc(splitCounts(split))} did this ${esc(words.step_when)}.</p>` +
-    diffView(vm, split, pick) +
     consequence(c) +
-    runStrip(c, [pick.honest, pick.inflated]) +
-    nextLine(split, words, trap) +
+    foldButton("split", open, "the two runs side by side") +
+    (open ? diffView(vm, split, pick) + runStrip(c, [pick.honest, pick.inflated]) + nextLine(split, words, trap) : "") +
     `</section>`;
 }
 
@@ -1054,6 +1156,10 @@ function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
   const step = stepTest(c, f.label);
   const nHid = nHidden(c.config);
   const dw = domainWords(c.config);
+  // Each arm's result is its number and its bars. Its copies, one tile each, show while they run and fold once the
+  // experiment is over.
+  const nCopies = Object.keys(f.children ?? {}).length;
+  const copies = isOpen(vm, `exp:${f.id}`, f.status !== "done");
   // Testing a step: the forced arm against control, as two outcomes (the claim, the subject).
   const outcome = fixing ? null : forkOutcome(f);
   const cfg = c.config as Partial<BatchConfig> & { unclear_threshold?: number };
@@ -1105,8 +1211,8 @@ function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
       plain +
       (a !== "control" ? exactStep(f, a, vm, armStepText, fix) : "") +
       (motion && a === "forced" ? forcedMap(f, vm) : "") +
-      `<div class="ln-kids" data-morph-key="kids" data-morph-list>${tiles}</div>` +
-      (sum ? `<p class="ln-arm-sum" data-morph-key="sum">${esc(sum)}</p>` : "") +
+      (copies ? `<div class="ln-kids" data-morph-key="kids" data-morph-list>${tiles}</div>` +
+        (sum ? `<p class="ln-arm-sum" data-morph-key="sum">${esc(sum)}</p>` : "") : "") +
       `</div>`;
   };
   const names = armNames(f);
@@ -1124,7 +1230,8 @@ function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
         `the ${esc(dw.subject)} moved <b class="ln-outcome-n">${esc(pts(outcome.subject))}</b>.` +
         `<span class="ln-muted"> Forced arm against control, mean over each arm's scored copies.</span></p></div>`
       : "") +
-    `<div class="ln-arms" data-arms="${names.length}">${names.map(arm).join("")}</div></div>` +
+    `<div class="ln-arms" data-arms="${names.length}">${names.map(arm).join("")}</div>` +
+    (nCopies ? foldButton(`exp:${f.id}`, copies, `the ${nCopies} ${nCopies === 1 ? "copy" : "copies"}`) : "") + `</div>` +
     provenance(f, vm) +
     `</div>`;
 }
@@ -1725,6 +1832,9 @@ export function investigatorView(vm: BatchVm): string {
       `</div>`).join("")}</div>`
     : "";
 
+  // While it works its log is the news. Once it is done the verdict below says what it found, and the log folds.
+  const detail = events + (hypHtml ? `<h3 class="ln-h3">Hypotheses</h3>${hypHtml}` : "");
+  const open = isOpen(vm, "inv", !["done", "stopped", "no_split"].includes(phase));
   const domain = (c.config as Partial<BatchConfig>).domain || "tabular";
   const nb = `<a class="ln-nb-link" href="${attr(notebookUrl(domain))}" target="_blank" rel="noopener" title="What the investigator noted from earlier ${attr(domain)} batches (read-only)">Notebook</a>`;
   return `<section class="ln-sec ln-inv ds-rise" data-io data-morph-key="ln-inv" aria-label="Investigator">` +
@@ -1736,8 +1846,7 @@ export function investigatorView(vm: BatchVm): string {
     `</div>` +
     // The approval card shows the error itself while a fork request is pending.
     (vm.error && !pendingForks(c) ? `<p class="ln-err" role="alert">${esc(vm.error)}</p>` : "") +
-    events +
-    (hypHtml ? `<h3 class="ln-h3">Hypotheses</h3>${hypHtml}` : "") +
+    (detail ? foldButton("inv", open, hypHtml ? "its log and hypothesis" : "its log") + (open ? detail : "") : "") +
     `</section>`;
 }
 
@@ -1753,6 +1862,7 @@ export function diagnosisView(vm: BatchVm): string {
   const c = vm.case;
   const trace = c.trace ?? [];
   if (!trace.length) return "";
+  const why = isOpen(vm, "dx-why");
   const card = (t: (typeof trace)[number]): string => {
     const where = `line ${t.line}`;
     const link = t.motion_file
@@ -1762,7 +1872,7 @@ export function diagnosisView(vm: BatchVm): string {
       `<div class="ln-dx-h"><span class="ln-tag">${esc(t.run_id)}</span><span class="ln-muted">controller.py ${esc(where)}</span>${link}</div>` +
       `<p class="ln-dx-symptom">${esc(t.symptom)}</p>` +
       `<pre class="ln-dx-code"><span class="ln-dx-ln">${esc(where)}</span>${esc(t.excerpt)}</pre>` +
-      `<p class="ln-dx-why ln-muted">${esc(t.why)}</p>` +
+      (why ? `<p class="ln-dx-why ln-muted">${esc(t.why)}</p>` : "") +
       `</div>`;
   };
   return `<section class="ln-sec ln-dx ds-rise" data-io data-morph-key="ln-dx" aria-label="Diagnosis">` +
@@ -1770,6 +1880,7 @@ export function diagnosisView(vm: BatchVm): string {
     `<p class="ln-sub">What the code-tracer saw in the recordings of the failing run, and the line behind each symptom.</p>` +
     (c.trace_comparison ? `<p class="ln-note ln-dx-cmp"><b>${esc(SAME_WORDS[c.trace_comparison.same] ?? c.trace_comparison.same)}</b> ${esc(c.trace_comparison.sentence)}</p>` : "") +
     `<div class="ln-stack" data-morph-list>${trace.map(card).join("")}</div>` +
+    foldButton("dx-why", why, "why each line causes it") +
     `</section>`;
 }
 
@@ -1843,6 +1954,7 @@ export function fixView(vm: BatchVm): string {
     `<pre class="ln-fix-pre">${text ? esc(text) : `<span class="ln-muted">(nothing)</span>`}</pre></figure>`;
   const fork = fixFork(c, fix);
   const tested = fork ? fixTestedText(fork) : null;
+  const why = isOpen(vm, "fix-why");
   return `<section class="ln-sec ln-fix ds-rise" data-io data-morph-key="ln-fix" aria-label="Fix">` +
     head("Fix", pill(fix.status, st.text, st.tone)) +
     `<p class="ln-fix-t">${reveal(fix.description, "word")}</p>` +
@@ -1850,8 +1962,8 @@ export function fixView(vm: BatchVm): string {
     `<div class="ln-fix-diff" role="group" aria-label="The text replaced, and its replacement">` +
     block("Before", "ln-fix-old", fix.old_string) + block("After", "ln-fix-new", fix.new_string) +
     `</div>` +
-    `<p class="ln-fix-why">${esc(fix.why)}</p>` +
     (fix.measured ? fixMeasuredView(fix.measured) : tested ? `<p class="ln-note ln-fix-tested">${esc(tested)}</p>` : "") +
     (fix.verdict ? `<p class="ln-sentence">${reveal(fix.verdict, "word")}</p>` : "") +
+    (fix.why ? foldButton("fix-why", why, "the reasoning") + (why ? `<p class="ln-fix-why">${esc(fix.why)}</p>` : "") : "") +
     `</section>`;
 }
