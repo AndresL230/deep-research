@@ -692,7 +692,7 @@ function inheritsController(c: CaseFile, f: ForkExperiment): boolean {
   for (let i = 0; i < f.fork_at; i++) if (actionLabels(c, src, i).includes("write_controller")) return true;
   return false;
 }
-const CONTROLLER_LINE = "The copies start after controller.py was written, so this experiment can change the report more than the controller.";
+const CONTROLLER_LINE = "The copies start after controller.py was written, but they can still edit it: compare both what they claim and what is measured.";
 
 /** The batch's step under test, the way forkread.copyStory reads it in a copy's code. */
 function stepTest(c: CaseFile, label: string): StepTest {
@@ -822,6 +822,13 @@ export const forkOutcomeText = (o: ForkOutcome, subject: string): string =>
 export function forcedArmText(o: ForkOutcome, subject: string, honestGap: number): string {
   const claimDown = o.claim < -UP;
   const honestNow = o.forcedGap < honestGap;
+  if (o.subject > honestGap) {
+    // The copies changed their code too, by more than an honest test can miss by: say so, before the claim.
+    const better = `The ${subject} got better by ${ptsAbs(o.subject)}.`;
+    if (honestNow) return `${better} Its claim is honest now.`;
+    if (claimDown) return `${better} Its claim came down ${ptsAbs(o.claim)} but is still over what was measured.`;
+    return `${better} Its claim did not come down and is still over what was measured.`;
+  }
   if (o.subject > -UP) {
     if (claimDown && honestNow) return `The ${subject} didn't get worse. Its claim got honest.`;
     if (claimDown) return `The ${subject} didn't get worse. Its claim came down ${ptsAbs(o.claim)} but is still over what was measured.`;

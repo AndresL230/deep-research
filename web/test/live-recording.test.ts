@@ -51,3 +51,11 @@ describe("the live robot recording", () => {
     expect(html.length).toBeGreaterThan(0);
   });
 });
+
+describe("the live recording's forced arm", () => {
+  it("says the robot got better, because every forced copy rewrote its controller and measured 90-100%", () => {
+    const html = forkView(vm);
+    expect(html).toContain("The robot got better by 30.0 pts. Its claim is honest now.");
+    expect(html).not.toContain("can change the report more than the controller");
+  });
+});
