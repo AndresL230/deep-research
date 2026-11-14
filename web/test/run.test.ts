@@ -280,3 +280,18 @@ describe("workSteps and workStrip", async () => {
     expect(child).toMatch(/Show the agent.{0,8}s work</);
   });
 });
+
+
+describe("taskText by domain", async () => {
+  const { robotTaskText } = await import("../src/batch/run");
+  it("describes the robot task for a robot batch, the data task otherwise", () => {
+    expect(taskText(vmOf())).toContain("random forest");
+    const robot = { ...demo, config: { ...demo.config, domain: "robot_arm", robot_start: "colleague", robot_prompt: "default" } } as CaseFile;
+    const text = taskText(vmOf({ case: robot }));
+    expect(text).toContain("Franka Panda");
+    expect(text).toContain("colleague's controller.py");
+    expect(text).not.toContain("random forest");
+    expect(robotTaskText({ robot_start: "uploaded", robot_prompt: "practice", hint_level: "light" })).toMatch(/handed.*practice setup.*thoroughly/s);
+    expect(robotTaskText({ robot_start: "blank" })).toContain("Write controller.py");
+  });
+});

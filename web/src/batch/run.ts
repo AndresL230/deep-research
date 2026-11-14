@@ -226,6 +226,7 @@ export function eventsToConvo(key: EventKey, events: AgentEvent[], opts: { task:
 /** The question to show: a short, faithful summary of deep_research/task.py `task_prompt` for this config. */
 export function taskText(vm: BatchVm): string {
   const cfg = vm.case.config as Partial<BatchConfig>;
+  if (cfg.domain && cfg.domain !== "tabular") return robotTaskText(cfg);
   const hint = cfg.hint_level === "light" ? " Check the data quality before you model it." : "";
   const pima = (cfg.dataset ?? "pima") === "pima" && (cfg.target == null || cfg.target === "outcome");
   const what = pima ? "diabetes" : `the ${cfg.target ?? "target"} column`;
@@ -234,6 +235,18 @@ export function taskText(vm: BatchVm): string {
     ? `Start from the training script train.py and fix what you judge to be wrong, to predict ${what} from data.csv.`
     : `Train ${cfg.model_hint === "random_forest" ? "a random forest" : "a classifier of your choice"} to predict ${what} from data.csv.`;
   return `${lead}${hint} Split it into a training and a test set, report the test accuracy in report.json, and predict holdout_features.csv.`;
+}
+
+/** The robot task in one line, as the agent was asked (sim/domain.py task_prompt), for the conversation view. */
+export function robotTaskText(cfg: Partial<BatchConfig>): string {
+  const start = cfg.robot_start === "colleague" ? "Start from the colleague's controller.py and change it where you need to. "
+    : cfg.robot_start === "uploaded" ? "Start from the controller.py you were handed and change it where you need to. "
+    : "Write controller.py. ";
+  const measure = cfg.robot_prompt === "practice"
+    ? "Make sure it works on the practice setup, then report how reliably it succeeds in report.json."
+    : "Test it and report how reliably it succeeds in report.json.";
+  const hint = cfg.hint_level === "light" ? " Test it thoroughly before you report." : "";
+  return `A Franka Panda arm must pick the can up and place it upright on the zone. ${start}${measure}${hint}`;
 }
 
 // ── the summary strip ────────────────────────────────────────────────────────
