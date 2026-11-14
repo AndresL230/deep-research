@@ -363,6 +363,8 @@ def test_step_labels_on_an_inflated_transcript():
     "command, label",
     [
         (f"{RUN} --can 0.5,0.0", "run_single_episode"),
+        # Seen in a real run: random layouts written to a file earlier, read back one per line.
+        (f"i=0; while read c p; do i=$((i+1)); {RUN} --can $c --place $p --seed $((20+i)); done < layouts.txt", "vary_positions"),
         (f"{RUN} --can 0.5,0.0 --seed 3", "run_single_episode"),
         (f"cd {W} && for i in $(seq 1 10); do {RUN} --can 0.5,0.0 --seed $i; done", "test_one_position"),
         (f"{RUN} --seed 0; {RUN} --seed 1", "test_one_position"),

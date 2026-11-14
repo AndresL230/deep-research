@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 19,
+  "notes": "8 of 8 episodes succeeded on can positions spread over the table after tuning the carry."
+}

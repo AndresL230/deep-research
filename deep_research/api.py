@@ -27,7 +27,7 @@ from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
-from . import datasets, hub, traps, user_scripts  # noqa: E402
+from . import datasets, domains, hub, traps, user_scripts  # noqa: E402
 from .batch import Batch, resume_problem  # noqa: E402 - needs the environment loaded first
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
@@ -86,7 +86,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await _lab_client.aclose()
 
 
-app = FastAPI(title="deep-research", lifespan=lifespan)
+app = FastAPI(title="Orro", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 BATCHES: dict[str, Batch] = {}
@@ -195,19 +195,36 @@ def _spawn(batch_id: str, coro) -> None:
     task.add_done_callback(done)
 
 
-def _avg_run_usd() -> float | None:
-    """Average cost of one run from earlier batches, saved when a batch finishes."""
+def _read_stats() -> dict:
     try:
-        return json.loads(STATS_FILE.read_text()).get("avg_run_usd")
+        stats = json.loads(STATS_FILE.read_text())
+        return stats if isinstance(stats, dict) else {}
     except Exception:  # noqa: BLE001
-        return None
+        return {}
+
+
+def _avg_run_usd(domain: str | None = None) -> float | None:
+    """Average cost of one run of a `domain` batch from earlier batches, saved when a batch finishes.
+
+    `avg_run_usd` is the default domain's, as stats saved before domains have it; the others are under `by_domain`.
+    """
+    stats = _read_stats()
+    domain = domain or domains.DEFAULT
+    if domain == domains.DEFAULT:
+        return stats.get("avg_run_usd")
+    return (stats.get("by_domain") or {}).get(domain)
 
 
 def _save_stats(b: Batch) -> None:
     avg = b.tracker.average_run_usd()
     if avg is not None:
+        stats = _read_stats()
+        if b.cfg.domain == domains.DEFAULT:
+            stats["avg_run_usd"] = avg
+        else:
+            stats["by_domain"] = {**(stats.get("by_domain") or {}), b.cfg.domain: avg}
         STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        STATS_FILE.write_text(json.dumps({"avg_run_usd": avg}))
+        STATS_FILE.write_text(json.dumps(stats))
 
 
 @app.get("/api/health")
@@ -246,12 +263,16 @@ def defaults():
         "prices_missing": missing or prices.get("daytona_vm_per_hour") is None,
         # Every trap a batch can plant, for the picker (`BatchConfig.trap` is one of their names).
         "traps": [t.public() for t in traps.registered()],
+        # Every domain a batch can run, each with its own defaults (`BatchConfig.domain` is one of their names).
+        # `config` above is the default domain's.
+        "domains": [{**d.public(), "config": BatchConfig(domain=d.name).model_dump()} for d in domains.registered()],
     }
 
 
 @app.post("/api/estimate")
 def estimate(cfg: BatchConfig):
-    avg = _avg_run_usd()
+    # Runs of different domains cost differently (a robot run simulates episodes), so each has its own average.
+    avg = _avg_run_usd(cfg.domain)
     runs = estimate_batch_usd(cfg.n_runs, avg)
     # No split yet, so this counts every arm the config allows. The `show` arm only exists for a step that
     # has a weaker version defined, so this is an upper bound (forks.arm_plan).
@@ -264,6 +285,7 @@ def estimate(cfg: BatchConfig):
         "total_usd": None if runs is None else runs + forks,
         "over_budget": runs is not None and runs + forks > cfg.budget_usd,
         "basis": "average of earlier runs" if avg is not None else "no earlier runs yet",
+        "domain": cfg.domain,
     }
 
 
@@ -412,12 +434,10 @@ async def _resume(batch_id: str, investigate: bool) -> dict:
 @app.post("/api/batches")
 async def start_batch(cfg: BatchConfig):
     try:
-        # Check the dataset, target and script before anything is written or started.
-        await asyncio.to_thread(datasets.load, cfg.dataset, cfg.target)
-        if cfg.script:
-            user_scripts.load(cfg.script)
+        # Check the settings (for tabular: the dataset, target and script) before anything is written or started.
+        await asyncio.to_thread(domains.get(cfg.domain).check_config, cfg)
         b = await asyncio.to_thread(Batch, cfg)
-    except (datasets.DatasetError, user_scripts.ScriptError) as e:
+    except (datasets.DatasetError, user_scripts.ScriptError, domains.ConfigError) as e:
         raise HTTPException(422, str(e)) from e
     BATCHES[b.id] = b
 
@@ -493,10 +513,13 @@ def investigator_events(batch_id: str):
 
 @app.get("/api/batches/{batch_id}/files/{path:path}")
 def batch_file(batch_id: str, path: str):
-    """Charts and outputs saved with a batch, such as `runs/r01/live/02_confusion.png` in replays."""
+    """Charts and outputs saved with a batch, such as `runs/r01/live/02_confusion.png` in replays, or a robot run's
+    motion files (`runs/r01/outputs/live/practice.motion.json`). Never a domain's hidden truth (`Domain.secret_files`):
+    the holdout labels, the hidden can positions."""
     root = _batch_dir(batch_id).resolve()
     full = (root / path).resolve()
-    if root not in full.parents or not full.is_file() or "holdout_labels" in full.name:
+    secret = ("holdout_labels", *domains.secret_files())
+    if root not in full.parents or not full.is_file() or any(s in full.name for s in secret):
         raise HTTPException(404, "no such file")
     return FileResponse(full, headers=FILE_HEADERS)
 

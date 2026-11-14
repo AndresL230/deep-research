@@ -54,7 +54,29 @@ export interface TrapInfo {
   evidence_text: string | null;
 }
 
+/** What the UI draws for a run (deep_research/domains/ `Domain.visual`): its PNG charts, or the motion of its episodes. */
+export type Visual = "charts" | "motion";
+
+/** A domain, the kind of task a batch runs, as the server describes it (`Domain.public()`). */
+export interface DomainInfo {
+  /** The value of `BatchConfig.domain`. */
+  name: string;
+  title: string;
+  description: string;
+  visual: Visual;
+  /** Files each run must write, relative to its workspace. */
+  output_files: string[];
+  /** More outputs, as globs relative to the workspace (a robot run's motion files). */
+  output_globs: string[];
+}
+
 export interface BatchConfig {
+  /** A domain's `name`: one of `Defaults.domains`. Absent on batches saved before domains: read it as "tabular". */
+  domain?: string;
+  /** In a case file only: what the UI draws for a run. Absent on batches saved before domains: read it as "charts". */
+  visual?: Visual;
+  /** In a case file only: the batch's domain, described. */
+  domain_info?: DomainInfo;
   /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
   dataset: string;
   /** The column to predict. Needed for an uploaded dataset; absent or null means Pima's `outcome`. */
@@ -118,6 +140,9 @@ export interface RunRecord extends Partial<Omit<RunScore, "status">> {
   labels?: StepLabel[][];
   /** The charts the run saved, oldest first, as paths for `batchFileUrl`. Set once the run has finished. */
   charts?: string[];
+  /** The motion files the run saved (`visual` "motion"), as paths for `batchFileUrl`, such as
+   *  `runs/r01/outputs/live/practice.motion.json`. Set once the run has finished; absent in the tabular domain. */
+  motion_files?: string[];
   // Fixture only (scripts/make_fixture.py).
   duration_s?: number;
   tokens?: { input: number; output: number };
@@ -151,6 +176,8 @@ export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   lab_url?: string | null;
   /** The charts the child saved, as paths for `batchFileUrl`. */
   charts?: string[];
+  /** The motion files the child saved, as paths for `batchFileUrl` (`forks/f1/forced-1/outputs/live/...`). */
+  motion_files?: string[];
   /** "fork": a copy-on-write VM fork. "replay": rebuilt by replaying the actions when forking failed. */
   how?: "fork" | "replay";
 }
@@ -361,6 +388,8 @@ export interface Defaults {
   prices_missing: boolean;
   /** Every trap a batch can plant, for the picker. Absent from a server older than the trap registry. */
   traps?: TrapInfo[];
+  /** Every domain a batch can run, each with its own default config. Absent from a server older than domains. */
+  domains?: (DomainInfo & { config: BatchConfig })[];
 }
 export interface Estimate {
   avg_run_usd: number | null;
@@ -369,6 +398,8 @@ export interface Estimate {
   total_usd: number | null;
   over_budget: boolean;
   basis: string;
+  /** The domain the estimate is for: each domain has its own average run cost. */
+  domain?: string;
 }
 
 // The cost report (deep_research/cost_report.py, `GET /api/costs`): spend across every batch.

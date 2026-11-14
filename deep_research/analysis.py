@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import re
 from dataclasses import asdict, dataclass, field
+from typing import Callable
 
 from . import traps
 
@@ -200,21 +201,29 @@ def _resolve_script_runs(actions: list[Action], given_files: dict[str, str]) -> 
     return actions
 
 
-def _did_before_split(actions: list[Action], label: str) -> bool:
+def _did_before_split(actions: list[Action], label: str, steps: "Steps | None" = None) -> bool:
     """Did the run do `label` before the split its results come from, which is its last one?
 
     An agent often splits more than once: it runs the script it was given to see what happens, then
     fixes it and runs it again. Only the last split feeds the reported score, so a step added before
     that one counts, even though an earlier split went without it.
+
+    `steps` says which label is the split (its `anchor`) in another domain. None: this module's.
     """
-    splits = [i for i, a in enumerate(actions) if "split" in a.labels]
+    steps = steps or STEPS
+    anchor = steps.anchor
+    splits = [i for i, a in enumerate(actions) if anchor in a.labels]
     last = splits[-1] if splits else len(actions) - 1
     for a in actions[: last + 1]:
         if label not in a.labels:
             continue
         # The same action can dedupe and then split, as in one script: then the order inside it decides.
         # Unless the step can be the split itself (a grouped split): then being in that action is enough.
-        if "split" not in a.labels or label in _AT_SPLIT or _order_in_text(a.source or a.text, label, "split"):
+        if (
+            anchor not in a.labels
+            or label in steps.at_anchor
+            or (steps.order is not None and steps.order(a.source or a.text, label, anchor))
+        ):
             return True
     return False
 
@@ -263,6 +272,29 @@ def _order_in_text(text: str, first: str, second: str) -> bool:
     return bool(m1 and m2 and m1.start() < m2.start())
 
 
+@dataclass(frozen=True)
+class Steps:
+    """A domain's step labels, as the split finder needs them.
+
+    `anchor` is the step a run's claim comes from: the train/test split here, whose score the run reports. The
+    finder looks for the step honest runs do before it and inflated runs skip, and forks just before it.
+    """
+
+    labels: list[str]
+    anchor: str
+    # Labels never reported as the finding, besides the anchor (loading the data is not a choice).
+    skip: frozenset[str] = frozenset()
+    # Steps that count whenever they are in the anchor's action (`Trap.at_split`).
+    at_anchor: frozenset[str] = frozenset()
+    # order(text, label, anchor): inside one action, does `label` come before the anchor? None: it does not
+    # count unless it is in `at_anchor`.
+    order: Callable[[str, str, str], bool] | None = None
+
+
+# The tabular domain's steps (deep_research/domains/tabular.py).
+STEPS = Steps(labels=LABELS, anchor="split", skip=frozenset({"load"}), at_anchor=frozenset(_AT_SPLIT), order=_order_in_text)
+
+
 @dataclass
 class SplitFinding:
     label: str
@@ -281,25 +313,31 @@ class SplitFinding:
 
 
 def find_split(
-    runs: dict[str, list[Action]], statuses: dict[str, str], prefer: str | None = None
+    runs: dict[str, list[Action]], statuses: dict[str, str], prefer: str | None = None, steps: "Steps | None" = None
 ) -> SplitFinding | None:
     """Find the label done before the train/test split by honest runs but not inflated ones.
 
     `prefer` is the batch trap's label. It wins a tie: one line of code can carry two labels
     (`drop_duplicates(subset='subject_id')` is both `deduplicate` and `group_split`), and the step
     that was planted for is the one the fork experiment can test.
+
+    `steps` is the domain's labels and split anchor (`Steps`). None: this module's, the tabular ones.
     """
+    steps = steps or STEPS
     honest = [r for r, s in statuses.items() if s == "honest" and r in runs]
     inflated = [r for r, s in statuses.items() if s == "inflated" and r in runs]
     if not honest or not inflated:
         return None
 
+    def did(r: str, label: str) -> bool:
+        return _did_before_split(runs[r], label, steps)
+
     best: tuple[float, str] | None = None
-    for label in LABELS:
-        if label in ("split", "load"):
+    for label in steps.labels:
+        if label == steps.anchor or label in steps.skip:
             continue
-        h = sum(_did_before_split(runs[r], label) for r in honest) / len(honest)
-        i = sum(_did_before_split(runs[r], label) for r in inflated) / len(inflated)
+        h = sum(did(r, label) for r in honest) / len(honest)
+        i = sum(did(r, label) for r in inflated) / len(inflated)
         if best is None or (h - i) > best[0] or ((h - i) == best[0] and label == prefer):
             best = (h - i, label)
     assert best is not None
@@ -307,16 +345,16 @@ def find_split(
         # No step is done more often by honest runs than by inflated ones: there is nothing to report.
         return None
     label = best[1]
-    h_rate = sum(_did_before_split(runs[r], label) for r in honest) / len(honest)
-    i_rate = sum(_did_before_split(runs[r], label) for r in inflated) / len(inflated)
+    h_rate = sum(did(r, label) for r in honest) / len(honest)
+    i_rate = sum(did(r, label) for r in inflated) / len(inflated)
 
     # Fork from the first inflated run that skipped it, just before its first split.
     fork_run, fork_at, inflated_example = None, None, None
     for r in inflated:
-        if _did_before_split(runs[r], label):
+        if did(r, label):
             continue
         for a in runs[r]:
-            if "split" in a.labels:
+            if steps.anchor in a.labels:
                 fork_run, fork_at, inflated_example = r, a.index, a.text
                 break
         if fork_run:
