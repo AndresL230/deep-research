@@ -712,7 +712,12 @@ interface Thumb {
   visible: boolean;
   /** When it started looping (ms, performance.now()). */
   start: number;
+  /** Under reduced motion: the size its one still frame was drawn at, so it is not drawn again. */
+  still?: string;
 }
+
+/** Reduced motion: a thumbnail shows its episode's last pose, still, instead of looping it. */
+const stillThumbs = (): boolean => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 class Thumbs {
   private renderer: THREE.WebGLRenderer | null = null;
@@ -793,10 +798,14 @@ class Thumbs {
     if (document.hidden || now - this.last < 1000 / THUMB_FPS || !this.world) return;
     this.last = now;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const still = stillThumbs();
     for (const th of this.items) {
       if (!th.visible || !th.motion) continue;
       const w = Math.round(th.canvas.clientWidth * dpr), h = Math.round(th.canvas.clientHeight * dpr);
       if (!w || !h) continue;
+      const drawn = `${w}x${h}:${themeOf(th.el)}`;
+      if (still && th.still === drawn) continue;
+      th.still = still ? drawn : undefined;
       if (th.canvas.width !== w || th.canvas.height !== h) { th.canvas.width = w; th.canvas.height = h; }
       // One drawing buffer for thumbnails of every size (run tiles and the smaller fork children): grown to the
       // largest, each drawn into its bottom-left corner and copied from there, so it is never reallocated per frame.
@@ -811,7 +820,7 @@ class Thumbs {
       if (this.cam.aspect !== w / h) { this.cam.aspect = w / h; this.cam.updateProjectionMatrix(); }
       const d = duration(th.motion);
       const loopS = d + LOOP_HOLD_S;
-      const t = Math.min(d, (((now - th.start) / 1000) % loopS));
+      const t = still ? d : Math.min(d, (((now - th.start) / 1000) % loopS));
       this.world.setTheme(themeOf(th.el));
       this.world.pose(th.motion, t);
       r.render(this.world.scene, this.cam);

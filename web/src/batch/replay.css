@@ -1,7 +1,7 @@
 /* The replay control bar (replay.ts `replayBar`). Compact: one row in a header, wrapping to two on a phone. */
 .rp-bar { display:flex; align-items:center; gap:8px; min-width:0; flex-wrap:wrap; padding:6px 0; font-size:13px; color:var(--fg-70); }
-.rp-tag { flex:none; padding:1px 7px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:550; letter-spacing:.02em; }
-.rp-btn { flex:none; display:grid; place-items:center; width:30px; height:30px; border-radius:8px; color:var(--fg); transition:background var(--fx-fast) var(--fx-ease); }
+.rp-tag { flex:none; padding:1px 7px; border-radius:var(--r-ctl); background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:500; letter-spacing:.02em; }
+.rp-btn { flex:none; display:grid; place-items:center; width:30px; height:30px; border-radius:var(--r-ctl); color:var(--fg); transition:background var(--fx-fast) var(--fx-ease); }
 .rp-btn:hover { background:var(--hover); }
 .rp-toggle { background:var(--accent-soft); color:var(--accent); }
 .rp-toggle:hover { background:color-mix(in srgb, var(--accent) 20%, transparent); }
@@ -18,12 +18,12 @@
 .rp-time { flex:none; font-variant-numeric:tabular-nums; color:var(--fg-55); white-space:nowrap; }
 .rp-now { color:var(--fg); }
 
-.rp-speeds { flex:none; display:inline-flex; padding:2px; border:1px solid var(--border); border-radius:8px; }
-.rp-speed { min-width:32px; height:24px; padding:0 6px; border-radius:6px; font-size:12px; font-variant-numeric:tabular-nums; color:var(--fg-55); transition:background var(--fx-fast) var(--fx-ease), color var(--fx-fast) var(--fx-ease); }
+.rp-speeds { flex:none; display:inline-flex; padding:2px; border:1px solid var(--border); border-radius:var(--r-ctl); }
+.rp-speed { min-width:32px; height:24px; padding:0 6px; border-radius:var(--r-ctl); font-size:12px; font-variant-numeric:tabular-nums; color:var(--fg-55); transition:background var(--fx-fast) var(--fx-ease), color var(--fx-fast) var(--fx-ease); }
 .rp-speed:hover { color:var(--fg); background:var(--hover); }
-.rp-speed[aria-pressed="true"] { background:var(--accent-soft); color:var(--accent); font-weight:550; }
+.rp-speed[aria-pressed="true"] { background:var(--accent-soft); color:var(--accent); font-weight:500; }
 
-.rp-end { flex:none; display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 9px; border-radius:8px; border:1px solid var(--border); color:var(--fg-70); font-size:12px; transition:background var(--fx-fast) var(--fx-ease); }
+.rp-end { flex:none; display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 9px; border-radius:var(--r-ctl); border:1px solid var(--border); color:var(--fg-70); font-size:12px; transition:background var(--fx-fast) var(--fx-ease); }
 .rp-end:hover { background:var(--hover); color:var(--fg); }
 .rp-end:disabled { opacity:.45; cursor:default; background:none; }
 
