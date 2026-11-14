@@ -14,6 +14,7 @@ import "./landing.css";
 import { routeHash } from "../batch/model";
 import { attr, esc } from "../ui";
 import { themeSwitch } from "../theme";
+import { symbolTile, wordmark } from "../brand";
 import type { SceneTone } from "./kit";
 
 /** A piece of an item's paragraph: plain words, or a path or address drawn on a chip. */
@@ -30,7 +31,7 @@ type Words = string | { chip: string };
  *  `finder` is the split finder's chapter. Its coins and its tag are the demo batch's: twelve runs, six of them
  *  honest, and the split the batch found (fixtures/demo-batch/case/case.json). */
 export const LANDING = {
-  brand: "Deep Research",
+  brand: "Orro",
   title: "Where do AI scientists go wrong?",
   lede: "Run one data science agent many times, find the step where honest and inflated runs split, then fork the VM to prove what went wrong.",
   labels: ["New task", "Many runs", "Split found", "Evidence"],
@@ -56,7 +57,7 @@ export const LANDING = {
   },
   finder: {
     title: "Split finder",
-    words: "Deep Research reads every run's log and labels each action with its step: load, deduplicate, split, train. Then it finds the step that honest runs took before the train/test split and inflated runs skipped. With the share of runs on each side and the code that shows it.",
+    words: "Orro reads every run's log and labels each action with its step: load, deduplicate, split, train. Then it finds the step that honest runs took before the train/test split and inflated runs skipped. With the share of runs on each side and the code that shows it.",
     /** How many runs the batch had, and which of them scored honestly. */
     runs: 12,
     honest: [1, 4, 5, 7, 11, 12],
@@ -87,7 +88,6 @@ export function demoRuns(): { id: string; honest: boolean }[] {
 }
 
 /** The mark: one run that splits in two, the second branch in the accent colour. */
-const MARK = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.4 12h5.4" stroke="#f2f3f3"></path><path d="M9.8 12c3.3 0 3.5-5.2 7-5.2h2.8" stroke="#f2f3f3"></path><path d="M9.8 12c3.3 0 3.5 5.2 7 5.2h2.8" stroke="#9aa4df"></path></svg>`;
 
 /** The list under the hero: a heading, then the items. The open one shows its paragraph and a bar beside it; the
  *  others are just their titles, and pressing one opens it (`data-lp-item`, handled in main.ts). */
@@ -160,7 +160,7 @@ export function landingView(tone: SceneTone = "dark", open = 0): string {
     <div class="lp-top">
       <div class="lp-scene" data-lp-scene data-keep aria-hidden="true"></div>
       <header class="lp-nav" data-lp-nav>
-        <a class="lp-brand" href="${attr(routeHash({ name: "landing" }))}"><span class="lp-mark">${MARK}</span><span class="lp-name">${esc(LANDING.brand)}</span></a>
+        <a class="lp-brand" href="${attr(routeHash({ name: "landing" }))}">${symbolTile(32, "lp-mark")}<span class="lp-name" role="img" aria-label="${attr(LANDING.brand)}">${wordmark(20)}</span></a>
         <nav class="lp-links" aria-label="Main">
           <a class="lp-link" href="${start}">Batches</a>
           <a class="lp-link" href="${demo}">Demo replay</a>
