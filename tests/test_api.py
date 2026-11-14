@@ -67,7 +67,7 @@ def test_health_reports_key_status_never_values(client, monkeypatch):
     monkeypatch.setenv("DAYTONA_API_KEY", "")
     monkeypatch.setattr(api, "ROOT_DIR", api.ROOT_DIR / "no-such-dir")  # ignore a local .env
     res = client.get("/api/health")
-    assert res.json() == {"ok": True, "keys": {"anthropic": True, "daytona": False}}
+    assert res.json() == {"ok": True, "keys": {"anthropic": True, "daytona": False}, "hub": {"state": "off"}}
     assert "sk-secret-value" not in res.text
 
 
