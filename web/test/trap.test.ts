@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import trapsRaw from "./traps.json?raw";
 import type { AgentEvent, BatchConfig, CaseFile, RunRecord, SplitFinding, TrapInfo } from "../src/api";
-import { homeView } from "../src/batch/home";
+import { newBatchView } from "../src/batch/home";
 import { splitHeadline, splitView as coloredSplitView, stepMark, stepWords } from "../src/batch/lanes";
 import type { BatchVm, HomeVm } from "../src/batch/model";
 import { LABEL_PATTERNS } from "../src/batch/notebook";
@@ -157,7 +157,7 @@ describe("trap helpers", () => {
   });
 });
 
-describe("the trap picker on the home screen", () => {
+describe("the trap picker in the New batch form", () => {
   const cfg = { ...(demo.config as BatchConfig), mode: "live" } as BatchConfig;
   const vm = (over: Partial<HomeVm> = {}): HomeVm => ({
     batches: { state: "ready", value: [] }, health: { ok: true, keys: { anthropic: true, daytona: true } },
@@ -166,7 +166,7 @@ describe("the trap picker on the home screen", () => {
   const select = (html: string): string => html.match(/<select[^>]*data-cfg="trap"[^>]*>.*?<\/select>/s)![0];
 
   it("lists the traps by title with the chosen one selected and described", () => {
-    const html = homeView(vm());
+    const html = newBatchView(vm());
     expect(select(html)).toContain('<option value="duplicates" selected>Duplicate rows</option>');
     expect(select(html)).toContain('<option value="leaky_column">Leaky column</option>');
     expect(select(html)).toContain('<option value="repeat_rows">Repeat subjects</option>');
@@ -179,7 +179,7 @@ describe("the trap picker on the home screen", () => {
   });
 
   it("follows the draft: the selected option, the description, the slider's label and the summary", () => {
-    const html = homeView(vm({ draft: { ...cfg, trap: "repeat_rows" } }), { html: "", label: inputsLabel(initialDatasetUi()) });
+    const html = newBatchView(vm({ draft: { ...cfg, trap: "repeat_rows" } }), { html: "", label: inputsLabel(initialDatasetUi()) });
     expect(select(html)).toContain('<option value="repeat_rows" selected>Repeat subjects</option>');
     expect(select(html)).toContain('<option value="duplicates">Duplicate rows</option>');
     expect(html).toContain(repeat.description);
@@ -187,35 +187,35 @@ describe("the trap picker on the home screen", () => {
     expect(text(html)).toContain("Runs Subjects with repeat visits 50% Hint None Light Budget $");
     expect(text(html)).toContain("New batch Pima diabetes · planted repeat visits of the same subjects Trap");
     expect(text(html)).not.toContain("Duplicated rows");
-    const leak = text(homeView(vm({ draft: { ...cfg, trap: "leaky_column", trap_strength: 0.25 } })));
+    const leak = text(newBatchView(vm({ draft: { ...cfg, trap: "leaky_column", trap_strength: 0.25 } })));
     expect(leak).toContain("Pima diabetes · planted a column that leaks the target");
     expect(leak).toContain("Leak strength 25%");
   });
 
   it("keeps the summary's other parts when the trap changes", () => {
     const label = `mine.csv, predicting label · ${DEFAULT_PLANTED} · starting from your script`;
-    const html = homeView(vm({ draft: { ...cfg, trap: "leaky_column" } }), { html: "", label });
+    const html = newBatchView(vm({ draft: { ...cfg, trap: "leaky_column" } }), { html: "", label });
     expect(text(html)).toContain("mine.csv, predicting label · planted a column that leaks the target · starting from your script");
-    expect(text(homeView(vm(), { html: "", label }))).toContain(label);
+    expect(text(newBatchView(vm(), { html: "", label }))).toContain(label);
   });
 
   it("shows no picker and today's words when the server sends no list", () => {
     for (const defaults of [{ config: cfg, prices_missing: false }, { config: cfg, prices_missing: false, traps: [] }]) {
-      const html = homeView(vm({ defaults }));
+      const html = newBatchView(vm({ defaults }));
       expect(html).not.toContain('data-cfg="trap"');
       expect(html).not.toContain("hm-trap");
       expect(text(html)).toContain("Pima diabetes · planted duplicate rows Runs Duplicated rows 50%");
     }
-    expect(homeView(vm({ draft: null, defaults: null }))).not.toContain('data-cfg="trap"');
+    expect(newBatchView(vm({ draft: null, defaults: null }))).not.toContain('data-cfg="trap"');
   });
 
   it("shows a draft's trap that the list does not have, and escapes what the server sends", () => {
-    const odd = homeView(vm({ draft: { ...cfg, trap: "old<trap>" } }));
+    const odd = newBatchView(vm({ draft: { ...cfg, trap: "old<trap>" } }));
     expect(select(odd)).toContain('<option value="old&lt;trap&gt;" selected>old&lt;trap&gt;</option>');
     expect(odd).not.toContain("hm-trap-d");
     expect(text(odd)).toContain("Duplicated rows 50%");
     const evil: TrapInfo = { ...duplicates, title: "<b>T</b>", description: "<img src=x>", strength_label: "<i>S</i>", planted: "<u>p</u>" };
-    const html = homeView(vm({ defaults: { config: cfg, prices_missing: false, traps: [evil] } }));
+    const html = newBatchView(vm({ defaults: { config: cfg, prices_missing: false, traps: [evil] } }));
     expect(html).toContain("&lt;b&gt;T&lt;/b&gt;");
     expect(html).toContain("&lt;img src=x&gt;");
     expect(html).toContain("&lt;i&gt;S&lt;/i&gt;");

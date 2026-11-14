@@ -218,7 +218,7 @@ describe("a LIBERO-PRO batch", () => {
   });
 });
 
-import { homeView } from "../src/batch/home";
+import { newBatchView } from "../src/batch/home";
 import type { HomeVm } from "../src/batch/model";
 
 describe("the start form's test positions", () => {
@@ -229,14 +229,14 @@ describe("the start form's test positions", () => {
   const inputs = { datasets: null, selected: "pima", targets: {}, upload: { state: "idle" }, dragging: false, script: null, controller: null } as never;
 
   it("offers the whole table and LIBERO-PRO on a robot batch, whole table chosen until asked", () => {
-    const html = homeView(vm(draft()), inputs);
+    const html = newBatchView(vm(draft()), inputs);
     expect(html).toContain('name="robot_positions" data-cfg="robot_positions" value="default" checked');
     expect(html).toContain('name="robot_positions" data-cfg="robot_positions" value="libero_pro"><span>LIBERO-PRO</span>');
     expect(html).toContain(POSITIONS_TEXT.default);
   });
 
   it("says what LIBERO-PRO measures once it is chosen", () => {
-    const html = homeView(vm(draft("libero_pro")), inputs);
+    const html = newBatchView(vm(draft("libero_pro")), inputs);
     expect(html).toContain('value="libero_pro" checked');
     expect(html).toContain(POSITIONS_TEXT.libero_pro.replace(/'/g, "&#39;"));
     expect(html).not.toContain(POSITIONS_TEXT.default);

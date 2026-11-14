@@ -2,10 +2,10 @@
    (regular for anything big, medium for labels), white parts on a white page with warm grey panels, black buttons,
    and the purple gradient as a surface, never glass. Black mode is the same page on the app's near-black.
 
-   Motion, measured from the reference: big type arrives a letter at a time, each letter rising from blur and from
-   purple to ink; paragraphs a word at a time; cards and pictures pull into focus (8px of blur and 10px below, 900ms,
-   80ms apart) while a purple wash clears off the picture; section lines draw themselves in. mount.ts adds
-   `is-in` when a `data-lp-rev` element comes into view. Nothing moves for someone who asks for less motion. */
+   Motion is kept light: every word is on the page from the first frame (no blur, nothing held back for a scroll or
+   an intro), and only the pictures move. mount.ts adds `is-in` when a `data-lp-rev` element comes into view, which
+   plays the small diagram motions in the cards and draws the section lines. Nothing moves for someone who asks for
+   less motion. */
 
 @font-face { font-family:'Hanken Grotesk'; font-style:normal; font-weight:300 700; font-display:swap; src:url("../fonts/hanken-latin.woff2") format("woff2"); unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 @font-face { font-family:'Hanken Grotesk'; font-style:normal; font-weight:300 700; font-display:swap; src:url("../fonts/hanken-latin-ext.woff2") format("woff2"); unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
@@ -60,49 +60,24 @@
 .lp-nav-end { margin-left:auto; display:flex; align-items:center; gap:10px; }
 .lp-cta { display:inline-flex; align-items:center; height:36px; padding:0 14px; border-radius:6px; background:var(--lp-btn); color:var(--lp-btn-fg); font-size:14px; font-weight:500; text-decoration:none; white-space:nowrap; transition:background .2s ease; }
 .lp-cta:hover { background:var(--lp-btn-hover); }
-.lp-nav > *, .lp-links > *, .lp-nav-end > * { animation:lp-arrive .9s var(--lp-ease) both; }
-/* The intro waits, held at its first frame, until the ribbon has drawn (mount.ts sets the hero's `data-go`). */
-.lp:has(> .lp-hero:not([data-go])) :is(.lp-nav > *, .lp-links > *, .lp-nav-end > *, .lp-pill, .lp-pill > *, .lp-down) { animation-play-state:paused; }
-.lp-brand { animation-delay:.25s; }
-.lp-links > :nth-child(1) { animation-delay:.42s; } .lp-links > :nth-child(2) { animation-delay:.5s; } .lp-links > :nth-child(3) { animation-delay:.58s; }
-.lp-links > :nth-child(4) { animation-delay:.66s; } .lp-links > :nth-child(5) { animation-delay:.74s; }
-.lp-nav-end > :nth-child(1) { animation-delay:.82s; } .lp-nav-end > :nth-child(2) { animation-delay:.9s; }
-/* The button arrives purple and settles to black, as the reference's does. */
-.lp-nav .lp-cta { animation:lp-arrive .9s var(--lp-ease) .9s both, lp-settle 1.4s ease .9s both; }
-@keyframes lp-arrive { from { opacity:0; filter:blur(8px); transform:translateY(-6px); } }
-@keyframes lp-settle { from { background:var(--lp-pu); } }
 
 /* ── the hero ───────────────────────────────────────────────────────────── */
 .lp-hero { position:relative; z-index:1; min-height:max(640px, 100svh); display:flex; flex-direction:column; align-items:center; }
 .lp-ribbon { position:absolute; left:0; right:0; top:0; height:118%; z-index:0; pointer-events:none; }
 .lp-ribbon > canvas { display:block; width:100%; height:100%; opacity:0; }
-.lp-hero[data-go] .lp-ribbon > canvas { opacity:1; animation:lp-focus 2.4s var(--lp-ease) both; }
-@keyframes lp-focus { from { opacity:0; filter:blur(28px); transform:scale(1.04); } }
+.lp-ribbon > canvas { transition:opacity .8s ease; }
+.lp-hero[data-go] .lp-ribbon > canvas { opacity:1; }
 .lp-hero-in { position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; gap:clamp(36px, 7vh, 74px); padding:calc(76px + clamp(28px, 7vh, 80px)) var(--lp-gutter) 0; text-align:center; }
-.lp-pill { display:inline-flex; align-items:center; gap:9px; height:40px; padding:0 13px 0 8px; border-radius:6px; background:var(--lp-chip); color:var(--lp-ink); font-size:14.5px; letter-spacing:-0.005em; text-decoration:none; animation:lp-open .55s var(--lp-ease) .7s both; }
-.lp-pill > * { animation:lp-arrive .5s ease 1.15s both; }
+.lp-pill { display:inline-flex; align-items:center; gap:9px; height:40px; padding:0 13px 0 8px; border-radius:6px; background:var(--lp-chip); color:var(--lp-ink); font-size:14.5px; letter-spacing:-0.005em; text-decoration:none; }
 .lp-pill-mark { display:inline-flex; }
 .lp-pill:hover { background:var(--lp-tab); }
-@keyframes lp-open { from { clip-path:inset(0 50% round 6px); opacity:.4; } to { clip-path:inset(0 0 round 6px); } }
 .lp-title { margin:0; max-width:13.6em; font-size:clamp(40px, 4.5vw, 66px); font-weight:400; line-height:1.08; letter-spacing:-0.032em; text-wrap:balance; }
-.lp-down { position:absolute; left:50%; bottom:clamp(90px, 22vh, 230px); z-index:1; translate:-50% 0; display:grid; place-items:center; width:42px; height:42px; border:1px solid var(--lp-line-2); border-radius:6px; background:color-mix(in srgb, var(--lp-bg) 70%, transparent); color:var(--lp-ink); animation:lp-arrive .9s var(--lp-ease) 1.6s both; transition:background .2s ease; }
+.lp-down { position:absolute; left:50%; bottom:clamp(90px, 22vh, 230px); z-index:1; translate:-50% 0; display:grid; place-items:center; width:42px; height:42px; border:1px solid var(--lp-line-2); border-radius:6px; background:color-mix(in srgb, var(--lp-bg) 70%, transparent); color:var(--lp-ink); transition:background .2s ease; }
 .lp-down:hover { background:var(--lp-bg); }
 
 /* ── text that arrives a letter or a word at a time ─────────────────────── */
 .lp-w { display:inline-block; white-space:nowrap; }
 .lp-ch, .lp-wd { display:inline-block; }
-[data-lp-rev] .lp-ch { opacity:0; filter:blur(5px); transform:translateY(.32em); color:var(--lp-tint);
-  transition:opacity .6s ease, filter .7s ease, transform .8s var(--lp-ease), color .9s ease;
-  transition-delay:calc(var(--lp-at, 0s) + var(--i) * var(--lp-step, 18ms)); }
-[data-lp-rev].is-in .lp-ch { opacity:1; filter:none; transform:none; color:inherit; }
-[data-lp-rev].is-in .lp-ch { transition-delay:calc(var(--lp-at, 0s) + var(--i) * var(--lp-step, 18ms)), calc(var(--lp-at, 0s) + var(--i) * var(--lp-step, 18ms)), calc(var(--lp-at, 0s) + var(--i) * var(--lp-step, 18ms)), calc(var(--lp-at, 0s) + .35s + var(--i) * var(--lp-step, 18ms)); }
-[data-lp-rev] .lp-wd { opacity:0; filter:blur(4px); transform:translateY(.25em); color:var(--lp-tint);
-  transition:opacity .6s ease, filter .7s ease, transform .8s var(--lp-ease), color 1s ease;
-  transition-delay:calc(var(--lp-at, 0s) + var(--i) * var(--lp-wstep, 32ms)); }
-[data-lp-rev].is-in .lp-wd { opacity:1; filter:none; transform:none; color:inherit; }
-.lp-title { --lp-at:.6s; --lp-step:24ms; }
-.lp-lede { --lp-wstep:38ms; }
-.lp-card-p, .lp-feat-p { --lp-wstep:14ms; }
 
 /* ── the intro: one sentence, then the folder ──────────────────────────── */
 .lp-intro { position:relative; z-index:2; padding-top:clamp(40px, 8vh, 110px); padding-bottom:clamp(80px, 14vh, 160px); }
@@ -128,11 +103,6 @@
 .lp-stat[hidden] { display:block; visibility:hidden; }
 .lp-num { font-size:clamp(46px, 4.9vw, 70px); line-height:1; letter-spacing:-0.04em; font-variant-numeric:tabular-nums; }
 .lp-num-p { max-width:21em; margin:14px 0 0; color:var(--lp-ink-2); font-size:15px; line-height:1.45; }
-/* The open tab's number arrives as the headings do; mount.ts takes `is-on` off and puts it back to play it again. */
-.lp-num .lp-ch { opacity:0; filter:blur(5px); transform:translateY(.25em); color:var(--lp-tint); transition:opacity .5s ease, filter .6s ease, transform .7s var(--lp-ease), color .9s ease; transition-delay:calc(.15s + var(--i) * 45ms); }
-.lp-stat.is-on .lp-num .lp-ch { opacity:1; filter:none; transform:none; color:inherit; }
-.lp-stat .lp-num-p { opacity:0; filter:blur(4px); transition:opacity .5s ease .35s, filter .6s ease .35s; }
-.lp-stat.is-on .lp-num-p { opacity:1; filter:none; }
 .lp-media { position:relative; min-height:300px; aspect-ratio:16 / 10; border-radius:8px; overflow:hidden; background:var(--lp-mesh); background-size:160% 160%; animation:lp-drift 18s ease-in-out infinite alternate; }
 .lp-media-scene { position:absolute; inset:0; opacity:0; transition:opacity .5s ease; container-type:inline-size; }
 .lp-media-scene > canvas { display:block; width:100%; height:100%; }
@@ -169,13 +139,7 @@
 .lp-card-h { margin:14px 0 6px; font-size:15px; font-weight:500; letter-spacing:-0.01em; }
 .lp-card-p { margin:0; max-width:34em; color:var(--lp-ink-2); font-size:14.5px; line-height:1.45; }
 
-/* Cards pull into focus; their picture's purple wash clears a beat later. */
-[data-lp-rev].lp-card, .lp-feat[data-lp-rev], .lp-folder[data-lp-rev], .lp-close-card[data-lp-rev], .lp-foot-top[data-lp-rev], .lp-eyebrow[data-lp-rev], .lp-stack[data-lp-rev] {
-  opacity:0; filter:blur(8px); transform:translateY(10px); transition:opacity .9s ease, filter .9s ease, transform .9s var(--lp-ease); transition-delay:calc(var(--i, 0) * 80ms); }
-[data-lp-rev].is-in.lp-card, .lp-feat.is-in, .lp-folder.is-in, .lp-close-card.is-in, .lp-foot-top.is-in, .lp-eyebrow.is-in, .lp-stack.is-in { opacity:1; filter:none; transform:none; }
 .lp-art { position:relative; overflow:hidden; aspect-ratio:1 / 1.02; border-radius:6px; background:var(--lp-mesh); background-size:150% 150%; }
-.lp-art::after { content:""; position:absolute; inset:0; z-index:3; background:var(--lp-wash); pointer-events:none; transition:opacity 1.3s ease .35s; }
-.lp-card.is-in .lp-art::after, .lp-art.is-in::after { opacity:0; }
 .lp-art--floor { aspect-ratio:1.28; background:var(--lp-panel); }
 .lp-art--floor > canvas { display:block; width:100%; height:100%; opacity:0; transition:opacity .7s ease; }
 .lp-art--floor[data-ready] > canvas { opacity:1; }
@@ -235,9 +199,9 @@
 
 /* The robot floor's card: one chapter's words at a time, for the station the scene rests at. */
 .lp-floor-texts { display:grid; }
-.lp-floor-text { grid-area:1 / 1; visibility:hidden; opacity:0; filter:blur(4px); transition:opacity .3s ease, filter .3s ease, visibility 0s .3s; }
+.lp-floor-text { grid-area:1 / 1; visibility:hidden; opacity:0; transition:opacity .3s ease, visibility 0s .3s; }
 .lp-floor-texts[data-chapter="0"] [data-lp-floor-text="0"], .lp-floor-texts[data-chapter="1"] [data-lp-floor-text="1"],
-.lp-floor-texts[data-chapter="2"] [data-lp-floor-text="2"], .lp-floor-texts[data-chapter="3"] [data-lp-floor-text="3"] { visibility:visible; opacity:1; filter:none; transition:opacity .5s ease .1s, filter .5s ease .1s, visibility 0s; }
+.lp-floor-texts[data-chapter="2"] [data-lp-floor-text="2"], .lp-floor-texts[data-chapter="3"] [data-lp-floor-text="3"] { visibility:visible; opacity:1; transition:opacity .5s ease .1s, visibility 0s; }
 
 /* ── why Orro ───────────────────────────────────────────────────────────── */
 .lp-eyebrow { display:inline-flex; align-items:center; height:24px; padding:0 9px; border-radius:5px; background:var(--lp-chip); color:var(--lp-ink-2); font-size:12px; text-decoration:none; white-space:nowrap; }
@@ -333,9 +297,6 @@
 /* ── less motion ────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .lp *, .lp *::before, .lp *::after { animation:none !important; transition:none !important; }
-  [data-lp-rev] .lp-ch, [data-lp-rev] .lp-wd, .lp-num .lp-ch, .lp-stat .lp-num-p { opacity:1; filter:none; transform:none; color:inherit; }
-  [data-lp-rev].lp-card, .lp-feat[data-lp-rev], .lp-folder[data-lp-rev], .lp-close-card[data-lp-rev], .lp-foot-top[data-lp-rev], .lp-eyebrow[data-lp-rev], .lp-stack[data-lp-rev] { opacity:1; filter:none; transform:none; }
-  .lp-art::after { opacity:0; }
   .lp-bar, .lp-pos, .lp-art--split .lp-found { transform:none; opacity:1; }
   .lp-div-a, .lp-div-b { transform:none; }
   .lp-div-c path, .lp-arc { stroke-dashoffset:0; }

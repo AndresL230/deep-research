@@ -273,7 +273,11 @@ def api_client(tmp_path, monkeypatch):
 def test_the_api_lists_and_opens_batches_from_the_hub(api_client):
     batches = api_client.get("/api/batches").json()
     remote = [b for b in batches if b["id"] == "1114-050000-abcd"]
-    assert remote == [{"id": "1114-050000-abcd", "kind": "replay", "machine": "laptop-b", "remote": True}]
+    assert [{k: v for k, v in b.items() if k != "summary"} for b in remote] == [
+        {"id": "1114-050000-abcd", "kind": "replay", "machine": "laptop-b", "remote": True}]
+    # Summarised from the hub's case file, like a saved batch.
+    summary = remote[0]["summary"]
+    assert summary["counts"]["honest"] == 1 and summary["analyst_models"] == ["m"] and summary["spend"]["usd"] == 0.5
     assert any(b["id"] == "demo-batch" and "remote" not in b for b in batches)
     assert api_client.get("/api/batches/1114-050000-abcd/case").json()["phase"] == "done"
     assert api_client.get("/api/batches/1114-050000-abcd/runs/r01/events").json()[0]["text"] == "1114-050000-abcd:r01"
@@ -282,6 +286,33 @@ def test_the_api_lists_and_opens_batches_from_the_hub(api_client):
     assert api_client.get("/api/batches/nope/case").status_code == 404
     with api_client.websocket_connect("/api/batches/1114-050000-abcd/ws") as ws:
         assert ws.receive_json()["case"]["phase"] == "done"
+
+
+def test_hub_summaries_fetch_case_files_only_for_a_new_revision(api_client, monkeypatch):
+    from deep_research import api
+
+    rows = [{"id": "1114-070000-aaaa", "machine": "laptop-b", "revision": 1}]
+    cases = [{"id": "1114-070000-aaaa", "machine": "laptop-b", "revision": 1, "started_at": "2026-11-14T07:00:00-0500",
+              "case": {"phase": "done", "runs": {"r01": {"id": "r01", "status": "inflated"}}}}]
+    calls = []
+
+    def all_cases(client=None):
+        calls.append(1)
+        return cases
+
+    monkeypatch.setattr(api, "_HUB_SUMMARIES", {})
+    monkeypatch.setattr(api.hub, "list_batches", lambda client=None: rows)
+    monkeypatch.setattr(api.hub, "all_cases", all_cases)
+
+    def remote():
+        api._hub_cache.clear()  # every call reads the hub list afresh; the case files only when a revision is new
+        return {b["id"]: b for b in api_client.get("/api/batches").json()}["1114-070000-aaaa"]["summary"]
+
+    assert remote()["counts"]["inflated"] == 1 and len(calls) == 1
+    assert remote()["counts"]["inflated"] == 1 and len(calls) == 1
+    rows[0]["revision"] = 2
+    cases[0] = {**cases[0], "revision": 2, "case": {"phase": "done", "runs": {"r01": {"id": "r01", "status": "honest"}}}}
+    assert remote()["counts"]["honest"] == 1 and len(calls) == 2
 
 
 def test_the_cost_screen_includes_the_team(api_client):

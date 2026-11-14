@@ -17,7 +17,7 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | POST | `/api/datasets?name=<file name>` | The body is the CSV file itself (up to 20 MB). Saves it under `datasets/` and returns its `DatasetInfo`. `422 {"detail"}` says why a file cannot be used; `413` when it is too large |
 | POST | `/api/scripts?name=<file name>` | The body is a Python training script (up to 200 KB). The server parses it and never runs it. Saves it under `user_scripts/` and returns its `ScriptInfo`; `422 {"detail"}` when it is not valid Python |
 | POST | `/api/controllers?name=<file name>` | The body is a robot controller, a Python file (up to 200 KB). The server parses it and never runs it. Returns its `ControllerInfo`; `422 {"detail"}` when it is refused (not valid Python, or no `class Controller` with `reset` and `act` methods); `413` when it is too large |
-| GET | `/api/batches` | `[{"id", "kind": "live" or "replay", "resumable"?: true}]`: batches started on this server, saved batches in `batches/`, and replays in `fixtures/`. `resumable` marks a saved batch that `resume` would accept |
+| GET | `/api/batches` | `[{"id", "kind": "live" or "replay", "resumable"?: true, "fixture"?: true, "remote"?: true, "machine"?, "summary": BatchSummary or null}]`: batches started on this server, saved batches in `batches/`, replays in `fixtures/` (`fixture`), and the team hub's batches (`remote`, run on `machine`). `resumable` marks a saved batch that `resume` would accept. `summary` is below ([The batch list](#the-batch-list)) |
 | POST | `/api/batches` | Body: a `BatchConfig`. Starts a batch, returns `{"id"}`. `422 {"detail"}` when the dataset, target, script or trap cannot be used |
 | GET | `/api/costs` | The cost report (below): spend across every batch, live ones from memory and saved ones from disk |
 | GET | `/api/batches/{id}/case` | The case file (below) |
@@ -32,6 +32,8 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | POST | `/api/batches/{id}/decision` | Live only. `{"approve": bool}` answers `forks.pending` (phase `awaiting_approval`) |
 | POST | `/api/batches/{id}/stop` | Live only. Cancels the work and stops every VM |
 | POST | `/api/batches/{id}/resume?investigate=<bool>` | Bring a saved batch of ours back live, in phase `ready`, so the investigator and the fork experiment can run on it after a server restart. With `investigate=true` the investigator starts in the same call. Only a batch whose runs are all scored, with a split and no verdict yet; `409 {"detail"}` says why otherwise. The list and the websocket snapshot flag such a batch with `resumable: true` |
+| GET | `/api/batches/{id}/more-pairs?n=<copies per arm>` | For a saved batch whose verdict is `open`: what running `n` more copies per arm of the verdict's fork experiment would add and cost, for the confirmation (`MorePairsQuote`, see More pairs below). Starts and loads nothing. `409 {"detail"}` says why more pairs cannot run; `422` for `n` below 1 |
+| POST | `/api/batches/{id}/more-pairs?n=<copies per arm>` | Run them: loads the saved batch back into this server (as `resume` does), claims it (phase `forking`) and starts the copies, then updates the fork and the verdict. Returns the quote plus `id`, `phase` and the new `children`. `409 {"detail"}` when it cannot run, an over-budget estimate included |
 | WS | `/api/batches/{id}/ws` | See below |
 
 Errors: unknown batch is `404 {"detail": ...}`; a live-only call on a replay is `409`; any other unknown `/api/*`
@@ -147,7 +149,7 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
 - `forks`: by id (`f1`...): `status` (`rebuilding`, `running`, `done`), `source_run`, `fork_at`, `label`,
   `intervention`, `n_per_arm`, `arm_steps`, `children` (each with `arm`, `status`, scores, `how`), and `arms`
   summaries when done. While the investigator waits for approval there is also `forks.pending` with `n_per_arm`,
-  `vm_count` and `estimate_usd`.
+  `vm_count` and `estimate_usd` (an average run's spend per copy, rounded up to the cent).
 
   `arm_steps` maps each arm, in the order it runs, to the step forced on it before it continues (null for
   `control`). `control` and `forced` are always there. `placebo` (`config.placebo_arm`) runs a harmless command so
@@ -165,12 +167,23 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   in them is `honest` of `scored` and `mean_true` (did the code get better), not the inflation. `forks.pending`
   carries the same `kind`, so the approval card can say which experiment is being asked for. The verdict always
   belongs to the method experiment; a fix experiment's result is recorded on `fix`.
+
+  `more_pairs` (absent until one runs): the rounds of more pairs run on this fork after its verdict, oldest first
+  (see More pairs below), each `{at, n_per_arm, children, status, estimate_usd, pairs_before, level_before,
+  n_per_arm_before}` plus `pairs_after` and `level_after` once it ended and `reason` when it `failed` or `stopped`.
+  `status` is `rebuilding` and `running` while it runs (the fork's own `status` follows: `rebuilding`, `running`,
+  then `done` again), then `done`, `failed` (the base VM could not be rebuilt: no copy ran and nothing else
+  changed) or `stopped` (stopped, or the server stopped: its scored copies count, the others are failed children).
+  The fork's `children` gain the round's copies, `arms` counts every copy of every round, and `n_per_arm` becomes
+  the copies per arm over all rounds.
 - `verdict`: `{sentence, step_label, numbers, evidence}` or null. `evidence` (`deep_research/evidence.py`,
   `VerdictEvidence` in `web/src/api.ts`): `{level, pairs, needed_pairs, control_inflated, control_total,
   forced_inflated, forced_total, p_value}`. `pairs` is min(control, forced scored copies); `level` is `supported`
   when pairs >= 8 and a one-sided Fisher exact test of fewer inflated forced copies than control copies gives
   p < 0.05, else `open`. The sentence says "suggests", with the score and the pairs, while it is open, and "caused"
   only when supported (`record_verdict` refuses a causal word while open). Verdicts saved before it get it when read.
+  More pairs (below) change `sentence`, `arms`, `numbers` and `evidence` and add `revisions`: `[{at, by:
+  "more_pairs", fork_id, sentence, evidence}]`, what the verdict said before each such change, oldest first.
 - `trace`: what the investigator's `code-tracer` subagent found, in order: `[]` until it records something (absent on
   case files saved before it existed; read as `[]`). Each entry has `at` (unix seconds), `run_id` (the run whose
   code was traced), `symptom` (one sentence read from a recording, with its time and distances), `line` (1-based,
@@ -216,7 +229,70 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   run's own `true_accuracy` above it means that run's agent made the controller better.
 - `costs`: `budget_usd`, `spent_usd` (null when a price is unknown), `prices_missing`, and `scopes`
   (`run:r01`, `fork:f1:base`, `fork:f1:control-1`, `investigator`), each with input, output, cache read and
-  cache write tokens, `model_usd`, `vm_seconds`, `vm_usd`, `total_usd`.
+  cache write tokens, `model_usd`, `vm_seconds`, `vm_usd`, `total_usd`. A round of more pairs rebuilds its own
+  base VM: `fork:f1:base-2` for the first, `fork:f1:base-3` for the next.
+
+## More pairs
+
+A verdict whose evidence is `open` (too few pairs, or no clear difference yet) can be given more pairs without the
+investigator: more copies in each arm of the fork experiment it rests on (the newest finished method experiment),
+the same arms with the same steps, forked from the same moment of the same run. When they are scored, the fork's
+`arms` and the verdict's `arms`, `numbers` and `evidence` are recomputed from every copy so far, and the sentence is
+reworded in plain code by the new level, the same rule the investigator follows (`evidence.verdict_sentence`):
+
+- open: `Skipping the step of removing duplicate rows suggests why the claims were inflated: forcing it left 1 of 6
+  copies inflated, against 4 of 6 without (6 pairs of the 8 needed, p = 0.121).`
+- supported: `Skipping the step of removing duplicate rows caused the inflated claims: forcing it left 0 of 8 copies
+  inflated, against 8 of 8 without (8 pairs, one-sided Fisher p < 0.001).`
+
+The step is its words from `config.domain_info.words.steps`; when `placebo` or `show` ran, their counts follow
+control's (`..., 5 of 5 after the placebo step, and 2 of 5 when only shown the problem`). The sentence it replaces
+is kept in `verdict.revisions`; `confidence` and the split's numbers stay the investigator's.
+
+New children continue each arm's numbers: after `control-1..4` and `forced-1..4` come `control-5..` and
+`forced-5..`, so copies pair by number as before.
+
+`GET /api/batches/{id}/more-pairs?n=4` (`MorePairsQuote` in `web/src/api.ts`):
+
+```json
+{"fork_id": "f1", "n_per_arm": 4, "max_per_arm": 8, "arms": ["control", "forced"], "vm_count": 9,
+ "estimate_usd": 0.03, "basis": "8 new copies at $0.0025 each (the average of 8 earlier finished copies of f1),
+ plus $0.0011 for the base VM (what f1's base VM cost). Model tokens and VM time, rounded up to the cent.",
+ "pairs_now": 4, "pairs_after": 8, "needed_pairs": 8, "level_now": "open", "p_value_now": 0.2143,
+ "budget_usd": 10.0, "spent_usd": 0.55, "over_budget": false, "budget_problem": null}
+```
+
+`n` defaults to `needed_pairs - pairs_now`, at least 1, and is held to 1..8 (`max_per_arm`). `vm_count` is one base
+VM plus `n` per arm. `pairs_after` assumes every new copy is scored.
+
+`estimate_usd` is one copy's spend, model tokens and VM time, times the new copies, plus one base VM; rounded up to
+the cent, never down, so a small round is never quoted as $0.00. One copy's spend is the average of this fork's
+copies that finished (scored `honest`, `inflated` or `unclear`; a failed or stopped copy may have ended early),
+else of a whole run on the source run's model, else of any run. A copy's spend includes the source run's history
+it starts from, which it sends again as cache reads and writes. The base VM is priced at the most one of this
+fork's base VMs cost, else at one copy's VM time. More pairs ask no other model (the verdict is reworded in code),
+so the investigator's spend, most of a batch's, is no part of it. Not counted: VM create and fork time before a VM
+is up, and disk kept by stopped VMs (as in the cost report). Null when prices or earlier spend are unknown.
+`basis` says the same in words for this quote (`"No estimate: ..."` when it is null). `over_budget` with
+`budget_problem`: the POST would refuse it, checked with the rounded-up estimate.
+
+`POST /api/batches/{id}/more-pairs?n=4` answers the same fields plus `{"id", "phase": "forking", "children":
+["control-5", ..., "forced-8"]}`. The batch is live from then on: open the websocket again to follow it. It sends
+the same messages a first experiment does: `case` sections (`phase` `forking`, `forks` as the fork goes
+`rebuilding`, `running` and `done` and as each child appears and is scored, `verdict` at the end, `costs`) and
+`fork_event` for each new child's events. The phase ends `done`; `stop` works while it runs.
+
+Both answer `409 {"detail": "cannot run more pairs: <why>"}` when:
+
+- the batch is a fixture (`fixtures/`), or simulated;
+- it has no verdict yet, or its evidence is already `supported`;
+- no method experiment finished with a `control` and a `forced` arm, or the files needed to fork its run are gone;
+- it is running something else in this server (any phase but an ended one), or an experiment is running or waiting
+  for approval: one experiment at a time;
+- (POST) the arms cannot be rebuilt as they ran (the step of an arm changed);
+- (POST) the batch has spent its budget, or spent plus the estimate is over it.
+
+An unknown batch is `404`.
 
 ## The cost report
 
@@ -259,6 +335,54 @@ Usd { total, runs, forks, investigator, other, model, vm }
 - `started_at` is local time, `YYYY-MM-DDTHH:MM:SS`, read from the batch id (`MMDD-HHMMSS-xxxx`); a batch with
   another kind of id gets its case file's last change, and a fixture gets null.
 - `vm_seconds` run from the moment a VM is up until it is deleted. A VM that is still up is counted to now.
+
+## The batch list
+
+Each item of `GET /api/batches` carries `summary`, the batch in a few numbers for the home screen's table
+(`web/src/batch/batch-table.ts`), built by `deep_research/batch_summary.py` from the case file: a live batch's from
+memory, a saved batch's and a fixture's from disk, a hub batch's from the hub's copy. It is null when the case file
+cannot be read. A batch saved before a field existed gets null, an empty list or zero counts for it.
+
+```ts
+BatchSummary {
+  domain: { name, title } | null,                 // config.domain ("tabular" when absent) and its title
+  started_at: string | null,                      // as in BatchCost; a hub batch whose id has no date uses the hub's
+  phase: string | null,
+  simulated: boolean,
+  analyst_models: string[],                       // the lineup, else [analyst_model], else []
+  investigator_model: string | null,
+  n_runs,                                         // runs in the case file, else config.n_runs
+  counts: { honest, inflated, unclear, failed, running, queued, stopped },
+  claim: { of: "inflated" | "honest", n, claimed, measured, n_hidden: number | null } | null,
+  step: { label, name } | null,                   // split.label, and its name in the domain's words
+  verdict: { state, pairs?, needed_pairs? },
+  pending: { kind: "method" | "fix", n_per_arm, vm_count, estimate_usd } | null,
+  fork_progress: { scored, total } | null,
+  spend: { usd: number | null, usd_partial: boolean, tokens },
+}
+```
+
+- `counts.running` counts starting runs too. Once the batch is over (done, no split, stopped, error, blocked) a run
+  that never finished counts as `stopped`, not running.
+- `claim` is the overview headline's (`claimHeadline` in web/src/batch/wall.ts): the means of the claimed and the
+  measured number over the inflated runs, or over the honest and unclear runs (`of: "honest"`) when none inflated.
+  Null while a run is still going in a batch that is not over. `n_hidden` is the hidden case count when the runs agree.
+- `step.name` comes from `config.domain_info.words.steps` (the registered domain's words for a case file that has
+  none), else the planted trap's words (`config.trap_info`), else "the <label in words> step". Never the raw label.
+- `verdict.state`: `none` (no fork yet), `awaiting_approval` (a fork waits for approval), `fork_running`,
+  `fork_stopped`, `forked` (the fork finished, no verdict yet), or the verdict's evidence level `open` or `supported`
+  (deep_research/evidence.py) with its `pairs` and `needed_pairs`.
+- `pending` is the fork request waiting for approval (`forks.pending`): a method experiment or a fix test, its copies
+  per arm, its VMs and its estimate in dollars (null when prices are missing; the numbers are null on a request saved
+  before it had them). Null when nothing waits. The home screen's "Needs you" list offers Approve and Decline on it
+  for a live batch.
+- `fork_progress` is the fork experiment still going (a first one, a fix test or a round of more pairs): its copies
+  scored out of `n_per_arm` times its arms (`n_per_arm` counts every round). Null when none is going or the batch is
+  over.
+- `spend` comes from the cost report's per batch row (`cost_report._batch`). `usd` is null for a simulated batch,
+  and when prices are missing and nothing was priced; `tokens` is input plus output.
+- Summaries are kept between calls while a saved case file's mtime and size, or a hub batch's revision, stay the
+  same. The hub's case files are fetched (one read shared with `/api/costs`) only when a revision is new.
 
 ## Event logs
 

@@ -205,6 +205,9 @@ export function mountRibbon(host: HTMLElement, options: RibbonOptions): Ribbon {
   // bright light panels back into range.
   renderer.toneMapping = NeutralToneMapping;
   renderer.toneMappingExposure = 1;
+  // What the glass refracts is a soft colour field: drawing it at half size each frame looks the same, at a quarter
+  // of the pixels.
+  renderer.transmissionResolutionScale = 0.5;
   const canvas = renderer.domElement;
   canvas.setAttribute("aria-hidden", "true");
   host.appendChild(canvas);
@@ -235,11 +238,8 @@ export function mountRibbon(host: HTMLElement, options: RibbonOptions): Ribbon {
     transmission: 1,
     thickness: 1.4,
     ior: 1.5,
-    dispersion: 9,
-    iridescence: 0.5,
-    iridescenceIOR: 1.3,
-    iridescenceThicknessMinimum: 280,
-    iridescenceThicknessMaximum: 620,
+    // No dispersion or iridescence: dispersion samples the refraction three times a pixel and iridescence adds a
+    // thin-film pass, together most of what made the hero crawl, for a rainbow edge hardly anyone sees.
     clearcoat: 1,
     clearcoatRoughness: 0.04,
     specularIntensity: 1,
@@ -263,7 +263,8 @@ export function mountRibbon(host: HTMLElement, options: RibbonOptions): Ribbon {
     width = host.clientWidth;
     height = host.clientHeight;
     if (!width || !height) return;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // The band fills the whole hero: past 1.5x the extra pixels cost more than they show.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     // Wide enough to fill most of the hero's width, never so near that it leaves the top and bottom.

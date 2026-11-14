@@ -281,6 +281,14 @@ class CaseFile:
             self._changed("verdict")
         return "verdict saved"
 
+    def update_verdict(self, **fields: Any) -> None:
+        """Change fields of the saved verdict (more pairs, `Batch.run_more_pairs`). Nothing without a verdict."""
+        with self._lock:
+            if not isinstance(self.data.get("verdict"), dict):
+                return
+            self.data["verdict"].update(fields)
+            self._changed("verdict")
+
     def method_fork_arms(self) -> dict[str, dict] | None:
         """The arms of the newest finished method experiment (not a fix test), or None when none finished."""
         done = [f for k, f in self.data["forks"].items()

@@ -1,13 +1,21 @@
 // The app: one canvas whose state follows the batch (docs/api-contract.md, web/src/batch/model.ts).
 //
 //   #/                         the landing page: a nav and a hero over a 3D scene of the pipeline (landing/)
-//   #/start                    home: saved and live batches, and the config screen to start one
+//   #/start                    home: what needs a person (Needs you), then the saved and live batches
+//   #/batches                  the same page, opened at the batch table
 //   #/b/<id>                   a batch, first page: the overview and the wall of runs
 //   #/b/<id>/<step>            a batch's later pages, one per stage: changed, investigator, fork, verdict,
 //                              diagnosis, fix (model.ts BATCH_STEPS)
 //   #/b/<id>/run/<run>         one run in the Ask conversation view
 //   #/b/<id>/fork/<f>/<child>  one fork child in the conversation view
 //   #/costs                    what every batch cost, in total and one by one
+//   #/how                      how it works: the loop in five steps, on the robot demo's numbers. The first time
+//                              someone enters the app (any app page but a batch's own), they are sent here once
+//
+// Every page but the landing page has the same top bar (batch/nav.ts): the links to Needs you (with how many batches
+// wait on the person), Batches and Costs, and "+ New batch", which opens the New batch form in a dialog from any page
+// (batch/new-batch-dialog.ts). The batch list behind the count and the home screen is loaded once and kept fresh by
+// one poller, on whichever app page is open.
 //
 // A live batch follows the server over the websocket. A saved batch (a replay) loads its final case file and every
 // event log once, then a clock plays it back on the timeline in batch/replay.ts.
@@ -19,23 +27,26 @@ import "./style.css";
 import "./system.css";
 import "./batch/page.css";
 import { attr, esc } from "./ui";
-import { symbolTile, wordmark } from "./brand";
+import { mark, wordmark } from "./brand";
 import { morphInner } from "./morph";
 import { AWAY_PX, conversationView, initialConversationUi, jumpButton, stickAfterScroll, thinkingLabel, type ConversationUi } from "./ask-conversation";
 import { scheduleOrbs } from "./thinking-orb";
 import { PAGE_BACKGROUND, readStoredTheme, resolveTheme, storeTheme, themeChoice, themeSwitch, type Theme, type ThemeChoice } from "./theme";
 import {
   applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
-  fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, uploadController, uploadDataset, uploadScript, startInvestigation, stopBatch,
-  type AgentEvent, type HubStatus, type BatchConfig, type BatchSocket, type CaseFile,
+  fetchMorePairs, fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, startMorePairs, uploadController, uploadDataset, uploadScript, startInvestigation, stopBatch,
+  type AgentEvent, type HubStatus, type BatchConfig, type BatchListItem, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, BATCH_STEPS, STEP_LABEL, childKey, parseRoute, routeHash, type BatchStep, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
-import { DEFAULT_DOMAIN, HM_ACT, costBar, domainOf, homeView, initialDraft, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload, toggleModel } from "./batch/home";
-import { hubBadge } from "./batch/hub-badge";
+import { DEFAULT_DOMAIN, HM_ACT, NEW_BATCH_TITLE, costBar, domainOf, homeView, initialDraft, newBatchView, pickDomain, recallDomain, rememberDomain, resetDraft, startPayload, toggleModel, type HomeInputs } from "./batch/home";
+import { BT_ACT, DEFAULT_VIEW, sortBy } from "./batch/batch-table";
+import { NY_ACT, moreFailedUi, needKey, needsCount, pruneNeeds, quoteUi, type NeedKind, type NeedUi } from "./batch/needs-you";
+import { navBar, navMenu, newBatchButton, refreshDue } from "./batch/nav";
+import { newBatchDialog } from "./batch/new-batch-dialog";
 import { DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
 import { notYetView, overviewView, pageHeadView, pagerView } from "./batch/overview";
 import { wallView } from "./batch/wall";
-import { feedView, notebookWithCaptions, wallWithFeed } from "./batch/commentary";
+import { feedButton, notebookWithCaptions } from "./batch/commentary";
 import { benchmarkView, diagnosisView, fixView, forkView, investigatorView, keyPointsView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, runSummaryView, taskText, workStrip } from "./batch/run";
@@ -43,7 +54,8 @@ import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, rep
 import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook";
 import { fetchCosts, type CostReport } from "./api";
 import type { Loadable } from "./batch/model";
-import { costsLink, costsView } from "./batch/costs";
+import { costsView } from "./batch/costs";
+import { HOW_BATCH, firstVisitRedirect, howSeen, howView } from "./batch/how";
 import { landingView } from "./landing/landing";
 import { syncLanding } from "./landing/mount";
 import { syncMotion } from "./motion";
@@ -72,8 +84,13 @@ interface BatchState {
 
 interface AppState {
   route: Route;
+  /** The batch list, the "Needs you" rows' states and the New batch form's draft (model.ts HomeVm). Kept for the whole
+   *  session and loaded on any app page: the header's count, the home screen and the dialog all read it. */
   home: HomeVm;
-  homeLoaded: boolean;
+  /** The first load of `home` (the list, the health and the defaults) has started. */
+  appLoaded: boolean;
+  /** The header's menu of links is unfolded (narrow screens). */
+  navOpen: boolean;
   /** What a new batch runs on: the dataset, the target column and the training script, or the robot controller (dataset-input.ts). */
   ds: DatasetUi;
   batch: BatchState | null;
@@ -86,6 +103,8 @@ interface AppState {
   workOpen: boolean;
   /** The cost screen's report (GET /api/costs), loaded again on every visit. */
   costs: Loadable<CostReport>;
+  /** The robot demo's case file, for the How it works page's pictures (batch/how.ts). */
+  how: Loadable<CaseFile>;
   /** Where the cost screen was opened from, for its back button. */
   costsBack: Route;
   /** The page of a batch last open, so the way back from one of its runs lands on it. */
@@ -102,7 +121,8 @@ interface AppState {
 const S: AppState = {
   route: parseRoute(location.hash),
   home: { batches: { state: "loading" }, health: null, defaults: null, draft: null, estimate: null, starting: false, error: null },
-  homeLoaded: false,
+  appLoaded: false,
+  navOpen: false,
   ds: initialDatasetUi(),
   batch: null,
   cv: initialConversationUi(),
@@ -110,6 +130,7 @@ const S: AppState = {
   runView: "notebook",
   workOpen: false,
   costs: { state: "loading" },
+  how: { state: "loading" },
   costsBack: { name: "home" },
   lastStep: null,
   hub: null,
@@ -138,13 +159,45 @@ app.innerHTML = `<div class="app-root" data-cnpy-theme="${theme()}">
   <header class="cnpy-hdr pg-hdr" data-region="header"></header>
   <div class="pg-sub" data-region="sub" hidden></div>
   <main class="pg-scroll" data-region="scroll"></main>
+  <dialog class="nbd-dlg" aria-labelledby="${NEW_BATCH_TITLE}"><div class="nbd-frame" data-region="new-batch"></div></dialog>
 </div>`;
 const root = app.firstElementChild as HTMLElement;
 const headerEl = root.querySelector<HTMLElement>("[data-region=header]")!;
 const subEl = root.querySelector<HTMLElement>("[data-region=sub]")!;
 const scrollEl = root.querySelector<HTMLElement>("[data-region=scroll]")!;
+// The New batch dialog: the <dialog> is never patched, only the frame inside it (new-batch-dialog.ts).
+const dialogEl = root.querySelector<HTMLDialogElement>("dialog.nbd-dlg")!;
+const newBatchEl = root.querySelector<HTMLElement>("[data-region=new-batch]")!;
 // The page scrolls smoothly (scroll.ts, Lenis); the jumps the app makes itself go through it too.
 const smooth = smoothScroll(scrollEl);
+const newBatch = newBatchDialog(dialogEl, {
+  fill: () => morphInner(newBatchEl, newBatchView(S.home, formInputs())),
+  lock: (on) => {
+    if (on) root.dataset.modal = "open";
+    else delete root.dataset.modal;
+    smooth.lock(on);
+  },
+  closed: () => { if (S.ds.dragging) S.ds = { ...S.ds, dragging: false }; paint(); },
+  fallback: () => headerEl.querySelector<HTMLElement>("[data-act=new-batch]"),
+});
+
+/** What the form runs on, drawn by dataset-input.ts. */
+function formInputs(): HomeInputs {
+  return {
+    html: inputsView(S.ds, S.home.starting), label: inputsLabel(S.ds),
+    controllerHtml: controllerRow(S.ds, S.home.starting), controller: S.ds.controller,
+  };
+}
+
+/** "+ New batch": the dialog, from any app page. The data behind the form loads with the app; the first open of a
+ *  session that has not loaded it yet starts it. */
+function openNewBatch(opener: HTMLElement | null): void {
+  if (S.route.name === "landing") return;
+  S.navOpen = false;
+  void loadApp();
+  newBatch.open(opener);
+  paint();
+}
 const applyTheme = (): void => { root.dataset.cnpyTheme = theme(); syncPageTheme(); scheduleOrbs(); paint(); };
 themeQ.addEventListener("change", () => { if (themePick === "system") applyTheme(); });
 /** The switch: white or black, kept in this browser. */
@@ -244,15 +297,19 @@ function headerView(vm: BatchVm | null): string {
   const onFirst = r.name === "batch" && !r.step;
   if ("id" in r) crumbs.push(`<button type="button" class="pg-crumb${onFirst ? " is-cur" : ""}" data-act="${ACT.back}">${esc(r.id)}</button>`);
   if (r.name === "batch" && r.step) crumbs.push(`<span class="pg-crumb is-cur">${esc(STEP_LABEL[r.step])}</span>`);
-  if (r.name === "costs") crumbs.push(`<span class="pg-crumb is-cur">Costs</span>`);
   if (r.name === "run") crumbs.push(`<span class="pg-crumb is-cur">${esc(r.run)}</span>`);
   if (r.name === "child") crumbs.push(`<span class="pg-crumb is-cur">${esc(`${r.fork} ${r.child}`)}</span>`);
+  const count = needsCount(S.home.batches);
+  // The logo, the links (nav.ts), then on a batch's pages its breadcrumb: the batch and the page in it.
   const left = `<div class="ask-hdr-l pg-hdr-l">
-    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${symbolTile(22)}<span class="ask-h1 ask-h1-t${crumbs.length ? " is-parent" : ""}">${wordmark(16)}</span></button>
-    ${crumbs.map((c) => `<span class="ask-crumb-sep">›</span>${c}`).join("")}
+    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${mark(15.5)}<span class="ask-h1 ask-h1-t">${wordmark(15)}</span></button>
+    ${navBar(r, count)}
+    ${crumbs.length ? `<nav class="pg-crumbs" aria-label="Breadcrumb" data-morph-key="crumbs">${crumbs.join(`<span class="ask-crumb-sep" aria-hidden="true">›</span>`)}</nav>` : ""}
   </div>`;
   const bar = vm ? costBar(vm.case.costs ?? {}, { simulated: !!(vm.case.config as BatchConfig).simulated }) : "";
-  const right = `<div class="pg-hdr-r">${bar}${hubBadge(S.hub)}${costsLink(r.name === "costs")}${themeSwitch(theme())}</div>`;
+  // The live feed sits where the hub badge was: on a batch's pages only, opening on hover (commentary.ts).
+  const feed = vm && "id" in r ? feedButton(vm, S.feedOpen) : "";
+  const right = `<div class="pg-hdr-r">${bar}${feed}${themeSwitch(theme())}${newBatchButton(newBatch.isOpen)}${navMenu(r, count, S.navOpen, [["Theme", themeSwitch(theme())]])}</div>`;
   return left + right;
 }
 
@@ -262,15 +319,15 @@ const STEP_VIEW: Record<Exclude<BatchStep, "wall">, (vm: BatchVm) => string> = {
 };
 
 /**
- * A batch, a page at a time instead of one long scroll. The first page is where the batch stands and its agents, with
- * the live feed of notable moments beside them (commentary.ts); each stage after them (where the runs split, the
+ * A batch, a page at a time instead of one long scroll. The first page is where the batch stands and its agents, the
+ * wall at the page's full width (the live feed is in the header, commentary.ts); each stage after them (where the runs split, the
  * investigator, the fork, the verdict, and a robot batch's diagnosis and fix) is a page of its own. Every page ends in
  * Back / Next (overview.ts `pagerView`).
  */
 function batchBody(vm: BatchVm, step: BatchStep): string {
   const sections: [string, string][] = step === "wall"
     // The first page ends in the key points: what the batch found so far, one line each (lanes.ts keyPointsView).
-    ? [["overview", overviewView(vm)], ["wall", wallWithFeed(wallView(vm), feedView(vm, S.feedOpen))], ["points", keyPointsView(vm)], ["bench", benchmarkView(vm)]]
+    ? [["overview", overviewView(vm)], ["wall", wallView(vm)], ["points", keyPointsView(vm)], ["bench", benchmarkView(vm)]]
     : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || notYetView(vm, step)]];
   // The bar is a new element on every page, so it arrives with the page.
   sections.push([`pager:${step}`, pagerView(vm, step)]);
@@ -326,14 +383,13 @@ function render(): void {
   subEl.hidden = !showReplay;
   if (showReplay && vm?.replay) morphInner(subEl, replayBar(vm.replay));
 
+  // The form in the dialog, while it is open: patched like the page, so a field keeps its focus and its caret.
+  if (newBatch.isOpen) morphInner(newBatchEl, newBatchView(S.home, formInputs()));
+
   let body: string;
   if (landing) body = landingView(landingTone);
-  else if (r.name === "home") {
-    body = homeView(S.home, {
-      html: inputsView(S.ds, S.home.starting), label: inputsLabel(S.ds),
-      controllerHtml: controllerRow(S.ds, S.home.starting), controller: S.ds.controller,
-    });
-  }
+  else if (r.name === "home") body = homeView(S.home);
+  else if (r.name === "how") body = howView(S.how);
   else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
   else if (!vm) body = messageView("loading", "Opening the batch", "Loading its case file and event logs…");
@@ -381,8 +437,35 @@ function followStory(): void {
   shownSections = keys;
 }
 
+/** Where the home screen goes once it is drawn, after a link in the header: its batch table (`#/batches`) or its top
+ *  (`#/start`). `glide` when the person was on the home screen already, else a jump. */
+let homeScroll: { to: "batches" | "top"; glide: boolean } | null = null;
+
+function scrollHome(): void {
+  const h = homeScroll;
+  if (!h || S.route.name !== "home") { homeScroll = null; return; }
+  const immediate = !h.glide || matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (h.to === "top") {
+    smooth.to(0, { immediate });
+    homeScroll = null;
+    return;
+  }
+  // Wait for the list: Needs you, above the table, only shows once it has loaded, and pushes the table down.
+  const table = scrollEl.querySelector<HTMLElement>('.hm [data-morph-key="batches"]');
+  if (!table || S.home.batches.state === "loading") return;
+  smooth.to(table, { offset: -20, immediate });
+  homeScroll = null;
+}
+
 let ticker: ReturnType<typeof setInterval> | null = null;
+/** An element to focus once the next paint is in (a row's Start once its confirm opens, say), as a selector. */
+let focusNext: string | null = null;
 function afterPaint(): void {
+  if (focusNext) {
+    scrollEl.querySelector<HTMLElement>(focusNext)?.focus({ preventScroll: true });
+    focusNext = null;
+  }
+  scrollHome();
   // First, before the browser styles the page: what morph took off the elements that move (motion.ts).
   syncMotion(scrollEl, scrollEl);
   // The landing page's 3D scenes are canvases, not markup: start them when the page is there, stop them when it is
@@ -546,28 +629,62 @@ async function loadLiveLogs(b: BatchState): Promise<void> {
   paint();
 }
 
-// ── home ─────────────────────────────────────────────────────────────────────
+// ── the app's data: the batch list and the New batch form ───────────────────
 
-async function loadHome(force = false): Promise<void> {
-  if (S.homeLoaded && !force) {
-    // The batch list is cheap and changes: refresh it on every visit.
-    fetchBatches().then((items) => { S.home = { ...S.home, batches: { state: "ready", value: items } }; paint(); }).catch(() => undefined);
-    return;
-  }
-  S.homeLoaded = true;
+/**
+ * The first load, on whichever app page opens first: the batch list (the header's count, the home screen), the health
+ * and the defaults (the New batch form, which opens from any page). After that only the list is fetched again, by
+ * `refreshBatches`: on a visit to the home screen, after an action on a batch, and every 10 s (5 s while one runs).
+ * `force` loads it all again (the home screen's Retry).
+ */
+async function loadApp(force = false): Promise<void> {
+  if (S.appLoaded && !force) return;
+  S.appLoaded = true;
+  batchesAt = Date.now();
   S.home = { ...S.home, batches: { state: "loading" } };
   paint();
   void loadInputs();
+  const seq = ++batchesSeq;
   const [batches, health, defaults] = await Promise.allSettled([fetchBatches(), fetchHealth(), fetchDefaults()]);
+  // A refresh that started later has the newer list.
+  const fresh = seq === batchesSeq;
   S.home = {
     ...S.home,
-    batches: batches.status === "fulfilled" ? { state: "ready", value: batches.value } : { state: "error", message: message(batches.reason, "Couldn't load the batches.") },
+    batches: !fresh ? S.home.batches
+      : batches.status === "fulfilled" ? { state: "ready", value: batches.value } : { state: "error", message: message(batches.reason, "Couldn't load the batches.") },
+    needs: fresh && batches.status === "fulfilled" ? pruneNeeds(S.home.needs, batches.value) : S.home.needs,
     health: health.status === "fulfilled" ? health.value : null,
     defaults: defaults.status === "fulfilled" ? defaults.value : S.home.defaults,
     draft: S.home.draft ?? (defaults.status === "fulfilled" ? initialDraft(defaults.value, recallDomain()) : null),
   };
   paint();
   scheduleEstimate();
+}
+
+/** When the batch list was last asked for, and which request is the latest: an answer to an older one is dropped. */
+let batchesAt = 0;
+let batchesSeq = 0;
+
+/** The batch list again (it is cheap and changes), and the "Needs you" rows' states that still apply. The one loader
+ *  of the list after the first load: the poller below, the home screen and the rows' actions all call this. A failed
+ *  refresh keeps the list there was. */
+async function refreshBatches(): Promise<void> {
+  if (!S.appLoaded) { void loadApp(); return; }
+  batchesAt = Date.now();
+  const seq = ++batchesSeq;
+  let items: BatchListItem[];
+  try {
+    items = await fetchBatches();
+  } catch (e) {
+    if (seq === batchesSeq && S.home.batches.state === "loading") {
+      S.home = { ...S.home, batches: { state: "error", message: message(e, "Couldn't load the batches.") } };
+      paint();
+    }
+    return;
+  }
+  if (seq !== batchesSeq) return;
+  S.home = { ...S.home, batches: { state: "ready", value: items }, needs: pruneNeeds(S.home.needs, items) };
+  paint();
 }
 
 /** The datasets a batch can run on (the built-in table and earlier uploads). */
@@ -663,7 +780,10 @@ async function start(): Promise<void> {
   try {
     const { id } = await startBatch(startPayload(draft, inputsConfig(S.ds), S.home.defaults));
     S.home = { ...S.home, starting: false };
+    // The dialog closes and the new batch opens, from whichever page the dialog was opened on.
+    newBatch.close();
     go({ name: "batch", id });
+    void refreshBatches();
   } catch (e) {
     S.home = { ...S.home, starting: false, error: refusal(e, "Couldn't start the batch", "Couldn't start the batch.") };
     paint();
@@ -683,6 +803,25 @@ async function loadCosts(): Promise<void> {
   } catch (e) {
     if (seq === costsSeq) S.costs = { state: "error", message: message(e, "Couldn't load the costs.") };
   }
+  paint();
+}
+
+// ── how it works ─────────────────────────────────────────────────────────────
+
+/** Whether this browser has seen How it works (batch/how.ts `howSeen`: storage that fails never loops). */
+const seenHow = howSeen(() => localStorage);
+let howLoading = false;
+/** The robot demo's case file, once a session; a failed load is tried again on the next visit. */
+async function loadHow(): Promise<void> {
+  if (howLoading || S.how.state === "ready") return;
+  howLoading = true;
+  S.how = { state: "loading" };
+  try {
+    S.how = { state: "ready", value: await fetchCase(HOW_BATCH) };
+  } catch (e) {
+    S.how = { state: "error", message: message(e, "Couldn't load the demo batch.") };
+  }
+  howLoading = false;
   paint();
 }
 
@@ -723,6 +862,86 @@ async function resumeAndInvestigate(b: BatchState): Promise<void> {
   }
 }
 
+// ── "Needs you" (batch/needs-you.ts) ─────────────────────────────────────────
+
+const needUi = (kind: NeedKind, id: string): NeedUi | undefined => S.home.needs?.[needKey(kind, id)];
+
+function setNeed(kind: NeedKind, id: string, ui: NeedUi | null): void {
+  const needs = { ...(S.home.needs ?? {}) };
+  if (ui) needs[needKey(kind, id)] = ui;
+  else delete needs[needKey(kind, id)];
+  S.home = { ...S.home, needs };
+  paint();
+}
+
+/** A row's call is in flight: a second press waits for it. */
+const inFlight = (ui: NeedUi | undefined): boolean => ui?.state === "busy" || (ui?.state === "confirm" && !!ui.starting);
+
+/** Open a batch from its row once the call that wakes it is in, if the person is still on the home screen. A batch
+ *  that went live opens on a fresh websocket: home closed the one of any batch open before (`closeBatch`). */
+function openFromHome(id: string): void {
+  if (S.route.name === "home") go({ name: "batch", id });
+}
+
+/** Approve or decline the fork waiting on a live batch, as its page does. */
+async function needDecide(id: string, approve: boolean): Promise<void> {
+  if (inFlight(needUi("approve", id))) return;
+  setNeed("approve", id, { state: "busy", action: approve ? "approve" : "decline" });
+  try {
+    await postDecision(id, approve);
+    setNeed("approve", id, { state: "done", message: approve ? "Approved. The fork is starting." : "Declined. The investigator goes on without it." });
+    void refreshBatches();
+  } catch (e) {
+    setNeed("approve", id, { state: "error", message: message(e, "Couldn't send the decision.") });
+  }
+}
+
+/** Bring a saved batch back live with its investigator started, as its page's Investigate does, then open it. */
+async function needInvestigate(id: string): Promise<void> {
+  if (inFlight(needUi("investigate", id))) return;
+  setNeed("investigate", id, { state: "busy", action: "investigate" });
+  try {
+    await resumeBatch(id, true);
+    setNeed("investigate", id, null);
+    openFromHome(id);
+  } catch (e) {
+    setNeed("investigate", id, { state: "error", message: message(e, "Couldn't resume the batch.") });
+  }
+}
+
+/** "Run 4 more": what the pairs would run and cost (nothing starts), as the row's confirm. */
+async function needQuote(id: string): Promise<void> {
+  if (inFlight(needUi("open", id))) return;
+  setNeed("open", id, { state: "busy", action: "quote" });
+  try {
+    const ui = quoteUi(await fetchMorePairs(id));
+    focusNext = `.ny-row[data-morph-key="${CSS.escape(id)}"] [data-ny-focus]`;
+    setNeed("open", id, ui);
+  } catch (e) {
+    setNeed("open", id, moreFailedUi(e));
+  }
+}
+
+/** The confirm's Start: run the quoted pairs, then open the batch to follow them live. */
+async function needStartMore(id: string): Promise<void> {
+  const ui = needUi("open", id);
+  if (ui?.state !== "confirm" || ui.starting) return;
+  setNeed("open", id, { ...ui, starting: true });
+  try {
+    await startMorePairs(id, ui.quote.n_per_arm);
+    setNeed("open", id, null);
+    openFromHome(id);
+  } catch (e) {
+    setNeed("open", id, moreFailedUi(e));
+  }
+}
+
+function needCancel(id: string): void {
+  if (inFlight(needUi("open", id))) return;
+  focusNext = `.ny-row[data-morph-key="${CSS.escape(id)}"] [data-act="${NY_ACT.more}"]`;
+  setNeed("open", id, null);
+}
+
 // ── routing ──────────────────────────────────────────────────────────────────
 
 function go(r: Route): void {
@@ -732,6 +951,13 @@ function go(r: Route): void {
 }
 
 function onRoute(): void {
+  // Someone new entering the app sees How it works first, once. replace(): Back does not return to the page skipped.
+  const first = firstVisitRedirect(parseRoute(location.hash), seenHow.get());
+  if (first) {
+    seenHow.set();
+    location.replace(routeHash(first));
+    if (routed) return; // the hashchange routes it
+  }
   const prev = S.route;
   S.route = parseRoute(location.hash);
   const r = S.route;
@@ -741,11 +967,24 @@ function onRoute(): void {
   const stepOf = (x: Route): string => (x.name === "batch" ? x.step ?? "wall" : "");
   if (prev.name !== r.name || routeKey(prev) !== routeKey(r) || stepOf(prev) !== stepOf(r)) smooth.top();
   if (r.name === "batch") S.lastStep = { id: r.id, step: r.step ?? "wall" };
+  S.navOpen = false;
+  // Every app page has the header's count and the New batch dialog: their data loads on whichever comes first.
+  if (r.name !== "landing") void loadApp();
   if (r.name === "landing") {
     closeBatch();
+    newBatch.close();
   } else if (r.name === "home") {
     closeBatch();
-    void loadHome();
+    // The batch list is cheap and changes: fetched again on every visit (the first visit's load fetched it already).
+    if (routed) void refreshBatches();
+    // The header's Batches link opens the page at the table; Needs you at its top. From elsewhere it is a jump.
+    const was = routed && prev.name === "home";
+    if (r.at === "batches") homeScroll = { to: "batches", glide: was };
+    else if (was && prev.name === "home" && prev.at === "batches") homeScroll = { to: "top", glide: true };
+  } else if (r.name === "how") {
+    seenHow.set();
+    closeBatch();
+    void loadHow();
   } else if (r.name === "costs") {
     if (prev.name !== "costs") S.costsBack = prev;
     closeBatch();
@@ -756,8 +995,11 @@ function onRoute(): void {
     if (b?.live && b.full) void loadLiveLogs(b);
     // A replay opened on a run that is not there yet: the run page shows it as it plays.
   }
+  routed = true;
   paint();
 }
+/** The first route has been taken (the page's own load is not a move from one page to another). */
+let routed = false;
 
 window.addEventListener("hashchange", onRoute);
 
@@ -771,19 +1013,41 @@ root.addEventListener("click", (e) => {
     if (to) smooth.to(to, { offset: section === "intro" ? 0 : -24 });
     return;
   }
+  const target = e.target as Element | null;
+  // A press anywhere but the header's menu folds it.
+  if (S.navOpen && !target?.closest?.(".nv-menu")) { S.navOpen = false; paint(); }
+  // And anywhere but the live feed folds a feed opened by a press.
+  if (S.feedOpen && !target?.closest?.(".cm-hf")) { S.feedOpen = false; paint(); }
+  // The header's links are real links (the hash routes them). One to the page already open goes to its place again
+  // (the top, or the batch table) instead of doing nothing.
+  // How it works' "Go to my batches": seen, so the home screen never sends the person back.
+  if (target?.closest?.("[data-how-done]")) seenHow.set();
+  const nav = target?.closest<HTMLAnchorElement>("a[data-nav]");
+  if (nav) {
+    S.navOpen = false;
+    if (nav.hash === location.hash && S.route.name === "home") {
+      e.preventDefault();
+      homeScroll = { to: S.route.at === "batches" ? "batches" : "top", glide: true };
+      paint();
+    }
+    return;
+  }
   // The white / black switch, in the header and on the landing page.
-  const pick = (e.target as Element | null)?.closest<HTMLElement>("[data-theme-pick]")?.dataset.themePick;
+  const pick = target?.closest<HTMLElement>("[data-theme-pick]")?.dataset.themePick;
   if (pick === "light" || pick === "dark") { pickTheme(pick); return; }
-  const el = (e.target as Element | null)?.closest<HTMLElement>("[data-act]");
+  const el = target?.closest<HTMLElement>("[data-act]");
   if (!el || (el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") return;
   if (el.tagName === "A") return; // real links (charts, lab pages) open on their own
   const arg = el.dataset.arg ?? "";
   const r = S.route;
   const b = S.batch;
   switch (el.dataset.act) {
-    case ACT.home: go({ name: "home" }); if (S.home.batches.state === "error") void loadHome(true); return;
+    case ACT.home: go({ name: "home" }); if (S.home.batches.state === "error") void loadApp(true); return;
     case ACT.openBatch: go({ name: "batch", id: arg }); return;
     case ACT.openCosts: go({ name: "costs" }); return;
+    case ACT.newBatch: openNewBatch(el); return;
+    case ACT.closeNewBatch: newBatch.close(); return;
+    case ACT.navMenu: S.navOpen = !S.navOpen; paint(); return;
     case ACT.start: void start(); return;
     case DI_ACT.dataset: S.ds = { ...S.ds, selected: arg, upload: uploadAfterEdit(S.ds.upload) }; S.home = { ...S.home, error: null }; paint(); return;
     case DI_ACT.upload: {
@@ -798,6 +1062,14 @@ root.addEventListener("click", (e) => {
       paint();
       return;
     case ACT.toggleAdvanced: S.home = { ...S.home, advanced: !S.home.advanced }; paint(); return;
+    case NY_ACT.approve: void needDecide(arg, true); return;
+    case NY_ACT.decline: void needDecide(arg, false); return;
+    case NY_ACT.investigate: void needInvestigate(arg); return;
+    case NY_ACT.more: void needQuote(arg); return;
+    case NY_ACT.start: void needStartMore(arg); return;
+    case NY_ACT.cancel: needCancel(arg); return;
+    case BT_ACT.sort: S.home = { ...S.home, table: sortBy(S.home.table ?? DEFAULT_VIEW, arg) }; paint(); return;
+    case BT_ACT.domain: S.home = { ...S.home, table: { ...(S.home.table ?? DEFAULT_VIEW), domain: arg || null } }; paint(); return;
     case HM_ACT.domain: {
       const next = pickDomain(S.home, arg);
       if (next !== S.home) { S.home = next; rememberDomain(arg); paint(); scheduleEstimate(); }
@@ -821,7 +1093,8 @@ root.addEventListener("click", (e) => {
     case ACT.resetConfig:
       if (S.home.defaults) { S.home = { ...S.home, draft: resetDraft(S.home), error: null }; paint(); scheduleEstimate(); }
       return;
-    case ACT.openRun: if ("id" in r) go({ name: "run", id: r.id, run: arg }); return;
+    // How it works draws the robot demo's bars: a bar there opens that batch's run.
+    case ACT.openRun: if ("id" in r) go({ name: "run", id: r.id, run: arg }); else if (r.name === "how") go({ name: "run", id: HOW_BATCH, run: arg }); return;
     case ACT.openChild: {
       const [fork, child] = arg.split("/");
       if ("id" in r && fork && child) go({ name: "child", id: r.id, fork, child });
@@ -877,6 +1150,19 @@ root.addEventListener("click", (e) => {
   }
 });
 
+// Keyboard: Esc folds the header's menu (the dialog closes on Esc by itself), back onto its button.
+root.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && S.feedOpen && !newBatch.isOpen) {
+    S.feedOpen = false;
+    paint();
+    headerEl.querySelector<HTMLElement>(".cm-hf-btn")?.focus();
+    return;
+  }
+  if (e.key !== "Escape" || !S.navOpen || newBatch.isOpen) return;
+  S.navOpen = false;
+  paint();
+  headerEl.querySelector<HTMLElement>("[data-act=nav-menu]")?.focus();
+});
 // Keyboard: role="button" tiles open on Enter and Space.
 root.addEventListener("keydown", (e) => {
   const el = e.target as HTMLElement;
@@ -905,7 +1191,7 @@ function onField(e: Event): void {
 root.addEventListener("input", onField);
 root.addEventListener("change", onField);
 
-// Dropping a CSV or a .py file on the new batch panel's data rows (or the controller row) uploads it. Elsewhere a dropped file does nothing
+// Dropping a CSV or a .py file on the New batch form's data rows (or the controller row) uploads it. Elsewhere a dropped file does nothing
 // (not a page load).
 const hasFiles = (e: DragEvent): boolean => Array.from(e.dataTransfer?.types ?? []).includes("Files");
 const overDrop = (e: DragEvent): boolean => !!(e.target as Element | null)?.closest?.("[data-drop]");
@@ -950,6 +1236,16 @@ scrollEl.addEventListener("scroll", () => {
 
 // A live batch's notebooks type between server messages.
 setInterval(() => { if (S.batch?.live && "id" in S.route) paint(); }, 150);
+// The batch list stays fresh on every app page, so the header's count is right and the home screen's rows move on:
+// every 10 s, every 5 s while a batch runs (nav.ts `refreshDue`). One poller for every page, never two; not while the
+// tab is hidden, nor on the landing page.
+setInterval(() => {
+  if (S.route.name === "landing" || !S.appLoaded || document.hidden) return;
+  const b = S.home.batches;
+  if (b.state === "loading") return;
+  const live = b.state === "ready" && b.value.some((x) => x.kind === "live");
+  if (refreshDue(Date.now(), batchesAt, live)) void refreshBatches();
+}, 1000);
 // The cost screen follows a batch that is still running.
 setInterval(() => { if (S.route.name === "costs" && S.costs.state === "ready" && S.costs.value.batches.some((b) => b.kind === "live")) void loadCosts(); }, 5000);
 

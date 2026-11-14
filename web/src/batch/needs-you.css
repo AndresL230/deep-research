@@ -1,0 +1,52 @@
+/* The home screen's "Needs you" list (needs-you.ts). Prefix ny-. Tokens only, so both themes work. The rows sit in
+   the same surface card as the batch table under them (overview.css .ov-card); on a phone each row stacks, its buttons under its words. */
+
+.ny-sec { gap:10px; }
+.ny { margin:0; padding:0; list-style:none; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); }
+
+/* a row: a dot for its kind, the batch, what it needs, and its buttons */
+.ny-row { display:grid; grid-template-columns:8px 148px minmax(0, 1fr) auto; grid-template-areas:"dot name body acts"; align-items:center; gap:4px 14px; min-height:56px; padding:10px 16px; box-sizing:border-box; border-top:1px solid var(--border); }
+.ny-row:first-child { border-top:none; }
+.ny-dot { grid-area:dot; width:7px; height:7px; border-radius:50%; background:var(--fg-40); }
+.ny-row[data-kind="approve"] .ny-dot { background:var(--amber); }
+.ny-row[data-kind="investigate"] .ny-dot { background:var(--accent); }
+.ny-row[data-kind="running"] .ny-dot { background:var(--accent); animation:ny-pulse 1.6s var(--fx-ease, ease) infinite alternate; }
+@keyframes ny-pulse { from { opacity:1; } to { opacity:.35; } }
+
+.ny-name { grid-area:name; justify-self:start; max-width:100%; padding:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--code); font-size:12px; font-weight:500; line-height:18px; color:var(--fg); text-align:left; border-radius:2px; transition:color var(--t-hover) ease; }
+.ny-name:hover { color:var(--accent); }
+.ny-name:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+
+.ny-body { grid-area:body; display:flex; flex-direction:column; gap:4px; min-width:0; }
+.ny-text { margin:0; font-size:13px; line-height:18px; color:var(--fg); overflow-wrap:anywhere; }
+.ny-say { margin:0; font-size:12.5px; line-height:18px; color:var(--fg-70); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.ny-say:empty { display:none; }
+.ny-say[data-tone="bad"] { color:var(--red); }
+
+/* the running batch's progress: a thin bar under its words */
+.ny-bar { position:relative; display:block; width:min(240px, 100%); height:3px; border-radius:2px; background:var(--border-strong); overflow:hidden; }
+.ny-bar > i { position:absolute; inset:0 auto 0 0; border-radius:2px; background:var(--accent); transition:width var(--fx-base, .3s) var(--fx-ease, ease); }
+
+.ny-acts { grid-area:acts; display:flex; align-items:center; justify-content:flex-end; gap:8px; }
+.ny-acts:empty { display:none; }
+.ny-btn { height:30px; padding:0 12px; white-space:nowrap; }
+/* a second action is an outline on the card, not a block: the one filled button is the row's main action */
+.ny-btn:not(.ds-primary) { background:transparent; }
+.ny-btn:not(.ds-primary):hover:not(:disabled) { background:var(--hover); }
+.ny-btn:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.ny-btn .ask-spin { flex:none; }
+
+/* nothing waits: one quiet line */
+.ny-none { margin:0; font-size:12.5px; line-height:18px; color:var(--fg-55); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ny-row[data-kind="running"] .ny-dot { animation:none; }
+}
+
+/* ── phones: the words under the batch, the buttons under the words ── */
+@media (max-width: 640px) {
+  .ny-row { grid-template-columns:8px minmax(0, 1fr); grid-template-areas:"dot name" ". body" ". acts"; align-items:center; gap:6px 10px; padding:12px 14px; }
+  .ny-acts { justify-content:flex-start; flex-wrap:wrap; margin-top:4px; }
+  .ny-acts:empty { display:none; }
+  .ny-btn { height:40px; padding:0 16px; }
+}

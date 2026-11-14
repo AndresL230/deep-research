@@ -285,7 +285,7 @@ from tests.test_api import client  # noqa: E402, F401 - the fixture: BATCHES_DIR
 
 
 def test_the_api_serves_the_robot_batch_but_not_its_hidden_positions(client, case):  # noqa: F811
-    assert {"id": "robot-demo-batch", "kind": "replay"} in client.get("/api/batches").json()
+    assert ("robot-demo-batch", "replay") in {(b["id"], b["kind"]) for b in client.get("/api/batches").json()}
     served = client.get("/api/batches/robot-demo-batch/case").json()
     assert served["config"]["visual"] == "motion" and served["runs"]["r01"]["motion_files"] == case["runs"]["r01"]["motion_files"]
     assert client.get("/api/batches/robot-demo-batch/runs/r02/events").json()
