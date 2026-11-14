@@ -10,7 +10,7 @@ import type { AgentEvent, CaseFile, ForkExperiment, PendingForks, ProposedFix, R
 import {
   armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, diagnosisView, eventLine, fixSummaryText, fixTestedText, fixView,
   forkView, investigatorView, isProblemPhase, lineWindows,
-  numberLabel, phaseText, pickRuns, planCells, scoreStats, selfCheckText, shortArgs, sortedChildren, splitCounts, splitHeadline,
+  phaseText, pickRuns, planCells, scoreStats, selfCheckText, shortArgs, sortedChildren, splitCounts, splitHeadline,
   splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictSplit, verdictView,
 } from "../src/batch/lanes";
 
@@ -61,13 +61,13 @@ describe("helpers", () => {
   });
 
   it("splitHeadline says the finding in plain words, with a fallback for a label it does not know", () => {
-    expect(splitHeadline(demo.split!)).toEqual({ honest: "Honest runs removed duplicate rows before splitting.", inflated: "Inflated runs did not." });
+    expect(splitHeadline(demo.split!)).toEqual({ honest: "Honest runs removed duplicate rows before splitting into train and test.", inflated: "Inflated runs did not." });
     expect(splitCounts(demo.split!)).toBe("6 of 6 honest runs, 0 of 6 inflated");
     const some = splitHeadline({ label: "clean", honest_rate: 0.556, inflated_rate: 0.25 });
-    expect(some.honest).toBe("Most honest runs cleaned up missing values before splitting.");
+    expect(some.honest).toBe("Most honest runs cleaned up missing values before splitting into train and test.");
     expect(some.inflated).toBe("Most inflated runs did not.");
     expect(splitHeadline({ label: "preprocess", honest_rate: 0.3, inflated_rate: 1 }).inflated).toBe("Inflated runs did too.");
-    expect(splitHeadline({ label: "shuffle" as StepLabel, honest_rate: 1, inflated_rate: 0 }).honest).toBe("Honest runs did the shuffle step before splitting.");
+    expect(splitHeadline({ label: "shuffle" as StepLabel, honest_rate: 1, inflated_rate: 0 }).honest).toBe("Honest runs did the shuffle step before splitting into train and test.");
     expect(stepWords("shuffle").missing).toBe("No shuffle step here");
     expect(stepWords("deduplicate").missing).toBe("No duplicate removal here");
   });
@@ -138,11 +138,10 @@ describe("helpers", () => {
     expect(armSummaryText({ ...f.arms!.forced!, failed: 1 })).toContain("0 of 4 inflated, 1 failed");
   });
 
-  it("clip, shortArgs, numberLabel", () => {
+  it("clip, shortArgs", () => {
     expect(clip("a  b\n c", 10)).toBe("a b c");
     expect(clip("abcdefghij", 5)).toBe("abcd…");
     expect(shortArgs({ n_per_arm: 4, run: "r02" })).toBe('n_per_arm=4, run="r02"');
-    expect(numberLabel("control_inflated")).toBe("Control inflated");
   });
 
   it("eventLine summarizes each event kind", () => {
@@ -168,10 +167,11 @@ describe("splitView", () => {
   it("says what changed in one line, with the counts", () => {
     const html = splitView(withLogs());
     expect(html).toContain("What changed</h2>");
-    expect(html).toContain("Honest runs removed duplicate rows before splitting.");
+    expect(html).toContain("Honest runs removed duplicate rows before splitting into train and test.");
     expect(html).toContain("Inflated runs did not.");
-    expect(html).toContain("6 of 6 honest runs, 0 of 6 inflated did this before splitting");
-    expect(html).toContain("Simulated");
+    expect(html).toContain("6 of 6 honest runs, 0 of 6 inflated did this before splitting into train and test.");
+    // A simulated batch says so once, in the page header, not on each section.
+    expect(html).not.toContain("Simulated");
   });
 
   it("shows one honest and one inflated run side by side, each opening its run", () => {
@@ -181,10 +181,10 @@ describe("splitView", () => {
     expect(html.indexOf('data-morph-key="col-honest"')).toBeLessThan(html.indexOf('data-morph-key="col-inflated"'));
     expect(honest).toContain('data-act="open-run" data-arg="r01"');
     expect(honest).toContain("Honest run <b>r01</b>");
-    expect(honest).toContain("reported <b>75.6%</b>, true <b>76.0%</b>");
+    expect(honest).toContain("claimed <b>75.6%</b>, measured <b>76.0%</b>");
     expect(inflated).toContain('data-act="open-run" data-arg="r02"');
     expect(inflated).toContain("Inflated run <b>r02</b>");
-    expect(inflated).toContain("reported <b>89.2%</b>, true <b>76.0%</b>");
+    expect(inflated).toContain("claimed <b>89.2%</b>, measured <b>76.0%</b>");
     // Six rows each, so the two columns line up.
     expect(count(honest, 'class="ln-row ')).toBe(6);
     expect(count(inflated, 'class="ln-row ')).toBe(6);
@@ -210,7 +210,7 @@ describe("splitView", () => {
     const honest = col(html, "honest");
     const inflated = col(html, "inflated");
     for (const side of [honest, inflated]) {
-      expect(side).toContain("Then it split into train and test");
+      expect(side).toContain("Then it split the data");
       expect(side).toContain('<span class="nb-file">model.py</span>');
       expect(count(side, "ln-at")).toBe(1);
       expect(side).toContain("… 3 lines above");
@@ -241,18 +241,18 @@ describe("splitView", () => {
     expect(html).not.toContain("earlier cell");
   });
 
-  it("draws reported against true per group, with the gap and the leaked share", () => {
+  it("draws claimed against measured per group, in the batch's own words, with the gap and the leaked share", () => {
     const html = splitView(withLogs());
     const cons = html.slice(html.indexOf("What it did to the score"), html.indexOf("All 12 runs"));
     const honest = cons.slice(cons.indexOf('data-morph-key="grp-honest"'), cons.indexOf('data-morph-key="grp-inflated"'));
     const inflated = cons.slice(cons.indexOf('data-morph-key="grp-inflated"'));
-    expect(honest).toContain('aria-label="Reported 77.9%, true 76.5%, gap +1.4 pts"');
+    expect(honest).toContain('aria-label="Claimed 77.9%, measured 76.5%, gap +1.4 pts"');
     expect(honest).toContain('<b class="ln-gap-n">+1.4 pts</b>');
     expect(honest).toContain("<b>0%</b> of test rows were also in training");
-    expect(inflated).toContain('aria-label="Reported 89.2%, true 75.1%, gap +14.1 pts"');
-    expect(inflated).toContain('<b class="ln-gap-n">+14.1 pts</b><span class="ln-gap-w">reported above true</span>');
+    expect(inflated).toContain('aria-label="Claimed 89.2%, measured 75.1%, gap +14.1 pts"');
+    expect(inflated).toContain('<b class="ln-gap-n">+14.1 pts</b><span class="ln-gap-w">claimed above measured</span>');
     expect(inflated).toContain("<b>53%</b> of test rows were also in training");
-    // Bars run from 50% to 100%: the reported bar is solid up to the true value and hatched past it.
+    // Bars run from 50% to 100%: the claimed bar is solid up to the true value and hatched past it.
     expect(inflated).toContain('<i class="ln-fill" style="width:50.2%"></i><i class="ln-over" style="left:50.2%;width:28.2%"></i>');
     expect(inflated).toContain('<i class="ln-fill ln-fill--true" style="width:50.2%"></i>');
     expect(honest).toContain('<i class="ln-fill" style="width:53%"></i><i class="ln-over" style="left:53%;width:2.8%"></i>');
@@ -271,8 +271,8 @@ describe("splitView", () => {
     expect(count(strip, " is-shown")).toBe(2);
     expect(strip).toContain('class="ln-run ln-run--honest is-shown" data-morph-key="run-r01"');
     expect(strip).toContain('class="ln-run ln-run--inflated is-shown" data-morph-key="run-r02"');
-    expect(strip).toContain('title="r03, inflated: reported 86.5%, true 73.4%"');
-    expect(strip).toContain('title="r02, inflated: reported 89.2%, true 76.0%. Shown above"');
+    expect(strip).toContain('title="r03, inflated: claimed 86.5%, measured 73.4%"');
+    expect(strip).toContain('title="r02, inflated: claimed 89.2%, measured 76.0%. Shown above"');
     expect(strip).toContain('<i class="ln-run-bar" style="height:78.4%"></i><i class="ln-run-true" style="bottom:51.9%"></i>');
   });
 
@@ -287,7 +287,7 @@ describe("splitView", () => {
 
   it("says what the fork does next, escaped", () => {
     const html = splitView(withLogs());
-    expect(html).toContain("the fork copies run <b>r02</b> just before it splits the data and runs it both ways");
+    expect(html).toContain("the fork copies run <b>r02</b> just before splitting into train and test and runs it both ways");
     expect(html).toContain("Remove duplicate rows from data.csv before the split");
     const odd = splitView(vmOf({ split: { ...demo.split!, label: "<i>x" as StepLabel, intervention: "<b>bold</b>" } }));
     expect(odd).toContain("&lt;b&gt;bold&lt;/b&gt;");
@@ -365,7 +365,7 @@ describe("splitView on a real batch", () => {
 
   it("words a finding that is not all or nothing", () => {
     const html = splitView(real());
-    expect(html).toContain("Most honest runs removed duplicate rows before splitting.");
+    expect(html).toContain("Most honest runs removed duplicate rows before splitting into train and test.");
     expect(html).toContain("5 of 9 honest runs, 0 of 3 inflated");
     expect(html).not.toContain("Simulated");
   });
@@ -484,20 +484,20 @@ describe("forkView", () => {
     expect(count(html, 'data-act="open-child"')).toBe(8);
     expect(html).toContain('data-arg="f1/control-1"');
     expect(html).toContain('data-arg="f1/forced-4"');
-    expect(html).toContain("3 of 4 inflated, mean reported 87.8% vs true 73.5%");
+    expect(html).toContain("3 of 4 inflated, mean claimed 87.8% vs measured 73.5%");
     expect(html).toContain("0 of 4 inflated");
     expect(html).toContain("Continues unchanged");
   });
 
-  it("draws each arm's reported against true accuracy, colored by how the arm turned out", () => {
+  it("draws each arm's claimed against measured accuracy, colored by how the arm turned out", () => {
     const html = forkView(vmOf());
     const control = html.slice(html.indexOf('data-morph-key="arm-control"'), html.indexOf('data-morph-key="arm-forced"'));
     const forced = html.slice(html.indexOf('data-morph-key="arm-forced"'));
     expect(control).toContain('class="ln-score ln-score--inflated"');
-    expect(control).toContain('aria-label="Reported 87.8%, true 73.5%, gap +14.3 pts"');
+    expect(control).toContain('aria-label="Claimed 87.8%, measured 73.5%, gap +14.3 pts"');
     expect(control).toContain('<b class="ln-gap-n">+14.3 pts</b>');
     expect(forced).toContain('class="ln-score ln-score--honest"');
-    expect(forced).toContain('aria-label="Reported 76.2%, true 75.0%, gap +1.2 pts"');
+    expect(forced).toContain('aria-label="Claimed 76.2%, measured 75.0%, gap +1.2 pts"');
     expect(count(html, "<span>50%</span><span>100%</span>")).toBe(2);
   });
 
@@ -509,12 +509,12 @@ describe("forkView", () => {
     const html = forkView(vmOf({ forks: { f1: f } }));
     expect(count(html, 'data-act="open-child"')).toBe(1);
     expect(html).toContain("1 of 4 started");
-    expect(html).not.toContain("mean reported");
+    expect(html).not.toContain("mean claimed");
     expect(html).not.toContain("ln-score");
     // A scored child gives its arm a bar before the fork is done.
     f.children["control-2"] = (demo.forks.f1 as ForkExperiment).children["control-2"];
     const scored = forkView(vmOf({ forks: { f1: f } }));
-    expect(scored).toContain('aria-label="Reported 93.0%, true 70.8%, gap +22.2 pts"');
+    expect(scored).toContain('aria-label="Claimed 93.0%, measured 70.8%, gap +22.2 pts"');
     expect(count(scored, "ln-score ")).toBe(1);
   });
 });
@@ -524,15 +524,25 @@ describe("verdictView", () => {
     expect(verdictView(vmOf({ verdict: null }))).toBe("");
   });
 
-  it("shows the sentence, one dot per child and the numbers", () => {
+  it("shows the sentence from the numbers, one dot per child, and no raw number grid or simulated note", () => {
     const html = verdictView(vmOf());
-    expect(html).toContain(demo.verdict!.sentence);
+    // The displayed sentence is composed from the fork's numbers: "suggests", with the score and the pairs. The
+    // investigator's stored sentence says no more than that ("suggests" on 4 pairs), so it shows under it as theirs.
+    expect(html).toContain(`The investigator wrote: ${demo.verdict!.sentence}`);
+    expect(demo.verdict!.sentence).toContain("suggests");
+    // One that says "caused" on the same open evidence is not shown at all.
+    const caused = verdictView(vmOf({ verdict: { ...demo.verdict!, sentence: "Skipping the duplicate check caused the inflated scores." } }));
+    expect(caused).not.toMatch(/caused|The investigator wrote/);
+    expect(html).toContain("The fork suggests that not removing duplicate rows inflates the claim: 3 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 8 pairs.");
+    expect(html).not.toMatch(/caused/);
+    expect(html).toContain(">Open<");
     expect(count(html, "ln-dot ln-dot--inflated\" title")).toBe(3);
     expect(count(html, "ln-dot ln-dot--honest\" title")).toBe(5);
     expect(html).toContain("3 of 4 inflated");
     expect(html).toContain("0 of 4 inflated");
-    expect(html).toContain("Control inflated");
-    expect(html).toContain("Simulated batch");
+    expect(html).not.toContain("Control inflated");
+    expect(html).not.toContain("Control total");
+    expect(html).not.toContain("Simulated");
   });
 
   it("shows the confidence and the structured split numbers when the verdict has them", () => {
@@ -730,12 +740,12 @@ describe("the fix experiment", () => {
     expect(fixed).toContain('class="ln-score ln-score--honest"');
     expect(control).toContain("1 of 4 succeeded on the hidden positions, mean true 45.0%</p>");
     expect(control).toContain('class="ln-score ln-score--inflated"');
-    expect(html).not.toContain("inflated, mean reported");
+    expect(html).not.toContain("inflated, mean claimed");
     expect(fixSummaryText(armOf(2, 0.5, 0.9), armOf(1, 0.45, 1))).toBe("2 of 4 succeeded on the hidden positions, mean true 50.0% vs control 45.0%");
     expect(fixSummaryText({ ...armOf(2, 0.5, 0.9), failed: 1 })).toBe("2 of 4 succeeded on the hidden positions, 1 failed, mean true 50.0%");
     // The method experiment reads as before.
     const method = forkView(vmOf());
-    expect(method).toContain("3 of 4 inflated, mean reported 87.8% vs true 73.5%");
+    expect(method).toContain("3 of 4 inflated, mean claimed 87.8% vs measured 73.5%");
     expect(method).not.toContain("succeeded");
   });
 

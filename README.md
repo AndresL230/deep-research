@@ -83,7 +83,7 @@ The controller is the robot's program: 50 times a second it reads where the arm 
 
 The analyst agents are fully isolated: no shared files, no labels, no case file.
 
-The investigator reads `/case/`, `/runs/` and `/skills/` through the normal file tools, but a `FilesystemPermission` rule denies `write_file` and `edit_file` there. The case file changes only through narrow tools (`record_step_labels`, `record_hypothesis`, `record_verdict`), each writing one section and checking its input. `tests/test_agents_offline.py` checks that the denial works.
+The investigator reads `/case/`, `/runs/` and `/skills/` through the normal file tools, but a `FilesystemPermission` rule denies `write_file` and `edit_file` there. `/case/` is its view of the case file (`case/view/case.json`, without any run's `hidden_results`) and reads of `/runs/*/hidden/` are denied. The case file changes only through narrow tools (`record_step_labels`, `record_hypothesis`, `record_verdict`), each writing one section and checking its input. `tests/test_agents_offline.py` checks that the denial works.
 
 ## Layout
 
@@ -263,10 +263,18 @@ It has the same files real batches produce:
 case/case.json              the case file
 runs/<id>/events.jsonl      todos, tool_call, tool_result, thought events with a time offset `t`
 runs/<id>/actions.json      the agent's tool calls with step labels
-runs/<id>/score.json        status, reported_accuracy, true_accuracy, overlap_share, gap
+runs/<id>/score.json        status, reported_accuracy, true_accuracy, overlap_share, gap, n_hidden, n_test, n_test_copies
 runs/<id>/live/*.png        the charts the lab page would show
 forks/f1/<arm>-<n>/...      the same, for each fork child
 ```
+
+`fixtures/robot-demo-batch/` (`uv run python scripts/make_robot_fixture.py`) is the robot twin. Its `score.json`
+also has `checked_positions` (the can positions the run's own episodes printed a result for or saved a motion file
+of) and `hidden_results` (every hidden episode: position, seed, `placed` / `dropped` / `tipped` / `missed`, place error), and each scored run keeps the
+recording of every hidden episode at 8 fps in `runs/<id>/hidden/<NN>-s<seed>.motion.json` (about 10 KB each; fork
+copies under `forks/f1/<child>/hidden/`). The API serves those only for a scored run, and the investigator never
+sees them. Both fixtures' verdicts carry `evidence`: 4 pairs is `open`, so they say "suggests", not "caused"
+(`deep_research/evidence.py`).
 
 ## Traps
 

@@ -5,15 +5,16 @@
 // chart, or a placeholder), the step label, a progress strip from the todos, then the reveal once the run is scored,
 // and its cost. Markup has no whitespace between tags so children pair by index the same way on every render.
 import "./wall.css";
-import type { AgentTodo, RunRecord, RunStatus, TrapInfo } from "../api";
+import type { AgentTodo, CaseFile, RunRecord, RunStatus, TrapInfo } from "../api";
 import { activityOf, chartUrl, logOf, notebookCells, notebookTail, stagesOf, type NbCell } from "./notebook";
 import { evidenceParts, trapOf } from "./trap";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
-import { modelShort, pct, pts, tokens, usd } from "./format";
+import { cleanReason, modelShort, pct, pts, usd, wholePct } from "./format";
 import { ACT, type BatchVm } from "./model";
 import { tileCaption } from "./commentary";
 import { isMotionBatch, robotThumb, scoreWords } from "../robot/markup";
+import { domainWords, judgedOn } from "./words";
 import "../robot/mount";
 
 export interface WallSummary {
@@ -70,6 +71,38 @@ export function summaryLine(s: WallSummary): string {
   return `${s.running} of ${s.total} running, ${s.honest + s.inflated + (s.unclear ?? 0) + s.failed} scored`;
 }
 
+const meanOf = (xs: readonly (number | null | undefined)[]): number | null => {
+  const v = xs.filter((x): x is number => typeof x === "number" && !Number.isNaN(x));
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+};
+
+/** The runs' hidden case count when they agree on one, else null (the sentence then leaves the number out). */
+function hiddenCount(runs: readonly RunRecord[]): number | null {
+  const ns = [...new Set(runs.map((r) => r.n_hidden).filter((n): n is number => typeof n === "number" && n > 0))];
+  return ns.length === 1 ? ns[0] : null;
+}
+
+/**
+ * The batch's claim against its truth, once every run has finished: "6 of 12 agents claimed 99%. Measured at 20
+ * positions they never tested: 59%." The two numbers are the means over the inflated runs (whole percents), the count
+ * is out of every finished run. With no inflated run it says so, with the other scored runs' means. Null while a run
+ * is still going, or when no run has a number to show.
+ */
+export function claimHeadline(c: Pick<CaseFile, "runs" | "config">): string | null {
+  const runs = Object.values(c.runs ?? {});
+  if (!runs.length || runs.some((r) => !isScored(r.status as Status))) return null;
+  const inflated = runs.filter((r) => r.status === "inflated");
+  const group = inflated.length ? inflated : runs.filter((r) => r.status === "honest" || r.status === "unclear");
+  const claimed = meanOf(group.map((r) => r.reported_accuracy));
+  const measured = meanOf(group.map((r) => r.true_accuracy));
+  if (claimed == null || measured == null) return null;
+  const n = runs.length;
+  const truth = `Measured ${judgedOn(domainWords(c.config), hiddenCount(group))}: ${wholePct(measured)}.`;
+  if (inflated.length) return `${inflated.length} of ${n} ${n === 1 ? "agent" : "agents"} claimed ${wholePct(claimed)}. ${truth}`;
+  const lead = n === 1 ? "The agent did not overclaim: it claimed" : `None of ${n} agents overclaimed: they claimed`;
+  return `${lead} ${wholePct(claimed)}. ${truth}`;
+}
+
 /** The analyst models the batch's runs use, in run order, or [] when it used one (or names none). */
 export function batchModels(vm: BatchVm): string[] {
   const models = [...new Set(sortedRuns(vm).map((r) => r.model).filter((m): m is string => !!m))];
@@ -111,7 +144,7 @@ export function stepLabel(run: RunRecord, todos: AgentTodo[] | null, cells: NbCe
     case "honest":
     case "inflated":
     case "unclear": return "Done";
-    case "failed": return run.reason?.trim() || "Failed";
+    case "failed": return cleanReason(run.reason) || "Failed";
     case "running": {
       const step = run.step?.trim();
       if (step && step.toLowerCase() !== "done") return step;
@@ -141,6 +174,8 @@ function picture(vm: BatchVm, run: RunRecord, step: string, cells: NbCell[]): st
   const text = run.status === "queued" ? "Waiting to start"
     : run.status === "starting" ? "Starting the VM"
     : run.status === "running" ? "Waiting for the first step"
+    // A failed run's reason is in the step line under the picture: said once.
+    : run.status === "failed" ? "Failed"
     : step;
   const lead = run.status === "starting" || run.status === "running" ? askSpinner(14) : askIcon("chart", 18, null, 1.5);
   return `<div class="bw-pic" data-morph-key="ph"><div class="bw-ph">${lead}<span class="bw-ph-t">${esc(truncate(text, 80))}</span></div></div>`;
@@ -173,16 +208,14 @@ const barWidth = (x: number | null | undefined): number => (x == null || Number.
 function reveal(run: RunRecord, trap: TrapInfo | null, config: unknown): string {
   const motion = isMotionBatch(config);
   const w = scoreWords(config);
+  const words = domainWords(config);
   const st = run.status as Status;
-  if (st === "failed") {
-    const reason = run.reason?.trim() || "The run failed before it was scored.";
-    return `<div class="bw-rev bw-rev--failed" title="${attr(reason)}">${esc(truncate(reason, 140))}</div>`;
-  }
+  // A failed run says why once, in its step line, and has no numbers.
   // An unclear run has its numbers too: they are why it is neither honest nor inflated.
   if (st !== "honest" && st !== "inflated" && st !== "unclear") return "";
   // The trap's evidence sentence. Left out when the run has no number or the trap has none to give.
   // A robot run's overlap share is the share of the can positions it tried that were the practice spot.
-  const ev = evidenceParts(run.overlap_share, trap, motion ? "of tested can positions were the practice spot" : "of test rows were in training");
+  const ev = evidenceParts(run.overlap_share, trap, words.evidence_text ?? "");
   const bar = (label: string, title: string, x: number | null | undefined, cls: string): string =>
     `<div class="bw-acc" title="${attr(title)}"><span class="bw-k">${esc(label)}</span><span class="bw-track" aria-hidden="true"><span class="bw-fill ${cls}" style="width:${barWidth(x).toFixed(1)}%"></span></span><span class="bw-v">${pct(x)}</span></div>`;
   return `<div class="bw-rev${motion ? " bw-rev--robot" : ""}">`
@@ -192,15 +225,10 @@ function reveal(run: RunRecord, trap: TrapInfo | null, config: unknown): string 
     + `</div>`;
 }
 
-/** "$0.42", or tokens when the price is unknown; null when nothing is known. */
+/** "$0.42", or null when the price is unknown. A tile never shows token counts: the header and the run page do. */
 export function tileCost(vm: BatchVm, run: RunRecord): string | null {
   const scope = vm.case.costs?.scopes?.[`run:${run.id}`];
-  if (scope) {
-    if (typeof scope.total_usd === "number") return usd(scope.total_usd);
-    return `${tokens(scope.input_tokens + scope.output_tokens)} tokens`;
-  }
-  if (run.tokens) return `${tokens(run.tokens.input + run.tokens.output)} tokens`;
-  return null;
+  return scope && typeof scope.total_usd === "number" ? usd(scope.total_usd) : null;
 }
 
 function tile(vm: BatchVm, run: RunRecord, multiModel = false): string {
@@ -229,14 +257,15 @@ export function wallView(vm: BatchVm): string {
   const s = wallSummary(vm);
   const byModel = modelSummaryLine(vm);
   const multiModel = batchModels(vm).length > 0;
-  const simulated = (vm.case.config as { simulated?: boolean }).simulated === true || vm.case.costs?.simulated === true;
+  // Once every run is in: the claim against the truth on top, the counts under it as a quieter line.
+  const headline = claimHeadline(vm.case);
   const head = `<div class="bw-head">`
-    + `<p class="bw-sum" aria-live="polite">${esc(summaryLine(s))}</p>`
+    + (headline ? `<p class="bw-headline" data-morph-key="headline">${esc(headline)}</p>` : "")
+    + `<p class="bw-sum${headline ? " bw-sum--quiet" : ""}" aria-live="polite">${esc(summaryLine(s))}</p>`
     + (byModel ? `<p class="bw-sum-models" data-morph-key="by-model">${esc(byModel)}</p>` : "")
     + (s.total ? `<div class="bw-mix" aria-hidden="true">${(["honest", "inflated", "unclear", "failed", "running", "queued"] as const)
       .filter((k) => (s[k] ?? 0) > 0).map((k) => `<span class="bw-mix-s bw-mix-s--${k}" data-morph-key="${k}" style="flex-grow:${s[k]}"></span>`).join("")}</div>` : "")
     + (s.total ? `<p class="bw-explain">${esc(scoreWords(vm.case.config).explainer)}</p>` : "")
-    + (simulated ? `<p class="bw-sim"><strong>Simulated batch:</strong> the agents' choices are scripted, the scores and charts are real</p>` : "")
     + `</div>`;
   const grid = runs.length
     ? `<div class="bw-grid" data-morph-key="grid" data-morph-list>${runs.map((r) => tile(vm, r, multiModel)).join("")}</div>`

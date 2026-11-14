@@ -13,8 +13,6 @@
 .ln-lit-word { color:var(--accent); font-weight:600; }
 .ln-iv { color:var(--fg); font-weight:500; }
 .ln-err { margin:0; padding:7px 10px; border:1px solid color-mix(in srgb, var(--red) 35%, transparent); border-radius:8px; background:color-mix(in srgb, var(--red) 8%, transparent); color:var(--red); font-size:12.5px; overflow-wrap:anywhere; }
-.ln-sim { display:inline-flex; align-items:center; padding:1px 7px; border:1px solid color-mix(in srgb, var(--amber) 45%, transparent); border-radius:999px; color:var(--amber); font-size:11px; font-weight:500; }
-.ln-note--sim { padding:7px 10px; border:1px dashed color-mix(in srgb, var(--amber) 45%, transparent); border-radius:8px; color:var(--fg-70); }
 .ln-tag { display:inline-flex; align-items:center; padding:0 5px; border:1px solid var(--border-strong); border-radius:4px; font-size:10.5px; font-family:var(--code); color:var(--fg-55); line-height:16px; }
 .ln-card { display:flex; flex-direction:column; gap:10px; min-width:0; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); }
 .ln-stack { display:flex; flex-direction:column; gap:12px; }
@@ -138,6 +136,10 @@ button.ln-col-h:focus-visible { outline:2px solid var(--accent); outline-offset:
 .ln-exp-id { font-size:13px; font-weight:600; }
 .ln-exp-t { margin:0; font-size:12.5px; color:var(--fg-70); }
 .ln-exp-t b { color:var(--fg); font-weight:600; }
+/* The fork as two outcomes: how far the claim moved, how far the subject did. */
+.ln-outcome { margin:0; font-size:15px; line-height:1.45; color:var(--fg); }
+.ln-outcome-n { font-weight:600; font-variant-numeric:tabular-nums; }
+.ln-outcome .ln-muted { font-size:12px; }
 .ln-arms { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:10px; }
 .ln-arm { display:flex; flex-direction:column; gap:8px; min-width:0; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
 .ln-arm--forced, .ln-arm--fixed { border-color:color-mix(in srgb, var(--accent) 35%, var(--border)); }
@@ -146,6 +148,8 @@ button.ln-col-h:focus-visible { outline:2px solid var(--accent); outline-offset:
 .ln-arm-h { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
 .ln-arm-t { font-size:12.5px; font-weight:600; }
 .ln-arm-sub { margin:0; font-size:12px; color:var(--fg-55); overflow-wrap:anywhere; }
+/* Under the forced arm: what the fork did to the subject and to its claim, said plainly. */
+.ln-arm-plain { margin:0; font-size:12.5px; line-height:1.4; font-weight:500; color:var(--fg); }
 .ln-arm-sum { margin:0; padding-top:8px; border-top:1px solid var(--border); font-size:12px; color:var(--fg-70); }
 .ln-kids { display:grid; grid-template-columns:repeat(auto-fill, minmax(124px, 1fr)); gap:6px; }
 .ln-kid { display:flex; flex-direction:column; align-items:flex-start; gap:5px; min-width:0; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--bg); text-align:left; font:inherit; color:inherit; animation:ln-in var(--fx-base) var(--fx-ease) both; transition:background var(--fx-fast) var(--fx-ease), border-color var(--fx-fast) var(--fx-ease); }
@@ -244,5 +248,10 @@ button.ln-col-h:focus-visible { outline:2px solid var(--accent); outline-offset:
 .ln-nb-link:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:2px; }
 .ln-conf { font-family:inherit; }
 .ln-conf--low { color:var(--amber); border-color:color-mix(in srgb, var(--amber) 45%, transparent); }
+/* The evidence level: open until the fork has enough pairs and a significant difference. */
+.ln-evi { font-family:inherit; }
+.ln-evi--open { color:var(--amber); border-color:color-mix(in srgb, var(--amber) 45%, transparent); }
+.ln-evi--supported { color:var(--green); border-color:color-mix(in srgb, var(--green) 45%, transparent); }
+.ln-vsrc { color:var(--fg-55); }
 .ln-vsplit { border-top:none; padding-top:0; }
 .ln-selfcheck { font-size:12px; }

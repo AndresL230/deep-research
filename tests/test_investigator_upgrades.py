@@ -221,7 +221,7 @@ class Counting(ScriptedModel):
         return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
 
-VERDICT = {"sentence": "Skipping the duplicate check looks like the cause, but no fork experiment ran.", "step_label": "deduplicate",
+VERDICT = {"sentence": "Skipping the duplicate check suggests why, but no fork experiment ran.", "step_label": "deduplicate",
            "honest_rate": 1.0, "inflated_rate": 0.0, "n_honest": 1, "n_inflated": 3, "confidence": "low", "arms": {}}
 
 
@@ -313,7 +313,9 @@ def test_older_callers_of_the_case_file_still_work(batch):
     assert batch.case.record_hypothesis("deduplicate", "a", "b", "c") == "hypothesis saved"
     assert "step" not in batch.case.data["hypotheses"][0]
     assert batch.case.record_verdict("s", "deduplicate", {"control_inflated": 1}) == "verdict saved"
-    assert batch.case.data["verdict"] == {"sentence": "s", "step_label": "deduplicate", "numbers": {"control_inflated": 1}}
+    v = dict(batch.case.data["verdict"])
+    assert v.pop("evidence")["level"] == "open"  # the counts it can read: one control copy, no forced ones
+    assert v == {"sentence": "s", "step_label": "deduplicate", "numbers": {"control_inflated": 1}}
     assert batch.case.record_structured_verdict("s", "deduplicate", 1, 0, 1, 3, {"control": {"inflated": 1, "total": 1}}, "low") \
         .startswith("error: no fork experiment finished")
 

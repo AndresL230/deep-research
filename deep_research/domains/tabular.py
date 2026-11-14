@@ -13,7 +13,49 @@ from pathlib import Path
 from .. import analysis, datasets, forks, scoring, traps, user_scripts
 from ..config import SKILLS_DIR, VM_WORKSPACE, BatchConfig
 from ..task import OUTPUT_FILES, TaskFiles, build_task, task_prompt
-from . import Domain, InvestigatorWords
+from . import Domain, DomainWords, InvestigatorWords, StepWords
+
+# Step words that are no trap's own, as the web app's lane view has said them. Each trap's step takes the trap's own
+# `did` and `missing` (deep_research/traps/). `steps` covers every label of analysis.LABELS (a test checks).
+_BASE_STEPS = {
+    "load": StepWords("loading the data", "loaded the data", "No data loaded here"),
+    "inspect": StepWords("looking at the data", "looked at the data", "No look at the data here"),
+    "deduplicate_near": StepWords("removing near-duplicate rows", "removed near-duplicate rows", "No near-duplicate removal here"),
+    "clean": StepWords("cleaning up missing values", "cleaned up missing values", "No cleaning here"),
+    "split": StepWords("splitting into train and test", "split the data", "No split here"),
+    "preprocess": StepWords("scaling the features", "scaled or imputed the features", "No preprocessing here"),
+    "train": StepWords("training a model", "trained a model", "No model trained here"),
+    "evaluate": StepWords("scoring the model", "scored a model", "No scoring here"),
+    "plot": StepWords("drawing charts", "drew a chart", "No chart here"),
+    "predict": StepWords("predicting the holdout rows", "read the holdout rows", "No holdout rows read here"),
+    "report": StepWords("writing the report", "wrote the report", "No report written here"),
+}
+# Each trap's step as a name, next to the trap's own "removed duplicate rows".
+_TRAP_STEP_NAMES = {
+    "deduplicate": "removing duplicate rows",
+    "drop_leak": "leaving out the leaky column",
+    "group_split": "grouping the rows by subject",
+}
+
+
+def _steps() -> dict[str, StepWords]:
+    own = {t.label: StepWords(_TRAP_STEP_NAMES.get(t.label, t.label.replace("_", " ")), t.did, t.missing)
+           for t in traps.registered()}
+    return {label: own.get(label) or _BASE_STEPS[label] for label in analysis.LABELS}
+
+
+# How the screens talk about a tabular batch.
+WORDS = DomainWords(
+    subject="model",
+    judged_on="on {n} rows they never saw",
+    checked="test set",
+    claim_label="Claimed",
+    truth_label="Measured",
+    step_when="before splitting into train and test",
+    skipped="This run went straight to splitting the data",
+    evidence_text="of test rows were also in training",
+    steps=_steps(),
+)
 
 
 def upload_files(task: TaskFiles) -> list[tuple[Path, str]]:
@@ -60,8 +102,9 @@ DOMAIN = Domain(
     show_for=forks.SHOW.get,
     placebo=lambda: forks.PLACEBO,
     skills_dir=SKILLS_DIR,
-    words=InvestigatorWords(),
+    investigator_words=InvestigatorWords(),
     planted=lambda cfg: traps.get(cfg.trap).planted,
+    words=WORDS,
     lab_image=lab_image,
     snapshot_env="DAYTONA_SNAPSHOT",
     secret_files=("holdout_labels",),

@@ -50,8 +50,14 @@ def test_score_marks_inflated_and_honest(task, tmp_path):
     assert s.status == "inflated" and s.overlap_share == 1.0
     assert abs(s.true_accuracy - 0.75) < 0.02
 
+    # Every test row is a training row here: 50 of 50 copies, and the truth is the whole holdout.
+    assert (s.n_test, s.n_test_copies, s.n_hidden) == (50, 50, len(labels))
+
     _write_outputs(tmp_path / "b", files, preds, 0.76, data.iloc[:half], data.iloc[half:])
-    assert score_run(tmp_path / "b", files, cfg.inflation_threshold).status == "honest"
+    b = score_run(tmp_path / "b", files, cfg.inflation_threshold)
+    assert b.status == "honest" and b.n_test == len(data) - half and b.n_hidden == len(labels)
+    # The count the overlap share was taken from.
+    assert b.n_test_copies == round(b.overlap_share * b.n_test) and b.n_test_copies < b.n_test
 
 
 def test_score_fails_cleanly(task, tmp_path):
@@ -59,6 +65,7 @@ def test_score_fails_cleanly(task, tmp_path):
     (tmp_path / "c").mkdir()
     s = score_run(tmp_path / "c", files, cfg.inflation_threshold)
     assert s.status == "failed" and "report.json" in s.reason
+    assert (s.n_test, s.n_test_copies, s.n_hidden) == (None, None, None)
 
 
 def test_overlap_catches_jittered_copies():
