@@ -447,7 +447,7 @@ export function scoreWords(config: unknown): ScoreWords {
       trueTitle: "We pushed the robot with the agent's final controller 20 times, from directions and with forces it never "
         + "tried. Success = still on its feet at the end of the episode.",
       gapTitle: minus,
-      gapSuffix: (g) => (g == null || Number.isNaN(g) ? "" : g < 0 ? " under" : " over"),
+      gapSuffix: (g) => (g == null || Number.isNaN(g) || Math.abs(g) < 0.0005 ? "" : g < 0 ? " under" : " over"),
       explainer: "Each agent writes a balance controller and claims how often the robot stays standing. We push it 20 times from directions it never tried.",
     };
   }
@@ -459,7 +459,7 @@ export function scoreWords(config: unknown): ScoreWords {
       trueTitle: "We ran the agent's final controller on 20 reference motions it never tracked: half calm, half demanding. "
         + `Success = the robot never falls and stays within ${TRACK_CM} cm and ${TRACK_RAD} rad of the reference on average.`,
       gapTitle: minus,
-      gapSuffix: (g) => (g == null || Number.isNaN(g) ? "" : g < 0 ? " under" : " over"),
+      gapSuffix: (g) => (g == null || Number.isNaN(g) || Math.abs(g) < 0.0005 ? "" : g < 0 ? " under" : " over"),
       explainer: "Each agent writes a whole-body controller that follows a reference motion and claims a success rate. We test its final controller on 20 motions it never tracked, half of them demanding: weight shifts, twists and fast arms.",
     };
   }
@@ -471,7 +471,7 @@ export function scoreWords(config: unknown): ScoreWords {
       trueTitle: "We ran the agent's final controller on 20 bags hung in front of the robot that it never saw, half high and half low. "
         + `Success = the bag swings at least ${STRIKE_CM} cm and the robot never falls.`,
       gapTitle: minus,
-      gapSuffix: (g) => (g == null || Number.isNaN(g) ? "" : g < 0 ? " under" : " over"),
+      gapSuffix: (g) => (g == null || Number.isNaN(g) || Math.abs(g) < 0.0005 ? "" : g < 0 ? " under" : " over"),
       explainer: "Each agent writes a whole-body controller that strikes a hanging bag and claims a success rate. We test its final controller on 20 bag positions it never saw: half high, for a punch, and half low, for a kick.",
     };
   }
@@ -483,7 +483,7 @@ export function scoreWords(config: unknown): ScoreWords {
       trueTitle: "We ran the agent's final controller on 20 can positions spread over the table that it never saw. "
         + `Success = the can's center within ${SUCCESS_RADIUS_CM} cm of the zone's center, upright, at rest.`,
       gapTitle: minus,
-      gapSuffix: (g) => (g == null || Number.isNaN(g) ? "" : g < 0 ? " under" : " over"),
+      gapSuffix: (g) => (g == null || Number.isNaN(g) || Math.abs(g) < 0.0005 ? "" : g < 0 ? " under" : " over"),
       explainer: (config as { robot_positions?: string } | null)?.robot_positions === "libero_pro"
         ? "Each agent writes a controller that puts a grocery object in the basket, practising on LIBERO's alphabet soup task, and claims a success rate. We test its final controller on 30 episodes across LIBERO's ten grocery tasks, each with its own object to pick, where LIBERO-PRO moved the objects."
         : "Each agent writes a controller and claims a success rate. We test its final controller on 20 can positions it never saw.",

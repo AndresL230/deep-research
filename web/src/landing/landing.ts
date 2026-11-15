@@ -197,7 +197,7 @@ const head = (id: string, title: string, href: string, words: string): string =>
 
 const pct = (n: number): string => n.toFixed(1);
 
-/** Run: the batch's runs as a list rolling past, the newest still being scored. */
+/** Run: the batch's runs as a list rolling past, ending on one of the two that failed before reporting. */
 function runsArt(): string {
   const rows = RUNS.slice(2).map((r, i) => `<li class="lp-row" style="--i:${i}">
           <span class="lp-row-ic">${CHECK}</span><span class="lp-row-id">${r.id}</span>
@@ -206,7 +206,7 @@ function runsArt(): string {
         </li>`).join("");
   return `<div class="lp-art lp-art--runs" data-lp-rev aria-hidden="true">
       <ul class="lp-rows">${rows}
-        <li class="lp-row is-busy" style="--i:8"><span class="lp-row-ic">${SPIN}</span><span class="lp-row-id">r13</span><span class="lp-row-t">Scoring…</span><span class="lp-row-n">replay</span></li>
+        <li class="lp-row is-busy" style="--i:8"><span class="lp-row-ic">${SPIN}</span><span class="lp-row-id">r03</span><span class="lp-row-t">Failed</span><span class="lp-row-n">no claim</span></li>
       </ul>
     </div>`;
 }

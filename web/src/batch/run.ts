@@ -20,7 +20,7 @@ import { foldAskEvent, newTurn, type AskConvo, type AskTurn } from "../ask-strea
 import { askIcon } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { ACT, type BatchVm, type EventKey } from "./model";
-import { cleanReason, duration, pct, pts, tokens, usd } from "./format";
+import { cleanReason, duration, pct, plainUnclear, pts, tokens, usd } from "./format";
 import { domainWords } from "./words";
 import { evidenceParts, trapOf } from "./trap";
 import { episodesHost, isMotionBatch, researchNote, robotView, scoreWords } from "../robot/markup";
@@ -290,6 +290,14 @@ interface Subject {
   fork: { exp: ForkExperiment | null; child: string; arm: ForkChild["arm"] | null } | null;
 }
 
+/** Whether the batch has this run, or this copy of one of its experiments. */
+function known(vm: BatchVm, key: EventKey): boolean {
+  const slash = key.indexOf("/");
+  if (slash < 0) return !!vm.case.runs?.[key];
+  const f = vm.case.forks?.[key.slice(0, slash)];
+  return !!f && f.id !== "pending" && !!(f as ForkExperiment).children?.[key.slice(slash + 1)];
+}
+
 function subject(vm: BatchVm, key: EventKey): Subject {
   const evs = vm.events[key];
   const fromEvents = evs?.length ? eventTimes(evs).at(-1) ?? null : null;
@@ -374,6 +382,13 @@ export interface RunPageOpts {
  * and the map find each other inside it (robot/viewer.ts, checked.ts).
  */
 export function runSummaryView(vm: BatchVm, key: EventKey, opts: RunPageOpts = {}): string {
+  // An address that names a run or a copy the batch does not have says so, instead of a page for a run that is
+  // forever "Queued".
+  if (Object.keys(vm.case.runs ?? {}).length && !known(vm, key)) {
+    return `<div class="rn-top" data-morph-key="top"><div class="rn-id">`
+      + `<button type="button" class="rn-back" data-act="${ACT.back}">${askIcon("chevLeft", 13, null, 2.2)}<span>Batch</span></button>`
+      + `<h2 class="rn-name">${esc(key.includes("/") ? `No copy ${key.replace("/", ", ")} in this batch` : `No run ${key} in this batch`)}</h2></div></div>`;
+  }
   const s = subject(vm, key);
   const status = s.status ?? "queued";
   const scored = status === "honest" || status === "inflated";
@@ -403,7 +418,7 @@ export function runSummaryView(vm: BatchVm, key: EventKey, opts: RunPageOpts = {
   const lab = s.labUrl && live
     ? `<a class="rn-lab" href="${attr(labPageUrl(vm.id, key))}" target="_blank" rel="noopener">${askIcon("external", 12, null, 2)}<span>Open lab page</span></a>`
     : "";
-  const armTag = s.fork?.arm ? `<span class="rn-arm rn-arm--${s.fork.arm}">${s.fork.arm === "forced" ? "Forced arm" : "Control arm"}</span>` : "";
+  const armTag = s.fork?.arm ? `<span class="rn-arm rn-arm--${s.fork.arm}">${esc(ARM_TAG[s.fork.arm] ?? `${s.fork.arm} arm`)}</span>` : "";
   // A simulated batch says so once, in the page header.
   const top = `<div class="rn-top" data-morph-key="top">`
     + `<div class="rn-id">`
@@ -419,12 +434,15 @@ export function runSummaryView(vm: BatchVm, key: EventKey, opts: RunPageOpts = {
   if (s.fork) {
     const exp = s.fork.exp;
     const from = exp ? `Forked from ${exp.source_run} after ${exp.fork_at} ${exp.fork_at === 1 ? "action" : "actions"}. ` : "";
-    const what = s.fork.arm === "forced"
-      ? `The experiment ran one step first: ${exp?.intervention ?? "the forced step"}.`
+    const arm = s.fork.arm;
+    const what = arm === "forced" ? `The experiment ran one step first: ${exp?.intervention ?? "the forced step"}.`
+      : arm === "placebo" ? "A check: the experiment ran a step that should change nothing, then the agent carried on."
+      : arm === "show" ? "A check: the agent was told about the step, and nothing was run for it."
+      : arm === "fixed" ? "The experiment applied the proposed fix first."
       : "No change: the agent carried on by itself.";
     notes.push({ text: from + what });
   }
-  if (status === "unclear" && s.score.reason) notes.push({ text: s.score.reason });
+  if (status === "unclear" && s.score.reason) notes.push({ text: plainUnclear(s.score.reason) });
   if (status === "failed" && s.score.reason) notes.push({ text: cleanReason(s.score.reason), cls: "rn-note-fail" });
   const note = notes.length
     ? `<p class="rn-note" data-morph-key="note" title="${attr(notes.map((n) => n.text).join(" "))}">${notes.map((n) => `<span${n.cls ? ` class="${n.cls}"` : ""}>${esc(n.text)}</span>`).join(" ")}</p>`
@@ -503,12 +521,17 @@ function stepsBlock(vm: BatchVm, key: EventKey): string {
     + `<ol class="rn-steps" data-lenis-prevent>${steps.map((w) => `<li>${esc(w)}</li>`).join("")}</ol></div>`;
 }
 
+/** A fork copy's arm, as its page's tag says it. */
+const ARM_TAG: Record<string, string> = { control: "Control arm", forced: "Forced arm", placebo: "Placebo arm", show: "Show arm", fixed: "Fixed arm" };
+
 /** The Evidence panel: the claim next to the truth (checked.ts), then every number with what it means. */
 function evidenceBody(vm: BatchVm, key: EventKey, score: CheckedSubject, items: StatItem[], notes: string[]): string {
   const pair = checkedView(vm.id, key, score, vm.case.config, "evidence");
   const defs = items.filter((x) => x.title).map((x) => `<div class="rn-def"><dt>${esc(x.label)} <span>${esc(x.value)}</span></dt><dd>${esc(x.title!)}</dd></div>`).join("");
   const why = notes.map((n) => `<p class="rn-ev-note">${esc(n)}</p>`).join("");
-  return `<div class="rn-ev">${pair || `<p class="rn-ev-note">Not scored yet.</p>`}${why}<dl class="rn-defs">${defs}</dl></div>`;
+  // "Not scored yet" only for a run with no measured number: a scored run without a picture just lists its numbers.
+  const scored = typeof (score as { true_accuracy?: number | null }).true_accuracy === "number";
+  return `<div class="rn-ev">${pair || (scored ? "" : `<p class="rn-ev-note">Not scored yet.</p>`)}${why}<dl class="rn-defs">${defs}</dl></div>`;
 }
 
 /** The tab row at the bottom of the box: a button per panel (aria-expanded, aria-controls). */

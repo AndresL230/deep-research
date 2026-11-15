@@ -12,8 +12,8 @@ FIGS = [
      "One run, four endings. Only the copies made to run the missing test stopped overclaiming."),
     ("agent", "The investigator as one LangChain deep agent: three subagents, files it reads, hidden results it cannot, an approval before any test, and a grader on its verdict.",
      "The investigator is one LangChain deep agent. The grey words are the Deep Agents features doing each job."),
-    ("math", "Counts of 4 and 0 against 0 and 4 give p of 1 in 70. That passes p below 0.05 and fails 8 per group, so the verdict says suggests.",
-     "The counts pass the first check and fail the second, so the verdict says “suggests”."),
+    ("math", "Four pairs of copies agree, each multiplying the score by 1.9, for a score of 13. A cause needs 20, so the verdict says suggests.",
+     "Four pairs agree and the score is 13. A cause needs 20, so the verdict says “suggests”."),
 ]
 def svg(fig, label, w="100%", h="auto"):
     return (f'<svg data-fig="{fig}" viewBox="0 0 1500 1000" role="img" aria-label="{label}" '

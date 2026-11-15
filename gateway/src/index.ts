@@ -83,6 +83,7 @@ export default {
       if (url.pathname.startsWith("/auth/")) return await authRoute(req, env, url, ctx);
       if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) return await adminRoute(req, env, url);
       if (url.pathname.startsWith("/api/")) return await apiRoute(req, env, url, ctx);
+      if (url.pathname.startsWith("/media/") && req.headers.has("Range")) return await mediaRange(req, env);
       return env.ASSETS.fetch(req);
     } catch (e) {
       console.error("gateway error", e);
@@ -94,6 +95,33 @@ export default {
     ctx.waitUntil(Promise.all([settleOpen(env, null, 25), monthlyRefill(env)]));
   },
 } satisfies ExportedHandler<Env>;
+
+// ───────────────────────────── media files, in parts ─────────────────────────────
+
+/**
+ * A part of a media file. The assets binding answers a Range request with the whole file and 200, and Safari will not
+ * play a video from a server that does that. So for /media/ the part asked for is cut here and sent as 206. Only one
+ * "bytes=a-b", "bytes=a-" or "bytes=-n" range is understood; anything else gets the whole file, as before.
+ */
+async function mediaRange(req: Request, env: Env): Promise<Response> {
+  const res = await env.ASSETS.fetch(req);
+  const m = /^bytes=(\d*)-(\d*)$/.exec((req.headers.get("Range") ?? "").trim());
+  if (res.status !== 200 || !m || (m[1] === "" && m[2] === "")) return res;
+  const whole = await res.arrayBuffer();
+  const size = whole.byteLength;
+  const headers = new Headers(res.headers);
+  headers.set("Accept-Ranges", "bytes");
+  headers.delete("Content-Encoding");
+  const start = m[1] === "" ? Math.max(0, size - Number(m[2])) : Number(m[1]);
+  const end = m[1] === "" || m[2] === "" ? size - 1 : Math.min(Number(m[2]), size - 1);
+  if (start >= size || start > end) {
+    headers.set("Content-Range", `bytes */${size}`);
+    return new Response(null, { status: 416, headers });
+  }
+  headers.set("Content-Range", `bytes ${start}-${end}/${size}`);
+  headers.set("Content-Length", String(end - start + 1));
+  return new Response(whole.slice(start, end + 1), { status: 206, headers });
+}
 
 // ───────────────────────────── sign-in (WorkOS AuthKit, PKCE) ─────────────────────────────
 

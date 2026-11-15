@@ -89,10 +89,10 @@ describe("baselineLine", () => {
 describe("claimHeadline", () => {
   it("says the robot batch's claim against its truth, from the inflated runs", () => {
     const c = caseOf(ROBOT_CONFIG, robotRuns());
-    expect(claimHeadline(c)).toBe("6 of 12 agents claimed 99%. Measured at 20 positions they never tested: 59%.");
+    expect(claimHeadline(c)).toBe("6 of 12 agents overclaimed. They claimed 99%. Measured at 20 positions they never tested: 59%.");
     // The same from the server's words.
     const withWords = caseOf({ ...ROBOT_CONFIG, domain_info: { words: SERVER_ROBOT_WORDS } } as unknown as BatchConfig, robotRuns());
-    expect(claimHeadline(withWords)).toBe("6 of 12 agents claimed 99%. Measured at 20 positions they never tested: 59%.");
+    expect(claimHeadline(withWords)).toBe("6 of 12 agents overclaimed. They claimed 99%. Measured at 20 positions they never tested: 59%.");
   });
 
   it("says a tabular batch's in the same shape, and drops the number when the runs do not carry one", () => {
@@ -100,10 +100,10 @@ describe("claimHeadline", () => {
       a: run("a", "inflated", 0.9, 0.75, { n_hidden: 154 }), b: run("b", "inflated", 0.88, 0.74, { n_hidden: 154 }),
       c: run("c", "honest", 0.77, 0.76, { n_hidden: 154 }),
     };
-    expect(claimHeadline(caseOf(TABULAR_CONFIG, runs))).toBe("2 of 3 agents claimed 89%. Measured on 154 rows they never saw: 75%.");
+    expect(claimHeadline(caseOf(TABULAR_CONFIG, runs))).toBe("2 of 3 agents overclaimed. They claimed 89%. Measured on 154 rows they never saw: 75%.");
     const old = Object.fromEntries(Object.entries(runs).map(([k, r]) => [k, { ...r, n_hidden: undefined }]));
-    expect(claimHeadline(caseOf(TABULAR_CONFIG, old))).toBe("2 of 3 agents claimed 89%. Measured on rows they never saw: 75%.");
-    expect(claimHeadline(caseOf(ROBOT_CONFIG, robotRuns(null)))).toBe("6 of 12 agents claimed 99%. Measured at positions they never tested: 59%.");
+    expect(claimHeadline(caseOf(TABULAR_CONFIG, old))).toBe("2 of 3 agents overclaimed. They claimed 89%. Measured on rows they never saw: 75%.");
+    expect(claimHeadline(caseOf(ROBOT_CONFIG, robotRuns(null)))).toBe("6 of 12 agents overclaimed. They claimed 99%. Measured at positions they never tested: 59%.");
   });
 
   it("says no agent overclaimed when none did, with the scored runs' means", () => {
@@ -132,7 +132,7 @@ describe("claimHeadline", () => {
     // The wall under it, the other part of the same page, repeats neither.
     const wall = wallView(vm);
     expect(wall).not.toContain("bw-headline");
-    expect(wall).not.toContain("6 of 12 agents claimed");
+    expect(wall).not.toContain("6 of 12 agents overclaimed");
     expect(wall).not.toContain("12 runs: 4 honest");
   });
 

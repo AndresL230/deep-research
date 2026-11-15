@@ -66,7 +66,11 @@ export function scoreText(x: number): string {
 // ── reading the case ─────────────────────────────────────────────────────────
 
 export type SuspectKind = "omission" | "commission" | "attribute" | "data";
-export interface Suspect { id: string; target: string; kind: SuspectKind | string; rationale: string; proposed_by: string; status: SxStatus | string; simulated?: boolean }
+export interface Suspect {
+  id: string; target: string; kind: SuspectKind | string; rationale: string; proposed_by: string; status: SxStatus | string; simulated?: boolean;
+  /** From a hypothesis: what tested it (a fork id, or "fix" for the measured fix) and how that came out. */
+  tested_by?: string | null; outcome?: string | null;
+}
 export interface Pair { i: number; control_gap: number; changed_gap: number; agree: boolean }
 export interface Lesson { id: string; name: string; rule: string; status: "proposed" | "approved" | "rejected" | string; suspect_id?: string; simulated?: boolean }
 /** forks.pending as the paired engine writes it (MASTER_PLAN 6.1), on top of today's fields. */
@@ -106,6 +110,7 @@ export function suspectsOf(c: CaseFile): Suspect[] {
     id: h.id!, target: hypTarget(h), kind: h.kind === "code" ? "commission" : "omission",
     rationale: (h as { sentence?: string }).sentence ?? h.evidence ?? "", proposed_by: "investigator",
     status: HYP_STATUS[h.status ?? "untested"] ?? (h.tested_by ? "open" : "proposed"),
+    tested_by: h.tested_by ?? null, outcome: h.status ?? null,
   }));
 }
 
@@ -249,6 +254,11 @@ export interface CardCtx { done: boolean; testable: readonly string[]; busy: str
 
 function untestedLine(r: SuspectRow, ctx: CardCtx): string {
   if (!ctx.done || r.experiments.length || r.status !== "proposed") return "";
+  // A hypothesis tested another way (the measured fix) was tested: say how, and offer no second test.
+  if (r.s.tested_by) {
+    const by = r.s.tested_by === "fix" ? "the measured fix" : `experiment ${r.s.tested_by}`;
+    return `<p class="sx-untested" data-morph-key="sx-untested-${attr(r.s.id)}"><span>${esc(`Tested by ${by}${r.s.outcome && r.s.outcome !== "untested" ? `: ${r.s.outcome.replace(/_/g, " ")}` : ""}.`)}</span></p>`;
+  }
   const can = ctx.admin && ctx.testable.includes(r.s.id);
   const busy = ctx.busy === `test:${r.s.id}`;
   const btn = can
@@ -436,13 +446,15 @@ export function suspectVerdictView(vm: BatchVm): string {
   const audit = auditView(vm);
   const decided = rows.filter((r) => r.score != null);
   if (!decided.length && !grid && !audit) return "";
+  // A suspect nobody tested has no level: it is named under "Still open", so that group never says nothing is left.
+  const notTested = rows.filter((r) => r.score == null && !r.s.tested_by);
   const group = (st: SxLevel, title: string, none: string): string => {
     const rs = decided.filter((r) => r.level === st);
     return `<div class="sx-vgrp sx-vgrp--${st}"><h3 class="sx-vgrp-h">${statusChip(st)}<span>${esc(title)}</span></h3>` +
       (rs.length ? `<ul class="sx-vlist">${rs.map(verdictRow).join("")}</ul>` : `<p class="ln-muted sx-vnone">${esc(none)}</p>`) + `</div>`;
   };
   const groups = decided.length
-    ? `<div class="sx-vgrps">${group("supported", "Supported causes", "No suspect reached a score of 20.")}${group("cleared", "Cleared", "No suspect cleared yet.")}${group("open", "Still open", "Nothing left open.")}${decided.some((r) => r.level === "inconclusive") ? group("inconclusive", "Inconclusive", "") : ""}</div>`
+    ? `<div class="sx-vgrps">${group("supported", "Supported causes", "No suspect reached a score of 20.")}${group("cleared", "Cleared", "No suspect cleared yet.")}${group("open", "Still open", notTested.length ? `Nothing tested is left open. Not tested: ${notTested.map((r) => r.s.id).join(", ")}.` : "Nothing left open.")}${decided.some((r) => r.level === "inconclusive") ? group("inconclusive", "Inconclusive", "") : ""}</div>`
     : "";
   return section("verdict", "Verdict by suspect", groups + grid + audit);
 }
@@ -549,7 +561,7 @@ function doneSummary(vm: BatchVm): string {
       `<button type="button" class="ask-ghostbtn ask-ghostbtn--outline sx-sum-go" data-act="${ACT.goto}" data-arg="verdict">Open the verdict</button></div>`
     : `<p class="ln-muted">It finished without a verdict.</p>`;
   const n = (st: SxStatus): number => rows.filter((r) => r.status === st).length;
-  const tested = rows.filter((r) => r.experiments.length > 0).length;
+  const tested = rows.filter((r) => r.experiments.length > 0 || r.s.tested_by).length;
   const untested = rows.length - tested;
   const exps = Object.values(c.forks ?? {}).filter((f) => !isPendingForks(f)).length;
   const cost = investigationCost(c);

@@ -77,7 +77,7 @@ describe("wallView on the finished demo batch", () => {
   it("leaves the headline to the overview above it, heads the cards with a plain label, and has no simulated banner", () => {
     // The batch has one headline, the overview's title (overview.test.ts): the wall names what its devices show.
     expect(html).not.toContain("bw-headline");
-    expect(html).not.toContain("6 of 12 agents claimed 89%");
+    expect(html).not.toContain("6 of 12 agents overclaimed. They claimed 89%");
     expect(html).not.toContain("12 runs: 6 honest, 6 inflated, 0 failed");
     expect(html).toContain('<h2 class="bw-sum bw-sum--label" title="Each agent trains a model and reports its test accuracy. We score its predictions on a holdout set it never saw.">Agents · 12</h2>');
     expect(html).not.toContain("bw-explain");
@@ -87,7 +87,7 @@ describe("wallView on the finished demo batch", () => {
   });
 
   it("puts the claim against the truth in words once every run is in (the overview's title)", () => {
-    expect(claimHeadline(demo)).toBe("6 of 12 agents claimed 89%. Measured on 154 rows they never saw: 75%.");
+    expect(claimHeadline(demo)).toBe("6 of 12 agents overclaimed. They claimed 89%. Measured on 154 rows they never saw: 75%.");
     expect(claimHeadline(midReplay())).toBeNull();
   });
 

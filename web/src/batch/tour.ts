@@ -78,8 +78,11 @@ export function placeHowTour(root: ParentNode): void {
   if (!tip) { last = { ring: ringAt, tip: "" }; return; }
   const tw = tip.offsetWidth;
   const th = tip.offsetHeight;
-  // Always under the part: each picture puts its ringed part last, so the bubble opens over nothing that matters.
-  const top = y + h + GAP;
+  // Under the part, and never over the picture: when the picture goes on below the ringed part (a tile in the middle
+  // of a grid, a bar with a note under the chart), the bubble opens under the picture's last line instead.
+  const pic = stage.querySelector<HTMLElement>(".hw-pic");
+  const picEnd = pic ? pic.getBoundingClientRect().bottom - oy : 0;
+  const top = Math.max(y + h, picEnd) + GAP;
   const left = Math.max(side, Math.min(x, stage.clientWidth - tw - side));
   const arrow = Math.max(14, Math.min(x + w / 2 - left, tw - 14));
   const tipAt = `left:${left.toFixed(1)}px;top:${top.toFixed(1)}px;--hw-ax:${arrow.toFixed(1)}px${fit}`;

@@ -90,8 +90,8 @@ function hiddenCount(runs: readonly RunRecord[]): number | null {
 }
 
 /**
- * The batch's claim against its truth, once every run has finished: "6 of 12 agents claimed 99%. Measured at 20
- * positions they never tested: 59%." The two numbers are the means over the inflated runs (whole percents), the count
+ * The batch's claim against its truth, once every run has finished: "6 of 12 agents overclaimed. They claimed 99%.
+ * Measured at 20 positions they never tested: 59%." The two numbers are the means over the inflated runs (whole percents), the count
  * is out of every finished run. With no inflated run it says so, with the other scored runs' means. Null while a run
  * is still going, or when no run has a number to show.
  */
@@ -105,7 +105,8 @@ export function claimHeadline(c: Pick<CaseFile, "runs" | "config">): string | nu
   if (claimed == null || measured == null) return null;
   const n = runs.length;
   const truth = `Measured ${judgedOn(domainWords(c.config), hiddenCount(group))}: ${wholePct(measured)}.`;
-  if (inflated.length) return `${inflated.length} of ${n} ${n === 1 ? "agent" : "agents"} claimed ${wholePct(claimed)}. ${truth}`;
+  // The count is of the agents that overclaimed: others may have claimed as much and earned it.
+  if (inflated.length) return `${inflated.length} of ${n} ${n === 1 ? "agent" : "agents"} overclaimed. ${inflated.length === 1 ? "It" : "They"} claimed ${wholePct(claimed)}. ${truth}`;
   const lead = n === 1 ? "The agent did not overclaim: it claimed" : `None of ${n} agents overclaimed: they claimed`;
   return `${lead} ${wholePct(claimed)}. ${truth}`;
 }
