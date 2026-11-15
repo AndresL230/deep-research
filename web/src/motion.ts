@@ -175,17 +175,12 @@ function syncCounts(root: Element): void {
     const fmt = (el.dataset.fmt ?? "int") as CountFmt;
     const was = shown.get(el);
     if (was && was.to === to) continue;
-    if (still || !Number.isFinite(to)) { shown.set(el, { to, value: to }); write(el, el.dataset.text ?? ""); continue; }
-    // A count waits, at zero, for the part of the page it is in to come on screen.
-    const gate = el.closest("[data-io]");
-    if (!was && gate && !seen.has(gate)) { write(el, FORMAT[fmt](0)); continue; }
+    // A number shows its value from the first paint (never a 0 waiting to count up, which is what a copy, a screen
+    // reader or a glance before scrolling would get); only a live value that changes counts from the old to the new.
+    if (still || !Number.isFinite(to) || !was) { shown.set(el, { to, value: to }); write(el, el.dataset.text ?? ""); continue; }
     const linear = el.hasAttribute("data-linear");
-    // A first count starts a moment after its card does; in a card that arrived long ago, at once.
-    const d = gate ? delays.get(gate) : undefined;
-    const wait = was ? 0 : d ? Math.max(0, d.at + d.ms + 250 - performance.now()) : gate ? 0 : 250;
-    counting.set(el, { el, from: was?.value ?? 0, to, t0: performance.now() + wait, ms: was ? 600 : linear ? 1900 : 1450, linear, fmt });
-    shown.set(el, { to, value: was?.value ?? 0 });
-    if (!was) write(el, FORMAT[fmt](0));
+    counting.set(el, { el, from: was.value, to, t0: performance.now(), ms: 600, linear, fmt });
+    shown.set(el, { to, value: was.value });
   }
   if (counting.size && !countFrame) countFrame = requestAnimationFrame(stepCounts);
 }

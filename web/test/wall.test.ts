@@ -74,14 +74,15 @@ describe("wallView on the finished demo batch", () => {
     expect(html.match(/role="button" tabindex="0"/g)).toHaveLength(12);
   });
 
-  it("leaves the headline and the counts to the overview above it, and has no simulated banner (the header has it)", () => {
+  it("leaves the headline to the overview above it, heads the cards with a plain label, and has no simulated banner", () => {
     // The batch has one headline, the overview's title (overview.test.ts): the wall names what its devices show.
     expect(html).not.toContain("bw-headline");
     expect(html).not.toContain("6 of 12 agents claimed 89%");
     expect(html).not.toContain("12 runs: 6 honest, 6 inflated, 0 failed");
-    expect(html).toContain('<span class="ds-eyebrow">Agents</span><h2 class="bw-sum">');
-    expect(html).toContain("Each agent&#39;s sandbox, and what it came to");
-    expect(wallView(vmOf(midReplay(), { replay }))).toContain("Each agent at work, in its own sandbox");
+    expect(html).toContain('<h2 class="bw-sum bw-sum--label" title="Each agent trains a model and reports its test accuracy. We score its predictions on a holdout set it never saw.">Agents · 12</h2>');
+    expect(html).not.toContain("bw-explain");
+    expect(html).not.toContain("what it came to");
+    expect(wallView(vmOf(midReplay(), { replay }))).toMatch(/Agents · \d+ of 12 working/);
     expect(html).not.toContain("Simulated");
   });
 
@@ -149,7 +150,7 @@ describe("wallView mid-replay", () => {
     // The counts are the overview's line, above the wall (overview.ts); the wall says its agents are at work.
     expect(summaryLine(wallSummary(vm))).toBe("4 of 12 running, 3 scored");
     expect(html).not.toContain("4 of 12 running, 3 scored");
-    expect(html).toContain("Each agent at work, in its own sandbox");
+    expect(html).toMatch(/Agents · \d+ of 12 working/);
     const r04 = tileOf(html, "r04");
     expect(r04).toContain("bw-pill--starting");
     expect(r04).toContain("Starting the VM");

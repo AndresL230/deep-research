@@ -101,6 +101,8 @@ body { background:#15171b; }
 
 /* ── text that arrives a character at a time (motion.ts `reveal`) ── */
 .mo-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+/* The animated copy of a text is for the eye only: a copy of the page takes the plain text once, from .mo-sr. */
+.mo-t { user-select:none; -webkit-user-select:none; }
 .mo-w { display:inline-block; white-space:pre; }
 .mo-c { display:inline-block; }
 .mo-n { font-variant-numeric:tabular-nums; }

@@ -1,5 +1,5 @@
 // The app's top bar (main.ts `headerView`), on every page but the landing page: the logo, the links to the app's
-// pages (How it works, Needs you with its count, Batches, Costs), and on the right the hub badge, the theme switch and "+ New batch",
+// pages (How it works, Needs you with its count, Batches, Costs; Needs you and Costs for admins only), and on the right the hub badge, the theme switch and "+ New batch",
 // which opens the New batch dialog (new-batch-dialog.ts). On a narrow screen the links fold into a menu button. Pure,
 // like every view here: main.ts renders it and handles its actions.
 //
@@ -31,12 +31,16 @@ export function navCurrent(r: Route): NavKey | null {
 /** The count as the badge shows it: nothing for none (or before the list loads), "99+" past 99. */
 export const countLabel = (n: number | null): string => (!n || n < 0 ? "" : n > 99 ? "99+" : String(n));
 
+/** The links only an admin has on the hosted site: Needs you (only an admin can act on what waits there) and Costs
+ *  (the all-batches cost report). Local development, with no gateway, counts as an admin (access.ts). */
+export const ADMIN_LINKS: ReadonlySet<NavKey> = new Set(["needs", "costs"]);
+
 /** The links, for the bar or for the menu. `count` is how many batches wait on the person (needs-you.ts
- *  `needsCount`). `costs`: the Costs link is there (the all-batches cost report is for admins on the hosted site). */
-export function navLinks(r: Route, count: number | null, where: "bar" | "menu" = "bar", costs = true): string {
+ *  `needsCount`). `admin`: the person may act, so the admin-only links (`ADMIN_LINKS`) are there too. */
+export function navLinks(r: Route, count: number | null, where: "bar" | "menu" = "bar", admin = true): string {
   const cur = navCurrent(r);
   const n = countLabel(count);
-  const items = NAV_LINKS.filter((l) => costs || l.key !== "costs").map((l) => {
+  const items = NAV_LINKS.filter((l) => admin || !ADMIN_LINKS.has(l.key)).map((l) => {
     const badge = l.key === "needs" && n
       ? `<span class="nv-n" aria-hidden="true">${n}</span><span class="nv-sr">, ${n} waiting</span>`
       : "";
@@ -47,8 +51,8 @@ export function navLinks(r: Route, count: number | null, where: "bar" | "menu" =
 }
 
 /** The links in the bar, on a wide screen. */
-export function navBar(r: Route, count: number | null, costs = true): string {
-  return `<nav class="nv" aria-label="Main" data-morph-key="nav">${navLinks(r, count, "bar", costs)}</nav>`;
+export function navBar(r: Route, count: number | null, admin = true): string {
+  return `<nav class="nv" aria-label="Main" data-morph-key="nav">${navLinks(r, count, "bar", admin)}</nav>`;
 }
 
 const MENU_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" style="flex:none;display:block"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>`;
@@ -59,13 +63,14 @@ const MENU_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" s
  * (`[label, html]`): what a phone's bar has no room for, the theme switch and the hub badge (nav.css shows them there
  * only).
  */
-export function navMenu(r: Route, count: number | null, open: boolean, extra: readonly [string, string][] = [], costs = true): string {
-  const waiting = countLabel(count);
+export function navMenu(r: Route, count: number | null, open: boolean, extra: readonly [string, string][] = [], admin = true): string {
+  // The waiting count is an admin's: for anyone else nothing waits on them.
+  const waiting = admin ? countLabel(count) : "";
   return `<div class="nv-menu" data-morph-key="nav-menu">
     <button type="button" class="nv-menu-b" data-act="${ACT.navMenu}" aria-expanded="${open}" aria-controls="nv-panel"${waiting ? ` title="${attr(`${waiting} waiting`)}"` : ""}>`
     + `${open ? askIcon("close", 16) : MENU_ICON}<span class="nv-sr">Menu${waiting ? `, ${waiting} waiting` : ""}</span>${waiting && !open ? `<span class="nv-dot" aria-hidden="true"></span>` : ""}</button>
     <div class="nv-panel" id="nv-panel"${open ? "" : " hidden"}>
-      <nav aria-label="Main">${navLinks(r, count, "menu", costs)}</nav>
+      <nav aria-label="Main">${navLinks(r, count, "menu", admin)}</nav>
       ${extra.length ? `<div class="nv-panel-x">${extra.map(([label, html]) => `<div class="nv-row"><span>${esc(label)}</span>${html}</div>`).join("")}</div>` : ""}
     </div>
   </div>`;

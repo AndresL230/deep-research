@@ -9,9 +9,10 @@
 /* ── the line above the grid ── */
 .bw-head { display:flex; flex-direction:column; align-items:flex-start; gap:12px; padding-top:20px; }
 .bw-sum { margin:0; font-size:clamp(24px, 2.7cqi, 32px); font-weight:400; line-height:1.15; letter-spacing:-0.028em; color:var(--fg); font-variant-numeric:tabular-nums; text-wrap:balance; }
+.bw-sum--label { font-size:15px; font-weight:500; letter-spacing:-0.01em; color:var(--fg-70); }
 /* A batch on more than one analyst model: how each model's runs came out. */
 .bw-sum-models { margin:-4px 0 0; font-size:13.5px; color:var(--fg-70); font-variant-numeric:tabular-nums; }
-.bw-explain { margin:0; max-width:72ch; font-size:13.5px; line-height:1.5; color:var(--fg-55); text-wrap:pretty; }
+
 .bw-empty { padding:28px 12px; border:1px dashed var(--border-strong); border-radius:var(--r-card); font-size:13px; color:var(--fg-55); text-align:center; }
 /* The code the runs started from, scored unchanged: the number each run's own rate is read against. */
 .bw-baseline { margin:-4px 0 0; max-width:72ch; font-size:13.5px; font-weight:500; color:var(--fg-70); font-variant-numeric:tabular-nums; text-wrap:pretty; }
