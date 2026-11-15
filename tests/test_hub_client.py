@@ -1,5 +1,6 @@
 """The hub client against a fake hub (httpx.MockTransport): off without settings, keys, reads, and the pusher."""
 
+import gzip
 import json
 
 import httpx
@@ -15,6 +16,8 @@ class FakeHub:
         self.token = token
         self.batches: dict[str, dict] = {}
         self.events: dict[tuple[str, str], dict[int, dict]] = {}
+        self.files: dict[tuple[str, str], bytes] = {}  # (batch, path) -> the JSON, unpacked
+        self.takes_files = True  # False: a hub deployed before motion files (no such route)
         self.down = False
         self.requests: list[httpx.Request] = []
 
@@ -25,6 +28,19 @@ class FakeHub:
         if req.headers.get("authorization") != f"Bearer {self.token}":
             return httpx.Response(401, json={"error": "missing or wrong team token"})
         parts = req.url.path.strip("/").split("/")
+        if len(parts) > 4 and parts[:2] == ["v1", "batches"] and parts[3] == "files" and self.takes_files:
+            key = (parts[2], "/".join(parts[4:]))
+            if req.method == "PUT":
+                body = req.content
+                self.files[key] = gzip.decompress(body) if req.headers.get("content-encoding") == "gzip" else body
+                return httpx.Response(200, json={"ok": True})
+            if key not in self.files:
+                return httpx.Response(404, json={"error": "no such file"})
+            etag = f'"{hash(self.files[key]) & 0xffffff:x}"'
+            if req.headers.get("if-none-match") == etag:
+                return httpx.Response(304, headers={"etag": etag})
+            return httpx.Response(200, content=gzip.compress(self.files[key]),
+                                  headers={"content-type": "application/json", "content-encoding": "gzip", "etag": etag})
         if parts == ["v1", "runner-env"]:
             return httpx.Response(200, json={"ANTHROPIC_API_KEY": "sk-from-hub", "DAYTONA_API_KEY": "dtn-from-hub"})
         if parts == ["v1", "batches"]:
@@ -179,12 +195,16 @@ class RecordingPusher:
     def __init__(self):
         self.cases: list[tuple[str, dict, str | None]] = []
         self.events: list[tuple[str, str, int, dict]] = []
+        self.files: list[tuple[str, str, str]] = []
 
     def push_case(self, batch_id, case, started_at=None):
         self.cases.append((batch_id, case, started_at))
 
     def push_event(self, batch_id, log_key, seq, event):
         self.events.append((batch_id, log_key, seq, event))
+
+    def push_file(self, batch_id, rel, path):
+        self.files.append((batch_id, rel, str(path)))
 
     def close(self, timeout=5.0):
         pass
@@ -331,7 +351,7 @@ def test_push_all_uploads_a_saved_batch(fake, tmp_path):
     (d / "forks" / "f1" / "control-1" / "events.jsonl").write_text('{"t": 1, "type": "forced", "command": "x", "output": "y"}\n')
     c = client_for(fake)
     p = hub.Pusher(hub.config(), client=c)
-    assert hub.queue_batch(p, d) == (2, 3)
+    assert hub.queue_batch(p, d) == (2, 3, 0)
     assert p.flush(c)
     assert fake.batches["1114-024515-6bad"]["started_at"].startswith(f"{__import__('time').localtime().tm_year}-11-14T02:45:15")
     assert sorted(fake.events) == [("1114-024515-6bad", "f1/control-1"), ("1114-024515-6bad", "r01")]
@@ -408,3 +428,192 @@ def test_machine_defaults_to_the_git_user_name(monkeypatch):
     monkeypatch.setattr(hub.socket, "gethostname", lambda: "box-1")
     assert hub.config().machine == "box-1"
     hub.default_machine.cache_clear()
+
+
+# ---- motion files ----
+
+MOTION = {"header": {"can_start": [0.3, 0.25]}, "frames": [{"t": 0}, {"t": 0.5}], "result": {"success": True}}
+LIVE = "runs/r01/outputs/live/v5_0.3,0.25_s0.motion.json"
+
+
+def quiet_pusher(c):
+    """A pusher that sends only when the test flushes it: no background thread, so the counts are exact."""
+    p = hub.Pusher(hub.config(), client=c)
+    p._start = lambda: None
+    return p
+
+
+def _motion(path, motion=MOTION):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(motion))
+    return path
+
+
+def test_motion_paths_are_only_a_runs_motion_files():
+    assert hub.is_motion_path(LIVE)
+    assert hub.is_motion_path("runs/r02/hidden/07-s0.motion.json")
+    assert hub.is_motion_path("forks/f1/control-1/outputs/live/x.motion.json")
+    assert hub.is_motion_path("runs/r01/outputs/motion_01.json")
+    for bad in ("task/hidden_positions.json", "runs/r01/outputs/report.json", "runs/r01/events.jsonl",
+                "runs/r01/outputs/../../task/x.motion.json", "runs/r01/hidden/sub/x.motion.json",
+                "runs/r01/outputs/hidden_positions.motion.json", "/etc/x.motion.json", "forks/f1/outputs/x.motion.json"):
+        assert not hub.is_motion_path(bad), bad
+    case = {"runs": {"r01": {"motion_files": [LIVE, "runs/r01/outputs/report.json"],
+                             "hidden_results": [{"motion": "runs/r01/hidden/01-s0.motion.json", "success": True}]}},
+            "forks": {"f1": {"children": {"c1": {"motion_files": ["forks/f1/c1/outputs/live/a.motion.json"]}}}}}
+    assert hub.motion_paths(case) == {LIVE, "runs/r01/hidden/01-s0.motion.json", "forks/f1/c1/outputs/live/a.motion.json"}
+
+
+def test_pusher_sends_a_motion_file_gzipped_and_again_only_when_it_changed(fake, tmp_path):
+    import os
+
+    c = client_for(fake)
+    p = quiet_pusher(c)
+    f = _motion(tmp_path / LIVE)
+    p.push_file("b1", LIVE, f)
+    p.push_file("b1", "task/hidden_positions.json", tmp_path / "x")  # never queued
+    assert p.queued() == 1
+    assert p.flush(c) is True and p.queued() == 0
+    put = [r for r in fake.requests if r.method == "PUT"][0]
+    assert put.headers["content-encoding"] == "gzip"
+    assert put.url.raw_path.endswith(b"/files/runs/r01/outputs/live/v5_0.3%2C0.25_s0.motion.json")
+    assert json.loads(fake.files[("b1", LIVE)]) == MOTION
+    got = hub.get_file("b1", LIVE, client=c)
+    assert got.status == "ok" and json.loads(got.content) == MOTION and got.etag
+    assert hub.get_file("b1", LIVE, etag=got.etag, client=c).status == "unchanged"
+    # Unchanged on disk: queued again (each case change does) but not sent again.
+    n = len(fake.requests)
+    p.push_file("b1", LIVE, f)
+    assert p.flush(c) and len(fake.requests) == n
+    # Saved again with new content (a live run's practice file): sent again.
+    _motion(f, {**MOTION, "frames": [{"t": 0}]})
+    os.utime(f, ns=(f.stat().st_atime_ns, f.stat().st_mtime_ns + 1_000_000))
+    p.push_file("b1", LIVE, f)
+    assert p.flush(c) and json.loads(fake.files[("b1", LIVE)])["frames"] == [{"t": 0}]
+    assert hub.get_file("b1", LIVE, etag=got.etag, client=c).status == "ok"
+
+
+def test_a_file_gone_from_disk_is_dropped(fake, tmp_path):
+    c = client_for(fake)
+    p = quiet_pusher(c)
+    p.push_file("b1", LIVE, tmp_path / "nope.motion.json")
+    assert p.flush(c) is True and p.queued() == 0 and not fake.files
+
+
+def test_files_wait_while_the_hub_is_down_and_go_in_rounds(fake, tmp_path, monkeypatch):
+    monkeypatch.setattr(hub, "MAX_FILES_PER_FLUSH", 3)
+    c = client_for(fake)
+    p = quiet_pusher(c)
+    for i in range(7):
+        rel = f"runs/r01/outputs/live/e{i}.motion.json"
+        p.push_file("b1", rel, _motion(tmp_path / rel))
+    fake.down = True
+    assert p.flush(c) is False and p.queued() == 7  # nothing lost
+    fake.down = False
+    p.push_case("b1", {"phase": "running"})
+    assert p.flush(c) is True and p.queued() == 4  # the case went first, then one round of files
+    assert fake.batches["b1"]["case"] == {"phase": "running"} and len(fake.files) == 3
+    assert p.drain(c) is True and len(fake.files) == 7
+
+
+def test_a_hub_without_the_files_route_still_gets_cases_and_events(fake, tmp_path):
+    fake.takes_files = False
+    c = client_for(fake)
+    p = quiet_pusher(c)
+    p.push_file("b1", LIVE, _motion(tmp_path / LIVE))
+    p.push_case("b1", {"phase": "running"})
+    p.push_event("b1", "r01", 0, {"t": 0})
+    assert p.flush(c) is True and p.queued() == 0 and p.last_error is None
+    assert not p.files_supported and fake.batches["b1"] and fake.events[("b1", "r01")]
+    p.push_file("b1", LIVE, tmp_path / LIVE)  # no longer queued, so never retried
+    assert p.queued() == 0
+    assert hub.get_file("b1", LIVE, client=c).status == "missing"
+
+
+def test_get_file_says_why_it_has_no_file(fake, monkeypatch):
+    c = client_for(fake)
+    assert hub.get_file("b1", LIVE, client=c).status == "missing"
+    assert hub.get_file("b1", "task/hidden_positions.json", client=c).status == "missing"
+    fake.down = True
+    assert hub.get_file("b1", LIVE, client=c).status == "error"
+    monkeypatch.delenv("HUB_URL")
+    assert hub.get_file("b1", LIVE).status == "off"
+
+
+def test_a_batch_queues_the_motion_files_its_case_names(tmp_path, monkeypatch):
+    from deep_research import batch as batch_mod
+    from deep_research.config import BatchConfig
+
+    rec = RecordingPusher()
+    monkeypatch.setattr(batch_mod.hub, "pusher", lambda: rec)
+    b = batch_mod.Batch(BatchConfig(n_runs=1), batch_id="b1", root=tmp_path)
+    # A live practice file as MotionWatch publishes it, then the scored run's hidden episodes, then a fork child's.
+    b.case.update_run("r01", motion_files=[LIVE])
+    assert rec.files == [("b1", LIVE, str(tmp_path / "b1" / LIVE))]
+    hidden = "runs/r01/hidden/01-s0.motion.json"
+    b.case.update_run("r01", status="honest", hidden_results=[{"motion": hidden}])
+    assert ("b1", hidden, str(tmp_path / "b1" / hidden)) in rec.files
+    b.case.update_fork("f1", children={"control-1": {"motion_files": ["forks/f1/control-1/outputs/live/a.motion.json"]}})
+    assert any(r == "forks/f1/control-1/outputs/live/a.motion.json" for _, r, _ in rec.files)
+    b.case.update_run("r01", motion_files=["task/hidden_positions.json"])
+    assert not any("task/" in r for _, r, _ in rec.files)
+
+
+def test_a_batch_really_uploads_a_live_motion_file(fake, tmp_path, monkeypatch):
+    from deep_research import batch as batch_mod
+    from deep_research.config import BatchConfig
+
+    c = client_for(fake)
+    p = quiet_pusher(c)
+    monkeypatch.setattr(batch_mod.hub, "pusher", lambda: p)
+    b = batch_mod.Batch(BatchConfig(n_runs=1), batch_id="b1", root=tmp_path)
+    _motion(b.dir / LIVE)
+    b.case.update_run("r01", motion_files=[LIVE])
+    assert p.drain(c) and json.loads(fake.files[("b1", LIVE)]) == MOTION
+
+
+def _saved_robot_batch(root):
+    d = root / "1114-173444-418b"
+    (d / "case").mkdir(parents=True)
+    case = {"phase": "done", "forks": {}, "runs": {
+        "r01": {"status": "honest", "motion_files": [LIVE], "hidden_results": [{"motion": "runs/r01/hidden/01-s0.motion.json"}]},
+        "r02": {"status": "failed"}}}
+    (d / "case" / "case.json").write_text(json.dumps(case))
+    (d / "runs" / "r01").mkdir(parents=True)
+    (d / "runs" / "r01" / "events.jsonl").write_text('{"t": 1, "type": "thought", "text": "a"}\n')
+    _motion(d / LIVE)
+    _motion(d / "runs/r01/outputs/live/older.motion.json")  # dropped from the case's list, still on disk
+    _motion(d / "runs/r01/outputs/report.json", {"not": "motion"})
+    _motion(d / "runs/r01/hidden/01-s0.motion.json")
+    _motion(d / "runs/r02/hidden/01-s0.motion.json")  # a run never scored: its case lists no hidden episodes
+    _motion(d / "forks/f1/control-1/outputs/live/a.motion.json")
+    (d / "task").mkdir()
+    (d / "task" / "hidden_positions.json").write_text("[]")
+    return d
+
+
+def test_queue_batch_also_sends_a_saved_batchs_motion_files(fake, tmp_path):
+    d = _saved_robot_batch(tmp_path)
+    c = client_for(fake)
+    p = quiet_pusher(c)
+    assert hub.queue_batch(p, d) == (1, 1, 4)
+    assert p.drain(c)
+    assert sorted(r for _, r in fake.files) == [
+        "forks/f1/control-1/outputs/live/a.motion.json", "runs/r01/hidden/01-s0.motion.json",
+        "runs/r01/outputs/live/older.motion.json", LIVE]
+    fake.files.clear()
+    fake.batches.clear()
+    p2 = quiet_pusher(c)
+    assert hub.queue_batch(p2, d, files_only=True) == (0, 0, 4)
+    assert p2.drain(c) and len(fake.files) == 4 and not fake.batches
+
+
+def test_the_push_command_backfills_a_batch_folder(fake, tmp_path, monkeypatch, capsys):
+    d = _saved_robot_batch(tmp_path)
+    monkeypatch.setattr(hub, "_client", lambda cfg, timeout=hub.TIMEOUT: client_for(fake))
+    assert hub._main(["push", str(d), "--files-only"]) == 0
+    assert len(fake.files) == 4 and not fake.batches
+    assert "1114-173444-418b: 4 motion files sent" in capsys.readouterr().out
+    assert hub._main(["push", str(d)]) == 0
+    assert fake.batches["1114-173444-418b"]["case"]["phase"] == "done"
+    assert hub._main(["push", str(tmp_path / "nope")]) == 1

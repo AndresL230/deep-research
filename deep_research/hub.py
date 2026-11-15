@@ -5,26 +5,32 @@ function here does nothing, so the app works exactly as before on its own.
 
 - Keys: `load_runner_env()` fills in ANTHROPIC_API_KEY, DAYTONA_API_KEY and the other runner settings from the hub
   when they are not set locally. A key set in the local .env always wins.
-- Pushing: a `Pusher` sends a batch's case file and its agents' events from a background thread, so a slow or
-  unreachable hub never holds up a run. It keeps only the newest case file per batch and retries what failed.
-- Reading: `list_batches`, `get_case`, `all_cases` and `get_events` read the team's batches, with short timeouts;
-  they return None when the hub cannot be reached.
+- Pushing: a `Pusher` sends a batch's case file, its agents' events and its robot runs' motion files from a
+  background thread, so a slow or unreachable hub never holds up a run. It keeps only the newest case file per
+  batch, reads a motion file when it sends it (so the newest content goes), and retries what failed.
+- Reading: `list_batches`, `get_case`, `all_cases`, `get_events` and `get_file` read the team's batches, with short
+  timeouts; they return None (`get_file`: a `Fetched` saying why) when the hub cannot be reached.
 
-The hub never receives holdout labels, task files or API keys: only case files and agent event logs.
+The hub never receives holdout labels, task files or API keys: only case files, agent event logs and motion files
+(a run's practice episodes, and its hidden episodes' recordings once it is scored; `is_motion_path`).
 """
 
 from __future__ import annotations
 
+import gzip
 import logging
 import os
 import queue
+import re
 import socket
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 
@@ -33,9 +39,52 @@ log = logging.getLogger("deep_research.hub")
 TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 READ_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
 MAX_EVENTS_PER_PUSH = 500
+# A flush sends at most this many motion files, so a batch's case file and events never wait behind a backlog.
+MAX_FILES_PER_FLUSH = 40
+# The hub's cap is 4 MB as sent (gzipped); a motion file is a few hundred kB of JSON at most.
+MAX_FILE_BYTES = 4_000_000
 RUNNER_KEYS = (
     "ANTHROPIC_API_KEY", "DAYTONA_API_KEY", "DAYTONA_API_URL", "DAYTONA_TARGET", "DAYTONA_SNAPSHOT", "LANGSMITH_API_KEY",
 )
+
+
+# A motion file the hub takes, batch-relative (hub/src/index.ts `motionPath`): under a run's or fork child's outputs,
+# or its hidden episodes, named `*.motion.json` or `motion*.json` (sim's OUTPUT_GLOBS).
+_PART = r"[A-Za-z0-9_,-][A-Za-z0-9._, -]{0,119}"
+_MOTION_FILE = re.compile(
+    rf"^(?:runs/{_PART}|forks/{_PART}/{_PART})/(?:outputs/(?:{_PART}/)*|hidden/)({_PART})$")
+
+
+def is_motion_path(rel: str) -> bool:
+    """Whether the hub takes batch-relative `rel` as a motion file. Never a secret (`domains.secret_files`)."""
+    m = _MOTION_FILE.match(rel) if len(rel) <= 300 else None
+    if m is None:
+        return False
+    name = m.group(1)
+    if not (name.endswith(".motion.json") or (name.startswith("motion") and name.endswith(".json"))):
+        return False
+    from . import domains
+
+    return not any(s in name for s in ("holdout_labels", *domains.secret_files()))
+
+
+def motion_paths(value: Any) -> set[str]:
+    """Every motion file a part of a case file names: runs' and fork children's `motion_files`, and the `motion` of
+    each of their `hidden_results` (a hidden episode's recording, listed once the run is scored)."""
+    found: set[str] = set()
+
+    def walk(v: Any, key: str | None) -> None:
+        if isinstance(v, dict):
+            for k, x in v.items():
+                walk(x, k)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x, key)
+        elif isinstance(v, str) and key in ("motion_files", "motion") and is_motion_path(v):
+            found.add(v)
+
+    walk(value, None)
+    return found
 
 
 @dataclass(frozen=True)
@@ -144,6 +193,45 @@ def get_events(batch_id: str, log_key: str, client: httpx.Client | None = None) 
     return _get(f"/v1/batches/{batch_id}/events", {"log": log_key}, client=client)
 
 
+def file_url(batch_id: str, rel: str) -> str:
+    """The hub's address of a batch's file, each part URL-encoded."""
+    return f"/v1/batches/{quote(batch_id, safe='')}/files/" + "/".join(quote(p, safe="") for p in rel.split("/"))
+
+
+@dataclass(frozen=True)
+class Fetched:
+    """What `get_file` got: the file (`ok`), no change since the `etag` given (`unchanged`), not on the hub
+    (`missing`), or the hub could not be asked (`off`: not set up; `error`: unreachable or refused)."""
+
+    status: Literal["ok", "unchanged", "missing", "off", "error"]
+    content: bytes | None = None
+    etag: str | None = None
+
+
+def get_file(batch_id: str, rel: str, etag: str | None = None, client: httpx.Client | None = None) -> Fetched:
+    """A batch's motion file from the hub, unpacked. With `etag`, a file unchanged since then is not sent again."""
+    cfg = config()
+    if cfg is None:
+        return Fetched("off")
+    if not is_motion_path(rel):
+        return Fetched("missing")
+    try:
+        c = client or _client(cfg, READ_TIMEOUT)
+        res = c.get(file_url(batch_id, rel), headers={"if-none-match": etag} if etag else None)
+        if res.status_code == 304:
+            return Fetched("unchanged", etag=etag)
+        if res.status_code in (404, 503):  # not uploaded, or a hub without file storage
+            return Fetched("missing")
+        res.raise_for_status()
+        content = res.content  # httpx unpacks content-encoding gzip
+        if content[:2] == b"\x1f\x8b":  # still gzipped: something on the way dropped the header
+            content = gzip.decompress(content)
+        return Fetched("ok", content, res.headers.get("etag"))
+    except Exception as e:  # noqa: BLE001
+        log.warning("hub read of %s in %s failed: %s", rel, batch_id, _describe(e))
+        return Fetched("error")
+
+
 # ── pushing ──────────────────────────────────────────────────────────────────
 
 
@@ -151,13 +239,16 @@ def get_events(batch_id: str, log_key: str, client: httpx.Client | None = None) 
 class _Pending:
     cases: dict[str, tuple[int, dict, str | None]] = field(default_factory=dict)  # batch -> (revision, case, started_at)
     events: dict[tuple[str, str], dict[int, dict]] = field(default_factory=dict)  # (batch, log) -> {seq: event}
+    files: dict[tuple[str, str], Path] = field(default_factory=dict)  # (batch, batch-relative path) -> the file
 
 
 class Pusher:
     """Sends case files and events to the hub from one background thread.
 
-    `push_case` keeps only the newest case per batch; `push_event` queues an event under its log and position.
+    `push_case` keeps only the newest case per batch; `push_event` queues an event under its log and position;
+    `push_file` queues a motion file, which is read when it is sent and sent again only once it changed on disk.
     Anything that fails stays queued and is retried, with a growing pause, until it goes through or the process ends.
+    A hub that does not take files yet (deployed before them) gets none from then on; case files and events still go.
     """
 
     def __init__(self, cfg: HubConfig, client: httpx.Client | None = None, interval: float = 1.0):
@@ -169,6 +260,9 @@ class Pusher:
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._revisions: dict[str, int] = {}
+        # Each file sent, by (batch, path): its size and modification time then, so an unchanged one is not sent again.
+        self._sent_files: dict[tuple[str, str], tuple[int, int]] = {}
+        self.files_supported = True
         self._thread: threading.Thread | None = None
         self.failures = 0
         # For the status badge: when a push last went through, and the last error since then.
@@ -178,7 +272,8 @@ class Pusher:
     def queued(self) -> int:
         """Case files and events waiting to be sent."""
         with self._lock:
-            return len(self._pending.cases) + sum(len(v) for v in self._pending.events.values())
+            return (len(self._pending.cases) + sum(len(v) for v in self._pending.events.values())
+                    + len(self._pending.files))
 
     # The revision only has to grow per batch, also across restarts of this server: milliseconds since 1970 do.
     def _revision(self, batch_id: str) -> int:
@@ -197,6 +292,14 @@ class Pusher:
             self._pending.events.setdefault((batch_id, log_key), {})[seq] = event
         self._start()
 
+    def push_file(self, batch_id: str, rel: str, path: Path | str) -> None:
+        """Queue the motion file at `path`, stored on the hub under batch-relative `rel`. Any other file is ignored."""
+        if not self.files_supported or not is_motion_path(rel):
+            return
+        with self._lock:
+            self._pending.files[(batch_id, rel)] = Path(path)
+        self._start()
+
     def _start(self) -> None:
         if self._thread is None or not self._thread.is_alive():
             self._thread = threading.Thread(target=self._loop, name="hub-pusher", daemon=True)
@@ -210,14 +313,22 @@ class Pusher:
             self._wake.clear()
             ok = self.flush(client)
             pause = self._interval if ok else min(60.0, pause * 2)
+            if ok and self._files_waiting():
+                self._wake.set()  # more files than one flush sends: go on at once
         self.flush(client)
 
+    def _files_waiting(self) -> bool:
+        with self._lock:
+            return bool(self._pending.files)
+
     def flush(self, client: httpx.Client | None = None) -> bool:
-        """Send everything queued now. Returns False if something failed (it stays queued)."""
+        """Send everything queued now, motion files up to MAX_FILES_PER_FLUSH. Returns False if something failed (it
+        stays queued)."""
         client = client or self._client or _client(self.cfg)
         with self._lock:
             cases, self._pending.cases = self._pending.cases, {}
             events, self._pending.events = self._pending.events, {}
+            files = {k: self._pending.files.pop(k) for k in list(self._pending.files)[:MAX_FILES_PER_FLUSH]}
         ok = True
         for batch_id, (revision, case, started_at) in cases.items():
             body = {"machine": self.cfg.machine, "revision": revision, "case": case}
@@ -238,12 +349,60 @@ class Pusher:
                         kept = self._pending.events.setdefault((batch_id, log_key), {})
                         for s in chunk:
                             kept.setdefault(s, by_seq[s])
+        for (batch_id, rel), path in files.items():
+            if not self._send_file(client, batch_id, rel, path):
+                ok = False
+                with self._lock:
+                    self._pending.files.setdefault((batch_id, rel), path)
         return ok
 
-    def _send(self, client: httpx.Client, method: str, path: str, body: dict) -> bool:
+    def drain(self, client: httpx.Client | None = None) -> bool:
+        """Flush until nothing is queued, or a flush fails. For the backfill, which queues a whole batch at once."""
+        while True:
+            if not self.flush(client):
+                return False
+            if not self.queued():
+                return True
+
+    def _send_file(self, client: httpx.Client, batch_id: str, rel: str, path: Path) -> bool:
+        """Send one motion file, unless it is gone, too large, or unchanged since it was sent. False: try again."""
+        if not self.files_supported:
+            return True
+        key = (batch_id, rel)
         try:
-            res = client.request(method, path, json=body)
-            if res.status_code in (400, 413):
+            st = path.stat()
+            sig = (st.st_size, st.st_mtime_ns)
+            if self._sent_files.get(key) == sig:
+                return True
+            packed = gzip.compress(path.read_bytes(), compresslevel=6)
+        except OSError:
+            return True  # gone (a run scored again): nothing to send
+        if len(packed) > MAX_FILE_BYTES:
+            log.warning("not sending %s of %s to the hub: %d bytes packed", rel, batch_id, len(packed))
+            return True
+        headers = {"content-type": "application/json", "content-encoding": "gzip"}
+        sent = self._send(client, "PUT", file_url(batch_id, rel), content=packed, headers=headers, file=True)
+        if sent:
+            self._sent_files[key] = sig
+        return sent
+
+    def _send(self, client: httpx.Client, method: str, path: str, body: dict | None = None, *,
+              content: bytes | None = None, headers: dict[str, str] | None = None, file: bool = False) -> bool:
+        try:
+            if content is not None:
+                res = client.request(method, path, content=content, headers=headers)
+            else:
+                res = client.request(method, path, json=body)
+            if file and res.status_code == 404:
+                # A hub deployed before motion files (it has no such route): stop sending them, keep the rest.
+                if self.files_supported:
+                    log.warning("the hub does not take motion files yet (HTTP %d): episodes stay on this machine",
+                                res.status_code)
+                self.files_supported = False
+                with self._lock:
+                    self._pending.files.clear()
+                return True
+            if res.status_code in (400, 413, 415):
                 # The hub will never take this one: drop it rather than retry forever.
                 log.warning("the hub refused %s %s: %s", method, path, res.text[:200])
                 return True
@@ -342,8 +501,6 @@ def started_from_id(batch_id: str, year: int | None = None) -> str | None:
 
 def event_logs(batch_dir) -> dict[str, Any]:
     """Every event log a saved batch has, by hub key: runs ("r01"), fork children ("f1/control-1"), "investigator"."""
-    from pathlib import Path
-
     d = Path(batch_dir)
     logs: dict[str, Path] = {}
     for p in sorted((d / "runs").glob("*/events.jsonl")):
@@ -355,28 +512,50 @@ def event_logs(batch_dir) -> dict[str, Any]:
     return logs
 
 
-def queue_batch(p: Pusher, batch_dir) -> tuple[int, int]:
-    """Queue a saved batch's case file and every event log on `p`. Returns (logs, events)."""
+def motion_files(batch_dir, case: dict) -> dict[str, Path]:
+    """Every motion file of a saved batch the hub takes, by batch-relative path: those under its runs' and fork
+    children's outputs, and the hidden episodes' recordings its case file lists (only a scored run lists them)."""
+    d = Path(batch_dir)
+    found: dict[str, Path] = {}
+    for pattern in ("runs/*/outputs/**/*.json", "forks/*/*/outputs/**/*.json"):
+        for f in sorted(d.glob(pattern)):
+            rel = f.relative_to(d).as_posix()
+            if f.is_file() and is_motion_path(rel):
+                found[rel] = f
+    for rel in sorted(motion_paths(case)):
+        f = d / rel
+        if ".." not in rel.split("/") and f.is_file():
+            found[rel] = f
+    return found
+
+
+def queue_batch(p: Pusher, batch_dir, files_only: bool = False) -> tuple[int, int, int]:
+    """Queue a saved batch's case file, every event log and every motion file on `p`; with `files_only`, only its
+    motion files. Returns (logs, events, files)."""
     import json
-    from pathlib import Path
 
     d = Path(batch_dir)
     case = json.loads((d / "case" / "case.json").read_text())
-    p.push_case(d.name, case, started_from_id(d.name))
     n_logs = n_events = 0
-    for key, path in event_logs(d).items():
-        n_logs += 1
-        seq = 0
-        for line in path.read_text().splitlines():
-            if line.strip():
-                p.push_event(d.name, key, seq, json.loads(line))
-                seq += 1
-        n_events += seq
-    return n_logs, n_events
+    if not files_only:
+        p.push_case(d.name, case, started_from_id(d.name))
+        for key, path in event_logs(d).items():
+            n_logs += 1
+            seq = 0
+            for line in path.read_text().splitlines():
+                if line.strip():
+                    p.push_event(d.name, key, seq, json.loads(line))
+                    seq += 1
+            n_events += seq
+    files = motion_files(d, case)
+    for rel, f in files.items():
+        p.push_file(d.name, rel, f)
+    return n_logs, n_events, len(files)
 
 
 def _main(argv: list[str]) -> int:
-    """`python -m deep_research.hub push-all`: upload every saved batch in batches/ (never the fixtures)."""
+    """`python -m deep_research.hub push-all`: upload every saved batch in batches/ (never the fixtures).
+    `python -m deep_research.hub push <batch folder>...`: upload the batch folders named, wherever they are."""
     import argparse
 
     from dotenv import load_dotenv
@@ -386,8 +565,13 @@ def _main(argv: list[str]) -> int:
     load_dotenv(ROOT_DIR / ".env")
     parser = argparse.ArgumentParser(prog="python -m deep_research.hub")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    push = sub.add_parser("push-all", help="upload every saved batch to the hub")
-    push.add_argument("--only", nargs="*", help="batch ids to upload (default: all)")
+    push_all = sub.add_parser("push-all", help="upload every saved batch in batches/ to the hub")
+    push_all.add_argument("--only", nargs="*", help="batch ids to upload (default: all)")
+    push = sub.add_parser("push", help="upload saved batch folders (case file, events and motion files) to the hub")
+    push.add_argument("folders", nargs="+", type=Path, help="batch folders, such as batches/1114-173444-418b")
+    for cmd in (push_all, push):
+        cmd.add_argument("--files-only", action="store_true",
+                         help="send only the motion files (for a batch the hub has, from before it took them)")
     sub.add_parser("status", help="show the hub settings and what it holds")
     args = parser.parse_args(argv)
 
@@ -403,14 +587,24 @@ def _main(argv: list[str]) -> int:
         return 0 if rows is not None else 1
 
     p = Pusher(cfg)
-    dirs = [d for d in sorted(BATCHES_DIR.iterdir()) if (d / "case" / "case.json").is_file()] if BATCHES_DIR.exists() else []
-    if args.only:
-        dirs = [d for d in dirs if d.name in set(args.only)]
+    if args.cmd == "push":
+        dirs = [d.resolve() for d in args.folders]
+        missing = [str(d) for d in dirs if not (d / "case" / "case.json").is_file()]
+        if missing:
+            print("Not a batch folder (no case/case.json): " + ", ".join(missing))
+            return 1
+    else:
+        dirs = [d for d in sorted(BATCHES_DIR.iterdir()) if (d / "case" / "case.json").is_file()] if BATCHES_DIR.exists() else []
+        if args.only:
+            dirs = [d for d in dirs if d.name in set(args.only)]
     for d in dirs:
-        n_logs, n_events = queue_batch(p, d)
-        ok = p.flush()
-        print(f"{d.name}: {n_logs} logs, {n_events} events {'sent' if ok else 'NOT sent (see the warnings above)'}")
-    return 0 if p.flush() else 1
+        n_logs, n_events, n_files = queue_batch(p, d, files_only=args.files_only)
+        ok = p.drain()
+        what = f"{n_files} motion files" if args.files_only else f"{n_logs} logs, {n_events} events, {n_files} motion files"
+        print(f"{d.name}: {what} {'sent' if ok else 'NOT all sent (see the warnings above)'}")
+        if n_files and not p.files_supported:
+            print("  the hub does not take motion files yet: deploy hub/ (README, \"The team hub\")")
+    return 0 if p.drain() else 1
 
 
 if __name__ == "__main__":
