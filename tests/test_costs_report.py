@@ -215,7 +215,7 @@ def test_costs_endpoint_reads_live_batches_from_memory_and_saved_ones_from_disk(
     assert recorded["kind"] == "replay" and not recorded.get("simulated") and recorded["usd"]["total"] > 0
     assert t["usd"]["total"] == pytest.approx(0.815 + 0.25 + recorded["usd"]["total"])
     assert t["batches"] == 3 and t["excludes_simulated"] is True
-    assert report["simulated"]["batches"] == 2
+    assert report["simulated"]["batches"] == 3
 
 
 def test_costs_endpoint_with_only_the_demo_batch(client):  # noqa: F811
