@@ -29,7 +29,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from deep_research import domains  # noqa: E402
-from deep_research.analysis import actions_from_events, find_split  # noqa: E402
+from deep_research.analysis import actions_from_events, find_split, rank_candidates, run_attributes  # noqa: E402
+from deep_research.audit import build_audit  # noqa: E402
 from deep_research.batch import _arm_summary  # noqa: E402
 from deep_research.case_file import CaseFile  # noqa: E402
 from deep_research.config import BatchConfig  # noqa: E402
@@ -49,7 +50,7 @@ HYPOTHESIS_AT = 1794637981.6498184
 # verdict's evidence.
 LEGACY_CONFIG = ("dataset", "trap", "trap_strength", "trap_noise", "hint_level", "model_hint", "holdout_fraction", "n_runs",
                  "forks_per_choice", "analyst_model", "investigator_model", "budget_usd", "inflation_threshold", "mode", "seed")
-LEGACY_DROPPED = ("trace", "fix", "trace_comparison", "rubric", "feed")
+LEGACY_DROPPED = ("trace", "fix", "trace_comparison", "rubric", "feed", "baseline")
 
 
 def todos(items: list[str], active: int) -> list[dict]:
@@ -254,6 +255,11 @@ def main() -> None:
     case.data["hypotheses"][0]["at"] = HYPOTHESIS_AT
     for section in LEGACY_DROPPED:
         case.data.pop(section, None)
+    # ---- the experiments engine's UI-only sections (MASTER_PLAN 6.1), from the same plain code a live batch runs ----
+    attrs = {rid: run_attributes(json.loads((OUT / "runs" / rid / "outputs" / "report.json").read_text()),
+                                 cfg.analyst_model) for rid in runs}
+    case.set_candidates([c.to_dict() for c in rank_candidates(runs, statuses, attributes=attrs)])
+    case.set_audit({**build_audit(case.data, OUT, cfg.inflation_threshold), "at": HYPOTHESIS_AT})
     case.set_phase("done")  # saves the file as it is now
 
     n_inf = sum(s == "inflated" for s in statuses.values())

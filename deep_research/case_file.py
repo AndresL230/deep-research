@@ -100,7 +100,13 @@ def investigator_view(data: dict) -> dict:
     fix = data.get("fix")
     if isinstance(fix, dict) and isinstance(fix.get("measured"), dict):
         view["fix"] = {**fix, "measured": {k: v for k, v in fix["measured"].items() if k not in VIEW_HIDDEN}}
+    for section in UPGRADE_HIDDEN:
+        view.pop(section, None)
     return view
+
+
+# Case sections for the UI and the fallback only (plan 6.2): the plain-Python ranking of suspects and the audit sheet.
+UPGRADE_HIDDEN = ("candidates", "audit")
 
 
 # Keys of a run (or fork copy) that never reach the investigator's view.
@@ -513,6 +519,34 @@ class CaseFile:
         with self._lock:
             self.data["rubric"].append(row)
             self._changed("rubric")
+
+    # ---- experiments engine sections (plan 6.1): candidates, evidence, interaction, audit. All additive: absent on
+    # case files saved before them. `candidates` and `audit` never reach the investigator's view (UPGRADE_HIDDEN).
+    def set_candidates(self, candidates: list[dict]) -> None:
+        with self._lock:
+            self.data["candidates"] = list(candidates)
+            self._changed("candidates")
+
+    def set_suspect_evidence(self, suspect_id: str, evidence: dict) -> None:
+        """`evidence.<suspect_id>`: the suspect's running evidence (`experiments.suspect_evidence`). When a `suspects`
+        list has this suspect, its status follows the level (`testing` while open)."""
+        with self._lock:
+            self.data.setdefault("evidence", {})[suspect_id] = evidence
+            for s in self.data.get("suspects") or []:
+                if isinstance(s, dict) and s.get("id") == suspect_id:
+                    s["status"] = {"supported": "supported", "cleared": "cleared"}.get(evidence.get("level"), "testing")
+                    self._changed("suspects")
+            self._changed("evidence")
+
+    def set_interaction(self, interaction: dict | None) -> None:
+        with self._lock:
+            self.data["interaction"] = interaction
+            self._changed("interaction")
+
+    def set_audit(self, audit: dict) -> None:
+        with self._lock:
+            self.data["audit"] = audit
+            self._changed("audit")
 
 
 CONFIDENCE = ("low", "medium", "high")

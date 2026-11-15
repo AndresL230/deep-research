@@ -244,6 +244,49 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   cache write tokens, `model_usd`, `vm_seconds`, `vm_usd`, `total_usd`. A round of more pairs rebuilds its own
   base VM: `fork:f1:base-2` for the first, `fork:f1:base-3` for the next.
 
+## The experiments engine (case sections)
+
+Plain Python, added for the investigator to call (MASTER_PLAN 6.1, 6.3 to 6.5). Every section and field here is
+additive and absent until written. `candidates` and `audit` are for the UI and the fallback only: the investigator's
+view (`case/view/case.json`) leaves them out (`case_file.UPGRADE_HIDDEN`).
+
+- `candidates` (`analysis.rank_candidates`, written by `Batch.analyze`): every step label in both directions plus run
+  attributes, sorted by `|diff|`, largest first. Each `{target, kind, honest_rate, inflated_rate, diff, n_honest,
+  n_inflated, fork_run_id, fork_at}`. `kind` is `omission` (a good step inflated runs skip), `commission` (a bad
+  step inflated runs add) or `attribute` (`target` is `<key>=<value>`: `model_family` from the run's report.json,
+  `analyst_model`). `diff` is honest_rate minus inflated_rate. `fork_run_id`/`fork_at` (null for attributes) say
+  where to test a step. New step labels: `drop_column`, `select_features`.
+- `forks.<id>` of a paired experiment (`Batch.run_experiment`) has every method fork field (`kind` `method`, arms
+  `control` and `forced`, where `forced` is the changed copy) plus `suspect_id`, `change` (`<kind>:<name>`, see
+  below), `change_kind`, `anchor`, `prediction` (`smaller_gap` or `larger_gap`, saved with `preregistered_at`
+  before any copy starts), `reason`, `pairs_requested`, `pairs` (`[{i, control_gap, changed_gap, agree}]`,
+  `control-i` against `forced-i`), `dropped_pairs` (`[{i, reason}]`, a pair with a failed copy), `score`,
+  `p_exact`, `level` (`open`, `supported`, `cleared`) and `cost_usd`. A two-factor grid's fork has `kind`
+  `interaction`, `change_a`, `change_b` and arms `neither`, `a`, `b`, `both`.
+- `evidence`: by suspect id, `{pairs, agree, score, p_exact, level, cost_usd, experiments}`, the running evidence
+  over every experiment that tested the suspect (fork ids, oldest first). Score: start at 1, x1.9 per agreeing pair,
+  x0.1 per disagreeing one; `supported` at 20 or more, `cleared` after 5 or more pairs with a score under 1, else
+  `open`. `agree = (control_gap - changed_gap) * direction > 0` (+1 for `smaller_gap`, -1 for `larger_gap`; a tie
+  disagrees). `p_exact` is a one-sided exact permutation test on the gaps of the newest prediction, for display.
+  When a `suspects` list has the suspect, its `status` follows the level.
+- `interaction` (`Batch.run_interaction`): `{fork_id, change_a, change_b, suspects, source_run, fork_at, anchor,
+  per_cell, cells: {neither, a, b, both: {mean_gap, n}}, effect_a, effect_b, interaction, cost_usd,
+  budget_left_usd}`. `effect_a = 1/2[(g00 - g10) + (g01 - g11)]`, `effect_b = 1/2[(g00 - g01) + (g10 - g11)]`,
+  as gap reductions.
+- `audit` (`audit.build_audit`, written when the investigator finishes with a verdict): `{at, runs: {<run>:
+  {run_id, status, questions}}}` for every honest or inflated run. Each question `{id, question, answer, evidence,
+  numbers}`, `answer` `yes`, `no` or `unknown`, ids `test_touched_training`, `columns_fair`,
+  `test_matches_claim`. Read from the run's own train.csv and test.csv, the task's holdout features and meta, and
+  the case file; never the holdout labels.
+
+Changes (`forks.parse_change`, listed by `forks.registry()`): `control`; `force_step:<label>` (every label with a
+forced step: `deduplicate`, `drop_leak`, `group_split`, `deduplicate_near`), `force_step:deduplicate_fuzzy`,
+`force_step:drop_column:<name>`; `fake_result:no_duplicates`; `edit_context:hint_quality`,
+`edit_context:use_logistic` or `edit_context:<free text, at most 300 characters>`; `swap_model:<model>` for a model
+priced in prices.json. Fork points: `before_split`, `before_label:<label>`, `index:<n>` (`fake_result` forks at
+`before_check:<label>`, the run's own look at the data). With no source run named, plain code picks the first run of
+the status the prediction needs (inflated for `smaller_gap`, honest for `larger_gap`) where the fork point exists.
+
 ## More pairs
 
 A verdict whose evidence is `open` (too few pairs, or no clear difference yet) can be given more pairs without the
