@@ -37,6 +37,7 @@ import { isPendingForks } from "../api";
 import { esc, attr } from "../ui";
 import { duration as fmtDuration } from "./format";
 import { ACT, childKey, type EventKey, type ReplayState } from "./model";
+import { scienceAt } from "./replay-science";
 
 /** Fixed beats in timeline seconds for what the logs do not time. Tuned so the demo batch runs about 4 minutes. */
 export const BEATS = {
@@ -476,8 +477,11 @@ export function caseAt(full: CaseFile, events: Record<EventKey, AgentEvent[]>, t
     if (at) forks[f.id] = at;
   });
   if (s.finalPendingAt !== null && t >= s.finalPendingAt && full.forks.pending) forks.pending = { ...full.forks.pending };
+  // Suspects, their evidence and the paired numbers on forks (replay-science.ts).
+  const science = scienceAt(full, s, t, forks);
 
   return {
+    ...science,
     config: full.config,
     phase: replayPhaseAt(full, events, t),
     runs,
