@@ -180,6 +180,7 @@ def calibrate(seeds=(0, 1, 2, 3, 4), draws: int = 30, draw_size: int = 10, worke
                "controllers": out}
     if verbose:
         text = format_calibration(summary).replace("hidden set: successes per position", "hidden set: successes per push")
+        text = text.replace(" positions the agent draws itself", " pushes the agent draws itself")
         text = text.replace(f"{'x':>6} {'y':>6}", f"{'angle':>6} {'force':>6}", 1)
         print(text)
         print("\nhidden outcomes: " + "; ".join(f"{n}: {d['hidden_outcomes']}" for n, d in out.items()))
