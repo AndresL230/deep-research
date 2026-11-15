@@ -5,17 +5,20 @@ Audited `origin/main` at `d3a23ab` (merge of #41), Sat Nov 14 23:57 to Sun Nov 1
 
 ## Summary
 
+Updated Sun Nov 15 02:45 Eastern to match the sections below and the code on this branch. The phase sections further
+down keep the 00:05 audit as it was written; the "Fixed", "Rebuilt" and "Open items" sections record what changed since.
+
 | Phase | Status | One line |
 | --- | --- | --- |
-| 0 Baseline on real runs | **Done** | Real batch `1114-032554-c05a`: 8 honest, 4 inflated, a real fork, a real verdict. Local only. Since 01:40: the real tabular batch `1115-012104-800f` is committed as `fixtures/tabular-live-investigation` |
-| 1 Blind start, wider net | **Partial** | Trap keys and "planted" are hidden. `split`, `overlap_share` and `score.json` are still readable, and the prompt sends it to `split` |
-| 2 Experiments with a choice and a score | **Diverged** | The investigator chooses a hypothesis and the prediction is saved first, but the evidence is Fisher on counts, not the 6.4 score. No `run_experiment`, no change registry. (Since fixed, see below. Real acceptance run on `1115-010055-bfc9`: same-vs-same open at 0.019, a harmless change cleared at 0.0002) |
-| 3 The investigator does the science | **Partial** | It records 2 or more competing hypotheses and tests them. The prompt is still a numbered 1 to 5 script. No lens or skeptic subagents. (Real acceptance since met on `1115-012104-800f`: blind, two suspects tested, one supported, one cleared) |
-| 4 A verdict that is checked | **Partial** | `RubricMiddleware` runs and sent a real verdict back twice, in the robot run and again in `1115-012104-800f`. No two-factor grid, no `audit.py` |
-| 5 It learns | **Partial** | Casebook and `propose_lesson` exist. Since 02:30 Nov 15: `lessons: learned` gives analysts the approved lessons as skills, and `cli foolrate` exists (estimate first, `--yes` to run). The fool-rate run itself has not been run |
-| 6 Real time travel | **Done offline, no real run yet** | Since 02:30 Nov 15: every analyst on the batch's `checkpoints.sqlite`; `fork_mode: checkpoint` seeds a copy from the source run's LangGraph snapshot (todo list kept); the VM still comes from replay. Not yet run for real |
+| 0 Baseline on real runs | **Done** | Real batch `1114-032554-c05a`: 8 honest, 4 inflated, a real fork, a real verdict. The real tabular batch `1115-012104-800f` is committed as `fixtures/tabular-live-investigation` |
+| 1 Blind start, wider net | **Done, one kept exception** | Trap keys, `overlap_share`, `n_test_copies`, `config.seed`, `candidates` and `audit` are out of the view; `/runs/**/score.json` is denied to every file tool; `investigator_assist` exists; `rank_candidates`; `scripts/check_invariants.py`. Since 02:45 `list_changes`, `list_interventions`, `request_forks` and the `method-errors` skill name no trap and no trap column (generic changes, `drop_column:<column>` checked against data.csv). `split` stays in the view on purpose |
+| 2 Experiments with a choice and a score | **Done** | 6.4 running score (`evidence.py`), the five-kind change registry, `Batch.run_experiment` with approve, edit, reject, `cli experiment --auto-approve`. Real: same-vs-same open at 0.019 and a harmless change cleared at 0.0002 (`1115-010055-bfc9`); a suspect supported at 24.76 (`1115-012104-800f`) |
+| 3 The investigator does the science | **Done** | Prompt of role, method and rules; typed `step-tagger`, `lens-*` and `skeptic` subagents; `write_todos`. Real acceptance met on `1115-012104-800f`: blind, two suspects tested, one supported, one cleared |
+| 4 A verdict that is checked | **Done offline, grid not run for real** | `RubricMiddleware` sent real verdicts back twice (robot run, `1115-012104-800f`). The audit sheet is built (`audit.py`, `Batch.write_audit`, at the end of every investigation). The two-factor grid is reachable since 02:45: the `run_interaction` tool (same approval as `run_experiment`, only for two supported suspects) and `cli interaction`; no real batch has run it |
+| 5 It learns | **Mostly done, not run for real** | The casebook `/memories/casebook.md` beside the per-domain notebook, both through `memory=`; `propose_lesson` with approval writes `skills/learned/<name>/SKILL.md`. Since 02:30: `lessons: learned` gives analysts the approved lessons as skills, and `cli foolrate` exists (estimate first, `--yes` to run). The fool-rate run itself has not been run |
+| 6 Real time travel | **Done offline, no real run yet** | The investigator and, since 02:30, every analyst checkpoint to the batch's `checkpoints.sqlite`; a pending approval survives a restart (tested); `fork_mode: checkpoint` seeds a copy from the source run's LangGraph snapshot (todo list kept); the VM still comes from replay. Not yet run for real |
 | 7 A second trap | **Partial** | `leaky_column` (the plan's `standin_column`) and `repeat_rows` exist and calibrate. No real batch on them |
-| 8 Show it | **Diverged, mostly done** | Hypotheses, evidence, approval, rubric, fix and simulated tags are in the UI, under other names. No suspect board as specified, no lessons or fool-rate views |
+| 8 Show it | **Mostly done** | Suspect board, approval card with editable pairs, lessons, investigator panel (plan, subagents, finished summary), simulated and `investigator_assist` tags, and the grid's effects on the suspect board when `interaction` is set. No fool-rate view |
 | 9 Demo hardening | **Partial** | A real robot recording and a real tabular recording (`1115-012104-800f`, the landing's "Demo replay"), the README's "What we ran for real", `docs/claims.md` with batch ids. The landing's own figures are still the simulated `demo-batch` |
 
 ## Fixed in this PR (after the audit)
@@ -55,6 +58,8 @@ langgraph 1.2.22, langchain 1.5.0 and langgraph-checkpoint-sqlite 3.1.3. All off
 | Phase 5 casebook and lessons | `memory=[notebook, "/memories/casebook.md"]`; writes allowed only on `/memory/**` and `/memories/**` (investigator only), denied everywhere else. `propose_lesson` with approval writes `skills/learned/<name>/SKILL.md` and `lessons`; `POST /api/batches/{id}/lessons/{lesson_id}` answers it | same, `api.py` |
 | `investigator_assist` | `BatchConfig.investigator_assist: none \| baseline`; `baseline` puts `candidates` in the view | `config.py`, `case_file.py` |
 | Verdict view wording | The verdict page's evidence line says the running score decides and the Fisher p is shown only | `web/src/batch/lanes.ts` |
+| Method gate (02:45) | The one real run never called `write_todos` or `task`, so plain code now asks for them. `record_suspects` is refused once before a plan and a lens call; `run_experiment` once per suspect before the skeptic, and that refusal is given before the approval card, so no one approves a cost that is not spent. The second try goes through and is logged in `investigator.skipped_steps`. Calls are read from `investigator.subagent_calls` and `todos` in the case file, so the gate survives a restart. `BatchConfig.investigator_strict` (default on) turns it off | `agents/method_gate.py`, `batch._method_gate_answer` |
+| Flat analysts, per agent (02:45) | `_make_flat` registered a process-wide harness profile per model, which took the default general-purpose subagent from any other deep agent on the same model. The analyst now passes `NoSubagents`, a no-op middleware named `SubAgentMiddleware`, which replaces deepagents' own in that agent's stack only (`graph._apply_custom_middleware`, as `NoCompaction` does for summarization): no `task` tool, no subagents | `agents/analyst.py` |
 
 Since 02:30 Nov 15, no longer cut: fork copies keeping the source run's todo list (`fork_mode: checkpoint`), the
 analysts loading learned lessons (`lessons="learned"`) and the fool-rate command (`cli foolrate`, not run). Still cut: a
@@ -107,9 +112,17 @@ Added Sun Nov 15 around 01:40 Eastern, every number read from each batch's `case
 `1115-012104-800f` is the first real run of the rebuilt investigator on the tabular trap, and the first real batch to
 reach `supported` under the 6.4 score. It started blind (`investigator_assist: none`, `split: null`, no honest run).
 
+## Fixed Sun Nov 15, from 02:35 Eastern (second audit, at `3177b86`)
+
+| Gap | Fix | Where |
+| --- | --- | --- |
+| The investigator's view named the trap catalog: `list_changes` listed `drop_leak`, `group_split` and `drop_column:followup_score`, and the skill named `followup_score` | `list_changes` shows generic changes only, each with what it does (`forks.blind_changes`): `control`; `force_step` `deduplicate`, `deduplicate_near`, `drop_column:<column>`, `group_split:<column>`; `fake_result`; `edit_context`; `swap_model`. A trap's own step asked for by its label is refused with a pointer to the generic form. A named column must be a column of the batch's data.csv, and the error does not list them. `list_interventions` and `request_forks` output replace trap columns with `<column>`. `trap_fixes` stays with the orchestrator. Traps declare their columns (`Trap.columns`). The skill names no trap column | `forks.py`, `traps/`, `agents/investigator.py`, `batch.py`, `skills/method-errors/SKILL.md`, `tests/test_blind_view.py` |
+| `check_invariants.py` gaps (8.1) | Fails when a suspect's status disagrees with `evidence.<id>` under the running-score rule, when `verdict.supported` names a suspect under 20, when a banned key or `holdout_labels` is on any investigator route (routes found by building the investigator's backend: `/case/`, `/runs/`, `/skills/`, `/memory/`, `/memories/`, plus the analyst VM's files), and when any GET route FastAPI has serves or names `holdout_labels` (each path parameter filled in; a new parameter fails until it gets a probe) | `scripts/check_invariants.py`, `tests/test_check_invariants.py` |
+| The two-factor grid had no caller | `run_interaction(suspect_a, suspect_b, per_cell=2, reason="")` on the investigator, behind the same approve, edit, reject as `run_experiment`, refused unless both suspects are `supported`; each suspect's change comes from its newest experiment. `forks.pending.kind = "interaction"`. `cli interaction <batch> --a s1 --b s2 --per-cell 2 --auto-approve`. A prompt rule says when to run it | `agents/investigator.py`, `interaction.py`, `batch.py`, `cli.py`, `tests/test_interaction_offline.py` |
+
 ## Open items (Sun Nov 15, 01:40)
 
-- **`list_changes` names a fix for every trap.** In `1115-012104-800f` the investigator's `list_changes` result lists
+- **Fixed at 02:45, see above.** **`list_changes` names a fix for every trap.** In `1115-012104-800f` the investigator's `list_changes` result lists
   `force_step:deduplicate`, `drop_leak`, `group_split`, `deduplicate_near`, `deduplicate_fuzzy`,
   `drop_column:<name>` and `fake_result:no_duplicates`, and its `list_interventions` and the `method-errors` skill name
   the leaky column `followup_score` ("Drop the followup_score column from data.csv…"), the name the registry's
@@ -256,7 +269,7 @@ Added beyond the plan: more pairs for an open verdict (`batch.py:1389-1450`), re
 | --- | --- | --- | --- |
 | 1 | Same idea | holds, widened | Many runs, hidden truth, rewind and change one step, investigator verdict. The robot domain and the code-fix path are additions |
 | 2 | Holdout labels never leave the server | **holds** | Written only to `task/holdout_labels.csv` (`task.py:96`). VMs get `data.csv` and `holdout_features.csv` only (`domains/tabular.py:62-63`). The files and motion routes refuse any `holdout_labels` or domain secret file by name, case-blind (`api.py:715-722`, `:872-884`). The hub never gets them (`hub.py:14`, `:61`). The investigator has no `/task/` route. Notes: (a) `fixtures/demo-batch/task/holdout_labels.csv` is committed to git (simulated Pima data, not served). (b) Robot hidden positions of scored runs are public through `/case` by design, and VMs have no egress limit (`sandboxes.py` sets none), so a fork copy could in theory read its own batch's hidden positions from the public site |
-| 3 | Analysts isolated and flat | holds | General-purpose subagent off, own VM, no case route (`agents/analyst.py:19-63`) |
+| 3 | Analysts isolated and flat | holds | No `task` tool per agent (`NoSubagents` in `agents/analyst.py`, no global profile), own VM, no case route |
 | 4 | Deterministic work is plain Python | holds | Scoring, split, evidence, outcomes, more-pairs rewording are code (`evidence.py`, `batch.py:1188-1208`) |
 | 5 | Every experiment has a control arm from the same point | holds | `forks.py:89`, `:121`. All arms fork one base VM (`batch.py:1151`, `:1167`) |
 | 6 | Spending needs approval, the budget guard can refuse | holds, one gap | `interrupt_on` (`agents/investigator.py:479-482`). Budget check before a fork (`batch.py:1137`) and in flight (`batch.py:553-561`). Gap: `CostTracker.check` lets work through when no price is known (`costs.py:172-175`) |

@@ -42,7 +42,8 @@ def _tool_results(b: Batch, name: str) -> list[str]:
 
 
 async def test_two_suspects_a_predicted_experiment_and_no_supported_suspect_under_20(local_vms, tmp_path, monkeypatch):
-    b = await _run_batch(tmp_path, placebo_arm=False, show_arm=False)
+    b = await _run_batch(tmp_path, placebo_arm=False, show_arm=False,
+                         investigator_strict=False)  # scripted without the lenses and the skeptic
     script_investigator(monkeypatch, [
         call("write_todos", TODOS, "t1"),
         call("record_suspects", SUSPECTS, "s"),
@@ -92,7 +93,8 @@ async def test_a_supported_suspect_needs_its_own_experiments(local_vms, tmp_path
 
 
 async def test_a_pending_experiment_survives_a_restart(local_vms, tmp_path, monkeypatch):
-    b = await _run_batch(tmp_path, placebo_arm=False, show_arm=False)
+    b = await _run_batch(tmp_path, placebo_arm=False, show_arm=False,
+                         investigator_strict=False)  # scripted without the lenses and the skeptic
     script_investigator(monkeypatch, [call("record_suspects", SUSPECTS, "s"), call("run_experiment", EXPERIMENT, "x1")])
     await b.investigate()
     assert _case(b)["phase"] == "awaiting_approval"
@@ -152,7 +154,7 @@ async def test_subagents_are_typed_read_only_and_named_in_the_log(local_vms, tmp
     assert {"general-purpose", "step-tagger", "lens-omission", "lens-commission", "lens-data", "skeptic"} <= set(subs)
     assert subs["general-purpose"]["tools"] == [] and subs["lens-data"]["tools"] == []
     assert subs["step-tagger"]["response_format"] is inv_mod.StepTags and subs["skeptic"]["response_format"] is inv_mod.SkepticReport
-    spending = {"run_experiment", "request_forks", "record_verdict", "propose_lesson", "request_fix_test"}
+    spending = {"run_experiment", "run_interaction", "request_forks", "record_verdict", "propose_lesson", "request_fix_test"}
     for s in subs.values():
         assert not spending & {t.name for t in s["tools"]}, s["name"]
         assert s["skills"] == ["/skills/"]

@@ -5,6 +5,7 @@ runs the fork experiment, drives the investigator, and tracks cost.
 from __future__ import annotations
 
 import ast
+import csv
 import asyncio
 import contextlib
 import contextvars
@@ -45,7 +46,8 @@ from .domains import actions_from_events, build_task, intervention_for, score_ru
 from .domains.robot_arm import BENCH_DIR
 from . import experiments as xp
 from . import interaction as ixn
-from .forks import ChangeError, anchor_error, change_messages, cut_history, fix_plan, parse_change, step_model
+from .forks import (COLUMN_STEPS, ChangeError, anchor_error, change_messages, cut_history, fix_plan, parse_change,
+                    step_model)
 
 logger = logging.getLogger(__name__)
 
@@ -1033,11 +1035,22 @@ class Batch:
     # ---- paired experiments (plan 6.5): one change, a control arm, pairs scored as they come ----
     def parse_change(self, change: str):
         """The change `change` names (forks.parse_change), with this batch's domain's forced steps. Raises ChangeError."""
-        c = parse_change(change, force=lambda label: self.domain.intervention_for(label, self.cfg))
-        tabular_only = c.kind == "fake_result" or (c.kind == "force_step" and c.name.startswith("drop_column:"))
+        c = parse_change(change, force=lambda label: self.domain.intervention_for(label, self.cfg),
+                         columns=self.data_columns())
+        tabular_only = c.kind == "fake_result" or (c.kind == "force_step" and c.name.partition(":")[0] in COLUMN_STEPS)
         if tabular_only and self.domain.name != "tabular":
             raise ChangeError(f"{c.spec} works on data.csv, so only in a tabular batch")
         return c
+
+    def data_columns(self) -> list[str] | None:
+        """The columns of this batch's data.csv, which a `drop_column:<column>` change must name. None when the batch
+        has no data.csv (another domain, or a task not built)."""
+        path = getattr(getattr(self, "task", None), "data", None)
+        try:
+            with open(path, newline="") as fh:
+                return next(csv.reader(fh), [])
+        except (OSError, TypeError):
+            return None
 
     def _forkable_runs(self) -> tuple[dict[str, list], dict[str, str]]:
         """The labelled runs that have a saved history to cut, and every run's status."""
@@ -2019,7 +2032,7 @@ class Batch:
         await self._ensure_investigator()
         decision = {"type": "approve"} if approve else {"type": "reject", "message": "The person declined the cost."}
         action = (self.case.data["forks"].get("pending") or {}).get("action") or {}
-        size_key = {"run_experiment": "pairs", "request_forks": "n_per_arm"}.get(action.get("name"))
+        size_key = {"run_experiment": "pairs", "run_interaction": "per_cell", "request_forks": "n_per_arm"}.get(action.get("name"))
         if approve and pairs is not None and size_key:
             args = {**(action.get("args") or {}), size_key: int(pairs)}
             decision = {"type": "edit", "edited_action": {"name": action["name"], "args": args}}
@@ -2066,6 +2079,11 @@ class Batch:
                 self.push_costs()
                 self._check_budget()
             if interrupted is not None:
+                gated = self._method_gate_answer(interrupted)
+                if gated is not None:  # refused before a person is asked: nothing to approve
+                    log.close()
+                    await self._stream_investigator(gated)
+                    return
                 self._on_interrupt(interrupted)
                 return
             try:
@@ -2103,13 +2121,35 @@ class Batch:
                         break
         return names.get(key, "subagent")
 
+    def _method_gate_answer(self, interrupts):
+        """The answer to a `run_experiment` approval request the method gate refuses (agents/method_gate.py): a
+        reject carrying the gate's refusal, given at once, so no person approves a cost that would then not be spent.
+        None when the gate lets it through and a person is asked as usual."""
+        from .agents import method_gate
+
+        try:
+            requests = interrupts[0].value["action_requests"]
+            first = requests[0]
+        except Exception:  # noqa: BLE001
+            return None
+        if first.get("name") != "run_experiment":
+            return None
+        sid = str((first.get("args") or {}).get("suspect_id") or "")
+        if self.case.suspect(sid) is None:
+            return None  # the tool itself says the suspect is unknown
+        refusal = method_gate.experiment_refusal(self.case, sid, bool(getattr(self.cfg, "investigator_strict", True)))
+        if refusal is None:
+            return None
+        rest = {"type": "reject", "message": "Only one experiment is asked for at a time. Ask again if you still need it."}
+        return Command(resume={"decisions": [{"type": "reject", "message": refusal}] + [rest] * (len(requests) - 1)})
+
     def _on_interrupt(self, interrupts) -> None:
         try:
             first = interrupts[0].value["action_requests"][0]
             action = {"name": first.get("name"), "args": dict(first.get("args") or {})}
         except Exception:  # noqa: BLE001
             action = {}
-        if action.get("name") in ("run_experiment", "propose_lesson"):
+        if action.get("name") in ("run_experiment", "run_interaction", "propose_lesson"):
             self._pending_requests = max(1, len(interrupts[0].value.get("action_requests") or []))
             return self._on_new_interrupt(action)
         n, kind = 4, "method"
@@ -2156,6 +2196,19 @@ class Batch:
         """`forks.pending` for a paired experiment (`run_experiment`) or a lesson (`propose_lesson`): what the person
         is asked to approve, and what it costs. The estimate is per pair, so an edited `pairs` is priced the same way."""
         args = action["args"]
+        if action["name"] == "run_interaction":
+            # The two-factor grid: four cells of `per_cell` copies from one fork point, plus the base VM.
+            try:
+                n = max(1, min(int(args.get("per_cell", 2)), ixn.MAX_PER_CELL))
+            except (TypeError, ValueError):
+                n = 2
+            self.case.update_fork(
+                "pending", status="awaiting_approval", kind="interaction", suspect_a=args.get("suspect_a"),
+                suspect_b=args.get("suspect_b"), reason=args.get("reason") or "", per_cell=n, n_per_arm=n,
+                vm_count=4 * n + 1, estimate_usd=usd_up(self.estimate_forks_usd(n, 4)), action=action,
+            )
+            self.case.set_phase("awaiting_approval")
+            return
         if action["name"] == "propose_lesson":
             lid = self.case.add_lesson(str(args.get("name") or "")[:60], str(args.get("rule") or "")[:1000],
                                        args.get("suspect_id"))

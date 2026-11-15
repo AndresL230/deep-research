@@ -274,7 +274,9 @@ view (`case/view/case.json`) leaves them out (`case_file.UPGRADE_HIDDEN`).
 - `interaction` (`Batch.run_interaction`): `{fork_id, change_a, change_b, suspects, source_run, fork_at, anchor,
   per_cell, cells: {neither, a, b, both: {mean_gap, n}}, effect_a, effect_b, interaction, cost_usd,
   budget_left_usd}`. `effect_a = 1/2[(g00 - g10) + (g01 - g11)]`, `effect_b = 1/2[(g00 - g01) + (g10 - g11)]`,
-  as gap reductions.
+  as gap reductions. When the investigator's `run_interaction` ran it, it also has `reason`. Its approval is
+  `forks.pending.kind = "interaction"` with `suspect_a`, `suspect_b`, `reason`, `per_cell` (= `n_per_arm`, 1 to 4;
+  `POST /decision` `pairs` edits it), `vm_count`, `estimate_usd` and `action`.
 - `audit` (`audit.build_audit`, written when the investigator finishes with a verdict): `{at, runs: {<run>:
   {run_id, status, questions}}}` for every honest or inflated run. Each question `{id, question, answer, evidence,
   numbers}`, `answer` `yes`, `no` or `unknown`, ids `test_touched_training`, `columns_fair`,

@@ -291,6 +291,27 @@ def drop_column_step(column: str) -> dict:
     }
 
 
+def group_split_step(column: str) -> dict:
+    """The forced step of a group-aware split: keep one row per value of `column` in data.csv, before the split, so no
+    group ends up in both train and test."""
+    if not _COLUMN_NAME.match(column or ""):
+        raise ChangeError(f"'{column}' is not a column name a change can group by (letters, digits, _ . - and spaces)")
+    return {
+        "description": f"Keep one row per {column} value in data.csv before the split, so no group is in both train "
+                       "and test",
+        "command": traps.in_workspace(
+            "import pandas as pd; d = pd.read_csv('data.csv', dtype=str, keep_default_na=False); n = len(d); "
+            f"d = d.drop_duplicates(subset=['{column}']); d.to_csv('data.csv', index=False); "
+            f"print(f'Kept one row per {column} value: removed {{n - len(d)}} rows. {{len(d)}} rows remain.')"
+        ),
+    }
+
+
+# The parametrised force_step changes: the investigator names the column (`drop_column:<column>`), checked against
+# the batch's data.csv when the batch has one.
+COLUMN_STEPS: dict[str, Callable[[str], dict]] = {"drop_column": drop_column_step, "group_split": group_split_step}
+
+
 def _trap_column(t) -> str | None:
     m = re.search(r"drop\(columns=\['([^']+)'\]", t.intervention.get("command", ""))
     return m.group(1) if m else None
@@ -305,11 +326,12 @@ def _label_of_column(column: str) -> str:
 
 
 def parse_change(spec: str, force: Callable[[str], dict | None] | None = None,
-                 models: tuple[str, ...] | None = None) -> Change:
+                 models: tuple[str, ...] | None = None, columns: list[str] | None = None) -> Change:
     """The change named by `spec`. Raises ChangeError with the reason and the choices.
 
     `force(label)` gives the domain's forced step for a label (`Domain.intervention_for`); None: this module's
-    tabular table. `models` is the `swap_model` allowlist; None: `swap_models()`.
+    tabular table. `models` is the `swap_model` allowlist; None: `swap_models()`. `columns`: the batch's real data
+    columns, which a `drop_column:<column>` or `group_split:<column>` change must name; None: not checked.
     """
     spec = (spec or "").strip()
     kind, _, name = spec.partition(":")
@@ -321,10 +343,16 @@ def parse_change(spec: str, force: Callable[[str], dict | None] | None = None,
     if not name:
         raise ChangeError(f"name the change: '{kind}:<name>'")
     if kind == "force_step":
-        if name.startswith("drop_column:"):
-            column = name.partition(":")[2]
-            return Change(kind, name, f"Drop the {column} column", drop_column_step(column),
-                          about=_label_of_column(column))
+        step_name, _, column = name.partition(":")
+        if step_name in COLUMN_STEPS and column:
+            column = column.strip()
+            step = COLUMN_STEPS[step_name](column)
+            # The error never lists the columns: the investigator reads them from the data itself.
+            if columns is not None and column not in columns:
+                raise ChangeError(f"'{column}' is not a column of this batch's data.csv")
+            if step_name == "group_split":
+                return Change(kind, name, step["description"], step, about="group_split")
+            return Change(kind, name, f"Drop the {column} column", step, about=_label_of_column(column))
         label = "deduplicate_near" if name == "deduplicate_fuzzy" else name
         iv = force(label) if force is not None else intervention_for(label)
         if iv is None:
@@ -375,6 +403,85 @@ def registry(force: Callable[[str], dict | None] | None = None, labels: list[str
         + [f"edit_context:<text, at most {MAX_CONTEXT_CHARS} characters>"],
         "swap_model": [f"swap_model:{m}" for m in swap_models()],
     }
+
+
+def trap_columns() -> set[str]:
+    """Every column a registered trap adds or keys on. The orchestrator knows them; the investigator is never told."""
+    return {c for t in traps.registered() for c in t.columns}
+
+
+def trap_words() -> set[str]:
+    """The registered traps' names and their columns: what nothing the investigator is offered may name."""
+    return {*traps.names(), *trap_columns()}
+
+
+def names_a_trap(text: str) -> bool:
+    """Whether `text` names a registered trap or one of its columns, as a whole word."""
+    low = (text or "").lower()
+    return any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(w.lower())}(?![A-Za-z0-9_])", low) for w in trap_words())
+
+
+def _trap_specific(step: dict | None) -> bool:
+    return step is not None and names_a_trap(f"{step.get('description', '')} {step.get('command', '')}")
+
+
+# What each parametrised step does, in the investigator's words. Neither names a trap or a trap's column.
+GENERIC_STEPS = {
+    "drop_column:<column>": "Drop the named column (any column of data.csv) from data.csv and holdout_features.csv "
+                            "before the split",
+    "group_split:<column>": "Group-aware split: keep one row per value of the named column (any column of data.csv) "
+                            "before the split, so no group is in both train and test",
+}
+
+
+def blind_changes(force: Callable[[str], dict | None] | None = None, labels: list[str] | None = None,
+                  tabular: bool = True) -> dict[str, list[dict]]:
+    """The changes as the investigator sees them (`list_changes`): generic ones only, each with what it does.
+
+    A fixed step whose forced command names a trap's column (the leak column, the subject id) is left out; the
+    parametrised `drop_column:<column>` and `group_split:<column>` take its place, so the investigator has to name
+    the column it suspects. Nothing here says which trap a change would fix (`trap_fixes` stays with the orchestrator).
+    `tabular`: the batch works on data.csv, so the column steps and `fake_result` apply.
+    """
+    force_rows = []
+    for name in force_steps(force, labels):
+        if name == "deduplicate_fuzzy":
+            continue  # the same step as deduplicate_near, under its other name
+        iv = force(name) if force is not None else intervention_for(name)
+        if _trap_specific(iv):
+            continue
+        force_rows.append({"change": f"force_step:{name}", "does": iv["description"]})
+    if tabular:
+        force_rows += [{"change": f"force_step:{n}", "does": d} for n, d in GENERIC_STEPS.items()]
+    return {
+        "control": [{"change": "control", "does": "Nothing: the copy continues unchanged"}],
+        "force_step": force_rows,
+        "fake_result": [{"change": f"fake_result:{n}", "does": f["description"]} for n, f in FAKE_RESULTS.items()]
+        if tabular else [],
+        "edit_context": [{"change": f"edit_context:{n}", "does": f"Tell the agent: {t}"} for n, t in CONTEXT_EDITS.items()]
+        + [{"change": f"edit_context:<text, at most {MAX_CONTEXT_CHARS} characters>",
+            "does": "Tell the agent your own short message"}],
+        "swap_model": [{"change": f"swap_model:{m}", "does": f"Continue with the model {m}"} for m in swap_models()],
+    }
+
+
+def blind_change_error(change: Change) -> str | None:
+    """Why the investigator may not ask for `change` by that name, or None: a fixed step whose forced command names a
+    trap's column (one trap's own fix, by its step label). The same step is open to it as a generic change."""
+    step_name, _, column = change.name.partition(":")
+    named_by_it = step_name in COLUMN_STEPS and bool(column)
+    if change.kind == "force_step" and not named_by_it and _trap_specific(change.step):
+        return (f"'{change.spec}' is not one of the generic changes in list_changes; name the column you mean with "
+                "force_step:drop_column:<column> or force_step:group_split:<column>")
+    return None
+
+
+def scrub(text: str) -> str:
+    """`text` with every trap name and trap column replaced by `<column>`: for tool output the orchestrator writes from
+    the full registry (the older `list_interventions` and `request_forks`)."""
+    for w in sorted(trap_words(), key=len, reverse=True):
+        text = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(w)}(?![A-Za-z0-9_])", "<column>", text)
+    return text
 
 
 def trap_fixes() -> dict[str, list[str]]:

@@ -51,10 +51,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel, Field
 
 from .. import notebook
+from . import method_gate
 from ..analysis import LABELS, fork_point
 from ..config import SKILLS_DIR
+from .. import interaction as ixn
 from ..experiments import MAX_PAIRS_PER_CALL, PREDICTIONS
-from ..forks import registry
+from ..forks import ChangeError, blind_change_error, blind_changes, scrub
+from ..interaction import MAX_PER_CELL
 from ..domains.robot_arm import BENCH_DIR, HIDDEN_DIR
 from ..evidence import AGREE, DISAGREE, NEEDED_PAIRS, SUPPORTED_SCORE
 from ..domains import InvestigatorWords
@@ -182,7 +185,8 @@ Work like a scientist, in your own order, with the plan above as your record of 
 - Propose suspects with `record_suspects`: each a target (a step label, a run attribute as `<key>=<value>`, or a
   property of the data), its kind (omission, commission, attribute or data), why it is a suspect, and who proposed it.
   Keep several alive: a step tied with the top one, a defect in the code, a difference in the data.
-- Predict, then experiment. `list_changes` shows the changes an experiment can make. `run_experiment` tests one
+- Predict, then experiment. `list_changes` shows the changes an experiment can make: generic ones, which name no
+  column. When you suspect a column, name it yourself (`force_step:drop_column:<column>`). `run_experiment` tests one
   suspect with one change: paired copies of one run from the same moment, a `control` copy unchanged and a changed
   copy, scored pair by pair. State the prediction (`smaller_gap` if the change should shrink the reported-minus-true
   gap, `larger_gap` if it should grow it) and the reason before it runs: it is saved before any copy starts. A
@@ -201,6 +205,9 @@ Work like a scientist, in your own order, with the plan above as your record of 
 - Always state the prediction before the experiment, never after seeing a result.
 - Never claim a cause below a running score of {SUPPORTED_SCORE:g}. `record_verdict` refuses a supported suspect whose
   score is under {SUPPORTED_SCORE:g}, or one whose evidence does not come from experiments that tested it.
+- When two suspects are both `supported`, run `run_interaction` on them before the verdict (a person approves it):
+  the four-cell grid says whether each matters with the other in place and whether they add up. Say in the verdict
+  what `effect_a`, `effect_b` and the `interaction` showed. Never run it for a suspect that is not supported.
 - Report cleared suspects as cleared, and every open one as open, with its score and pairs.
 - Stop when the budget is gone: say what the evidence shows and what it cannot tell apart.
 - `request_forks` (with a `hypothesis_id` from `record_hypothesis`) still runs the older experiment with `placebo` and
@@ -375,6 +382,14 @@ class ExperimentArgs(BaseModel):
     anchor: str = Field(default="before_split",
                         description="Where to fork: before_split, before_label:<label> or index:<n>.")
     reason: str = Field(default="", description="Why this suspect and this change, in one sentence.")
+
+
+class InteractionArgs(BaseModel):
+    suspect_a: str = Field(description="One supported suspect (s1, s2, ...).")
+    suspect_b: str = Field(description="Another supported suspect.")
+    per_cell: int = Field(default=2, ge=1, le=MAX_PER_CELL,
+                          description=f"Copies per cell, 1 to {MAX_PER_CELL}. Four cells, so 4 x per_cell copies.")
+    reason: str = Field(default="", description="Why these two suspects, in one sentence.")
 
 
 class LessonArgs(BaseModel):
@@ -558,6 +573,8 @@ def build_investigator(batch: "Batch", model: str, checkpointer=None):
     case = batch.case
     domain = batch.domain
     labels, words = domain.labels(), domain.investigator_words
+    # The soft gate on the method (method_gate.py): on unless the batch turns it off.
+    strict = bool(getattr(batch.cfg, "investigator_strict", True))
 
     @tool
     def record_step_labels(run_id: str, labels: list[list[str]]) -> str:
@@ -586,13 +603,14 @@ def build_investigator(batch: "Batch", model: str, checkpointer=None):
                 continue
             runs, statuses = batch._labelled_runs()
             where = fork_point(runs, statuses, label, domain.steps())
-            out.append({"step_label": label, "forced": iv["description"],
+            # `scrub`: a trap's own step names its column; the investigator sees `<column>` there instead.
+            out.append({"step_label": label, "forced": scrub(iv["description"]),
                         "fork_from": None if where is None else {"run": where[0], "before_action": where[1]},
                         "split": rows.get(label)})
         return json.dumps(out, indent=1) if out else "No step can be forced in this batch."
 
     async def request_forks(hypothesis_id: str, n_per_arm: int = 4) -> str:
-        return await batch.run_forks(n_per_arm, hypothesis_id=hypothesis_id)
+        return scrub(await batch.run_forks(n_per_arm, hypothesis_id=hypothesis_id))
 
     request_forks.__doc__ = _request_forks_doc(words)
     request_forks = tool(request_forks)
@@ -612,13 +630,22 @@ def build_investigator(batch: "Batch", model: str, checkpointer=None):
     def record_suspects(suspects: list) -> str:
         """Add suspects to the case: each a target, its kind (omission, commission, attribute, data), why, and who
         proposed it. Returns their ids (s1, s2, ...). Record at least two before the first experiment."""
-        return case.record_suspects(suspects)
+        refused = method_gate.suspects_refusal(case, strict)
+        if refused:
+            return refused
+        before = {s.get("id") for s in case.data.get("suspects") or []}
+        out = case.record_suspects(suspects)
+        method_gate.mark_recorded(case, [s["id"] for s in case.data.get("suspects") or [] if s.get("id") not in before])
+        return out
 
     @tool
     def list_changes() -> str:
         """The changes an experiment can make, by kind (`control`, `force_step`, `fake_result`, `edit_context`,
-        `swap_model`), as the names `run_experiment` takes, and the fork points it accepts."""
-        names = registry(force=lambda label: domain.intervention_for(label, batch.cfg), labels=labels)
+        `swap_model`), each with what it does, as the names `run_experiment` takes, and the fork points it accepts.
+        A `<column>` is any column of the batch's data.csv, named by you."""
+        # Generic changes only (forks.blind_changes): nothing names a trap or a trap's column, or says what it fixes.
+        names = blind_changes(force=lambda label: domain.intervention_for(label, batch.cfg), labels=labels,
+                              tabular=domain.name == "tabular")
         return json.dumps({"changes": names, "anchors": ["before_split", "before_label:<label>", "index:<n>"],
                            "predictions": list(PREDICTIONS), "max_pairs": MAX_PAIRS_PER_CALL}, indent=1)
 
@@ -634,7 +661,32 @@ def build_investigator(batch: "Batch", model: str, checkpointer=None):
         if len(case.data.get("suspects") or []) < MIN_SUSPECTS:
             return (f"error: record at least {MIN_SUSPECTS} suspects before an experiment, so the one you test is "
                     "chosen over an alternative")
+        try:
+            blind = blind_change_error(batch.parse_change(change))
+        except ChangeError:
+            blind = None  # run_experiment reports it
+        if blind:
+            return f"error: {blind}"
+        refused = method_gate.experiment_refusal(case, suspect_id, strict)
+        if refused:
+            return refused
         out = await batch.run_experiment(suspect_id, change, prediction, pairs, source_run, anchor, reason)
+        return json.dumps(out, separators=(",", ":"), default=str)
+
+    @tool(args_schema=InteractionArgs)
+    async def run_interaction(suspect_a: str, suspect_b: str, per_cell: int = 2, reason: str = "") -> str:
+        """The two-factor grid, for two suspects that are both supported: copies of one run from one fork point in four
+        cells (neither change, A's only, B's only, both), `per_cell` copies each, each suspect's change taken from its
+        newest experiment. Needs a person's approval (they may change `per_cell`). Returns each cell's mean gap,
+        `effect_a`, `effect_b`, their `interaction`, the cost and the budget left."""
+        found = ixn.suspect_changes(case.read(), suspect_a, suspect_b)
+        if isinstance(found, str):
+            return f"error: {found}"
+        change_a, change_b, anchor = found
+        out = await batch.run_interaction(change_a, change_b, per_cell, anchor=anchor, suspects=(suspect_a, suspect_b))
+        if "error" not in out:
+            out["reason"] = (reason or "")[:500]
+            case.set_interaction(out)
         return json.dumps(out, separators=(",", ":"), default=str)
 
     @tool(args_schema=LessonArgs)
@@ -776,12 +828,13 @@ def build_investigator(batch: "Batch", model: str, checkpointer=None):
             "code-tracer", "Re-runs one run's code where it fails, reads the recordings, and records which line of the "
             "code each symptom points at. Give it one run id; several can run at once.", TRACER_PROMPT,
             [trace_failures, record_trace]))
-    main_tools = [record_suspects, list_changes, run_experiment, record_hypothesis, list_interventions, request_forks,
-                  record_verdict, propose_lesson]
+    main_tools = [record_suspects, list_changes, run_experiment, run_interaction, record_hypothesis, list_interventions,
+                  request_forks, record_verdict, propose_lesson]
     # Every experiment waits for a person: a fork costs VMs and model calls, and a direct fix test runs patched code.
-    # A paired experiment's size can be edited; a lesson is approved or rejected.
+    # A paired experiment's size (and the grid's) can be edited; a lesson is approved or rejected.
     interrupt_on = {"request_forks": {"allowed_decisions": ["approve", "edit", "reject"]},
                     "run_experiment": {"allowed_decisions": ["approve", "edit", "reject"]},
+                    "run_interaction": {"allowed_decisions": ["approve", "edit", "reject"]},
                     "propose_lesson": {"allowed_decisions": ["approve", "reject"]}}
     if diagnose:
         main_tools += [record_trace_comparison, propose_fix, request_fix_test, record_fix_verdict]
