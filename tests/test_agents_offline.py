@@ -187,3 +187,32 @@ async def test_a_finished_investigator_can_be_asked_to_test_an_untested_suspect(
     assert b2.case.read()["phase"] == "done"
     asks = [json.loads(line) for line in (b2.dir / "investigator" / "events.jsonl").read_text().splitlines()]
     assert any("ask the skeptic" in (e.get("text") or "") for e in asks)
+
+
+def _tool_names(agent) -> dict:
+    """The compiled agent's tools by name (its `tools` node)."""
+    return agent.nodes["tools"].bound.tools_by_name
+
+
+def test_a_flat_analyst_leaves_other_agents_on_its_model_their_subagents(batch):
+    """The analyst has no `task` tool and no subagents (plan invariant 3), and that is its own: an investigator and a
+    plain deep agent built afterwards on the same model, in the same process, keep theirs."""
+    from deepagents import create_deep_agent
+    from deepagents.backends import StateBackend
+
+    from deep_research.agents import investigator as inv_mod
+    from deep_research.agents.analyst import build_analyst
+
+    model = "anthropic:claude-haiku-4-5"
+    analyst = build_analyst(StateBackend(), model)
+    assert "task" not in _tool_names(analyst)
+    assert {"write_todos", "read_file"} <= set(_tool_names(analyst))
+
+    task = _tool_names(inv_mod.build_investigator(batch, model))["task"].description
+    for name in ("general-purpose", "step-tagger", "lens-omission", "lens-commission", "lens-data", "skeptic"):
+        assert f"- {name}:" in task
+    assert "Cannot record, run, approve or write anything" in task  # its own restricted general-purpose one
+
+    plain = _tool_names(create_deep_agent(model=model, backend=StateBackend()))
+    assert "task" in plain and "- general-purpose:" in plain["task"].description
+    assert "task" not in _tool_names(build_analyst(StateBackend(), model))  # and the next analyst is flat again
