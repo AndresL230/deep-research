@@ -19,6 +19,7 @@ export const ACT = {
   newBatch: "new-batch",        // open the New batch dialog (the header's button)
   closeNewBatch: "close-new-batch", // close it (its X)
   navMenu: "nav-menu",          // open or close the header's menu of links (narrow screens)
+  howStep: "how-step",          // How it works: arg is the tour's stop to show (0 is the first)
   // the New batch form
   start: "start",               // start a live batch with the draft config
   resetConfig: "reset-config",  // draft back to the server defaults

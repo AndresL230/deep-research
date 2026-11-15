@@ -192,9 +192,9 @@ export function forkDiagram(step: string, run: string | null, f: Pick<ForkExperi
     if (sts.length) counts.push(`${a.title}: ${inflated} of ${sts.length} inflated`);
     const squares = sts.map((s, k) => `<rect class="hw-d-sq hw-d-sq--${attr(s)}" x="${r1(336 - (sts.length - k) * 17)}" y="${r1(y - 22)}" width="13" height="13" rx="2"/>`).join("");
     return `<path class="hw-d-a${a.arm === "forced" ? " hw-d-a--ok" : ""}" d="M120 28 C 120 ${r1(y)}, 130 ${r1(y)}, 150 ${r1(y)}"/>`
-      + `<circle class="hw-d-end${a.arm === "forced" ? " hw-d-end--ok" : ""}" cx="150" cy="${r1(y)}" r="4"/>`
+      + `<g data-how-arm="${attr(a.arm)}"><circle class="hw-d-end${a.arm === "forced" ? " hw-d-end--ok" : ""}" cx="150" cy="${r1(y)}" r="4"/>`
       + `<text class="hw-d-t" x="160" y="${r1(y - 11)}">${esc(a.title)}</text>`
-      + `<text class="hw-d-s" x="160" y="${r1(y + 5)}">${esc(a.line)}</text>` + squares;
+      + `<text class="hw-d-s" x="160" y="${r1(y + 5)}">${esc(a.line)}</text>` + squares + `</g>`;
   }).join("");
   const desc = `A run is copied just before ${step}. The copies go four ways: unchanged, with a step that changes nothing, `
     + `told about the step with nothing run, and with the step done.${counts.length ? ` ${counts.join(". ")}.` : ""}`;
