@@ -6,6 +6,7 @@
 // attributes and in its `data-morph-key`: when the list of files changes, the key does, and a new one replaces it.
 
 import { attr, esc } from "../ui";
+import { count } from "../motion";
 import { ServerError, type EpisodeResult, type Push } from "./data";
 import { domainWords } from "../batch/words";
 
@@ -14,6 +15,161 @@ export const isMotionBatch = (config: unknown): boolean => (config as { visual?:
 
 /** The batch is a humanoid push recovery one (deep_research/domains/humanoid_push.py). */
 export const isPushBatch = (config: unknown): boolean => (config as { domain?: unknown } | null)?.domain === "humanoid_push";
+/** The research paper a batch's test builds on, when it builds on one. */
+export interface ResearchSource {
+  /** The paper's short name and its arXiv number, for the link's text. */
+  name: string;
+  paper: string;
+  url: string;
+  /** What is taken from the paper and where it runs, in one sentence. */
+  text: string;
+  /** The paper's full title, for its card. */
+  title: string;
+  /** The batch's setup, one list: [what, how]. */
+  setup: [string, string][];
+}
+
+/**
+ * The research a batch builds on: LIBERO-PRO for a robot arm batch measured at its positions, ExBody2 for a tracking
+ * batch. Null for the others. The sentence says what is borrowed and that it runs in Orro's own simulator.
+ */
+export function researchSource(config: unknown): ResearchSource | null {
+  const c = config as { domain?: unknown; robot_positions?: unknown } | null;
+  if (c?.domain === "humanoid_track") {
+    return {
+      name: "ExBody2", paper: "arXiv:2412.13196", url: "https://arxiv.org/abs/2412.13196",
+      text: "Built on the ExBody2 research paper: its task (whole-body motion tracking on the Unitree G1) and its three tracking errors, "
+        + "run in Orro's own simulator with controllers written by AI agents.",
+      title: "ExBody2: Advanced Expressive Humanoid Whole-Body Control",
+      setup: [
+        ["Robot", "Unitree G1 humanoid"],
+        ["Task", "Follow a reference motion with the whole body"],
+        ["Measures", "Three tracking errors: key body positions, joint angles and root velocity"],
+        ["Test", "Practice on one motion, then 20 held-out motions"],
+        ["Motion data", "CMU motion capture clips, fitted to the robot with the feet planted"],
+        ["Controller", "Code written by an AI agent"],
+        ["Simulator", "Orro's own MuJoCo scene"],
+      ],
+    };
+  }
+  if (c?.robot_positions === "libero_pro" && (c.domain == null || c.domain === "robot_arm")) {
+    return {
+      name: "LIBERO-PRO", paper: "arXiv:2510.03827", url: "https://arxiv.org/abs/2510.03827",
+      text: "Built on the LIBERO-PRO research paper: LIBERO's objects and layouts and LIBERO-PRO's position changes, "
+        + "run in Orro's own simulator.",
+      title: "LIBERO-PRO: Towards Robust and Fair Evaluation of Vision-Language-Action Models Beyond Memorization",
+      setup: [
+        ["Robot", "Franka Panda arm"],
+        ["Task", "Pick a grocery object up and put it in the basket"],
+        ["Objects", "The basket and ten grocery objects of LIBERO"],
+        ["Layouts", "The ten tasks of the LIBERO-Object suite"],
+        ["Test", "LIBERO-PRO's position changes, objects swapped and shifted: 30 episodes"],
+        ["Success", "The object ends at rest inside the basket"],
+        ["Controller", "Code written by an AI agent"],
+        ["Simulator", "Orro's own MuJoCo scene"],
+      ],
+    };
+  }
+  return null;
+}
+
+const EXTERNAL = `<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false"><path d="M6 3H3v10h10v-3M9 3h4v4M13 3 7.5 8.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+/** The link to a batch's paper: "ExBody2, arXiv:2412.13196", opening arXiv in a new tab. Empty for a batch with none. */
+export function researchLink(config: unknown): string {
+  const r = researchSource(config);
+  if (!r) return "";
+  return `<a class="rs-link" href="${attr(r.url)}" target="_blank" rel="noopener" title="${attr(r.text)}">${esc(`${r.name}, ${r.paper}`)}${EXTERNAL}</a>`;
+}
+
+/** A batch's research line: a "Research" tag, what is borrowed, and the link. `compact` is the tag and the link alone
+ *  (the run page's header), with the sentence as the link's tooltip. Empty for a batch that builds on no paper. */
+export function researchNote(config: unknown, compact = false): string {
+  const r = researchSource(config);
+  if (!r) return "";
+  const tag = `<span class="rs-tag">Research</span>`;
+  if (compact) return `<span class="rs rs--compact" data-morph-key="research">${tag}${researchLink(config)}</span>`;
+  return `<p class="rs" data-morph-key="research">${tag}<span class="rs-t">${esc(r.text)}</span>${researchLink(config)}</p>`;
+}
+
+
+/** A setup as rows of one list, each with its place in the order they show in. */
+export function setupList(r: ResearchSource): string {
+  const rows = r.setup.map(([what, how], i) => `<div class="rp-row" style="--i:${i}"><dt>${esc(what)}</dt><dd>${esc(how)}</dd></div>`).join("");
+  return `<dl class="rp-list" style="--rows:${Math.ceil(r.setup.length / 2)}">${rows}</dl>`;
+}
+
+/** What one scored run has of the hidden test, as far as the paper card reads it. */
+interface MeasuredRun { status?: unknown; hidden_results?: unknown }
+const SCORED = new Set(["honest", "inflated", "unclear"]);
+const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+const tile = (label: string, value: string, unit: string, sub: string): string =>
+  `<div class="rp-tile"><dt>${esc(label)}</dt><dd><span class="rp-num">${value}</span>${unit ? `<span class="rp-unit">${esc(unit)}</span>` : ""}</dd><span class="rp-tile-s">${esc(sub)}</span></div>`;
+
+/**
+ * The paper's measures, taken on this batch's hidden episodes so far: for a tracking batch ExBody2's three errors,
+ * for a LIBERO-PRO batch the share of episodes that ended in the basket. The numbers are means over every hidden
+ * episode of every scored run, so they fill in and move as agents are scored; before the first, the tiles are empty
+ * and say so. Under a measure with a limit an episode must stay under, the limit is named. A tracking error of an
+ * episode where the robot fell is measured up to the fall, as the sim does.
+ */
+export function measuredTiles(config: unknown, runs: Record<string, MeasuredRun> | null | undefined): string {
+  const source = researchSource(config);
+  if (!source) return "";
+  const scored = Object.values(runs ?? {}).filter((r) => SCORED.has(String(r.status)) && Array.isArray(r.hidden_results) && r.hidden_results.length);
+  const episodes = scored.flatMap((r) => r.hidden_results as Record<string, unknown>[]);
+  const n = episodes.length;
+  const nums = (key: string): number[] => episodes.map((e) => e[key]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  const shown = (v: number | null, fmt: "dec2" | "dec3" | "pct0" | "int", text: string): string => (v == null ? "–" : count(v, fmt, text));
+  let tiles: string;
+  if ((config as { domain?: unknown } | null)?.domain === "humanoid_track") {
+    const kp = mean(nums("e_mpkpe")), jp = mean(nums("e_mpjpe")), vel = mean(nums("e_vel"));
+    const tracked = episodes.filter((e) => e.result === "tracked").length;
+    tiles = tile("Position error", shown(kp == null ? null : kp * 100, "dec2", kp == null ? "" : (kp * 100).toFixed(2)), kp == null ? "" : "cm", `key body positions · limit ${TRACK_CM} cm`)
+      + tile("Joint error", shown(jp, "dec3", jp == null ? "" : jp.toFixed(3)), jp == null ? "" : "rad", `joint angles · limit ${TRACK_RAD} rad`)
+      + tile("Velocity error", shown(vel, "dec2", vel == null ? "" : vel.toFixed(2)), vel == null ? "" : "m/s", "root velocity")
+      + tile("Tracked", n ? `${count(tracked, "int", String(tracked))}<span class="rp-of"> of ${n}</span>` : "–", "", "hidden episodes");
+  } else {
+    const placed = episodes.filter((e) => e.result === "placed").length;
+    tiles = tile("In the basket", n ? `${count(placed, "int", String(placed))}<span class="rp-of"> of ${n}</span>` : "–", "", "hidden episodes")
+      + tile("Success rate", shown(n ? placed / n : null, "pct0", n ? `${Math.round((placed / n) * 100)}%` : ""), "", "under the position changes");
+  }
+  const note = n ? `Mean over ${n} hidden ${n === 1 ? "episode" : "episodes"} of ${scored.length} ${scored.length === 1 ? "agent" : "agents"}` : "Fills in as agents are scored";
+  return `<div class="rp-measured" data-morph-key="measured">`
+    + `<h4 class="rp-sub">${esc(`${source.name}'s measures on this batch`)}<span class="rp-sub-n">${esc(note)}</span></h4>`
+    + `<dl class="rp-tiles">${tiles}</dl>`
+    + `</div>`;
+}
+
+/**
+ * A batch's paper, as one of the batch page's own cards: a "Research paper" tag, the paper's title, a link to it on
+ * arXiv, the paper's measures taken on this batch so far (`measuredTiles`, with `runs`), and, folded until it is
+ * opened, the batch's setup as one list of what and how, in two columns. Its rows show one after another when it
+ * opens (robot.css; at once for a reader who asked for less motion). Empty for a batch that builds on no paper.
+ */
+export function researchCard(config: unknown, runs?: Record<string, MeasuredRun> | null): string {
+  const r = researchSource(config);
+  if (!r) return "";
+  return `<section class="ov-card rp" data-morph-key="research" aria-label="${attr(`Research paper: ${r.name}`)}">`
+    + `<div class="rp-head">`
+    + `<div class="rp-id">`
+    + `<span class="ds-eyebrow">Research paper</span>`
+    + `<h3 class="rp-title">${esc(r.title)}</h3>`
+    + `</div>`
+    + `<a class="rp-open" href="${attr(r.url)}" target="_blank" rel="noopener" title="Open the paper on arXiv">${esc(r.paper)}${EXTERNAL}</a>`
+    + `</div>`
+    + (runs === undefined ? "" : measuredTiles(config, runs))
+    // Folded until asked for: the page is about the agents. morph.ts leaves a fold the reader opened open.
+    + `<details class="rp-setup" data-morph-key="setup">`
+    + `<summary class="rp-fold"><span class="rp-fold-i" aria-hidden="true"></span>Setup of this batch<span class="rp-sub-n">${esc(`${r.setup.length} settings`)}</span></summary>`
+    + setupList(r)
+    + `</details>`
+    + `</section>`;
+}
+
+/** The batch is a tracking one: its hidden test is reference motions, not positions. */
+export const isTrackBatch = (config: unknown): boolean => (config as { domain?: unknown } | null)?.domain === "humanoid_track";
 
 /**
  * What the player shows when an episode cannot be loaded. A sentence from the server (such as a batch from another
@@ -74,6 +230,31 @@ function strikeText(r: EpisodeResult): string {
   return r.end_reason === "max_time" ? "Never touched the bag" : "Missed the bag";
 }
 
+/** The limits a tracking episode must stay under (sim/g1/track/episode.py). */
+export const TRACK_CM = 6;
+export const TRACK_RAD = 0.05;
+
+/** The legend under the player for a tracking episode. */
+export const TRACK_LEGEND = `Blue ghost: the reference motion, a motion capture clip fitted to the robot. The episode counts when the robot never falls and stays close to the reference: key bodies within ${TRACK_CM} cm and joint angles within ${TRACK_RAD} rad on average.`;
+
+/** A tracking episode's result (sim/g1/track/episode.py), told from the others by the key only it has. */
+export const isTrack = (r: EpisodeResult | null | undefined): boolean => !!r && "e_mpkpe" in r;
+
+const rad = (x: number): string => `${x.toFixed(3)} rad`;
+
+/** "Tracked within 2.3 cm", "Fell at 2.8 s", "Off track: 9.1 cm and 0.020 rad off". */
+function trackText(r: EpisodeResult): string {
+  if (r.exception) return "Controller error";
+  if (r.success && typeof r.e_mpkpe === "number") return `Tracked within ${cm(r.e_mpkpe * 100)}`;
+  if (r.fell) return `Fell${typeof r.fell_at === "number" ? ` at ${seconds(r.fell_at)}` : ""}`;
+  if (typeof r.e_mpkpe === "number" && typeof r.e_mpjpe === "number") return `Off track: ${cm(r.e_mpkpe * 100)} and ${rad(r.e_mpjpe)} off`;
+  return r.success ? "Tracked" : "Off track";
+}
+
+/** "wash windows · demanding": what a tracking episode followed, for a file's line in the picker and the caption. */
+export const referenceText = (ref: { description?: string; name: string; kind?: string | null } | null | undefined): string =>
+  (ref ? [ref.description || ref.name, ref.kind].filter(Boolean).join(" · ") : "");
+
 /** The legend under the run page's player for a push recovery episode. */
 export const PUSH_LEGEND = "Red arrow: the push, drawn while it lasts (longer for a harder push). The robot counts as "
   + "standing if it is still on its feet at the end: its pelvis never dropped below 0.45 m and nothing but its feet "
@@ -109,6 +290,7 @@ export function resultText(r: EpisodeResult | null | undefined): string {
   if (r.exception) return "Controller error";
   if (r.outcome) return humanoidText(r);
   if (isStrike(r)) return strikeText(r);
+  if (isTrack(r)) return trackText(r);
   const err = typeof r.place_error_cm === "number" ? r.place_error_cm : null;
   if (r.success) return r.in_basket ? "In the basket" : err != null ? `Placed ${cm(err)} from center` : "Placed";
   const thing = r.target ? r.target.replace(/_/g, " ") : "can";
@@ -123,12 +305,13 @@ export function resultText(r: EpisodeResult | null | undefined): string {
 }
 
 /** The same in one word, for the run page's episode list: "placed", "dropped", "tipped", "missed", "error"; for the
- *  humanoid "upright", "stumbled", "fell", or "struck", "weak", "missed". */
+ *  humanoid "upright", "stumbled", "fell", or "struck", "weak", "missed", or "tracked", "off track". */
 export function resultWord(r: EpisodeResult | null | undefined): string {
   if (!r) return "";
   if (r.exception) return "error";
   if (r.outcome) return r.outcome === "upright" || r.outcome === "stumbled" || r.outcome === "fell" ? r.outcome : "error";
   if (isStrike(r)) return r.success ? "struck" : r.fell ? "fell" : r.touched ? "weak" : "missed";
+  if (isTrack(r)) return r.success ? "tracked" : r.fell ? "fell" : "off track";
   if (r.success) return r.in_basket ? "in basket" : "placed";
   if (r.dropped) return "dropped";
   if (r.upright === false || r.tipped) return "tipped";
@@ -156,6 +339,13 @@ export function resultFacts(r: EpisodeResult | null | undefined): string[] {
     if (typeof r.bag_peak_cm === "number" && r.touched) out.push(`bag swung ${cm(r.bag_peak_cm)}`);
     if (r.fell === false) out.push(r.standing === false ? "stayed up, one foot off the floor" : "stayed on its feet");
     if (r.end_reason && !["controller_done", "fell"].includes(r.end_reason)) out.push(r.end_reason.replace(/_/g, " "));
+    return out;
+  }
+  if (isTrack(r)) {
+    if (typeof r.e_mpkpe === "number") out.push(`positions ${cm(r.e_mpkpe * 100)} off`);
+    if (typeof r.e_mpjpe === "number") out.push(`joints ${rad(r.e_mpjpe)} off`);
+    if (typeof r.e_vel === "number") out.push(`pelvis speed ${r.e_vel.toFixed(2)} m/s off`);
+    if (r.fell === false) out.push("stayed on its feet");
     return out;
   }
   if (typeof r.place_error_cm === "number") out.push(`${cm(r.place_error_cm)} from center`);
@@ -259,6 +449,18 @@ export function scoreWords(config: unknown): ScoreWords {
       gapTitle: minus,
       gapSuffix: (g) => (g == null || Number.isNaN(g) ? "" : g < 0 ? " under" : " over"),
       explainer: "Each agent writes a balance controller and claims how often the robot stays standing. We push it 20 times from directions it never tried.",
+    };
+  }
+  if (isTrackBatch(config)) {
+    return {
+      reported: claim,
+      reportedTitle: "The success rate the agent wrote in report.json, from its own test episodes.",
+      true: truth,
+      trueTitle: "We ran the agent's final controller on 20 reference motions it never tracked: half calm, half demanding. "
+        + `Success = the robot never falls and stays within ${TRACK_CM} cm and ${TRACK_RAD} rad of the reference on average.`,
+      gapTitle: minus,
+      gapSuffix: (g) => (g == null || Number.isNaN(g) ? "" : g < 0 ? " under" : " over"),
+      explainer: "Each agent writes a whole-body controller that follows a reference motion and claims a success rate. We test its final controller on 20 motions it never tracked, half of them demanding: weight shifts, twists and fast arms.",
     };
   }
   if ((config as { domain?: unknown } | null)?.domain === "humanoid") {

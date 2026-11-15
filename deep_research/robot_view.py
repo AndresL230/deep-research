@@ -2,9 +2,10 @@
 
 The browser has no MuJoCo, so the kinematics happen here. `scene(model_id)` describes a compiled model once: every
 visual geom with its body, shape, local pose and color, and the meshes it uses, made small by vertex clustering (the
-panda's visual OBJ files are about 33 MB; the JSON is about 1.4 MB, 0.45 MB gzipped). Three models are known (MODELS):
+panda's visual OBJ files are about 33 MB; the JSON is about 1.4 MB, 0.45 MB gzipped). Four models are known (MODELS):
 the pick-and-place scene (sim/scene.py, "panda-can-v1", the default), the push recovery scene (sim/humanoid/scene.py,
-"g1-push-v1") and the strike scene, the G1 with a hanging bag (sim/g1/scene.py, "g1-bag-v1"). Each scene also says how
+"g1-push-v1"), the strike scene, the G1 with a hanging bag (sim/g1/scene.py, "g1-bag-v1"), and the tracking scene, the
+G1 alone ("g1-track-v1"). Each scene also says how
 to look at it (`view`: the camera, and for the push recovery scene the body a push hits).
 `motion_poses(path)` loads one motion file (sim/MOTION_FORMAT.md) of any of their formats, builds the model its
 `header.model_id` names, and runs `mj_kinematics` on every frame's qpos, giving each moving body's world position and
@@ -46,6 +47,8 @@ PANDA = "panda-can-v1"
 # The two G1 scenes: pushed while standing (sim/humanoid/), and striking a hanging bag (sim/g1/).
 G1_PUSH = "g1-push-v1"
 G1_BAG = "g1-bag-v1"
+# The same robot with nothing in front of it, following a reference motion (sim/g1/track/).
+G1_TRACK = "g1-track-v1"
 DEFAULT_MODEL = PANDA
 # How the viewer looks at each scene: where the camera looks (`target`), where it starts (`camera`, `thumb_camera`),
 # the fog's near and far distances, the half size of the square the key light casts shadows in (`shadow`), the floor
@@ -59,11 +62,14 @@ VIEWS: dict[str, dict] = {
     # From the front and the robot's right, near enough to see a fist or a toe meet the bag, far enough for a fall.
     G1_BAG: {"target": [0.16, 0.0, 0.66], "camera": [1.5, -1.75, 1.05], "thumb_camera": [1.6, -1.85, 1.1], "fog": [3.0, 6.5],
              "shadow": 1.4, "grid": [3.0, 30]},
+    # Straight on from a little to the robot's right, so both arms, a lean to either side and a lifted foot show.
+    G1_TRACK: {"target": [0.0, 0.0, 0.68], "camera": [2.35, -0.95, 1.0], "thumb_camera": [2.5, -1.0, 1.05], "fog": [3.4, 7.0],
+               "shadow": 1.5, "grid": [3.0, 30]},
 }
 MODELS = tuple(VIEWS)
 # A coarser vertex grid for a bigger robot: the G1 is 1.3 m tall, and at 6 mm its 35 meshes come to about the panda's
 # size (0.45 MB gzipped instead of 0.63 MB at CELL_M).
-CELLS = {G1_PUSH: 0.006, G1_BAG: 0.006}
+CELLS = {G1_PUSH: 0.006, G1_BAG: 0.006, G1_TRACK: 0.006}
 
 
 class MotionError(ValueError):
@@ -91,6 +97,10 @@ def model(model_id: str | None = None):
 
                 # The bag hung at a nominal spot: each motion file says where its own hangs (`_bag_poses`).
                 _models[mid] = build_bag([0.38, -0.15, 1.0])
+            elif mid == G1_TRACK:
+                from sim.g1.scene import build_track_model  # needs mujoco and the G1 meshes
+
+                _models[mid] = build_track_model()
             else:
                 from sim.scene import build_model  # needs mujoco and the panda meshes
 
@@ -444,6 +454,7 @@ def poses(motion: dict) -> dict:
         "frames": frames,
         "static": static,
         **(_layout_extra(m, layout) if layout else {}),
+        **(_reference_extra(header, result, times, m, d, moving) if model_id == G1_TRACK else {}),
     }
 
 
@@ -457,6 +468,53 @@ def _layout_extra(m, layout: dict) -> dict:
     return {"extra": layout_geoms(m, model().nbody, picked), "hide": hide}
 
 
+def _reference(header: dict, result: dict) -> dict | None:
+    """What a tracking recording followed: {"name", "kind", "description", "seconds", "lead_in", "set"}. None for a
+    recording that names no reference."""
+    r = header.get("motion")
+    r = r if isinstance(r, dict) else {"name": result.get("motion"), "kind": result.get("kind")}
+    name = r.get("name")
+    if not isinstance(name, str) or not name or len(name) > 60 or not name.replace("_", "").isalnum():
+        return None
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v < 1000  # noqa: E731
+    lead, seconds = header.get("lead_in", 1.5), r.get("seconds")
+    return {
+        "name": name,
+        "kind": r.get("kind") if r.get("kind") in ("calm", "demanding") else None,
+        "description": str(r.get("description") or "")[:200],
+        "seconds": round(float(seconds), 2) if num(seconds) else None,
+        "lead_in": round(float(lead), 3) if num(lead) else 1.5,
+        "set": header.get("motion_set") if header.get("motion_set") in ("public", "hidden", "diagnostic") else "public",
+    }
+
+
+def _reference_extra(header: dict, result: dict, times: list[float], m, d, moving: list[int]) -> dict:
+    """A tracking recording's reference, and its "ghost": the pose of every moving body where the reference has the
+    robot at each frame's time, in the layout of "frames", for the viewer to draw behind the robot. A reference this
+    server has not got (a recording from another build) leaves the ghost out."""
+    import mujoco
+
+    ref = _reference(header, result)
+    if ref is None:
+        return {}
+    out = {"reference": {k: v for k, v in ref.items() if k != "set"}}
+    try:
+        from sim.g1.track.motions import load, reference
+
+        source = load(ref["name"], ref["set"])
+    except Exception:  # noqa: BLE001 - no ghost, the recording still plays
+        return out
+    ghost: list[list[float]] = []
+    for t in times:
+        d.qpos[:] = reference(source, t)
+        mujoco.mj_kinematics(m, d)
+        row: list[float] = []
+        for b in moving:
+            row += _r(d.xpos[b], POS_DECIMALS) + _r(d.xquat[b], QUAT_DECIMALS)
+        ghost.append(row)
+    return {**out, "ghost": ghost}
+
+
 def _xy(v) -> bool:
     return isinstance(v, list) and len(v) >= 2 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v[:2])
 
@@ -468,6 +526,9 @@ RESULT_KEYS = (
     "outcome", "fell", "stumbled", "fall_time", "touched", "max_tilt_deg", "max_foot_shift_cm",
     # The strike sim's (sim/g1/episode.py); it has "fell" and "touched" too.
     "struck", "struck_with", "bag_peak_cm", "standing",
+    # The tracking sim's (sim/g1/track/episode.py); it has "fell" too.
+    "e_vel", "e_mpkpe", "e_mpkpe_upper", "e_mpkpe_lower", "e_mpjpe", "e_mpjpe_upper", "e_mpjpe_lower", "tracked_s", "fell_at",
+    "motion", "kind",
 )
 
 
@@ -536,6 +597,7 @@ def motion_summary(path: Path) -> dict:
         "place_target": place if _xy(place) else None,
         "push": _push(header, result),
         **({"bag_pos": bag} if _xyz(bag) else {}),
+        **({"reference": {k: ref[k] for k in ("name", "kind", "description")}} if (ref := _reference(header, result)) else {}),
         "duration": round(float(t), 3) if isinstance(t, (int, float)) and not isinstance(t, bool) else None,
         "n": len(motion["frames"]),
         "result": _public_result(result),

@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 5,
+  "notes": "Scripted preview, no agent: 5 of 5 episodes tracked the reference and stayed standing, with the reference's joint angles played back as they are: the practice motion 5 times."
+}

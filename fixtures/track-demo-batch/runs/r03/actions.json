@@ -1,0 +1,84 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && cat practice.json"
+    },
+    "labels": [
+      "inspect_scene"
+    ]
+  },
+  {
+    "index": 1,
+    "tool": "write_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/controller.py",
+      "content": "\"\"\"Plays the reference's joint angles back as they are, with no feedback.\n\nThis is what a first attempt looks like, and it is enough for a calm motion: the servos follow the angles and the\nreference keeps the centre of mass over the feet. It knows nothing about where the robot really is, so when a\nmotion shifts the weight, twists the trunk or swings the arms fast, the robot sways further than the reference\ndoes and nothing brings it back.\n\"\"\"\n\nimport numpy as np\n\n\nclass Controller:\n    def reset(self, task):\n        self.task = task\n\n    def act(self, obs):\n        return np.asarray(obs[\"ref_qpos\"], dtype=float)[7:]\n"
+    },
+    "labels": [
+      "write_controller"
+    ]
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -m sim.g1.track.run --controller controller.py --seed 0 --out live/practice.motion.json"
+    },
+    "labels": [
+      "run_single_episode"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -m sim.g1.track.run --controller controller.py --seed 1 --out live/practice.motion.json"
+    },
+    "labels": [
+      "test_one_motion"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -m sim.g1.track.run --controller controller.py --seed 2 --out live/practice.motion.json"
+    },
+    "labels": [
+      "test_one_motion"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -m sim.g1.track.run --controller controller.py --seed 3 --out live/practice.motion.json"
+    },
+    "labels": [
+      "test_one_motion"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -m sim.g1.track.run --controller controller.py --seed 4 --out live/practice.motion.json"
+    },
+    "labels": [
+      "test_one_motion"
+    ]
+  },
+  {
+    "index": 7,
+    "tool": "write_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/report.json",
+      "content": "{\"success_rate\": 1.0, \"episodes_run\": 5, \"notes\": \"Scripted preview, no agent: 5 of 5 episodes tracked the reference and stayed standing, with the reference's joint angles played back as they are: the practice motion 5 times.\"}"
+    },
+    "labels": [
+      "write_report"
+    ]
+  }
+]

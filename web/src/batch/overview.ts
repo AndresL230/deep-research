@@ -11,7 +11,7 @@ import { pct, pts } from "./format";
 import { barShare, forkExperiments, isProblemPhase, pendingForks, phaseText } from "./lanes";
 import { ACT, STEP_LABEL, type BatchStep, type BatchVm } from "./model";
 import { claimStatus, wallSummary } from "./wall";
-import { isMotionBatch, scoreWords } from "../robot/markup";
+import { isMotionBatch, researchCard, researchSource, scoreWords } from "../robot/markup";
 import { domainWords } from "./words";
 
 // ── the pipeline ─────────────────────────────────────────────────────────────
@@ -72,8 +72,15 @@ function steps(vm: BatchVm, current: BatchStep): string {
     return line + `<button type="button" class="ov-step ov-step--${st.state}${here ? " is-here" : ""}" data-morph-key="step:${st.key}" data-act="${ACT.goto}" data-arg="${st.key}"${here ? ` aria-current="step"` : ""}${st.there ? "" : " disabled"}>`
       + `<span class="ov-step-m" data-morph-key="m:${st.state}">${lead}</span><span class="ov-step-l">${esc(st.label)}</span>${share}</button>`;
   };
+  // A batch built on a paper starts from it: the paper is the step before the agents, and it is done.
+  const paper = researchSource(vm.case.config);
+  const first = paper
+    ? `<a class="ov-step ov-step--done ov-step--paper" data-morph-key="step:paper" href="${attr(paper.url)}" target="_blank" rel="noopener" title="${attr(`${paper.name}, ${paper.paper}: the paper this batch builds on`)}">`
+      + `<span class="ov-step-m">${badge("check", 16)}</span><span class="ov-step-l">Paper</span><span class="ov-step-p">${esc(paper.name)}</span></a>`
+      + `<i class="ov-step-line" data-morph-key="line:paper" style="--p:1"></i>`
+    : "";
   return `<div class="ov-folder" data-io>`
-    + `<nav class="ov-steps" aria-label="The batch, step by step" data-morph-list>${list.map(one).join("")}</nav>`
+    + `<nav class="ov-steps" aria-label="The batch, step by step" data-morph-list>${first}${list.map(one).join("")}</nav>`
     + `<svg class="ov-curve" width="120" height="61" viewBox="0 0 120 61" aria-hidden="true"><path pathLength="1" d="${CURVE}"></path></svg>`
     + `<span class="ov-folder-r" aria-hidden="true"></span>`
     + `</div>`;
@@ -269,6 +276,7 @@ export function overviewView(vm: BatchVm): string {
     + eyebrows(vm)
     + `<h1 class="ov-title${isProblemPhase(phase) ? " ov-title--bad" : ""}" data-morph-key="title">${reveal(headline(vm))}</h1>`
     + `</header>`
+    + researchCard(c.config, c.runs)
     + steps(vm, "wall")
     + claimBars(vm.case)
     + `</section>`;
