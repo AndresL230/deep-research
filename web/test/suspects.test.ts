@@ -232,6 +232,9 @@ describe("lessons and tags", () => {
     expect(sxTagsView(vmOf(full))).not.toContain("assist");
     const on = { ...full, config: { ...full.config, investigator_assist: "baseline" } } as unknown as CaseFile;
     expect(sxTagsView(vmOf(on))).toContain("Investigator assist on");
+    expect(sxTagsView(vmOf(full))).not.toContain("Lessons on");
+    const learned = { ...full, config: { ...full.config, lessons: "learned" } } as unknown as CaseFile;
+    expect(sxTagsView(vmOf(learned))).toContain("Lessons on");
     const real = { ...demo, config: { ...demo.config, simulated: false }, costs: {} } as unknown as CaseFile;
     expect(sxTagsView(vmOf(real))).toBe("");
   });

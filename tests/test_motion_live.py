@@ -126,7 +126,7 @@ def _robot_batch(tmp_path, monkeypatch) -> tuple[Batch, FakeVM]:
     monkeypatch.setattr(batch_mod.vms, "start_lab_page", lambda sb: None)
     monkeypatch.setattr(batch_mod.vms, "download_charts", lambda sb, dest: [])
     monkeypatch.setattr(batch_mod.vms, "delete_vm", lambda sb: None)
-    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt: object())
+    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt, **kw: object())
     monkeypatch.setattr(batch_mod, "DaytonaSandbox", lambda sandbox: object())
     monkeypatch.setattr(sim_domain, "_evaluate_fn", lambda: lambda *a, **k: {"success_rate": 0.2})
     b = Batch(BatchConfig(domain="robot_arm", n_runs=1), batch_id="t", root=tmp_path / "batches")

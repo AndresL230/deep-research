@@ -204,6 +204,10 @@ export interface BatchConfig {
   simulated?: boolean;
   /** MASTER_PLAN 6.2: "baseline" puts `candidates` in the investigator's view, a demo safety net the UI must show. */
   investigator_assist?: "none" | "baseline";
+  /** MASTER_PLAN Phase 5.2: "learned" gives the analysts the approved lessons (skills/learned/); the UI tags it. */
+  lessons?: "none" | "learned";
+  /** MASTER_PLAN Phase 6: how fork copies get the source run's agent state. The VM is rebuilt by replay either way. */
+  fork_mode?: "checkpoint" | "messages";
 }
 
 /** A run's score (deep_research/scoring.py RunScore). */

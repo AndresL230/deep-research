@@ -7,6 +7,7 @@ from __future__ import annotations
 import ast
 import csv
 import asyncio
+import contextlib
 import contextvars
 import json
 import logging
@@ -15,7 +16,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 from . import domains, hub
+from . import lessons as lessons_mod
 from . import sandboxes as vms
 from .agents.analyst import build_analyst
 from .agents.investigator import RUBRIC, build_investigator
@@ -458,6 +460,9 @@ class Batch:
         self._investigator = None
         self._inv_config: dict | None = None
         self._checkpoint_conn = None
+        self._checkpoint_saver: AsyncSqliteSaver | None = None
+        # Analysts holding the saver right now (`_analyst_checkpoints`).
+        self._saver_users = 0
         self._pending_requests = 1
         # VM creations cancelled midway (a stop): their VMs are deleted once they exist (`_create_vm`).
         self._orphans: set[asyncio.Future] = set()
@@ -696,7 +701,9 @@ class Batch:
         # The code the runs start from is scored on this server while they work in their VMs.
         baseline = asyncio.create_task(self.score_baseline())
         try:
-            await asyncio.gather(*(guarded(r) for r in run_ids))
+            # The checkpoint file stays open for the whole batch of runs, not reopened run by run.
+            async with self._analyst_checkpoints():
+                await asyncio.gather(*(guarded(r) for r in run_ids))
             await baseline
         finally:
             if not baseline.done():
@@ -760,12 +767,18 @@ class Batch:
                 self.commentary.attach(run_id, log, on_event)
             watch = _watch_motion(self.domain, sb, rdir / "outputs", f"runs/{run_id}/outputs", log, on_event,
                                   lambda files: self.case.update_run(run_id, motion_files=files))
-            agent = build_analyst(DaytonaSandbox(sandbox=sb), model, self.domain.analyst_system_prompt)
             inp = {"messages": [{"role": "user", "content": self.domain.task_prompt(self.cfg)}]}
-            msgs = await asyncio.wait_for(
-                self._drive(agent, inp, f"{self.id}-{run_id}", scope, model, log, on_event),
-                RUN_TIMEOUT_S,
-            )
+            # The run's whole graph state is checkpointed in the batch's checkpoints.sqlite on a stable thread, so a
+            # checkpoint-mode fork can read its state history later (plan Phase 6). messages.json is still saved:
+            # messages-mode forks, and batches whose checkpoints are gone, are cut from it.
+            thread_id = f"{self.id}-{run_id}"
+            async with self._analyst_checkpoints() as saver:
+                agent, lessons = await self._new_analyst(DaytonaSandbox(sandbox=sb), model, f"run {run_id}", saver)
+                self.case.update_run(run_id, thread_id=thread_id, **({"lessons": lessons} if lessons else {}))
+                msgs = await asyncio.wait_for(
+                    self._drive(agent, inp, thread_id, scope, model, log, on_event),
+                    RUN_TIMEOUT_S,
+                )
             (rdir / "messages.json").write_text(json.dumps(messages_to_dict(msgs)))
             if watch is not None:
                 await watch.stop()
@@ -1048,7 +1061,8 @@ class Batch:
         return None if spent is None else round(self.cfg.budget_usd - spent, 4)
 
     async def run_experiment(self, suspect_id: str, change: str, prediction: str, pairs: int = 3,
-                             source_run: str | None = None, anchor: str = "before_split", reason: str = "") -> dict:
+                             source_run: str | None = None, anchor: str = "before_split", reason: str = "",
+                             fork_mode: str | None = None) -> dict:
         """Test one suspect with one change (plan 6.5): `pairs` control and changed copies, paired by index, forked
         from the same moment of one run, with the prediction saved before any copy starts.
 
@@ -1061,8 +1075,13 @@ class Batch:
         built). Otherwise `{fork_id, suspect_id, change, anchor, source_run, fork_at, prediction, pairs, dropped,
         score, p_exact, level, evidence, cost_usd, budget_left_usd}`: this experiment's pairs and score, and the
         suspect's running evidence over all its experiments (`evidence.<suspect_id>`).
+
+        `fork_mode` ("messages" or "checkpoint"; default the batch's `fork_mode`) is how each copy gets the source
+        run's agent state (`_seed_copy`). The copies' VMs come from replay either way.
         """
         self._loop = asyncio.get_running_loop()
+        if fork_mode not in (None, "messages", "checkpoint"):
+            return {"error": "fork_mode must be 'messages' or 'checkpoint'"}
         if not (suspect_id or "").strip():
             return {"error": "name the suspect this experiment tests (`suspect_id`)"}
         if prediction not in xp.PREDICTIONS:
@@ -1102,7 +1121,8 @@ class Batch:
                   "pairs": [], "score": None, "p_exact": None, "level": None,
                   **({"label": ch.about} if ch.about else {})}
         ran = await self._fork_copies(fork_id, plan, xp.pair_jobs(n), kind="method", src=src.run_id,
-                                      fork_at=src.fork_at, n_per_arm=n, record=record)
+                                      fork_at=src.fork_at, n_per_arm=n, record=record,
+                                      **({"fork_mode": fork_mode} if fork_mode else {}))
         if isinstance(ran, str):
             return {"error": ran.removeprefix("error: ")}
         results, n_prefix = ran
@@ -1406,20 +1426,26 @@ class Batch:
         return f"f{sum(k.startswith('f') for k in self.case.data['forks']) + 1}"
 
     async def _fork_copies(self, fork_id: str, plan: dict[str, Any], jobs: list[tuple[str, int]], *, kind: str,
-                           src: str, fork_at: int, n_per_arm: int, record: dict) -> tuple[dict[str, dict], int] | str:
+                           src: str, fork_at: int, n_per_arm: int, record: dict,
+                           fork_mode: str | None = None) -> tuple[dict[str, dict], int] | str:
         """The fork-running core every experiment shares (`_experiment`, `run_experiment`, `run_interaction`): record
         the fork with `record` before anything runs, rebuild the base VM by replay to the fork point, continue one copy
         per `(arm, number)` of `jobs` and release the base. Returns ({child id: result}, actions before the cut), or
-        an error string when the base could not be built (the fork is then removed and the phase restored)."""
+        an error string when the base could not be built (the fork is then removed and the phase restored).
+
+        `fork_mode` (default: the batch's `fork_mode`) is how the copies get the source run's agent state; the VM
+        state comes from the base VM either way (`_seed_copy`)."""
         self._loop = asyncio.get_running_loop()
         phase_before = self.case.data.get("phase")
         base_key, base_scope = f"{fork_id}-base", f"fork:{fork_id}:base"
         try:
             point = self._fork_point(src, fork_at)
+            point.fork_mode = fork_mode or self.cfg.fork_mode
             self.case.set_phase("forking")
             self.case.update_fork(
                 fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=point.n_prefix, n_per_arm=n_per_arm,
-                children={}, arm_steps={a: _step_description(step) for a, step in plan.items()}, **record,
+                children={}, arm_steps={a: _step_description(step) for a, step in plan.items()},
+                fork_mode=point.fork_mode, **record,
             )
             base = await self._build_base(base_key, f"{self.id}-{fork_id}-base", base_scope, point.actions)
         except Exception as e:  # noqa: BLE001 - returned, so an agent calling this as a tool reads it instead of dying
@@ -1436,10 +1462,24 @@ class Batch:
 
         # Each copy is its own run, so each starts in an empty context (`_run_children`).
         try:
-            results = await self._run_children(fork_id, plan, jobs, base, point, self.run_model(src), kind=kind)
+            async with self._analyst_checkpoints():  # open for every copy of the fork, not reopened copy by copy
+                results = await self._run_children(fork_id, plan, jobs, base, point, self.run_model(src), kind=kind)
         finally:
             await self._release(base_key, base_scope)
+            self._record_restore(fork_id, point)
         return results, point.n_prefix
+
+    def _record_restore(self, fork_id: str, point: "_ForkPoint") -> None:
+        """On the fork: how its copies' agent state and VM state were restored, side by side. The agent state comes
+        from a LangGraph checkpoint (checkpoint mode) or the cut messages; the VM always from the base VM, rebuilt by
+        replaying the source run's actions (Daytona refuses VM forks, and a checkpoint holds no disk)."""
+        used = "checkpoint" if point.seed is not None else "messages"
+        fields: dict[str, Any] = {"fork_mode": used, "restore": {"agent_state": used, "vm": "replay"}}
+        if point.fork_mode == "checkpoint":
+            fields.update(fork_mode_requested="checkpoint", checkpoint_id=point.checkpoint_id,
+                          source_thread_id=point.source_thread, fork_mode_fallback=point.fallback)
+        if fork_id in self.case.data["forks"]:
+            self.case.update_fork(fork_id, **fields)
 
     def _fork_findings(self, fork_id: str, arms: dict[str, dict]) -> dict:
         """What a fork's stored copies say, recomputed from every child and the arm summaries `arms`: how the copies
@@ -1475,7 +1515,39 @@ class Batch:
         prefix_msgs, n_prefix = cut_history(msgs, fork_at)
         # Each copy keeps these next to its own log: the episodes the source ran before the cut are the copy's too.
         prefix_log = "".join(json.dumps(e) + "\n" for e in prefix_events(src_events, n_prefix))
-        return _ForkPoint(prefix_msgs, n_prefix, actions[:n_prefix], prefix_log)
+        return _ForkPoint(prefix_msgs, n_prefix, actions[:n_prefix], prefix_log, source_run=src)
+
+    async def _checkpoint_seed(self, point: "_ForkPoint", src: str, agent) -> None:
+        """Checkpoint mode (plan Phase 6): find, once per fork point, the source run's LangGraph snapshot just before
+        the model turn that made the fork-point action, in `checkpoints.sqlite`, through `agent.aget_state_history`
+        on the source run's thread. That snapshot is the one whose next node is `model` and whose messages are the
+        cut history (`forks.cut_history`): the state the model was about to answer from. Sets `point.seed`, or
+        `point.fallback` with the reason messages mode is used instead. `agent` is any analyst graph on the batch's
+        saver (a copy's own: reading a thread does not call the model)."""
+        async with point.lock:
+            if point.looked_up:
+                return
+            point.looked_up = True
+            run = self.case.data["runs"].get(src) or {}
+            if not self.checkpoints_path.is_file() or not run.get("thread_id"):
+                point.fallback = (f"run {src} has no checkpoints in checkpoints.sqlite (it ran before analysts were "
+                                  "checkpointed, or the file is gone), so the copies start from its saved messages")
+            else:
+                point.source_thread = run["thread_id"]
+                want = [_msg_key(m) for m in point.messages]
+                found = None
+                async for snap in agent.aget_state_history({"configurable": {"thread_id": point.source_thread}}):
+                    msgs = list((snap.values or {}).get("messages") or [])
+                    if "model" in (snap.next or ()) and len(msgs) == len(want) and [_msg_key(m) for m in msgs] == want:
+                        found = snap  # newest first: keep going, so the earliest such snapshot wins
+                if found is None:
+                    point.fallback = (f"no checkpoint of run {src} sits just before action {point.n_prefix} (thread "
+                                      f"{point.source_thread}), so the copies start from its saved messages")
+                else:
+                    point.seed = dict(found.values)
+                    point.checkpoint_id = found.config["configurable"].get("checkpoint_id")
+            if point.fallback:
+                logger.info("checkpoint mode falls back to messages mode: %s", point.fallback)
 
     async def _build_base(self, key: str, label: str, scope: str, actions: list) -> Any:
         """A VM at the fork point: a fresh VM with the task loaded and the source run's actions replayed. Kept under
@@ -1486,6 +1558,31 @@ class Batch:
         await asyncio.to_thread(vms.load_task, base, self.task)
         await asyncio.to_thread(vms.replay_actions, base, actions)
         return base
+
+    async def _seed_copy(self, agent, point: "_ForkPoint", history: list, thread_id: str) -> tuple[Any, dict]:
+        """What a copy's agent starts from, and the fields that say so on the copy. `history` is the cut history
+        (`point.messages`) plus the arm's change (`change_messages`).
+
+        Messages mode: `history` is the input of a fresh thread. Checkpoint mode: the source run's snapshot just before
+        the cut (`_checkpoint_seed`) is written into the copy's new thread with `aupdate_state(..., as_node="tools")`,
+        its messages replaced by the snapshot's own plus the change, so the copy keeps the rest of the source run's
+        state (its todo list); the input is then None and the graph goes on from there, at its `model` node. With no
+        snapshot it falls back to messages mode, and says why.
+
+        Either way only the agent's state is restored. The copy's VM is the base VM (rebuilt by replaying the source
+        run's actions, `_build_base`) or a fork of it: LangGraph has no hold on what is on the VM's disk.
+        """
+        if point.fork_mode != "checkpoint":
+            return {"messages": history}, {"fork_mode": "messages", "state_from": "messages"}
+        await self._checkpoint_seed(point, point.source_run, agent)
+        if point.seed is None:
+            return {"messages": history}, {"fork_mode": "messages", "state_from": "messages",
+                                           "fork_mode_requested": "checkpoint", "fork_mode_fallback": point.fallback}
+        change = history[len(point.messages):]
+        values = {**point.seed, "messages": list(point.seed.get("messages") or []) + change}
+        await agent.aupdate_state({"configurable": {"thread_id": thread_id}}, values, as_node="tools")
+        return None, {"fork_mode": "checkpoint", "state_from": "checkpoint", "checkpoint_id": point.checkpoint_id,
+                      "source_thread_id": point.source_thread}
 
     async def _run_children(self, fork_id: str, plan: dict[str, dict | None], jobs: list[tuple[str, int]], base: Any,
                             point: "_ForkPoint", model: str, *, kind: str = "method") -> dict[str, dict]:
@@ -1539,18 +1636,24 @@ class Batch:
                         for ev in forced_events:
                             log.write(ev)
 
-                    agent = build_analyst(DaytonaSandbox(sandbox=vm), copy_model, self.domain.analyst_system_prompt)
-
                     def on_event(ev: dict) -> None:
                         self._emit({"kind": "fork_event", "fork": fork_id, "child": cid, "event": ev})
 
-                    watch = _watch_motion(self.domain, vm, cdir / "outputs", f"forks/{fork_id}/{cid}/outputs", log,
-                                          on_event, lambda files: self._set_child(fork_id, cid, motion_files=files))
-                    await asyncio.wait_for(
-                        self._drive(agent, {"messages": history}, f"{self.id}-{fork_id}-{cid}", scope,
-                                    copy_model, log, on_event),
-                        RUN_TIMEOUT_S,
-                    )
+                    # A new thread for every copy: the source run's thread is only read, never continued.
+                    thread_id = f"{self.id}-{fork_id}-{cid}"
+                    async with self._analyst_checkpoints() as saver:
+                        agent, lessons = await self._new_analyst(DaytonaSandbox(sandbox=vm), copy_model,
+                                                                 f"fork {fork_id} {cid}", saver)
+                        inp, state = await self._seed_copy(agent, point, history, thread_id)
+                        self._set_child(fork_id, cid, thread_id=thread_id, **state,
+                                        **({"lessons": lessons} if lessons else {}))
+                        watch = _watch_motion(self.domain, vm, cdir / "outputs", f"forks/{fork_id}/{cid}/outputs",
+                                              log, on_event,
+                                              lambda files: self._set_child(fork_id, cid, motion_files=files))
+                        await asyncio.wait_for(
+                            self._drive(agent, inp, thread_id, scope, copy_model, log, on_event),
+                            RUN_TIMEOUT_S,
+                        )
                     if watch is not None:
                         await watch.stop()
                     motion = await asyncio.to_thread(vms.download_outputs, vm, cdir / "outputs", **self._vm_domain)
@@ -1678,6 +1781,7 @@ class Batch:
         jobs = [(c.rsplit("-", 1)[0], _child_number(c)) for c in job["children"]]
         try:
             point = self._fork_point(src, int(fork.get("fork_at") or 0))
+            point.fork_mode = fork.get("fork_mode") or "messages"
             base = await self._build_base(base_key, f"{self.id}-{fid}-base-{k + 1}", base_scope, point.actions)
         except Exception as e:  # noqa: BLE001 - recorded on the round; nothing ran, so nothing else changes
             logger.warning("fork %s: could not build the base VM for more pairs: %s: %s", fid, type(e).__name__, e)
@@ -1784,12 +1888,48 @@ class Batch:
                                  revisions=[*(verdict.get("revisions") or []), before])
         return True
 
-    # ---- the investigator ----
+    # ---- the durable checkpointer (plan Phase 6) ----
     @property
     def checkpoints_path(self) -> Path:
-        """The investigator's durable checkpoints (plan Phase 6): one SQLite file per batch."""
+        """The batch's durable checkpoints (plan Phase 6): one SQLite file per batch, shared by the investigator and
+        every analyst (runs and fork copies), each on its own thread."""
         return self.dir / "checkpoints.sqlite"
 
+    async def _saver(self) -> AsyncSqliteSaver:
+        """The batch's one AsyncSqliteSaver on `checkpoints.sqlite`, opened on first use. Every agent of the batch
+        writes through it (one connection, so the saver's own lock orders the writes). `close` closes it."""
+        if self._checkpoint_saver is None:
+            # A generous busy timeout: a run, a copy and the investigator may write in the same moment.
+            self._checkpoint_conn = await aiosqlite.connect(str(self.checkpoints_path), timeout=30)
+            self._checkpoint_saver = AsyncSqliteSaver(self._checkpoint_conn)
+        return self._checkpoint_saver
+
+    @contextlib.asynccontextmanager
+    async def _analyst_checkpoints(self):
+        """The saver, held for one analyst's life. When the last analyst lets go and no investigator holds it, the
+        file is closed, so a batch that is only running analysts leaves no connection open behind it."""
+        saver = await self._saver()
+        self._saver_users += 1
+        try:
+            yield saver
+        finally:
+            self._saver_users -= 1
+            if self._saver_users == 0 and self._investigator is None:
+                await self._close_checkpointer()
+
+    def run_thread_id(self, run_id: str) -> str:
+        """A run's analyst thread in `checkpoints.sqlite`. Stable: a checkpoint-mode fork reads the run's history here."""
+        return (self.case.data["runs"].get(run_id) or {}).get("thread_id") or f"{self.id}-{run_id}"
+
+    async def _new_analyst(self, backend, model: str, who: str, saver) -> tuple[Any, dict | None]:
+        """An analyst for a run or a fork copy on `backend`, on the batch's saver, with the lessons the batch's
+        `lessons` setting gives it (lessons.for_analyst). Returns (agent, how the lessons reached it, or None)."""
+        prompt, folder, record = lessons_mod.for_analyst(self.cfg.lessons, backend, self.domain.analyst_system_prompt,
+                                                         f"batch {self.id} {who}")
+        agent = build_analyst(backend, model, prompt, checkpointer=saver, learned_dir=folder)
+        return agent, record
+
+    # ---- the investigator ----
     async def _ensure_investigator(self, thread_id: str | None = None) -> None:
         """Build the investigator on this batch's SQLite checkpointer, once per process. Its thread id is saved in the
         case file (`investigator.thread_id`), so a new process (a server restart) picks the same thread up where it
@@ -1797,14 +1937,14 @@ class Batch:
         self._loop = asyncio.get_running_loop()
         saved = (self.case.data.get("investigator") or {}).get("thread_id")
         if thread_id is not None and thread_id != saved:
-            await self._close_checkpointer()
+            # The old thread stays in the file; the investigator is rebuilt on the new one.
+            self._investigator = None
             self.case.set_investigator(thread_id=thread_id)
         elif saved is None:
             self.case.set_investigator(thread_id=f"{self.id}-investigator")
         if self._investigator is not None:
             return
-        self._checkpoint_conn = await aiosqlite.connect(str(self.checkpoints_path))
-        saver = AsyncSqliteSaver(self._checkpoint_conn)
+        saver = await self._saver()
         self._investigator = build_investigator(self, self.cfg.investigator_model, checkpointer=saver)
         self._inv_config = {
             "configurable": {"thread_id": self.case.data["investigator"]["thread_id"]},
@@ -1814,6 +1954,7 @@ class Batch:
 
     async def _close_checkpointer(self) -> None:
         conn, self._checkpoint_conn = getattr(self, "_checkpoint_conn", None), None
+        self._checkpoint_saver = None
         self._investigator = None
         if conn is not None:
             try:
@@ -2112,7 +2253,7 @@ def _arm_lines(plan: dict[str, dict | None], arms: dict[str, dict], kind: str, e
     return lines
 
 
-@dataclass(frozen=True)
+@dataclass
 class _ForkPoint:
     """Where the copies of a fork start (`Batch._fork_point`)."""
 
@@ -2120,6 +2261,24 @@ class _ForkPoint:
     n_prefix: int
     actions: list
     log: str
+    # How the copies get the source run's agent state (BatchConfig.fork_mode): "messages" (the cut history above) or
+    # "checkpoint" (the LangGraph snapshot below, looked up once by the first copy, `Batch._checkpoint_seed`).
+    fork_mode: str = "messages"
+    source_run: str = ""
+    # Checkpoint mode, once looked up: the snapshot's values, its checkpoint id and the source run's thread. `fallback`
+    # says why the copies use messages mode instead (no checkpoints, no snapshot at the cut).
+    seed: dict | None = None
+    checkpoint_id: str | None = None
+    source_thread: str | None = None
+    fallback: str | None = None
+    looked_up: bool = False
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+def _msg_key(m) -> tuple:
+    """One message as a checkpoint snapshot is matched against the cut history: its id when it has one (the ids
+    survive messages.json), else its type and content."""
+    return (getattr(m, "type", None), m.id) if getattr(m, "id", None) else (getattr(m, "type", None), str(m.content))
 
 
 def _step_description(step: dict | list | None) -> str | None:
