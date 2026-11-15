@@ -2,7 +2,7 @@
 
 # Orro
 
-### A Virtual Lab for Physical AI
+### A Virtual Research Lab for Physical AI
 
 Orro puts AI agents to work on physical AI tasks, writing controllers for simulated robot arms and humanoids, checks every result they report against tests they never saw, and runs controlled experiments to find out why a result came out wrong.
 
@@ -318,6 +318,6 @@ Orro is built on open-source work and hosted services:
 
 **Built at HackPrinceton 2026 · Science + Discovery**
 
-*A Virtual Lab for Physical AI* · [Explore Orro](https://orrolab.dev)
+*A Virtual Research Lab for Physical AI* · [Explore Orro](https://orrolab.dev)
 
 </div>
