@@ -83,6 +83,14 @@ describe("the header's links", () => {
     expect(navMenu({ name: "home" }, null, true, [], false)).not.toContain('data-nav="costs"');
     expect(navBar({ name: "home" }, null, false)).toContain('data-nav="batches"');
   });
+  it("leave out Needs you and its count for anyone who is not an admin: nothing there is theirs to act on", () => {
+    expect(navBar({ name: "home" }, 4)).toContain('data-nav="needs"');
+    expect(navBar({ name: "home" }, 4, false)).not.toContain('data-nav="needs"');
+    const menu = navMenu({ name: "home" }, 4, false, [], false);
+    expect(menu).not.toContain('data-nav="needs"');
+    expect(menu).not.toContain("waiting");
+    expect(menu).not.toContain("nv-dot");
+  });
 });
 
 const summary = (over: Partial<BatchSummary> = {}): BatchSummary => ({
@@ -127,6 +135,12 @@ describe("Needs you and the home screen", () => {
     expect(homeView(vm, "viewer")).toContain(ADMIN_ONLY.start);
     expect(homeView(vm, "admin")).not.toContain(ADMIN_ONLY.start);
     expect(homeView(vm, "unknown")).not.toContain(ADMIN_ONLY.start);
+  });
+  it("shows a viewer no Needs you section on the home screen, only the batches", () => {
+    const vm: HomeVm = { batches: ready, health: null, defaults: null, draft: null, estimate: null, starting: false, error: null };
+    expect(homeView(vm, "viewer")).not.toContain('aria-labelledby="ny-h"');
+    expect(homeView(vm, "viewer")).not.toContain("Nothing needs you");
+    expect(homeView(vm, "admin")).toContain('data-morph-key="needs"');
   });
 });
 
