@@ -36,7 +36,7 @@ import { AWAY_PX, conversationView, initialConversationUi, jumpButton, stickAfte
 import { scheduleOrbs } from "./thinking-orb";
 import { PAGE_BACKGROUND, readStoredTheme, resolveTheme, storeTheme, themeChoice, themeSwitch, type Theme, type ThemeChoice } from "./theme";
 import {
-  applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
+  applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchPaperPdf, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
   fetchMorePairs, fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, postLesson, resumeBatch, startBatch, startMorePairs, testSuspect, uploadController, uploadDataset, uploadScript, startInvestigation, stopBatch,
   type AgentEvent, type HubStatus, type BatchConfig, type BatchListItem, type BatchSocket, type CaseFile,
 } from "./api";
@@ -138,6 +138,8 @@ interface AppState {
   /** The pairs set on a paired experiment's approval card, and the request they belong to (`pendingKey`). */
   pairs: number | null;
   pairsFor: string;
+  /** The findings paper being exported, and the batch it is for (overview.ts `exportView`). */
+  paper: { for: string; busy: boolean; error: string | null } | null;
 }
 
 const S: AppState = {
@@ -164,6 +166,7 @@ const S: AppState = {
   access: { kind: "unknown" },
   pairs: null,
   pairsFor: "",
+  paper: null,
 };
 
 /** One pending request: an edit to its pairs never carries over to the next one. */
@@ -308,6 +311,7 @@ function batchVm(b: BatchState, full: CaseFile): BatchVm {
     open: S.foldsFor === b.id ? S.folds : {},
     role: roleOf(S.access),
     pairs: S.pairsFor === pendingKey(b.id, c) ? S.pairs : null,
+    paper: S.paper?.for === b.id ? S.paper : undefined,
     foolrate: S.foolrate.state === "ready" ? S.foolrate.value : undefined,
   };
 }
@@ -645,6 +649,28 @@ function openBatch(id: string, reopen = false): void {
       }
     },
   });
+  paint();
+}
+
+/** Download the batch's findings paper: written and compiled on the server, saved here under the batch's run ID. */
+async function exportPaper(id: string): Promise<void> {
+  if (S.paper?.for === id && S.paper.busy) return;
+  S.paper = { for: id, busy: true, error: null };
+  paint();
+  try {
+    const pdf = await fetchPaperPdf(id);
+    const url = URL.createObjectURL(pdf);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `orro-findings-${id.replace(/[^A-Za-z0-9._-]+/g, "-")}.pdf`;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    S.paper = { for: id, busy: false, error: null };
+  } catch (e) {
+    S.paper = { for: id, busy: false, error: message(e, "Couldn't export the findings.") };
+  }
   paint();
 }
 
@@ -1280,6 +1306,9 @@ root.addEventListener("click", (e) => {
       } else if (r.name === "costs") go(S.costsBack);
       return;
     }
+    case ACT.exportPaper:
+      if ("id" in r) void exportPaper(r.id);
+      return;
     case ACT.goto: {
       // A step of the batch, or Back / Next: open its page.
       const step = BATCH_STEPS.find((k) => k === arg);

@@ -141,6 +141,17 @@
 .pgr-next:hover .pgr-go { transform:translateX(3px); }
 .pgr-prev:focus-visible, .pgr-next:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
 /* Not open yet: what comes next, and when. */
+/* The end of the batch: its findings as a paper (overview.ts `exportView`). */
+.pgx { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px 28px; padding:20px 22px; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); }
+.pgx-t { flex:1 1 420px; min-width:0; }
+.pgx-h { margin:0 0 4px; font-size:16px; font-weight:500; }
+.pgx-s { margin:0; font-size:13.5px; line-height:1.55; color:var(--fg-55); text-wrap:pretty; }
+.pgx-s code { font-size:12.5px; color:var(--fg-70); overflow-wrap:anywhere; }
+.pgx-err { margin:8px 0 0; font-size:13px; color:var(--red); }
+.pgx-a { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+.pgx-go { display:inline-flex; align-items:center; gap:8px; }
+.pgx-tex { font-size:13.5px; color:var(--fg-70); text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--border-strong); }
+.pgx-tex:hover { color:var(--fg); }
 .pgr-wait { display:inline-flex; align-items:center; gap:10px; min-height:48px; padding:0 16px; border-radius:var(--r-ctl); background:var(--muted); font-size:13.5px; color:var(--fg-55); }
 .pgr-wait b { font-weight:500; color:var(--fg); }
 .pgr-wait .ds-spin { color:var(--accent); }

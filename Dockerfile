@@ -18,6 +18,12 @@ RUN npm run build
 FROM python:3.12-slim-bookworm
 COPY --from=ghcr.io/astral-sh/uv:0.10.12 /uv /usr/local/bin/uv
 
+# pdflatex, for a batch's findings paper (deep_research/paper.py, /api/batches/{id}/paper.pdf): only the packages the
+# paper loads (about 125 MB). Without them the PDF answers 503 and the .tex is still served.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends texlive-latex-base texlive-latex-recommended texlive-fonts-recommended lmodern \
+    && rm -rf /var/lib/apt/lists/*
+
 # uv installs into the image's own Python and never downloads another.
 ENV PYTHONUNBUFFERED=1 \
     UV_PYTHON=/usr/local/bin/python3 \
