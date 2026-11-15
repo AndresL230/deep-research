@@ -2,9 +2,9 @@
 
 # Orro
 
-### A virtual lab for research agents
+### A Virtual Lab for Physical AI
 
-Orro puts AI research agents to work on real tasks, checks every result they report against tests they never saw, and runs controlled experiments to find out why a result came out wrong.
+Orro puts AI agents to work on physical AI tasks, writing controllers for simulated robot arms and humanoids, checks every result they report against tests they never saw, and runs controlled experiments to find out why a result came out wrong.
 
 **[Live platform](https://orrolab.dev)** · **[Source code](https://github.com/AndresL230/deep-research)**
 
@@ -20,7 +20,7 @@ An AI agent can write code, run experiments, and report an impressive result. Th
 
 Orro is a lab where that process can be studied. Each agent works at its own bench, an isolated sandbox where every step it takes is recorded. An independent evaluator measures what it built on held-out tests, the way a lab checks a result before believing it. When a reported result and the measurement disagree, an investigator agent writes down competing hypotheses, each with a prediction and what would prove it wrong, and runs a controlled experiment: it returns to an earlier point in an agent's work, continues copies with and without one change, and measures both. The resulting case file connects the original claim, the recorded work, the intervention, and the measured evidence, like a lab notebook that can be replayed.
 
-The lab has been run on robotic manipulation, humanoid control, and tabular machine learning. The investigations below are recorded runs, with replayable artifacts in this repository.
+The lab has been run on robotic manipulation and humanoid control in MuJoCo simulation, and on tabular machine learning tasks that exercise the same pipeline. The investigations below are recorded runs, with replayable artifacts in this repository.
 
 ## Recorded results
 
@@ -318,6 +318,6 @@ Orro is built on open-source work and hosted services:
 
 **Built at HackPrinceton 2026 · Science + Discovery**
 
-*A virtual lab for research agents* · [Explore Orro](https://orrolab.dev)
+*A Virtual Lab for Physical AI* · [Explore Orro](https://orrolab.dev)
 
 </div>
