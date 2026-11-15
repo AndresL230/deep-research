@@ -1237,6 +1237,16 @@ root.addEventListener("click", (e) => {
       paint();
       return;
     }
+    case ACT.pick: {
+      if (!b) return;
+      // One of a group: every other key of the group ("dx-run:") is forgotten, so exactly one is on.
+      const group = arg.slice(0, arg.indexOf(":") + 1);
+      const kept = Object.entries(S.foldsFor === b.id ? S.folds : {}).filter(([k]) => !group || !k.startsWith(group));
+      S.folds = { ...Object.fromEntries(kept), [arg]: true };
+      S.foldsFor = b.id;
+      paint();
+      return;
+    }
     case ACT.resetConfig:
       if (S.home.defaults) { S.home = { ...S.home, draft: resetDraft(S.home), error: null }; paint(); scheduleEstimate(); }
       return;

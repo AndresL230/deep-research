@@ -665,7 +665,8 @@ describe("a fork experiment's fold", () => {
 
 describe("the diagnosis fold", () => {
   const what = "why each line causes it";
-  const trace = [traceEntry, { ...traceEntry, at: 1700000005, run_id: "r05", line: 31, why: "The grip closes 0.1 s early." }];
+  // Two failures of one run: both are on screen whichever run is in focus.
+  const trace = [traceEntry, { ...traceEntry, at: 1700000005, line: 31, why: "The grip closes 0.1 s early." }];
   const expectClosed = (html: string): void => {
     expect(html).toContain(fold("dx-why", false, what));
     expect(html).not.toContain("ln-dx-why");
@@ -703,6 +704,29 @@ describe("the diagnosis fold", () => {
     const html = diagnosisView(demoVm({ trace }, { open: { "dx-why": true } }));
     expect(count(html, 'data-act="fold"')).toBe(1);
     expect(html.lastIndexOf("ln-dx-entry")).toBeLessThan(html.indexOf('data-arg="dx-why"'));
+  });
+
+  it("shows one traced run at a time: a row of runs to pick from, and the picked run's failures under it", () => {
+    const two = [traceEntry, { ...traceEntry, at: 1700000005, run_id: "r05", line: 31, why: "The grip closes 0.1 s early." }];
+    const first = diagnosisView(demoVm({ trace: two }));
+    // Each run is a button; the first traced run is in focus until another is picked, or the fix names one.
+    expect(count(first, 'data-act="pick"')).toBe(2);
+    expect(first).toMatch(/class="ln-dx-pick is-on"[^>]*data-arg="dx-run:r02" aria-pressed="true"/);
+    expect(first).toMatch(/class="ln-dx-pick"[^>]*data-arg="dx-run:r05" aria-pressed="false"/);
+    expect(count(first, 'class="ln-dx-run"')).toBe(1);
+    expect(first).toContain('<span class="ln-dx-ln">line 25</span>');
+    expect(first).not.toContain('<span class="ln-dx-ln">line 31</span>');
+    const other = diagnosisView(demoVm({ trace: two }, { open: { "dx-run:r05": true } }));
+    expect(other).toMatch(/class="ln-dx-pick is-on"[^>]*data-arg="dx-run:r05" aria-pressed="true"/);
+    expect(other).toContain('<span class="ln-dx-ln">line 31</span>');
+    expect(other).not.toContain('<span class="ln-dx-ln">line 25</span>');
+    expect(diagnosisView(demoVm({ trace: two, fix: { ...proposedFix, run_id: "r05" } }))).toMatch(/class="ln-dx-pick is-on"[^>]*data-arg="dx-run:r05"/);
+    // With every fold open there is nothing to pick: each run's failures are listed.
+    const all = diagnosisView(demoVm({ trace: two }, { open: "all" }));
+    expect(all).not.toContain("ln-dx-rail");
+    expect(count(all, 'class="ln-dx-run"')).toBe(2);
+    // One run: no row.
+    expect(diagnosisView(demoVm({ trace }))).not.toContain("ln-dx-rail");
   });
 });
 
