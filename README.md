@@ -2,9 +2,9 @@
 
 # Orro
 
-### Investigating AI agent behavior through controlled experiments
+### A virtual lab for research agents
 
-Orro reconstructs how autonomous agents reached their results, tests suspected failure points, and measures what changes when an earlier decision is made differently.
+Orro puts AI research agents to work on real tasks, checks every result they report against tests they never saw, and runs controlled experiments to find out why a result came out wrong.
 
 **[Live platform](https://orrolab.dev)** · **[Source code](https://github.com/AndresL230/deep-research)**
 
@@ -18,9 +18,9 @@ Orro reconstructs how autonomous agents reached their results, tests suspected f
 
 An AI agent can write code, run experiments, and report an impressive result. That result can still depend on a flawed test, an overlooked condition, a data leak, or an implementation that fails outside its practice environment. Reading the final report rarely tells us which part of the process matters.
 
-Orro makes that process investigable. It runs agents in isolated environments, records their work, checks their outputs with independent evaluators, and uses an investigator to develop testable explanations for discrepancies. The investigator can return to an earlier execution state and compare new continuations under controlled changes. The resulting case connects the original claim, the recorded behavior, the intervention, and the measured evidence.
+Orro is a lab where that process can be studied. Each agent works at its own bench, an isolated sandbox where every step it takes is recorded. An independent evaluator measures what it built on held-out tests, the way a lab checks a result before believing it. When a reported result and the measurement disagree, an investigator agent writes down competing hypotheses, each with a prediction and what would prove it wrong, and runs a controlled experiment: it returns to an earlier point in an agent's work, continues copies with and without one change, and measures both. The resulting case file connects the original claim, the recorded work, the intervention, and the measured evidence, like a lab notebook that can be replayed.
 
-The platform has been exercised on robotic manipulation, humanoid control, and tabular machine learning. The investigations below are recorded runs, with replayable artifacts in this repository.
+The lab has been run on robotic manipulation, humanoid control, and tabular machine learning. The investigations below are recorded runs, with replayable artifacts in this repository.
 
 ## Recorded results
 
@@ -42,7 +42,7 @@ These are task-specific experiments, not estimates of how often all AI agents fa
 - **[Checkpoint-based tabular investigation](https://orrolab.dev/#/b/tabular-time-travel-investigation)**: an earlier LangGraph state continued under alternative instructions.
 - **[Lessons experiment](https://orrolab.dev/#/lessons)**: a fresh-agent comparison with and without an approved lesson.
 
-## How Orro works
+## How the lab works
 
 ```mermaid
 flowchart TD
@@ -153,7 +153,7 @@ flowchart LR
 | **TypeScript / Vite / three.js** | Dashboard, case inspection and interactive 3D replay |
 | **Cloudflare Worker, D1 and R2** | Optional shared team hub for batch records, events and motion files |
 
-### Supported domains
+### Lab domains
 
 - `robot_arm`: Franka Panda can manipulation and placement.
 - `humanoid`: Unitree G1 bag strike and balance.
@@ -277,7 +277,7 @@ The experiments are auditable, but their evidence is conditional on the tested t
 - **Simulation versus hardware:** MuJoCo results do not establish performance on physical robots.
 - **Checkpoint versus VM restoration:** LangGraph state can be resumed from a checkpoint. In the recorded investigations, Daytona VMs were reconstructed by replay rather than natively forked (our sandboxes refused native forking); nondeterminism can affect continuation behavior. Every experiment records how each copy was built.
 - **Control reproducibility:** An intervention is not informative about the original failure when its control branch does not reproduce that failure. In the leaky-feature case, the saved experiments f1 and f2 were labelled `cleared` and `supported` although none of their control copies overreported; the current scoring rule counts a pair only when its control reproduces the problem, so both now count no pairs and read as inconclusive.
-- **Evidence scores:** Method-fork decisions use a running score with thresholds. The score is a platform rule, not a universal guarantee of causal identification. Fisher exact p-values may be displayed separately. Code-fix tests use paired held-out outcomes.
+- **Evidence scores:** Method-fork decisions use a running score with thresholds. The score is a rule of the lab, not a universal guarantee of causal identification. Fisher exact p-values may be displayed separately. Code-fix tests use paired held-out outcomes.
 - **Small samples:** The robot-arm edge-test result has four agreeing pairs but remains below the configured evidence threshold. Robot scores use 20 hidden positions, so rates move in 5-point steps. The lessons comparison uses twelve agents per condition and one task.
 - **Intervention fidelity:** Some interventions are bundled or lack fully verified adherence. Those findings cannot cleanly identify the effect of each individual instruction.
 - **Blindness and data separation:** The investigator does not receive the hidden answers, but it can access certain computed diagnostic summaries. Diagnostic and hidden evaluation conditions are separated where the experiment requires it.
@@ -318,6 +318,6 @@ Orro is built on open-source work and hosted services:
 
 **Built at HackPrinceton 2026 · Science + Discovery**
 
-[Explore Orro](https://orrolab.dev)
+*A virtual lab for research agents* · [Explore Orro](https://orrolab.dev)
 
 </div>
