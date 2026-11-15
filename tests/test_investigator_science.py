@@ -152,7 +152,7 @@ async def test_subagents_are_typed_read_only_and_named_in_the_log(local_vms, tmp
     assert {"general-purpose", "step-tagger", "lens-omission", "lens-commission", "lens-data", "skeptic"} <= set(subs)
     assert subs["general-purpose"]["tools"] == [] and subs["lens-data"]["tools"] == []
     assert subs["step-tagger"]["response_format"] is inv_mod.StepTags and subs["skeptic"]["response_format"] is inv_mod.SkepticReport
-    spending = {"run_experiment", "request_forks", "record_verdict", "propose_lesson", "request_fix_test"}
+    spending = {"run_experiment", "run_interaction", "request_forks", "record_verdict", "propose_lesson", "request_fix_test"}
     for s in subs.values():
         assert not spending & {t.name for t in s["tools"]}, s["name"]
         assert s["skills"] == ["/skills/"]
