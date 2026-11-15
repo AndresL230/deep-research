@@ -30,7 +30,7 @@ from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
-from . import controllers, datasets, domains, foolrate, hub, lessons, notebook, robot_view, traps, user_scripts  # noqa: E402
+from . import controllers, datasets, domains, foolrate, hub, lessons, notebook, paper, robot_view, traps, user_scripts  # noqa: E402
 from .batch import Batch, Refused, more_pairs_problem, more_pairs_quote, resume_problem, testable_suspects  # noqa: E402 - needs the environment loaded first
 from .batch_summary import summarize  # noqa: E402
 from .case_file import current_domain, with_evidence  # noqa: E402
@@ -737,6 +737,26 @@ def get_case(batch_id: str):
     root = _batch_dir(batch_id)
     # Verdicts saved before `evidence` get it here, from their arm counts.
     return _with_charts(with_evidence(json.loads((root / "case" / "case.json").read_text())), root)
+
+
+@app.get("/api/batches/{batch_id}/paper.tex")
+def paper_tex(batch_id: str):
+    """The batch's findings as a research paper, the LaTeX source (paper.py, built with PyLaTeX)."""
+    source = paper.build_paper(_case(batch_id), batch_id)
+    return Response(source, media_type="application/x-tex; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{paper.filename(batch_id, "tex")}"'})
+
+
+@app.get("/api/batches/{batch_id}/paper.pdf")
+def paper_pdf(batch_id: str):
+    """The batch's findings as a research paper, compiled by pdflatex. 503 when the server has no LaTeX engine (the
+    .tex is still served), 500 when the document does not compile."""
+    try:
+        pdf = paper.compile_pdf(paper.build_paper(_case(batch_id), batch_id))
+    except paper.PaperError as e:
+        raise HTTPException(e.status, str(e)) from None
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{paper.filename(batch_id, "pdf")}"'})
 
 
 def _events(batch_id: str, rel: str, key: str) -> list[dict]:

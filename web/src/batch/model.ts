@@ -30,6 +30,7 @@ export const ACT = {
   openChild: "open-child",      // arg: "<fork>/<child>" ("f1/control-1")
   back: "back",                 // from a run or child back to its batch
   goto: "goto",                 // arg: a step of the batch (BatchStep); open its page
+  exportPaper: "export-paper",  // download the batch's findings as a PDF research paper (paper.pdf)
   runPanel: "run-panel",        // arg: "notebook" | "steps" | "logs" | "evidence": open that panel of a run's page, or fold it
   runChart: "run-chart",        // arg: a chart's index; a tabular run's page shows it large
   investigate: "investigate",   // live only: start the investigator
@@ -142,6 +143,8 @@ export interface LogView {
 
 export interface BatchVm {
   id: string;
+  /** The findings paper's download while it is being made, or why it failed (overview.ts `exportView`). */
+  paper?: { busy: boolean; error: string | null };
   /** Started on this server: the live-only actions (investigate, approve, decline, stop) work. */
   live: boolean;
   /** A saved batch that stopped at its split: Investigate brings it back live first (`resumeBatch`). */

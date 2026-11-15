@@ -196,6 +196,19 @@ describe("the pages", () => {
     expect(last).not.toContain('class="pgr-next');
   });
 
+  it("ends the last page with the findings to export, as a PDF paper and its LaTeX source", () => {
+    const last = pagerView(vmOf(demo), "verdict");
+    expect(last).toContain('data-act="export-paper"');
+    expect(last).toContain("Export findings (PDF)");
+    expect(last).toContain(`href="/api/batches/${vmOf(demo).id}/paper.tex" download`);
+    // Only at the end: a page with a Next has nothing to export yet.
+    expect(pagerView(vmOf(demo), "phase")).not.toContain("export-paper");
+    // While it is being written, and when it could not be.
+    expect(pagerView({ ...vmOf(demo), paper: { busy: true, error: null } }, "verdict")).toContain("Writing the paper…");
+    expect(pagerView({ ...vmOf(demo), paper: { busy: false, error: "The server answered HTTP 503." } }, "verdict"))
+      .toContain('role="alert">The server answered HTTP 503.');
+  });
+
   it("says a later page has nothing yet when the batch has not got there", () => {
     expect(notYetView(vmOf(midRun()), "verdict")).toContain("The verdict appears here once the batch gets there.");
     expect(pageHeadView(vmOf(demo), "fork")).toContain('class="ov-step ov-step--done is-here" data-morph-key="step:fork" data-act="goto" data-arg="fork" aria-current="step"');

@@ -1267,6 +1267,19 @@ export const fetchFoolrate = (o: Opts = {}) => call<FoolrateReport[]>("/api/fool
 export const fetchLessons = (o: Opts = {}) => call<ApprovedLesson[]>("/api/lessons", o);
 export const startBatch = (cfg: BatchConfig, o: Opts = {}) => call<{ id: string }>("/api/batches", { ...o, json: cfg });
 export const fetchCase = (id: string, o: Opts = {}) => call<CaseFile>(`${batchPath(id)}/case`, o);
+/** The batch's findings as a research paper (deep_research/paper.py): the LaTeX source, a plain download. */
+export const paperTexUrl = (id: string): string => `${batchPath(id)}/paper.tex`;
+/** The same paper as a PDF. Fetched rather than linked, so a refusal (no LaTeX engine: 503) is said, not saved. */
+export async function fetchPaperPdf(id: string): Promise<Blob> {
+  let res: Response;
+  try {
+    res = await fetch(`${batchPath(id)}/paper.pdf`);
+  } catch {
+    throw new ApiError("Couldn't reach the server.", 0);
+  }
+  if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
+  return res.blob();
+}
 export const fetchRunEvents = (id: string, run: string, o: Opts = {}) =>
   call<AgentEvent[]>(`${batchPath(id)}/runs/${encodeURIComponent(run)}/events`, o);
 export const fetchForkEvents = (id: string, fork: string, child: string, o: Opts = {}) =>

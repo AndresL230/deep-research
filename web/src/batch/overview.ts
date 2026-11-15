@@ -4,7 +4,7 @@
 // and the same steps, the one it is on marked; every page ends in a Back / Next bar (`pagerView`). A pure `(vm) => html` view like the others; the look is in overview.css and the motion in
 // system.css (motion.ts writes the animated markup).
 import "./overview.css";
-import type { BatchConfig, CaseFile, RunRecord } from "../api";
+import { paperTexUrl, type BatchConfig, type CaseFile, type RunRecord } from "../api";
 import { attr, esc } from "../ui";
 import { badge, chip, count, reveal, spinner } from "../motion";
 import { pct, pts } from "./format";
@@ -280,10 +280,32 @@ export function pagerView(vm: BatchVm, current: BatchStep): string {
   } else {
     right = `<button type="button" class="pgr-prev pgr-again" data-act="${ACT.goto}" data-arg="wall" data-morph-key="again">That is the whole batch. Back to the agents</button>`;
   }
-  return `<nav class="pgr" aria-label="Pages of this batch" data-io>`
+  // The end of the batch: its findings, to take away as a paper.
+  const end = !nav.next && !nav.waiting ? exportView(vm) : "";
+  return end + `<nav class="pgr" aria-label="Pages of this batch" data-io>`
     + `<div class="pgr-l">${prev}</div>`
     + `<div class="pgr-r"><span class="pgr-n">${nav.at} of ${nav.of}</span>${right}</div>`
     + `</nav>`;
+}
+
+/**
+ * The batch's findings as a research paper, at the end of its last page: the PDF (written in LaTeX on the server,
+ * deep_research/paper.py) and its LaTeX source, both named for the batch's run ID.
+ */
+export function exportView(vm: BatchVm): string {
+  const busy = !!vm.paper?.busy;
+  const err = vm.paper?.error;
+  return `<section class="pgx" data-morph-key="export" aria-label="Export findings">`
+    + `<div class="pgx-t"><h2 class="pgx-h">Export findings</h2>`
+    + `<p class="pgx-s">The whole investigation as a research paper written in LaTeX: the setup and methods, every run's claim `
+    + `against its measurement, the explanations as they were written before testing, each experiment, the verdict and its `
+    + `limits. Run ID <code>${esc(vm.id)}</code>.</p>`
+    + (err ? `<p class="pgx-err" role="alert">${esc(err)}</p>` : "")
+    + `</div><div class="pgx-a">`
+    + `<button type="button" class="ask-btn ds-primary pgx-go" data-act="${ACT.exportPaper}"${busy ? " disabled" : ""}>`
+    + `${busy ? spinner(13) : ""}${busy ? "Writing the paper…" : "Export findings (PDF)"}</button>`
+    + `<a class="pgx-tex" href="${attr(paperTexUrl(vm.id))}" download>LaTeX source</a>`
+    + `</div></section>`;
 }
 
 /** A later page's head: the batch's name and state, and the steps with this page's marked. */
