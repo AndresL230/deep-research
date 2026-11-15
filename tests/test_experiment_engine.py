@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from deep_research import analysis, audit, case_file, cli, experiments as xp, forks, interaction, traps
+from deep_research import analysis, audit, case_file, cli, evidence, experiments as xp, forks, interaction, traps
 from deep_research.analysis import Action
 from deep_research.batch import Batch
 from deep_research.case_file import CaseFile, investigator_view
@@ -117,12 +117,14 @@ def test_fork_points_and_source_runs():
 # ---- the pair score (plan 6.4) ----
 
 def test_pair_score_levels_and_the_fixtures_known_answers():
-    assert xp.agrees(0.2, 0.0, "smaller_gap") and not xp.agrees(0.1, 0.1, "smaller_gap")  # a tie disagrees
-    assert xp.agrees(0.0, 0.2, "larger_gap")
-    assert round(xp.running_score([True] * 4), 2) == 13.03
-    assert round(xp.running_score([True] * 5), 1) == 24.8 and xp.evidence_level(24.76, 5) == "supported"
-    assert xp.evidence_level(0.5, 5) == "cleared" and xp.evidence_level(0.5, 4) == "open"
-    assert xp.evidence_level(13.03, 4) == "open"
+    # One source for the math: evidence.py (plan 6.4); experiments.py only maps a prediction to a direction.
+    assert evidence.agrees(0.2, 0.0, xp.direction("smaller_gap")) and not evidence.agrees(0.1, 0.1)  # a tie disagrees
+    assert evidence.agrees(0.0, 0.2, xp.direction("larger_gap"))
+    assert round(evidence.running_score([True] * 4), 2) == 13.03
+    assert round(evidence.running_score([True] * 5), 1) == 24.8 and evidence.score_level(24.76, 5) == "supported"
+    assert evidence.score_level(0.5, 5) == "cleared" and evidence.score_level(0.5, 4) == "open"
+    assert evidence.score_level(13.03, 4) == "open"
+    assert not hasattr(xp, "running_score") and not hasattr(xp, "p_exact")
     # fixtures/demo-batch fork f1: four pairs, all agreeing, give 13.03; the gap test gives 1/70.
     f1 = json.loads((FIXTURES / "demo-batch" / "case" / "case.json").read_text())["forks"]["f1"]
     kept, dropped = xp.pair_outcomes(f1["children"], 4, "smaller_gap")

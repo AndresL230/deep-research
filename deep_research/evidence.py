@@ -116,8 +116,23 @@ def pair_up(children: dict | None, direction: int = 1, base: str = "control", ch
             dropped.append({"i": i, "why": f"{bad} was not scored"})
             continue
         cg, xg = float(ends[0][1]["gap"]), float(ends[1][1]["gap"])
-        done.append({"i": i, "control_gap": cg, "changed_gap": xg, "agree": round((cg - xg) * direction, 4) > 0})
+        done.append({"i": i, "control_gap": cg, "changed_gap": xg, "agree": agrees(cg, xg, direction)})
     return done, dropped
+
+
+def agrees(control_gap: float, changed_gap: float, direction: int = 1) -> bool:
+    """A pair agrees when (control_gap - changed_gap) * direction > 0 at four places. A tie disagrees."""
+    return round((float(control_gap) - float(changed_gap)) * direction, 4) > 0
+
+
+def score_pairs(pairs: list[dict], direction: int = 1) -> dict:
+    """`{n_pairs, agree, score, p_exact, level}` of complete pairs (`pair_up`). The one scoring rule: a fork's
+    verdict evidence (`verdict_evidence`), more pairs and `Batch.run_experiment` all go through it."""
+    agree = [bool(p.get("agree")) for p in pairs]
+    score = running_score(agree)
+    exact = p_exact([p["control_gap"] for p in pairs], [p["changed_gap"] for p in pairs], direction) if pairs else None
+    return {"n_pairs": len(pairs), "agree": sum(agree), "score": float(f"{score:.6g}"),
+            "p_exact": None if exact is None else round(exact, 4), "level": score_level(score, len(pairs))}
 
 
 def fork_pairs(fork: dict | None) -> list[dict] | None:
@@ -210,18 +225,17 @@ def _counts_agreements(ci: int, ct: int, fi: int, ft: int) -> int:
     return max(0, max(0, ci - (ct - n)) - min(fi, n))
 
 
-def verdict_evidence(arms: dict | None = None, numbers: dict | None = None, pairs: list[dict] | None = None) -> dict:
+def verdict_evidence(arms: dict | None = None, numbers: dict | None = None, pairs: list[dict] | None = None,
+                     direction: int = 1) -> dict:
     """The evidence of a verdict, as saved in `verdict.evidence` and `forks.<id>.evidence`: the running score and its
     level from the fork's `pairs` (`fork_pairs`), else from the arm counts (`arms`, or the old `numbers`) at their
     least favourable pairing; the Fisher p on the counts and, with pairs, the exact gap test, for display."""
     ci, ct, fi, ft = _counts(arms, numbers)
     fisher = fisher_less(fi, ft, ci, ct)
     if pairs is not None:
-        n = len(pairs)
-        agree = sum(1 for p in pairs if p.get("agree"))
-        score = running_score(p.get("agree") for p in pairs)
-        level = score_level(score, n)
-        exact = p_exact([p["control_gap"] for p in pairs], [p["changed_gap"] for p in pairs]) if n else None
+        scored = score_pairs(pairs, direction)
+        n, agree, score, level, exact = (scored["n_pairs"], scored["agree"], scored["score"], scored["level"],
+                                         scored["p_exact"])
         basis = "pairs"
     else:
         n = min(ct, ft)
