@@ -1,0 +1,3436 @@
+{
+  "config": {
+    "domain": "tabular",
+    "dataset": "pima",
+    "target": null,
+    "script": null,
+    "trap": "duplicates",
+    "trap_strength": 0.5,
+    "trap_noise": 0.05,
+    "trap_hidden_share": 0.8,
+    "hint_level": "none",
+    "investigator_assist": "none",
+    "investigator_strict": true,
+    "fork_mode": "checkpoint",
+    "lessons": "none",
+    "model_hint": "random_forest",
+    "holdout_fraction": 0.2,
+    "n_runs": 12,
+    "forks_per_choice": 4,
+    "placebo_arm": true,
+    "show_arm": true,
+    "analyst_model": "anthropic:claude-haiku-5-5",
+    "investigator_model": "anthropic:claude-sonnet-5-5",
+    "analyst_models": null,
+    "max_concurrent_runs": 12,
+    "max_agent_steps": 200,
+    "budget_usd": 1.2,
+    "inflation_threshold": 0.08,
+    "mode": "live",
+    "seed": 0,
+    "robot_hidden_positions": null,
+    "robot_eval_seeds": [
+      0
+    ],
+    "robot_prompt": "default",
+    "robot_start": "blank",
+    "robot_positions": "default",
+    "robot_controller": null,
+    "commentary": false,
+    "commentary_model": "anthropic:claude-haiku-5-5",
+    "commentary_budget_usd": 0.5,
+    "visual": "charts",
+    "domain_info": {
+      "name": "tabular",
+      "title": "Tabular data science",
+      "description": "Agents train a classifier on a CSV with a flaw planted in it and report a test accuracy; we score their predictions on held-out rows they never see.",
+      "visual": "charts",
+      "output_files": [
+        "report.json",
+        "predictions.csv",
+        "train.csv",
+        "test.csv"
+      ],
+      "output_globs": [],
+      "words": {
+        "subject": "model",
+        "judged_on": "on {n} rows they never saw",
+        "checked": "test set",
+        "claim_label": "Claimed",
+        "truth_label": "Measured",
+        "step_when": "before splitting into train and test",
+        "skipped": "This run went straight to splitting the data",
+        "evidence_text": "of test rows were also in training",
+        "steps": {
+          "load": {
+            "name": "loading the data",
+            "did": "loaded the data",
+            "missing": "No data loaded here"
+          },
+          "inspect": {
+            "name": "looking at the data",
+            "did": "looked at the data",
+            "missing": "No look at the data here"
+          },
+          "deduplicate": {
+            "name": "removing duplicate rows",
+            "did": "removed duplicate rows",
+            "missing": "No duplicate removal here"
+          },
+          "drop_leak": {
+            "name": "leaving out the leaky column",
+            "did": "left out the leaky column",
+            "missing": "The leaky column was kept here"
+          },
+          "group_split": {
+            "name": "grouping the rows by subject",
+            "did": "grouped the rows by subject",
+            "missing": "No grouping by subject here"
+          },
+          "deduplicate_near": {
+            "name": "removing near-duplicate rows",
+            "did": "removed near-duplicate rows",
+            "missing": "No near-duplicate removal here"
+          },
+          "clean": {
+            "name": "cleaning up missing values",
+            "did": "cleaned up missing values",
+            "missing": "No cleaning here"
+          },
+          "drop_column": {
+            "name": "leaving out a column",
+            "did": "dropped a column",
+            "missing": "No column dropped here"
+          },
+          "select_features": {
+            "name": "choosing features",
+            "did": "chose features by their link to the target",
+            "missing": "No feature selection here"
+          },
+          "split": {
+            "name": "splitting into train and test",
+            "did": "split the data",
+            "missing": "No split here"
+          },
+          "preprocess": {
+            "name": "scaling the features",
+            "did": "scaled or imputed the features",
+            "missing": "No preprocessing here"
+          },
+          "train": {
+            "name": "training a model",
+            "did": "trained a model",
+            "missing": "No model trained here"
+          },
+          "evaluate": {
+            "name": "scoring the model",
+            "did": "scored a model",
+            "missing": "No scoring here"
+          },
+          "plot": {
+            "name": "drawing charts",
+            "did": "drew a chart",
+            "missing": "No chart here"
+          },
+          "predict": {
+            "name": "predicting the holdout rows",
+            "did": "read the holdout rows",
+            "missing": "No holdout rows read here"
+          },
+          "report": {
+            "name": "writing the report",
+            "did": "wrote the report",
+            "missing": "No report written here"
+          }
+        }
+      }
+    },
+    "trap_info": {
+      "name": "duplicates",
+      "title": "Duplicate rows",
+      "description": "A share of the rows is copied once more. A random split puts copies in both train and test.",
+      "planted": "duplicate rows",
+      "strength_label": "Duplicated rows",
+      "label": "deduplicate",
+      "pattern": "drop_duplicates|~[^\\n\\]]*?\\.duplicated\\(",
+      "at_split": false,
+      "did": "removed duplicate rows",
+      "missing": "No duplicate removal here",
+      "intervention": {
+        "description": "Remove duplicate rows from data.csv before the split",
+        "command": "cd /home/daytona/workspace && python3 -c \"import pandas as pd; d = pd.read_csv('data.csv'); n = len(d); d = d.drop_duplicates(); d.to_csv('data.csv', index=False); print(f'Removed {n - len(d)} duplicate rows. {len(d)} rows remain.')\""
+      },
+      "evidence_text": "of test rows were also in training"
+    },
+    "recording": {
+      "kind": "live",
+      "source_batch": "1115-033734-e892",
+      "saved_at": "2026-11-15 03:45 EST",
+      "note": "A recording of a real run: real agents in Daytona VMs, real scoring on the hidden holdout, a real investigator. Nothing in it was generated or edited by hand.",
+      "after_the_run": [],
+      "trimmed": "0 practice recordings dropped to keep the fixture small; at most 4 per run kept",
+      "excluded": [
+        "checkpoints.sqlite",
+        "task/ (hidden truth)"
+      ]
+    }
+  },
+  "phase": "done",
+  "runs": {
+    "r01": {
+      "id": "r01",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "23ee269b-0906-4597-8fca-14a8d7652656",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r01",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 6,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "inspect",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ]
+      ]
+    },
+    "r02": {
+      "id": "r02",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "77097b44-d3fb-461f-a9ac-a91b3259c49a",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r02",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 6,
+      "labels": [
+        [
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect"
+        ],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "inspect",
+          "drop_column",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ]
+      ]
+    },
+    "r03": {
+      "id": "r03",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "210e6b05-8d19-4fcb-b96d-ca8a19effe85",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r03",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8117,
+      "overlap_share": 0.2428,
+      "gap": 0.1016,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 6,
+      "labels": [
+        [
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "inspect",
+          "drop_column",
+          "train",
+          "evaluate",
+          "plot",
+          "predict",
+          "report"
+        ]
+      ],
+      "charts": [
+        "runs/r03/live/feature_importance.png"
+      ]
+    },
+    "r04": {
+      "id": "r04",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "166b401f-e046-44f1-9a0e-8406800caa78",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r04",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 8,
+      "labels": [
+        [],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "split"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate",
+          "plot",
+          "predict",
+          "report"
+        ]
+      ],
+      "charts": [
+        "runs/r04/live/feature_importance.png"
+      ]
+    },
+    "r05": {
+      "id": "r05",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "70dfe332-3026-4093-8e9f-7d5be23a8114",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r05",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8117,
+      "overlap_share": 0.2428,
+      "gap": 0.1016,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 7,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect"
+        ],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "evaluate"
+        ],
+        [
+          "load",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ]
+      ]
+    },
+    "r06": {
+      "id": "r06",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "565560de-23d8-4670-8edc-f85a8c250b6c",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r06",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9017,
+      "true_accuracy": 0.7987,
+      "overlap_share": 0.2428,
+      "gap": 0.103,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 6,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "predict"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "inspect",
+          "drop_column",
+          "train",
+          "evaluate",
+          "plot",
+          "predict",
+          "report"
+        ]
+      ],
+      "charts": [
+        "runs/r06/live/feature_importance.png"
+      ]
+    },
+    "r07": {
+      "id": "r07",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "c02fe34b-1929-4096-bf54-b5f62f5df5d3",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r07",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 6,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "inspect",
+          "drop_column",
+          "train",
+          "evaluate",
+          "plot",
+          "predict",
+          "report"
+        ]
+      ],
+      "charts": [
+        "runs/r07/live/feature_importance.png"
+      ]
+    },
+    "r08": {
+      "id": "r08",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "6e4dd662-b763-48a9-8367-ade0946f697f",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r08",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9017,
+      "true_accuracy": 0.7987,
+      "overlap_share": 0.2428,
+      "gap": 0.103,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 6,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "evaluate"
+        ],
+        [
+          "load",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict",
+          "report"
+        ]
+      ]
+    },
+    "r09": {
+      "id": "r09",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "cbb3bd99-28a6-4279-a484-74dc20019014",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r09",
+      "last_tool": "write_todos",
+      "todos": [
+        {
+          "content": "Explore data (done)",
+          "status": "completed"
+        },
+        {
+          "content": "Drop 57 exact duplicate rows, stratified 80/20 split, write train.csv/test.csv (done)",
+          "status": "completed"
+        },
+        {
+          "content": "Train RandomForestClassifier on train set (done, test acc 0.913)",
+          "status": "completed"
+        },
+        {
+          "content": "Evaluate test accuracy; save chart to live/ (done)",
+          "status": "completed"
+        },
+        {
+          "content": "Write report.json and predictions.csv for holdout (done)",
+          "status": "completed"
+        }
+      ],
+      "step": null,
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 11,
+      "labels": [
+        [
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "plot"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "drop_column",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ],
+        []
+      ],
+      "charts": [
+        "runs/r09/live/feature_importance.png"
+      ]
+    },
+    "r10": {
+      "id": "r10",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "49d7bb55-2859-4254-8b01-64132123ec43",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r10",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9017,
+      "true_accuracy": 0.7987,
+      "overlap_share": 0.2428,
+      "gap": 0.103,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 6,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "evaluate"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ]
+      ]
+    },
+    "r11": {
+      "id": "r11",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "803be8a2-9337-4ec7-bd66-b42f01085423",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r11",
+      "last_tool": "write_todos",
+      "todos": [
+        {
+          "content": "Inspect data (zeros=missing, duplicates)",
+          "status": "completed"
+        },
+        {
+          "content": "Drop exact duplicates to prevent leakage, then stratified 80/20 split; save train.csv/test.csv",
+          "status": "completed"
+        },
+        {
+          "content": "Train RandomForest on train (median-impute zeros, using train medians only), evaluate on test",
+          "status": "completed"
+        },
+        {
+          "content": "Write report.json, predictions.csv for holdout",
+          "status": "completed"
+        },
+        {
+          "content": "Save chart(s) to live/",
+          "status": "completed"
+        }
+      ],
+      "step": null,
+      "reported_accuracy": 0.9075,
+      "true_accuracy": 0.7792,
+      "overlap_share": 0.2428,
+      "gap": 0.1283,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 8,
+      "labels": [
+        [
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "clean",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "clean",
+          "train",
+          "evaluate",
+          "plot",
+          "predict",
+          "report"
+        ],
+        []
+      ],
+      "charts": [
+        "runs/r11/live/feature_importance.png"
+      ]
+    },
+    "r12": {
+      "id": "r12",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "d1cfc51e-a114-4990-bc9b-441c2eeb1ecd",
+      "lab_url": null,
+      "thread_id": "1115-033734-e892-r12",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9081,
+      "true_accuracy": 0.8182,
+      "overlap_share": 0.3189,
+      "gap": 0.0899,
+      "reason": "",
+      "n_test": 185,
+      "n_test_copies": 59,
+      "n_hidden": 154,
+      "n_actions": 6,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ]
+      ]
+    }
+  },
+  "step_labels": {
+    "r11": [
+      [
+        "inspect"
+      ],
+      [
+        "inspect"
+      ],
+      [
+        "load",
+        "inspect"
+      ],
+      [],
+      [
+        "load",
+        "deduplicate",
+        "split"
+      ],
+      [
+        "load",
+        "clean",
+        "train",
+        "evaluate"
+      ],
+      [
+        "load",
+        "clean",
+        "train",
+        "evaluate",
+        "plot",
+        "predict",
+        "report"
+      ],
+      []
+    ],
+    "r12": [
+      [
+        "load",
+        "inspect"
+      ],
+      [
+        "load",
+        "inspect"
+      ],
+      [
+        "load",
+        "inspect"
+      ],
+      [
+        "load",
+        "split"
+      ],
+      [
+        "load",
+        "train",
+        "evaluate"
+      ],
+      [
+        "load",
+        "train",
+        "evaluate",
+        "predict",
+        "report"
+      ]
+    ],
+    "r01": [
+      [
+        "inspect"
+      ],
+      [
+        "load",
+        "inspect"
+      ],
+      [
+        "load",
+        "inspect"
+      ],
+      [
+        "load",
+        "deduplicate",
+        "split"
+      ],
+      [
+        "load",
+        "train",
+        "evaluate"
+      ],
+      [
+        "load",
+        "inspect",
+        "train",
+        "evaluate",
+        "predict",
+        "report"
+      ]
+    ],
+    "r09": [
+      [
+        "inspect"
+      ],
+      [
+        "inspect"
+      ],
+      [
+        "load",
+        "inspect"
+      ],
+      [
+        "load",
+        "inspect"
+      ],
+      [],
+      [
+        "load",
+        "deduplicate",
+        "split"
+      ],
+      [
+        "load",
+        "train",
+        "evaluate"
+      ],
+      [
+        "load",
+        "train",
+        "plot"
+      ],
+      [],
+      [
+        "load",
+        "inspect",
+        "train",
+        "evaluate",
+        "predict",
+        "report"
+      ],
+      []
+    ]
+  },
+  "split": null,
+  "hypotheses": [],
+  "forks": {
+    "f1": {
+      "id": "f1",
+      "status": "done",
+      "kind": "method",
+      "source_run": "r01",
+      "fork_at": 3,
+      "n_per_arm": 5,
+      "children": {
+        "control-2": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f1-control-2",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.9133,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.2428,
+          "gap": 0.1081,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154
+        },
+        "forced-2": {
+          "arm": "forced",
+          "status": "failed",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f1-forced-2",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "nudged": true,
+          "reported_accuracy": null,
+          "true_accuracy": null,
+          "overlap_share": null,
+          "gap": null,
+          "reason": "report.json missing or invalid: [Errno 2] No such file or directory: '/tmp/claude-1000/-home-andresl-Projects-deep-research/790b691c-4ad5-4584-889b-d5f012ad9157/scratchpad/gate/batches/1115-033734-e892/forks/f1/forced-2/outputs/report.json'",
+          "n_test": null,
+          "n_test_copies": null,
+          "n_hidden": null,
+          "held": true,
+          "held_verified": false
+        },
+        "control-5": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f1-control-5",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.9133,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.2428,
+          "gap": 0.1081,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154,
+          "charts": [
+            "forks/f1/control-5/live/feature_importance.png"
+          ]
+        },
+        "forced-4": {
+          "arm": "forced",
+          "status": "failed",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f1-forced-4",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "nudged": true,
+          "reported_accuracy": null,
+          "true_accuracy": null,
+          "overlap_share": null,
+          "gap": null,
+          "reason": "report.json missing or invalid: float() argument must be a string or a real number, not 'NoneType'",
+          "n_test": null,
+          "n_test_copies": null,
+          "n_hidden": null,
+          "held": true,
+          "held_verified": false
+        },
+        "control-3": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f1-control-3",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.9133,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.2428,
+          "gap": 0.1081,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154,
+          "charts": [
+            "forks/f1/control-3/live/feature_importance.png"
+          ]
+        },
+        "forced-5": {
+          "arm": "forced",
+          "status": "honest",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f1-forced-5",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.7886,
+          "true_accuracy": 0.7857,
+          "overlap_share": 0.0,
+          "gap": 0.0029,
+          "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true
+        },
+        "forced-3": {
+          "arm": "forced",
+          "status": "failed",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f1-forced-3",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "nudged": true,
+          "reported_accuracy": null,
+          "true_accuracy": null,
+          "overlap_share": null,
+          "gap": null,
+          "reason": "report.json missing or invalid: [Errno 2] No such file or directory: '/tmp/claude-1000/-home-andresl-Projects-deep-research/790b691c-4ad5-4584-889b-d5f012ad9157/scratchpad/gate/batches/1115-033734-e892/forks/f1/forced-3/outputs/report.json'",
+          "n_test": null,
+          "n_test_copies": null,
+          "n_hidden": null,
+          "held": true,
+          "held_verified": false
+        },
+        "control-4": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f1-control-4",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.9135,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.3189,
+          "gap": 0.1083,
+          "reason": "",
+          "n_test": 185,
+          "n_test_copies": 59,
+          "n_hidden": 154
+        },
+        "forced-1": {
+          "arm": "forced",
+          "status": "honest",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f1-forced-1",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.7886,
+          "true_accuracy": 0.7857,
+          "overlap_share": 0.0,
+          "gap": 0.0029,
+          "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true
+        },
+        "control-1": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f1-control-1",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.9017,
+          "true_accuracy": 0.7987,
+          "overlap_share": 0.2428,
+          "gap": 0.103,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154,
+          "charts": [
+            "forks/f1/control-1/live/confusion_matrix.png"
+          ]
+        }
+      },
+      "arm_steps": {
+        "control": null,
+        "forced": "Remove near-duplicate rows from data.csv before the split"
+      },
+      "fork_mode": "checkpoint",
+      "suspect_id": "s1",
+      "change": "force_step:deduplicate_near",
+      "change_kind": "force_step",
+      "intervention": "Remove near-duplicate rows from data.csv before the split",
+      "anchor": "before_split",
+      "prediction": "smaller_gap",
+      "preregistered_at": 1794731978.9612813,
+      "reason": "Test perturbed near-copies in train/test; exact dedup didn't remove inflation.",
+      "pairs_requested": 5,
+      "pairs": [
+        {
+          "i": 1,
+          "control_gap": 0.103,
+          "changed_gap": 0.0029,
+          "agree": true
+        },
+        {
+          "i": 5,
+          "control_gap": 0.1081,
+          "changed_gap": 0.0029,
+          "agree": true
+        }
+      ],
+      "score": 3.61,
+      "p_exact": 0.1667,
+      "level": "open",
+      "label": "deduplicate_near",
+      "restore": {
+        "agent_state": "checkpoint",
+        "vm": "replay"
+      },
+      "fork_mode_requested": "checkpoint",
+      "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+      "source_thread_id": "1115-033734-e892-r01",
+      "fork_mode_fallback": null,
+      "arms": {
+        "control": {
+          "total": 5,
+          "scored": 5,
+          "inflated": 5,
+          "honest": 0,
+          "failed": 0,
+          "mean_reported": 0.911,
+          "mean_true": 0.8039
+        },
+        "forced": {
+          "total": 5,
+          "scored": 2,
+          "inflated": 0,
+          "honest": 2,
+          "failed": 3,
+          "mean_reported": 0.7886,
+          "mean_true": 0.7857
+        }
+      },
+      "dropped_pairs": [
+        {
+          "i": 2,
+          "reason": "forced-2: report.json missing or invalid: [Errno 2] No such file or directory: '/tmp/claude-1000/-home-andresl-Projects-deep-research/790b691c-4ad5-4584-889b-d5f012ad9157/scratchpad/gate/batches/1115-033734-e892/forks/f1/forced-2/outputs/report.json'"
+        },
+        {
+          "i": 3,
+          "reason": "forced-3: report.json missing or invalid: [Errno 2] No such file or directory: '/tmp/claude-1000/-home-andresl-Projects-deep-research/790b691c-4ad5-4584-889b-d5f012ad9157/scratchpad/gate/batches/1115-033734-e892/forks/f1/forced-3/outputs/report.json'"
+        },
+        {
+          "i": 4,
+          "reason": "forced-4: report.json missing or invalid: float() argument must be a string or a real number, not 'NoneType'"
+        }
+      ],
+      "cost_usd": 0.0267,
+      "adherence": {
+        "undid_change": 0,
+        "held_verified": 2,
+        "held_unverified": 3,
+        "note": null
+      },
+      "evidence": {
+        "level": "open",
+        "pairs": 2,
+        "needed_pairs": 5,
+        "control_inflated": 5,
+        "control_total": 5,
+        "forced_inflated": 0,
+        "forced_total": 2,
+        "p_value": 0.0476,
+        "rule": "running_score",
+        "score": 3.61,
+        "needed_score": 20.0,
+        "agree": 2,
+        "disagree": 0,
+        "basis": "pairs",
+        "p_exact": 0.1667
+      },
+      "built": {
+        "fork": 0,
+        "replay": 10,
+        "none": 0
+      },
+      "measures": "reporting_accuracy",
+      "outcome": "inconclusive"
+    },
+    "f2": {
+      "id": "f2",
+      "status": "done",
+      "kind": "method",
+      "source_run": "r01",
+      "fork_at": 3,
+      "n_per_arm": 6,
+      "children": {
+        "control-5": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-control-5",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.9133,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.2428,
+          "gap": 0.1081,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154
+        },
+        "forced-3": {
+          "arm": "forced",
+          "status": "honest",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-forced-3",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.7886,
+          "true_accuracy": 0.7857,
+          "overlap_share": 0.0,
+          "gap": 0.0029,
+          "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true
+        },
+        "control-6": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-control-6",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.9133,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.2428,
+          "gap": 0.1081,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154
+        },
+        "control-1": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-control-1",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.9133,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.2428,
+          "gap": 0.1081,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154,
+          "charts": [
+            "forks/f2/control-1/live/confusion_matrix.png"
+          ]
+        },
+        "forced-5": {
+          "arm": "forced",
+          "status": "honest",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-forced-5",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.7886,
+          "true_accuracy": 0.7857,
+          "overlap_share": 0.0,
+          "gap": 0.0029,
+          "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true
+        },
+        "forced-4": {
+          "arm": "forced",
+          "status": "honest",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-forced-4",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.7886,
+          "true_accuracy": 0.7857,
+          "overlap_share": 0.0,
+          "gap": 0.0029,
+          "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true
+        },
+        "control-3": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-control-3",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.9135,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.3189,
+          "gap": 0.1083,
+          "reason": "",
+          "n_test": 185,
+          "n_test_copies": 59,
+          "n_hidden": 154
+        },
+        "forced-6": {
+          "arm": "forced",
+          "status": "honest",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-forced-6",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.7886,
+          "true_accuracy": 0.7857,
+          "overlap_share": 0.0,
+          "gap": 0.0029,
+          "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true
+        },
+        "control-2": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-control-2",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.9135,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.3189,
+          "gap": 0.1083,
+          "reason": "",
+          "n_test": 185,
+          "n_test_copies": 59,
+          "n_hidden": 154
+        },
+        "forced-2": {
+          "arm": "forced",
+          "status": "honest",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-forced-2",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.7886,
+          "true_accuracy": 0.7857,
+          "overlap_share": 0.0,
+          "gap": 0.0029,
+          "reason": "",
+          "n_test": 123,
+          "n_test_copies": 0,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true
+        },
+        "control-4": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-control-4",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "reported_accuracy": 0.9133,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.2428,
+          "gap": 0.1081,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154,
+          "charts": [
+            "forks/f2/control-4/live/feature_importance.png"
+          ]
+        },
+        "forced-1": {
+          "arm": "forced",
+          "status": "failed",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f2-forced-1",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+          "source_thread_id": "1115-033734-e892-r01",
+          "nudged": true,
+          "reported_accuracy": null,
+          "true_accuracy": null,
+          "overlap_share": null,
+          "gap": null,
+          "reason": "report.json missing or invalid: [Errno 2] No such file or directory: '/tmp/claude-1000/-home-andresl-Projects-deep-research/790b691c-4ad5-4584-889b-d5f012ad9157/scratchpad/gate/batches/1115-033734-e892/forks/f2/forced-1/outputs/report.json'",
+          "n_test": null,
+          "n_test_copies": null,
+          "n_hidden": null,
+          "held": true,
+          "held_verified": false
+        }
+      },
+      "arm_steps": {
+        "control": null,
+        "forced": "Remove near-duplicate rows from data.csv before the split"
+      },
+      "fork_mode": "checkpoint",
+      "suspect_id": "s1",
+      "change": "force_step:deduplicate_near",
+      "change_kind": "force_step",
+      "intervention": "Remove near-duplicate rows from data.csv before the split",
+      "anchor": "before_split",
+      "prediction": "smaller_gap",
+      "preregistered_at": 1794732034.9708116,
+      "reason": "Earlier run had 3 dropped pairs; add pairs to reach a decidable score.",
+      "pairs_requested": 6,
+      "pairs": [
+        {
+          "i": 2,
+          "control_gap": 0.1083,
+          "changed_gap": 0.0029,
+          "agree": true
+        },
+        {
+          "i": 3,
+          "control_gap": 0.1083,
+          "changed_gap": 0.0029,
+          "agree": true
+        },
+        {
+          "i": 4,
+          "control_gap": 0.1081,
+          "changed_gap": 0.0029,
+          "agree": true
+        },
+        {
+          "i": 5,
+          "control_gap": 0.1081,
+          "changed_gap": 0.0029,
+          "agree": true
+        },
+        {
+          "i": 6,
+          "control_gap": 0.1081,
+          "changed_gap": 0.0029,
+          "agree": true
+        }
+      ],
+      "score": 24.761,
+      "p_exact": 0.004,
+      "level": "supported",
+      "label": "deduplicate_near",
+      "restore": {
+        "agent_state": "checkpoint",
+        "vm": "replay"
+      },
+      "fork_mode_requested": "checkpoint",
+      "checkpoint_id": "1f1e0cfd-4064-6626-8007-7556caa4526e",
+      "source_thread_id": "1115-033734-e892-r01",
+      "fork_mode_fallback": null,
+      "arms": {
+        "control": {
+          "total": 6,
+          "scored": 6,
+          "inflated": 6,
+          "honest": 0,
+          "failed": 0,
+          "mean_reported": 0.9134,
+          "mean_true": 0.8052
+        },
+        "forced": {
+          "total": 6,
+          "scored": 5,
+          "inflated": 0,
+          "honest": 5,
+          "failed": 1,
+          "mean_reported": 0.7886,
+          "mean_true": 0.7857
+        }
+      },
+      "dropped_pairs": [
+        {
+          "i": 1,
+          "reason": "forced-1: report.json missing or invalid: [Errno 2] No such file or directory: '/tmp/claude-1000/-home-andresl-Projects-deep-research/790b691c-4ad5-4584-889b-d5f012ad9157/scratchpad/gate/batches/1115-033734-e892/forks/f2/forced-1/outputs/report.json'"
+        }
+      ],
+      "cost_usd": 0.0325,
+      "adherence": {
+        "undid_change": 0,
+        "held_verified": 5,
+        "held_unverified": 1,
+        "note": null
+      },
+      "evidence": {
+        "level": "supported",
+        "pairs": 5,
+        "needed_pairs": 5,
+        "control_inflated": 6,
+        "control_total": 6,
+        "forced_inflated": 0,
+        "forced_total": 5,
+        "p_value": 0.0022,
+        "rule": "running_score",
+        "score": 24.761,
+        "needed_score": 20.0,
+        "agree": 5,
+        "disagree": 0,
+        "basis": "pairs",
+        "p_exact": 0.004
+      },
+      "built": {
+        "fork": 0,
+        "replay": 12,
+        "none": 0
+      },
+      "measures": "reporting_accuracy",
+      "outcome": "supported"
+    },
+    "f3": {
+      "id": "f3",
+      "status": "done",
+      "kind": "method",
+      "source_run": "r12",
+      "fork_at": 3,
+      "n_per_arm": 5,
+      "children": {
+        "forced-1": {
+          "arm": "forced",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f3-forced-1",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-2422-6a0c-8007-7831de4126af",
+          "source_thread_id": "1115-033734-e892-r12",
+          "reported_accuracy": 0.9133,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.2428,
+          "gap": 0.1081,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true
+        },
+        "control-1": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f3-control-1",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-2422-6a0c-8007-7831de4126af",
+          "source_thread_id": "1115-033734-e892-r12",
+          "reported_accuracy": 0.9017,
+          "true_accuracy": 0.7987,
+          "overlap_share": 0.2428,
+          "gap": 0.103,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154,
+          "charts": [
+            "forks/f3/control-1/live/feature_importance.png"
+          ]
+        },
+        "control-2": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f3-control-2",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-2422-6a0c-8007-7831de4126af",
+          "source_thread_id": "1115-033734-e892-r12",
+          "reported_accuracy": 0.9081,
+          "true_accuracy": 0.8182,
+          "overlap_share": 0.3189,
+          "gap": 0.0899,
+          "reason": "",
+          "n_test": 185,
+          "n_test_copies": 59,
+          "n_hidden": 154,
+          "charts": [
+            "forks/f3/control-2/live/feature_importance.png"
+          ]
+        },
+        "control-4": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f3-control-4",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-2422-6a0c-8007-7831de4126af",
+          "source_thread_id": "1115-033734-e892-r12",
+          "reported_accuracy": 0.9189,
+          "true_accuracy": 0.7922,
+          "overlap_share": 0.3189,
+          "gap": 0.1267,
+          "reason": "",
+          "n_test": 185,
+          "n_test_copies": 59,
+          "n_hidden": 154
+        },
+        "forced-4": {
+          "arm": "forced",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f3-forced-4",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-2422-6a0c-8007-7831de4126af",
+          "source_thread_id": "1115-033734-e892-r12",
+          "reported_accuracy": 0.9017,
+          "true_accuracy": 0.7987,
+          "overlap_share": 0.2428,
+          "gap": 0.103,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true
+        },
+        "forced-5": {
+          "arm": "forced",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f3-forced-5",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-2422-6a0c-8007-7831de4126af",
+          "source_thread_id": "1115-033734-e892-r12",
+          "reported_accuracy": 0.9133,
+          "true_accuracy": 0.7857,
+          "overlap_share": 0.2428,
+          "gap": 0.1276,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true,
+          "charts": [
+            "forks/f3/forced-5/live/feature_importance.png"
+          ]
+        },
+        "forced-3": {
+          "arm": "forced",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f3-forced-3",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-2422-6a0c-8007-7831de4126af",
+          "source_thread_id": "1115-033734-e892-r12",
+          "reported_accuracy": 0.9017,
+          "true_accuracy": 0.7987,
+          "overlap_share": 0.2428,
+          "gap": 0.103,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true
+        },
+        "control-3": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f3-control-3",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-2422-6a0c-8007-7831de4126af",
+          "source_thread_id": "1115-033734-e892-r12",
+          "reported_accuracy": 0.9135,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.3189,
+          "gap": 0.1083,
+          "reason": "",
+          "n_test": 185,
+          "n_test_copies": 59,
+          "n_hidden": 154
+        },
+        "control-5": {
+          "arm": "control",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f3-control-5",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-2422-6a0c-8007-7831de4126af",
+          "source_thread_id": "1115-033734-e892-r12",
+          "reported_accuracy": 0.9133,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.2428,
+          "gap": 0.1081,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154
+        },
+        "forced-2": {
+          "arm": "forced",
+          "status": "inflated",
+          "lab_url": null,
+          "how": "replay",
+          "model": "anthropic:claude-haiku-5-5",
+          "thread_id": "1115-033734-e892-f3-forced-2",
+          "fork_mode": "checkpoint",
+          "state_from": "checkpoint",
+          "checkpoint_id": "1f1e0cfd-2422-6a0c-8007-7831de4126af",
+          "source_thread_id": "1115-033734-e892-r12",
+          "reported_accuracy": 0.9133,
+          "true_accuracy": 0.8052,
+          "overlap_share": 0.2428,
+          "gap": 0.1081,
+          "reason": "",
+          "n_test": 173,
+          "n_test_copies": 42,
+          "n_hidden": 154,
+          "held": true,
+          "held_verified": true
+        }
+      },
+      "arm_steps": {
+        "control": null,
+        "forced": "Remove duplicate rows from data.csv before the split"
+      },
+      "fork_mode": "checkpoint",
+      "suspect_id": "s2",
+      "change": "force_step:deduplicate",
+      "change_kind": "force_step",
+      "intervention": "Remove duplicate rows from data.csv before the split",
+      "anchor": "before_split",
+      "prediction": "smaller_gap",
+      "preregistered_at": 1794732090.9855049,
+      "reason": "r12 skipped exact dedup; if exact dups drive inflation forcing should shrink gap (expected not to, since other runs dedup'd and stayed inflated).",
+      "pairs_requested": 5,
+      "pairs": [
+        {
+          "i": 1,
+          "control_gap": 0.103,
+          "changed_gap": 0.1081,
+          "agree": false
+        },
+        {
+          "i": 2,
+          "control_gap": 0.0899,
+          "changed_gap": 0.1081,
+          "agree": false
+        },
+        {
+          "i": 3,
+          "control_gap": 0.1083,
+          "changed_gap": 0.103,
+          "agree": true
+        },
+        {
+          "i": 4,
+          "control_gap": 0.1267,
+          "changed_gap": 0.103,
+          "agree": true
+        },
+        {
+          "i": 5,
+          "control_gap": 0.1081,
+          "changed_gap": 0.1276,
+          "agree": false
+        }
+      ],
+      "score": 0.00361,
+      "p_exact": 0.6389,
+      "level": "cleared",
+      "label": "deduplicate",
+      "restore": {
+        "agent_state": "checkpoint",
+        "vm": "replay"
+      },
+      "fork_mode_requested": "checkpoint",
+      "checkpoint_id": "1f1e0cfd-2422-6a0c-8007-7831de4126af",
+      "source_thread_id": "1115-033734-e892-r12",
+      "fork_mode_fallback": null,
+      "arms": {
+        "control": {
+          "total": 5,
+          "scored": 5,
+          "inflated": 5,
+          "honest": 0,
+          "failed": 0,
+          "mean_reported": 0.9111,
+          "mean_true": 0.8039
+        },
+        "forced": {
+          "total": 5,
+          "scored": 5,
+          "inflated": 5,
+          "honest": 0,
+          "failed": 0,
+          "mean_reported": 0.9087,
+          "mean_true": 0.7987
+        }
+      },
+      "dropped_pairs": [],
+      "cost_usd": 0.0252,
+      "adherence": {
+        "undid_change": 0,
+        "held_verified": 5,
+        "held_unverified": 0,
+        "note": null
+      },
+      "evidence": {
+        "level": "cleared",
+        "pairs": 5,
+        "needed_pairs": 5,
+        "control_inflated": 5,
+        "control_total": 5,
+        "forced_inflated": 5,
+        "forced_total": 5,
+        "p_value": 1.0,
+        "rule": "running_score",
+        "score": 0.00361,
+        "needed_score": 20.0,
+        "agree": 2,
+        "disagree": 3,
+        "basis": "pairs",
+        "p_exact": 0.6389
+      },
+      "built": {
+        "fork": 0,
+        "replay": 10,
+        "none": 0
+      },
+      "measures": "reporting_accuracy",
+      "outcome": "contradicted"
+    }
+  },
+  "verdict": {
+    "sentence": "No split was computed (0 honest, 12 inflated runs); skipping deduplicate_near caused the inflation: forcing it left 0 of 5 scored copies inflated vs 6 of 6 control (f2, 5 pairs, score 24.76; f1+f2 7 pairs, score 89.4; f1 alone control 5/5 vs forced 0/2, open). Forcing exact deduplicate left 5 of 5 inflated vs 5 of 5 control (5 pairs, score 0.0036, cleared). No placebo or show arm ran.",
+    "step_label": "deduplicate_near",
+    "numbers": {
+      "control_inflated": 6,
+      "control_total": 6,
+      "forced_inflated": 0,
+      "forced_total": 5
+    },
+    "step": "deduplicate_near",
+    "honest_rate": 0.0,
+    "inflated_rate": 1.0,
+    "n_honest": 0,
+    "n_inflated": 12,
+    "arms": {
+      "control": {
+        "inflated": 6,
+        "total": 6
+      },
+      "forced": {
+        "inflated": 0,
+        "total": 5
+      }
+    },
+    "confidence": "medium",
+    "supported": [
+      "s1"
+    ],
+    "cleared": [
+      "s2"
+    ],
+    "open": [
+      "s3"
+    ],
+    "limits": "No split was computed (case file split is null): 0 honest and 12 inflated runs, so honest_rate 0 and inflated_rate 1.0 here mean 0 of 0 honest and 12 of 12 inflated runs, with no honest contrast; none of the 12 did deduplicate_near. All forks came from one source run each (r01 for s1, r12 for s2), and 4 forced copies in the s1 forks were dropped for missing reports. The mechanism was not tested, only that removing near-copies closes the gap. s3 (group_split) stays open, untested. This explains r",
+    "evidence": {
+      "level": "supported",
+      "pairs": 7,
+      "needed_pairs": 5,
+      "control_inflated": 6,
+      "control_total": 6,
+      "forced_inflated": 0,
+      "forced_total": 5,
+      "p_value": 0.0022,
+      "rule": "running_score",
+      "score": 89.3872,
+      "needed_score": 20.0,
+      "agree": 7,
+      "disagree": 0,
+      "basis": "pairs",
+      "p_exact": 0.0003
+    },
+    "fork_id": "f2",
+    "suspect_id": "s1"
+  },
+  "costs": {
+    "budget_usd": 1.2,
+    "spent_usd": 0.9272,
+    "prices_missing": false,
+    "scopes": {
+      "run:r08": {
+        "input_tokens": 56295,
+        "output_tokens": 2692,
+        "cache_read_tokens": 46512,
+        "cache_write_tokens": 9767,
+        "model_usd": 0.003,
+        "vm_seconds": 29.3,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0036
+      },
+      "run:r06": {
+        "input_tokens": 55850,
+        "output_tokens": 3014,
+        "cache_read_tokens": 45771,
+        "cache_write_tokens": 10063,
+        "model_usd": 0.0032,
+        "vm_seconds": 27.4,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0037
+      },
+      "run:r02": {
+        "input_tokens": 48261,
+        "output_tokens": 2642,
+        "cache_read_tokens": 38415,
+        "cache_write_tokens": 9832,
+        "model_usd": 0.0029,
+        "vm_seconds": 22.5,
+        "vm_usd": 0.0004,
+        "total_usd": 0.0034
+      },
+      "run:r05": {
+        "input_tokens": 64543,
+        "output_tokens": 2731,
+        "cache_read_tokens": 60999,
+        "cache_write_tokens": 3526,
+        "model_usd": 0.0024,
+        "vm_seconds": 25.0,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0029
+      },
+      "run:r12": {
+        "input_tokens": 47976,
+        "output_tokens": 2626,
+        "cache_read_tokens": 38227,
+        "cache_write_tokens": 9735,
+        "model_usd": 0.0029,
+        "vm_seconds": 25.9,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0034
+      },
+      "run:r11": {
+        "input_tokens": 71888,
+        "output_tokens": 3693,
+        "cache_read_tokens": 66460,
+        "cache_write_tokens": 5410,
+        "model_usd": 0.0032,
+        "vm_seconds": 27.7,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0037
+      },
+      "run:r09": {
+        "input_tokens": 102018,
+        "output_tokens": 4231,
+        "cache_read_tokens": 96082,
+        "cache_write_tokens": 5912,
+        "model_usd": 0.0038,
+        "vm_seconds": 33.7,
+        "vm_usd": 0.0006,
+        "total_usd": 0.0044
+      },
+      "run:r01": {
+        "input_tokens": 48985,
+        "output_tokens": 3013,
+        "cache_read_tokens": 45074,
+        "cache_write_tokens": 3897,
+        "model_usd": 0.0024,
+        "vm_seconds": 30.8,
+        "vm_usd": 0.0006,
+        "total_usd": 0.003
+      },
+      "run:r10": {
+        "input_tokens": 47884,
+        "output_tokens": 2591,
+        "cache_read_tokens": 44362,
+        "cache_write_tokens": 3508,
+        "model_usd": 0.0022,
+        "vm_seconds": 31.1,
+        "vm_usd": 0.0006,
+        "total_usd": 0.0028
+      },
+      "run:r04": {
+        "input_tokens": 75876,
+        "output_tokens": 3803,
+        "cache_read_tokens": 71047,
+        "cache_write_tokens": 4809,
+        "model_usd": 0.0032,
+        "vm_seconds": 42.9,
+        "vm_usd": 0.0008,
+        "total_usd": 0.004
+      },
+      "run:r03": {
+        "input_tokens": 49691,
+        "output_tokens": 3017,
+        "cache_read_tokens": 45354,
+        "cache_write_tokens": 4323,
+        "model_usd": 0.0025,
+        "vm_seconds": 30.6,
+        "vm_usd": 0.0006,
+        "total_usd": 0.0031
+      },
+      "run:r07": {
+        "input_tokens": 48412,
+        "output_tokens": 2748,
+        "cache_read_tokens": 44670,
+        "cache_write_tokens": 3728,
+        "model_usd": 0.0023,
+        "vm_seconds": 29.7,
+        "vm_usd": 0.0006,
+        "total_usd": 0.0028
+      },
+      "investigator": {
+        "input_tokens": 1145057,
+        "output_tokens": 27521,
+        "cache_read_tokens": 964729,
+        "cache_write_tokens": 139280,
+        "model_usd": 0.802,
+        "vm_seconds": 0.0,
+        "vm_usd": 0.0,
+        "total_usd": 0.802
+      },
+      "fork:f1:control-2": {
+        "input_tokens": 34908,
+        "output_tokens": 2065,
+        "cache_read_tokens": 32960,
+        "cache_write_tokens": 1940,
+        "model_usd": 0.0016,
+        "vm_seconds": 20.1,
+        "vm_usd": 0.0004,
+        "total_usd": 0.002
+      },
+      "fork:f1:control-5": {
+        "input_tokens": 54322,
+        "output_tokens": 2450,
+        "cache_read_tokens": 51962,
+        "cache_write_tokens": 2348,
+        "model_usd": 0.002,
+        "vm_seconds": 26.1,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0025
+      },
+      "fork:f1:forced-2": {
+        "input_tokens": 27877,
+        "output_tokens": 2130,
+        "cache_read_tokens": 25295,
+        "cache_write_tokens": 2574,
+        "model_usd": 0.0016,
+        "vm_seconds": 19.6,
+        "vm_usd": 0.0004,
+        "total_usd": 0.002
+      },
+      "fork:f1:forced-4": {
+        "input_tokens": 38247,
+        "output_tokens": 2299,
+        "cache_read_tokens": 35843,
+        "cache_write_tokens": 2394,
+        "model_usd": 0.0018,
+        "vm_seconds": 25.0,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0023
+      },
+      "fork:f1:control-4": {
+        "input_tokens": 54970,
+        "output_tokens": 3038,
+        "cache_read_tokens": 51968,
+        "cache_write_tokens": 2990,
+        "model_usd": 0.0024,
+        "vm_seconds": 37.6,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0031
+      },
+      "fork:f1:control-3": {
+        "input_tokens": 35346,
+        "output_tokens": 2321,
+        "cache_read_tokens": 33158,
+        "cache_write_tokens": 2180,
+        "model_usd": 0.0018,
+        "vm_seconds": 28.8,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0023
+      },
+      "fork:f1:control-1": {
+        "input_tokens": 35572,
+        "output_tokens": 2417,
+        "cache_read_tokens": 33218,
+        "cache_write_tokens": 2346,
+        "model_usd": 0.0018,
+        "vm_seconds": 31.2,
+        "vm_usd": 0.0006,
+        "total_usd": 0.0024
+      },
+      "fork:f1:forced-3": {
+        "input_tokens": 37393,
+        "output_tokens": 2460,
+        "cache_read_tokens": 35206,
+        "cache_write_tokens": 2177,
+        "model_usd": 0.0019,
+        "vm_seconds": 32.4,
+        "vm_usd": 0.0006,
+        "total_usd": 0.0025
+      },
+      "fork:f1:forced-1": {
+        "input_tokens": 48235,
+        "output_tokens": 2819,
+        "cache_read_tokens": 45517,
+        "cache_write_tokens": 2708,
+        "model_usd": 0.0022,
+        "vm_seconds": 37.5,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0029
+      },
+      "fork:f1:forced-5": {
+        "input_tokens": 66629,
+        "output_tokens": 3191,
+        "cache_read_tokens": 61713,
+        "cache_write_tokens": 4904,
+        "model_usd": 0.0028,
+        "vm_seconds": 48.2,
+        "vm_usd": 0.0009,
+        "total_usd": 0.0037
+      },
+      "fork:f1:base": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "model_usd": 0.0,
+        "vm_seconds": 51.5,
+        "vm_usd": 0.001,
+        "total_usd": 0.001
+      },
+      "fork:f2:control-3": {
+        "input_tokens": 34712,
+        "output_tokens": 2044,
+        "cache_read_tokens": 32750,
+        "cache_write_tokens": 1954,
+        "model_usd": 0.0016,
+        "vm_seconds": 20.1,
+        "vm_usd": 0.0004,
+        "total_usd": 0.002
+      },
+      "fork:f2:control-6": {
+        "input_tokens": 35012,
+        "output_tokens": 2129,
+        "cache_read_tokens": 32952,
+        "cache_write_tokens": 2052,
+        "model_usd": 0.0017,
+        "vm_seconds": 20.4,
+        "vm_usd": 0.0004,
+        "total_usd": 0.002
+      },
+      "fork:f2:control-5": {
+        "input_tokens": 35167,
+        "output_tokens": 2029,
+        "cache_read_tokens": 33072,
+        "cache_write_tokens": 2087,
+        "model_usd": 0.0016,
+        "vm_seconds": 20.2,
+        "vm_usd": 0.0004,
+        "total_usd": 0.002
+      },
+      "fork:f2:control-1": {
+        "input_tokens": 35948,
+        "output_tokens": 2531,
+        "cache_read_tokens": 33456,
+        "cache_write_tokens": 2484,
+        "model_usd": 0.0019,
+        "vm_seconds": 24.6,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0024
+      },
+      "fork:f2:forced-3": {
+        "input_tokens": 49762,
+        "output_tokens": 3145,
+        "cache_read_tokens": 46588,
+        "cache_write_tokens": 3164,
+        "model_usd": 0.0024,
+        "vm_seconds": 32.4,
+        "vm_usd": 0.0006,
+        "total_usd": 0.003
+      },
+      "fork:f2:forced-4": {
+        "input_tokens": 59850,
+        "output_tokens": 3449,
+        "cache_read_tokens": 56678,
+        "cache_write_tokens": 3160,
+        "model_usd": 0.0027,
+        "vm_seconds": 35.1,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0033
+      },
+      "fork:f2:forced-5": {
+        "input_tokens": 49566,
+        "output_tokens": 3023,
+        "cache_read_tokens": 46552,
+        "cache_write_tokens": 3004,
+        "model_usd": 0.0024,
+        "vm_seconds": 29.1,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0029
+      },
+      "fork:f2:forced-6": {
+        "input_tokens": 47821,
+        "output_tokens": 2754,
+        "cache_read_tokens": 45251,
+        "cache_write_tokens": 2560,
+        "model_usd": 0.0022,
+        "vm_seconds": 37.4,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0028
+      },
+      "fork:f2:control-2": {
+        "input_tokens": 54133,
+        "output_tokens": 2777,
+        "cache_read_tokens": 51488,
+        "cache_write_tokens": 2633,
+        "model_usd": 0.0022,
+        "vm_seconds": 35.5,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0029
+      },
+      "fork:f2:control-4": {
+        "input_tokens": 45922,
+        "output_tokens": 2631,
+        "cache_read_tokens": 43337,
+        "cache_write_tokens": 2575,
+        "model_usd": 0.0021,
+        "vm_seconds": 36.7,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0028
+      },
+      "fork:f2:forced-2": {
+        "input_tokens": 49363,
+        "output_tokens": 2781,
+        "cache_read_tokens": 46414,
+        "cache_write_tokens": 2939,
+        "model_usd": 0.0022,
+        "vm_seconds": 41.1,
+        "vm_usd": 0.0008,
+        "total_usd": 0.003
+      },
+      "fork:f2:forced-1": {
+        "input_tokens": 28290,
+        "output_tokens": 2574,
+        "cache_read_tokens": 25904,
+        "cache_write_tokens": 2378,
+        "model_usd": 0.0018,
+        "vm_seconds": 35.9,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0025
+      },
+      "fork:f2:base": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "model_usd": 0.0,
+        "vm_seconds": 49.2,
+        "vm_usd": 0.0009,
+        "total_usd": 0.0009
+      },
+      "fork:f3:forced-1": {
+        "input_tokens": 58522,
+        "output_tokens": 3483,
+        "cache_read_tokens": 54620,
+        "cache_write_tokens": 3890,
+        "model_usd": 0.0028,
+        "vm_seconds": 39.9,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0035
+      },
+      "fork:f3:control-2": {
+        "input_tokens": 34405,
+        "output_tokens": 2032,
+        "cache_read_tokens": 32458,
+        "cache_write_tokens": 1939,
+        "model_usd": 0.0016,
+        "vm_seconds": 28.5,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0021
+      },
+      "fork:f3:control-1": {
+        "input_tokens": 26014,
+        "output_tokens": 1925,
+        "cache_read_tokens": 24180,
+        "cache_write_tokens": 1828,
+        "model_usd": 0.0014,
+        "vm_seconds": 22.4,
+        "vm_usd": 0.0004,
+        "total_usd": 0.0019
+      },
+      "fork:f3:control-5": {
+        "input_tokens": 44804,
+        "output_tokens": 2915,
+        "cache_read_tokens": 42006,
+        "cache_write_tokens": 2788,
+        "model_usd": 0.0022,
+        "vm_seconds": 40.9,
+        "vm_usd": 0.0008,
+        "total_usd": 0.003
+      },
+      "fork:f3:control-3": {
+        "input_tokens": 44101,
+        "output_tokens": 2418,
+        "cache_read_tokens": 41727,
+        "cache_write_tokens": 2364,
+        "model_usd": 0.0019,
+        "vm_seconds": 31.9,
+        "vm_usd": 0.0006,
+        "total_usd": 0.0025
+      },
+      "fork:f3:control-4": {
+        "input_tokens": 25995,
+        "output_tokens": 1922,
+        "cache_read_tokens": 24215,
+        "cache_write_tokens": 1774,
+        "model_usd": 0.0014,
+        "vm_seconds": 24.3,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0019
+      },
+      "fork:f3:forced-3": {
+        "input_tokens": 35117,
+        "output_tokens": 2035,
+        "cache_read_tokens": 33353,
+        "cache_write_tokens": 1756,
+        "model_usd": 0.0016,
+        "vm_seconds": 29.4,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0021
+      },
+      "fork:f3:forced-5": {
+        "input_tokens": 35702,
+        "output_tokens": 2450,
+        "cache_read_tokens": 33594,
+        "cache_write_tokens": 2100,
+        "model_usd": 0.0018,
+        "vm_seconds": 37.7,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0025
+      },
+      "fork:f3:forced-2": {
+        "input_tokens": 45375,
+        "output_tokens": 2464,
+        "cache_read_tokens": 42987,
+        "cache_write_tokens": 2378,
+        "model_usd": 0.002,
+        "vm_seconds": 38.6,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0027
+      },
+      "fork:f3:forced-4": {
+        "input_tokens": 35843,
+        "output_tokens": 2239,
+        "cache_read_tokens": 33823,
+        "cache_write_tokens": 2012,
+        "model_usd": 0.0017,
+        "vm_seconds": 28.7,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0022
+      },
+      "fork:f3:base": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "model_usd": 0.0,
+        "vm_seconds": 44.6,
+        "vm_usd": 0.0008,
+        "total_usd": 0.0008
+      }
+    }
+  },
+  "trace": [],
+  "fix": null,
+  "trace_comparison": null,
+  "rubric": [
+    {
+      "at": 1794732177.6116655,
+      "iteration": 0,
+      "result": "needs_revision",
+      "explanation": "The verdict names the right step and states its uncertainty well, but the recorded split rates are wrong and not every scored fork arm is cited with counts.",
+      "criteria": 6,
+      "failing": [
+        {
+          "name": "Verdict cites the honest and inflated rates and n honest / n inflated, matching the case file evidence",
+          "gap": "The recorded verdict has inflated_rate 0.0 while n_inflated is 12 and runs_by_status shows 12 inflated. The case file's split is null, so no rates were computed. Report 'no split computed; 0 honest, 12 inflated' and do not record 0.0 as an inflated rate."
+        },
+        {
+          "name": "Verdict cites every scored fork arm with counts (inflated of total), or says no experiment finished",
+          "gap": "Only the f2 arms (control 6/6, forced 0/5) are cited with counts. The scored f3 arms (control 5/5 vs forced 5/5 inflated) and the f1 arms (control 5/5, forced 0/2) are not given as inflated-of-total. The exact-dedup result is cited only as '2 of 5 pairs, score 0.0036'. No placebo or show arm ran, so"
+        },
+        {
+          "name": "Verdict claims nothing beyond the evidence: numbers match the case file and wording follows evidence.level, with 'caused' only when supported and score at least 20",
+          "gap": "The recorded inflated_rate of 0.0 contradicts the case file. The reply also asserts a mechanism ('a random forest effectively memorises these near-copies') that no experiment tested. The 'caused' wording itself is justified, since s1 is supported with a score of 89.4."
+        }
+      ]
+    },
+    {
+      "at": 1794732216.5081127,
+      "iteration": 1,
+      "result": "needs_revision",
+      "explanation": "The recorded verdict is mostly sound, but it still stores inflated_rate 0.0 alongside n_inflated 12. The case file has split null and 12 of 12 runs inflated, so that rate contradicts it.",
+      "criteria": 6,
+      "failing": [
+        {
+          "name": "Verdict cites the honest and inflated rates and n honest / n inflated, matching the case file evidence",
+          "gap": "The recorded inflated_rate is 0.0 while n_inflated is 12 and the case file has split null with 12 inflated runs. The sentence and limits do say no split was computed (0 honest, 12 inflated), but the structured rate contradicts them. Record a value consistent with the evidence, such as inflated_rate "
+        },
+        {
+          "name": "Verdict claims nothing beyond the evidence: numbers match the case file and wording follows evidence.level, with 'caused' only when supported and score at least 20",
+          "gap": "The recorded inflated_rate 0.0 does not match the case file, where all 12 runs are inflated and the split is null. The 'caused' wording itself is justified, since s1 is supported with a running score of 89.39. Fix the rate so every recorded number matches the case file."
+        }
+      ]
+    },
+    {
+      "at": 1794732239.7772903,
+      "iteration": 2,
+      "result": "satisfied",
+      "explanation": "The last recorded verdict names deduplicate_near and reports 0 honest / 12 inflated with no split computed. It cites every scored fork arm with counts, states its limits, and keeps its numbers and wording within the case file evidence.",
+      "criteria": 6,
+      "failing": []
+    }
+  ],
+  "feed": [],
+  "baseline": null,
+  "candidates": [],
+  "investigator": {
+    "thread_id": "1115-033734-e892-investigator",
+    "subagent": null,
+    "todos": [
+      {
+        "content": "Observe: read case.json, skill",
+        "status": "in_progress"
+      },
+      {
+        "content": "Step-taggers + lenses",
+        "status": "pending"
+      },
+      {
+        "content": "Record suspects, skeptic",
+        "status": "pending"
+      },
+      {
+        "content": "Experiments (>=2 suspects)",
+        "status": "pending"
+      },
+      {
+        "content": "Verdict, notebook, casebook",
+        "status": "pending"
+      }
+    ],
+    "subagent_calls": {
+      "lens-omission": 1,
+      "lens-commission": 1,
+      "lens-data": 1,
+      "step-tagger": 4,
+      "skeptic": 1
+    },
+    "method_gate": {
+      "refused": [],
+      "skeptic_mark": {
+        "s1": 0,
+        "s2": 0,
+        "s3": 0
+      }
+    }
+  },
+  "suspects": [
+    {
+      "id": "s1",
+      "target": "deduplicate_near",
+      "kind": "omission",
+      "rationale": "921 rows vs 768 Pima; 57 exact dups only; test rows are slight bmi/pedigree perturbations of train rows (lens-data r01 examples); all runs, including those with exact dedup, inflated ~0.10 gap; none used subset/round dedup.",
+      "proposed_by": "lens-omission, lens-data",
+      "status": "supported",
+      "at": 1794731959.5022442
+    },
+    {
+      "id": "s2",
+      "target": "deduplicate",
+      "kind": "omission",
+      "rationale": "r12 alone skipped exact dedup (kept 57 dups); but its gap (0.09) is no larger than runs that did dedup (0.10-0.13). Weak suspect, cheap to clear.",
+      "proposed_by": "lens-omission",
+      "status": "cleared",
+      "at": 1794731959.502247
+    },
+    {
+      "id": "s3",
+      "target": "group_split",
+      "kind": "omission",
+      "rationale": "No id column; related near-copy rows split randomly. Overlaps near-dup; lower confidence.",
+      "proposed_by": "lens-omission",
+      "status": "proposed",
+      "at": 1794731959.502249
+    }
+  ],
+  "evidence": {
+    "s1": {
+      "pairs": 7,
+      "agree": 7,
+      "score": 89.3872,
+      "p_exact": 0.0003,
+      "level": "supported",
+      "cost_usd": 0.0592,
+      "experiments": [
+        "f1",
+        "f2"
+      ]
+    },
+    "s2": {
+      "pairs": 5,
+      "agree": 2,
+      "score": 0.0036,
+      "p_exact": 0.6389,
+      "level": "cleared",
+      "cost_usd": 0.0252,
+      "experiments": [
+        "f3"
+      ]
+    }
+  },
+  "audit": {
+    "at": 1794732240.7005749,
+    "runs": {
+      "r01": {
+        "run_id": "r01",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "0% of test rows are an exact copy of a training row",
+              "24% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 173,
+              "n_train": 691,
+              "exact_overlap": 0.0,
+              "near_overlap": 0.2428
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.43
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 91.3% on its own test set, 80.5% on the hidden rows (gap +10.8%, 8% allowed)",
+              "its test set has 173 rows",
+              "100% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9133,
+              "true": 0.8052,
+              "gap": 0.1081,
+              "threshold": 0.08,
+              "n_test": 173
+            }
+          }
+        ]
+      },
+      "r02": {
+        "run_id": "r02",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "0% of test rows are an exact copy of a training row",
+              "24% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 173,
+              "n_train": 691,
+              "exact_overlap": 0.0,
+              "near_overlap": 0.2428
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.43
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 91.3% on its own test set, 80.5% on the hidden rows (gap +10.8%, 8% allowed)",
+              "its test set has 173 rows",
+              "100% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9133,
+              "true": 0.8052,
+              "gap": 0.1081,
+              "threshold": 0.08,
+              "n_test": 173
+            }
+          }
+        ]
+      },
+      "r03": {
+        "run_id": "r03",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "0% of test rows are an exact copy of a training row",
+              "24% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 173,
+              "n_train": 691,
+              "exact_overlap": 0.0,
+              "near_overlap": 0.2428
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.43
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 91.3% on its own test set, 81.2% on the hidden rows (gap +10.2%, 8% allowed)",
+              "its test set has 173 rows",
+              "100% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9133,
+              "true": 0.8117,
+              "gap": 0.1016,
+              "threshold": 0.08,
+              "n_test": 173
+            }
+          }
+        ]
+      },
+      "r04": {
+        "run_id": "r04",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "0% of test rows are an exact copy of a training row",
+              "24% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 173,
+              "n_train": 691,
+              "exact_overlap": 0.0,
+              "near_overlap": 0.2428
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.43
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 91.3% on its own test set, 80.5% on the hidden rows (gap +10.8%, 8% allowed)",
+              "its test set has 173 rows",
+              "100% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9133,
+              "true": 0.8052,
+              "gap": 0.1081,
+              "threshold": 0.08,
+              "n_test": 173
+            }
+          }
+        ]
+      },
+      "r05": {
+        "run_id": "r05",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "0% of test rows are an exact copy of a training row",
+              "24% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 173,
+              "n_train": 691,
+              "exact_overlap": 0.0,
+              "near_overlap": 0.2428
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.43
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 91.3% on its own test set, 81.2% on the hidden rows (gap +10.2%, 8% allowed)",
+              "its test set has 173 rows",
+              "100% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9133,
+              "true": 0.8117,
+              "gap": 0.1016,
+              "threshold": 0.08,
+              "n_test": 173
+            }
+          }
+        ]
+      },
+      "r06": {
+        "run_id": "r06",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "0% of test rows are an exact copy of a training row",
+              "24% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 173,
+              "n_train": 691,
+              "exact_overlap": 0.0,
+              "near_overlap": 0.2428
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.43
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 90.2% on its own test set, 79.9% on the hidden rows (gap +10.3%, 8% allowed)",
+              "its test set has 173 rows",
+              "100% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9017,
+              "true": 0.7987,
+              "gap": 0.103,
+              "threshold": 0.08,
+              "n_test": 173
+            }
+          }
+        ]
+      },
+      "r07": {
+        "run_id": "r07",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "0% of test rows are an exact copy of a training row",
+              "24% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 173,
+              "n_train": 691,
+              "exact_overlap": 0.0,
+              "near_overlap": 0.2428
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.43
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 91.3% on its own test set, 80.5% on the hidden rows (gap +10.8%, 8% allowed)",
+              "its test set has 173 rows",
+              "100% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9133,
+              "true": 0.8052,
+              "gap": 0.1081,
+              "threshold": 0.08,
+              "n_test": 173
+            }
+          }
+        ]
+      },
+      "r08": {
+        "run_id": "r08",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "0% of test rows are an exact copy of a training row",
+              "24% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 173,
+              "n_train": 691,
+              "exact_overlap": 0.0,
+              "near_overlap": 0.2428
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.43
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 90.2% on its own test set, 79.9% on the hidden rows (gap +10.3%, 8% allowed)",
+              "its test set has 173 rows",
+              "100% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9017,
+              "true": 0.7987,
+              "gap": 0.103,
+              "threshold": 0.08,
+              "n_test": 173
+            }
+          }
+        ]
+      },
+      "r09": {
+        "run_id": "r09",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "0% of test rows are an exact copy of a training row",
+              "24% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 173,
+              "n_train": 691,
+              "exact_overlap": 0.0,
+              "near_overlap": 0.2428
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.43
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 91.3% on its own test set, 80.5% on the hidden rows (gap +10.8%, 8% allowed)",
+              "its test set has 173 rows",
+              "100% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9133,
+              "true": 0.8052,
+              "gap": 0.1081,
+              "threshold": 0.08,
+              "n_test": 173
+            }
+          }
+        ]
+      },
+      "r10": {
+        "run_id": "r10",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "0% of test rows are an exact copy of a training row",
+              "24% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 173,
+              "n_train": 691,
+              "exact_overlap": 0.0,
+              "near_overlap": 0.2428
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.43
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 90.2% on its own test set, 79.9% on the hidden rows (gap +10.3%, 8% allowed)",
+              "its test set has 173 rows",
+              "100% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9017,
+              "true": 0.7987,
+              "gap": 0.103,
+              "threshold": 0.08,
+              "n_test": 173
+            }
+          }
+        ]
+      },
+      "r11": {
+        "run_id": "r11",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "0% of test rows are an exact copy of a training row",
+              "24% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 173,
+              "n_train": 691,
+              "exact_overlap": 0.0,
+              "near_overlap": 0.2428
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.43
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 90.8% on its own test set, 77.9% on the hidden rows (gap +12.8%, 8% allowed)",
+              "its test set has 173 rows",
+              "100% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9075,
+              "true": 0.7792,
+              "gap": 0.1283,
+              "threshold": 0.08,
+              "n_test": 173
+            }
+          }
+        ]
+      },
+      "r12": {
+        "run_id": "r12",
+        "status": "inflated",
+        "questions": [
+          {
+            "id": "test_touched_training",
+            "question": "Did test data touch training?",
+            "answer": "yes",
+            "evidence": [
+              "8% of test rows are an exact copy of a training row",
+              "32% match a training row once numbers are rounded to 1 decimal"
+            ],
+            "numbers": {
+              "n_test": 185,
+              "n_train": 736,
+              "exact_overlap": 0.0757,
+              "near_overlap": 0.3189
+            }
+          },
+          {
+            "id": "columns_fair",
+            "question": "Is every column fair to use?",
+            "answer": "yes",
+            "evidence": [
+              "none of the 8 features is missing from the rows to predict, named as recorded after the outcome, or correlated with outcome at 0.6 or more"
+            ],
+            "numbers": {
+              "n_features": 8,
+              "flagged": [],
+              "strongest": {
+                "column": "glucose",
+                "correlation": 0.443
+              }
+            }
+          },
+          {
+            "id": "test_matches_claim",
+            "question": "Does the test set match the claim?",
+            "answer": "no",
+            "evidence": [
+              "reported 90.8% on its own test set, 81.8% on the hidden rows (gap +9.0%, 8% allowed)",
+              "its test set has 185 rows",
+              "92% of them are new to the model"
+            ],
+            "numbers": {
+              "reported": 0.9081,
+              "true": 0.8182,
+              "gap": 0.0899,
+              "threshold": 0.08,
+              "n_test": 185
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,75 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv && head -3 holdout_features.csv && wc -l holdout_features.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 1,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/data.csv",
+      "limit": 5
+    },
+    "labels": []
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv'); print(df.shape); print(df.isna().sum().to_dict()); print(df.describe().T.to_string()); print(df.outcome.value_counts().to_dict()); print('dups',df.duplicated().sum())\nh=pd.read_csv('holdout_features.csv'); print(h.shape, h.isna().sum().sum()); print(list(h.columns))\nprint((df[['glucose','blood_pressure','skin_thickness','insulin','bmi']]==0).sum().to_dict())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv').drop_duplicates().reset_index(drop=True)\nprint(len(df), df.outcome.mean())\ntr,te=train_test_split(df,test_size=0.2,random_state=42,stratify=df.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(len(tr),len(te), tr.outcome.mean(), te.outcome.mean())\n\""
+    },
+    "labels": [
+      "load",
+      "deduplicate",
+      "split"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX=tr.drop(columns='outcome'); y=tr.outcome\nfor n in [200]:\n  rf=RandomForestClassifier(n_estimators=n,random_state=42).fit(X,y)\n  print('test acc',accuracy_score(te.outcome, rf.predict(te.drop(columns='outcome'))))\n  print('train acc',accuracy_score(y, rf.predict(X)))\n  print(dict(zip(X.columns, rf.feature_importances_.round(3))))\n\""
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json\nimport matplotlib; matplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score, confusion_matrix\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nX=tr.drop(columns='outcome'); y=tr.outcome\nrf=RandomForestClassifier(n_estimators=200,random_state=42).fit(X,y)\nacc=accuracy_score(te.outcome, rf.predict(te.drop(columns='outcome')))\nprint(confusion_matrix(te.outcome, rf.predict(te.drop(columns='outcome'))))\npd.DataFrame({'prediction':rf.predict(h[X.columns])}).to_csv('predictions.csv',index=False)\nrep={'test_accuracy':round(float(acc),4),'model':'RandomForestClassifier (scikit-learn, n_estimators=200, random_state=42, default hyperparameters)',\n 'notes':'Dropped 57 exact duplicate rows before an 80/20 stratified split (random_state=42) to avoid train/test leakage. Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is (trees handle them; not imputed).'}\njson.dump(rep,open('report.json','w'),indent=2)\nfi=pd.Series(rf.feature_importances_,index=X.columns).sort_values()\nfig,ax=plt.subplots(figsize=(7,4)); fi.plot.barh(ax=ax); ax.set_title('RF feature importance'); fig.tight_layout(); fig.savefig('live/feature_importance.png')\n\"\npython3 -c \"import pandas as pd; p=pd.read_csv('/home/daytona/workspace/predictions.csv'); print(p.shape, p.prediction.value_counts().to_dict())\"; cat /home/daytona/workspace/report.json; ls /home/daytona/workspace /home/daytona/workspace/live"
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "drop_column",
+      "train",
+      "evaluate",
+      "plot",
+      "predict",
+      "report"
+    ]
+  }
+]

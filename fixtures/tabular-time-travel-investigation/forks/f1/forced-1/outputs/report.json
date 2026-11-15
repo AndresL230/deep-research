@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7886,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=300, random_state=42), trained on 80% stratified split, default hyperparameters",
+  "notes": "IMPORTANT: data.csv was accidentally overwritten by a fuzzy near-duplicate removal (307 of 921 rows deleted, original file not backed up), so this model is trained on 614 rows, not the original 921. Zeros in insulin/skin_thickness/etc. were left as-is."
+}

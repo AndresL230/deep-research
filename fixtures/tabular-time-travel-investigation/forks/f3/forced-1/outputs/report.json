@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42), raw features",
+  "notes": "Stratified 80/20 split (random_state=42) after removing 57 exact duplicate rows; zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were kept as-is and not imputed. 5-fold CV accuracy on the full data was about 0.856."
+}

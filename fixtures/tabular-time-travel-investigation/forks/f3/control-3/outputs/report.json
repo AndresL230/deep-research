@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9135,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42), default hyperparameters, all 8 features",
+  "notes": "Stratified 80/20 random split (random_state=42) of 921 rows; zeros in insulin/skin_thickness/etc. were kept as values, not imputed. 14 test rows exactly duplicate training rows, which may slightly inflate accuracy (0.906 on the non-duplicated test rows)."
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9135,
+  "model": "RandomForestClassifier (sklearn, 500 trees, random_state=42, default hyperparameters)",
+  "notes": "Stratified 80/20 split (736 train / 185 test) on raw features, no imputation of zero values. 14 of 185 test rows are exact duplicates of training rows; accuracy on the other 171 rows is 0.906."
+}

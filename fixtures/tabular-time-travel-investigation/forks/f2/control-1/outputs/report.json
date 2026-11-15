@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42), trained on 80% stratified split after dropping 57 duplicate rows",
+  "notes": "Zeros in insulin/skin_thickness were kept as values (likely missing placeholders). 5-fold CV on train gave ~0.82, so the 0.91 test estimate on 173 rows is likely optimistic."
+}

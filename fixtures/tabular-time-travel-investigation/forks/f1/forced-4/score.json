@@ -1,0 +1,11 @@
+{
+  "status": "failed",
+  "reported_accuracy": null,
+  "true_accuracy": null,
+  "overlap_share": null,
+  "gap": null,
+  "reason": "report.json missing or invalid: float() argument must be a string or a real number, not 'NoneType'",
+  "n_test": null,
+  "n_test_copies": null,
+  "n_hidden": null
+}

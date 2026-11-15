@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier(n_estimators=500, random_state=42), trained on 80% stratified split of data.csv",
+  "notes": "Stratified 80/20 split (random_state=42); zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is. 57 exact duplicate rows were removed from data.csv before splitting (921 -> 864 rows)."
+}

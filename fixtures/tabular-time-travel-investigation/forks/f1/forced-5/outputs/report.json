@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7886,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), trained on 80% stratified split",
+  "notes": "WARNING: data.csv was accidentally overwritten with a near-duplicate-filtered version (614 of 921 rows) before modeling, so these results and files are based on the altered data; the original file must be restored and the pipeline rerun. Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is."
+}

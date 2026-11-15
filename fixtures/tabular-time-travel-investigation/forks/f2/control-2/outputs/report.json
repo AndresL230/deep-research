@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9135,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42), stratified 80/20 split, no preprocessing",
+  "notes": "Zeros in insulin, skin_thickness, etc. were kept as-is (likely missing values). 57 duplicate rows were kept; 14 test rows also occur in train, and accuracy on the 171 non-overlapping test rows is 0.906."
+}
