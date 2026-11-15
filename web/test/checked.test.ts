@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import type { CaseFile, DomainWords, HiddenResult } from "../src/api";
 import {
-  ROBOT_WORDS, TABULAR_WORDS, checkedView, countsText, dotLabel, episodeView, hiddenDots, judgedOn, outcomeCounts, pressDot,
-  toPercent, wireChecked, wordsOf, type CheckedSubject, type DotEl,
+  PLAY_EVENT, ROBOT_WORDS, TABULAR_WORDS, checkedView, countsText, dotLabel, episodeView, hiddenDots, judgedOn, outcomeCounts, pressDot,
+  toPercent, wireChecked, wordsOf, type CheckedSubject, type DotEl, type PlayDetail,
 } from "../src/batch/checked";
 import { runSummaryView } from "../src/batch/run";
 import type { BatchVm } from "../src/batch/model";
@@ -249,18 +249,75 @@ describe("pressing a dot", () => {
 
   it("listens for clicks on the root, so Enter and Space on the native buttons press too", () => {
     const { player, dots } = fakeMap(checkedView("b1", "r02", scoredRobot, robotCfg));
-    let handler: ((e: Event) => void) | null = null;
+    const handlers: Record<string, (e: Event) => void> = {};
     const root = {
-      addEventListener: (_t: string, h: (e: Event) => void) => { handler = h; },
-      removeEventListener: () => { handler = null; },
+      addEventListener: (t: string, h: (e: Event) => void) => { handlers[t] = h; },
+      removeEventListener: (t: string) => { delete handlers[t]; },
     } as unknown as Document;
     const off = wireChecked(root);
     const target = { closest: (sel: string) => (sel === "[data-ck-dot]" ? dots[2] : null) };
-    handler!({ target } as unknown as Event);
+    handlers.click!({ target } as unknown as Event);
     expect(dots[2].attrs["aria-pressed"]).toBe("true");
     expect(player.innerHTML).toContain("02-s0.motion.json");
     off();
-    expect(handler).toBeNull();
+    expect(handlers).toEqual({});
+  });
+
+  it("on the run page's small map, sends the episode to the page's own player instead", () => {
+    const html = checkedView("b1", "r02", scoredRobot, robotCfg, "map");
+    const sent: Event[] = [];
+    const player = { dispatchEvent: (e: Event) => { sent.push(e); return true; } };
+    const deck = { querySelector: (sel: string) => (sel === "[data-robot-view]" ? player : null) };
+    const dots: DotEl[] = [];
+    const attrs: Record<string, string>[] = [];
+    const map = {
+      dataset: { batch: "b1", ckKey: "r02", ckPlay: "" },
+      querySelectorAll: () => dots,
+      querySelector: () => null,
+      closest: (sel: string) => (sel === "[data-rb-deck]" ? deck : null),
+    };
+    for (const b of tags(html, "button", "data-ck-dot")) {
+      const get = (n: string): string => b.match(new RegExp(`${n}="([^"]*)"`))?.[1] ?? "";
+      const a: Record<string, string> = { "aria-label": get("aria-label") };
+      attrs.push(a);
+      dots.push({
+        dataset: { ckDot: get("data-ck-dot"), ckMotion: get("data-ck-motion"), ckResult: get("data-ck-result") },
+        getAttribute: (n) => a[n] ?? null,
+        setAttribute: (n, v) => { a[n] = v; },
+        closest: (sel) => (sel === "[data-ck]" ? map : null),
+      });
+    }
+    expect(pressDot(dots[1])).toBe("runs/r02/hidden/01-s0.motion.json");
+    expect(attrs.map((a) => a["aria-pressed"])).toEqual(["false", "true", "false", "false", "false", "false", "false"]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].type).toBe(PLAY_EVENT);
+    expect((sent[0] as CustomEvent<PlayDetail>).detail).toEqual({ file: "runs/r02/hidden/01-s0.motion.json", label: "Position 2: tipped over, 4.1 cm from center" });
+  });
+});
+
+describe("the run page's parts", () => {
+  it("draws the small map without the numbers or a player of its own, kept across repaints", () => {
+    const html = checkedView("b1", "r02", scoredRobot, robotCfg, "map");
+    expect(html).toContain("ck--mini");
+    expect(html).toContain("data-keep");
+    expect(html).toContain("data-ck-play");
+    expect(html).not.toContain("data-ck-player");
+    expect(html).not.toContain("ck-vs");
+    expect(tags(html, "button", "data-ck-dot")).toHaveLength(HIDDEN.length);
+    expect(text(html)).toContain("Positions");
+  });
+
+  it("draws the claim next to the truth alone for the Evidence panel", () => {
+    const html = checkedView("b1", "r02", scoredRobot, robotCfg, "evidence");
+    expect(html).toContain("ck-vs");
+    expect(html).not.toContain("data-ck-dot");
+    expect(html).not.toContain("data-keep");
+  });
+
+  it("has no map for a tabular run, only its bars", () => {
+    const tab = { status: "inflated", reported_accuracy: 0.98, true_accuracy: 0.76, overlap_share: 0.52, n_test: 100, n_test_copies: 52, n_hidden: 154 };
+    expect(checkedView("demo", "r03", tab, tabCfg, "map")).toBe("");
+    expect(checkedView("demo", "r03", tab, tabCfg, "evidence")).toContain("ck--tab");
   });
 });
 
@@ -297,13 +354,16 @@ describe("on the run page", () => {
   const demo = JSON.parse(caseRaw) as CaseFile;
   const vmOf = (c: CaseFile): BatchVm => ({ id: "demo-batch", live: false, case: c, events: {}, replay: null, busy: null, error: null, now: 0 });
 
-  it("sits under a scored run's numbers", () => {
-    const html = runSummaryView(vmOf(demo), "r03");
+  it("is in a scored run's Evidence panel, with the evidence in words in the side column", () => {
+    const folded = runSummaryView(vmOf(demo), "r03");
+    // Folded on landing: the bars are not drawn, the side column says the numbers in words.
+    expect(folded).not.toContain('class="ck ck--tab"');
     // The fixture's r03 counts its own test rows and their copies of training rows: 89 of 185.
+    expect(text(folded)).toContain("89 of 185 test rows were also in training");
+    expect(text(folded)).toContain("Holdout, 154 rows it never saw");
+    const html = runSummaryView(vmOf(demo), "r03", { open: "evidence" });
     expect(html).toContain('class="ck ck--tab"');
-    expect(html.indexOf("</dl>")).toBeLessThan(html.indexOf('class="ck ck--tab"'));
-    expect(text(html)).toContain("89 of 185 test rows were also in training");
-    expect(text(html)).toContain("Holdout, 154 rows it never saw");
+    expect(html.indexOf('id="rn-panel-evidence"')).toBeLessThan(html.indexOf('class="ck ck--tab"'));
   });
 
   it("shows a fork child's own hidden results on its page", () => {

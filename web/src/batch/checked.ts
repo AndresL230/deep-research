@@ -276,7 +276,56 @@ export function practiceOf(config: unknown): { can: [number, number]; place: [nu
 /** The scene a batch's agents were given (`config.robot_practice.layout`), when it has one. */
 const layoutOf = (config: unknown): SceneLayout | undefined => (config as Partial<BatchConfig> | null)?.robot_practice?.layout;
 
-function robotChecked(batch: string, key: string, s: CheckedSubject, config: unknown): string {
+/** Which part of the component to draw: all of it (How it works), the run page's small map for its side column, or
+ *  the claim next to the truth for its Evidence panel. */
+export type CheckedPart = "full" | "map" | "evidence";
+
+/** What a robot kind's map is made of (the arm's table, the push dial, the bag positions), to draw as `part`. */
+interface MapParts {
+  batch: string;
+  key: string;
+  /** The section's own class ("ck--push") and the map's ("ck-map--dial"). */
+  cls: string;
+  mapCls: string;
+  mapLabel: string;
+  /** The map's picture and its buttons. */
+  map: string;
+  pair: string;
+  legend: string;
+  sentence: string;
+  sig: string;
+  /** How many hidden episodes it draws, and what one is called on the small map's heading ("Positions"). */
+  hidden: number;
+  noun: string;
+  scored: boolean;
+}
+
+function mapSection(m: MapParts, part: CheckedPart): string {
+  const cls = m.cls ? ` ${m.cls}` : "";
+  const mapCls = m.mapCls ? ` ${m.mapCls}` : "";
+  if (part === "evidence") return `<section class="ck ck--robot ck--ev${cls}" data-morph-key="${attr(`ckev:${m.key}:${m.sig}`)}">${m.pair}</section>`;
+  if (part === "map") {
+    // The run page's map: a pressed dot plays in the page's own player (`data-ck-play`), so it has no player of its own.
+    const note = m.hidden ? `${m.hidden} hidden, press one to replay` : m.scored ? "Not recorded" : "Shown once scored";
+    return `<section class="ck ck--robot ck--mini${cls}" data-keep data-ck data-ck-play data-batch="${attr(m.batch)}" data-ck-key="${attr(m.key)}" data-morph-key="${attr(`ckm:${m.key}:${m.sig}`)}">`
+      + `<h3 class="ck-mini-h"><span>${esc(m.noun)}</span><span class="ck-mini-n">${esc(note)}</span></h3>`
+      + `<div class="ck-map${mapCls}" role="group" aria-label="${attr(m.mapLabel)}">${m.map}</div>`
+      + m.legend.replace('class="ck-legend"', 'class="ck-legend ck-legend--mini"')
+      + `</section>`;
+  }
+  return `<section class="ck ck--robot${cls}" data-keep data-ck data-batch="${attr(m.batch)}" data-ck-key="${attr(m.key)}" data-morph-key="${attr(`ck:${m.key}:${m.sig}`)}">`
+    + `<h3 class="ck-h">What it checked vs what it is judged on</h3>`
+    + m.pair
+    + `<div class="ck-body">`
+    + `<div class="ck-map${mapCls}" role="group" aria-label="${attr(m.mapLabel)}">${m.map}</div>`
+    + `<div class="ck-side">${m.legend}${m.sentence}</div>`
+    + `</div>`
+    // Empty until a dot is pressed: no episode is chosen for the reader.
+    + (m.hidden ? `<div class="ck-player" data-ck-player aria-live="polite"></div>` : "")
+    + `</section>`;
+}
+
+function robotChecked(batch: string, key: string, s: CheckedSubject, config: unknown, part: CheckedPart = "full"): string {
   const words = wordsOf(config);
   // A LIBERO-PRO batch: LIBERO's spot and basket, and hidden positions that come in small regions.
   const own = practiceOf(config);
@@ -311,18 +360,9 @@ function robotChecked(batch: string, key: string, s: CheckedSubject, config: unk
   const mapLabel = dots.length
     ? `Table seen from above: ${countsText(counts)}`
     : "Table seen from above";
-  return `<section class="ck ck--robot" data-keep data-ck data-batch="${attr(batch)}" data-ck-key="${attr(key)}" data-morph-key="${attr(`ck:${key}:${sig}`)}">`
-    + `<h3 class="ck-h">What it checked vs what it is judged on</h3>`
-    + pair
-    + `<div class="ck-body">`
-    + `<div class="ck-map" role="group" aria-label="${attr(mapLabel)}">`
-    + tableSvg(checked, words.checked, own ? { place: own.place, placeWord: libero ? "Basket" : "Place zone", regions: grouped?.regions, practice: own.can, layout: layoutOf(config) } : {})
-    + `${dots.map(dotButton).join("")}</div>`
-    + `<div class="ck-side">${legend}${sentence}</div>`
-    + `</div>`
-    // Empty until a dot is pressed: no episode is chosen for the reader.
-    + (dots.length ? `<div class="ck-player" data-ck-player aria-live="polite"></div>` : "")
-    + `</section>`;
+  const map = tableSvg(checked, words.checked, own ? { place: own.place, placeWord: libero ? "Basket" : "Place zone", regions: grouped?.regions, practice: own.can, layout: layoutOf(config) } : {})
+    + dots.map(dotButton).join("");
+  return mapSection({ batch, key, cls: "", mapCls: "", mapLabel, map, pair, legend, sentence, sig, hidden: dots.length, noun: "Positions", scored }, part);
 }
 
 // ── the push recovery dial ───────────────────────────────────────────────────
@@ -444,7 +484,7 @@ function pushButton(d: PushDot): string {
     + ` style="left:calc(${n2((sx / DIAL) * 100)}%${off});top:${n2((sy / DIAL) * 100)}%">${shape(d.result)}</button>`;
 }
 
-function pushChecked(batch: string, key: string, s: CheckedSubject, config: unknown): string {
+function pushChecked(batch: string, key: string, s: CheckedSubject, config: unknown, part: CheckedPart = "full"): string {
   const words = wordsOf(config);
   const scored = isScored(s);
   const checked = (s.checked_pushes ?? []).filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]));
@@ -471,15 +511,8 @@ function pushChecked(batch: string, key: string, s: CheckedSubject, config: unkn
   const sig = hash(JSON.stringify([s.status, s.reported_accuracy, s.true_accuracy, nHidden, checked, results, words.checked]));
   const said = PUSH_OUTCOMES.filter((o) => counts[o] > 0).map((o) => `${counts[o]} ${o}`).join(", ");
   const mapLabel = `The robot seen from above, each push on the side it came from${said ? `: ${said}` : ""}`;
-  return `<section class="ck ck--robot ck--push" data-keep data-ck data-batch="${attr(batch)}" data-ck-key="${attr(key)}" data-morph-key="${attr(`ck:${key}:${sig}`)}">`
-    + `<h3 class="ck-h">What it checked vs what it is judged on</h3>`
-    + pair
-    + `<div class="ck-body">`
-    + `<div class="ck-map ck-map--dial" role="group" aria-label="${attr(mapLabel)}">${dialSvg(checked, words.checked)}${dots.map(pushButton).join("")}</div>`
-    + `<div class="ck-side">${legend}${sentence}</div>`
-    + `</div>`
-    + (dots.length ? `<div class="ck-player" data-ck-player aria-live="polite"></div>` : "")
-    + `</section>`;
+  const map = dialSvg(checked, words.checked) + dots.map(pushButton).join("");
+  return mapSection({ batch, key, cls: "ck--push", mapCls: "ck-map--dial", mapLabel, map, pair, legend, sentence, sig, hidden: dots.length, noun: "Pushes", scored }, part);
 }
 
 // ── the strike map: the bags, seen from behind the robot ─────────────────────
@@ -608,7 +641,7 @@ function frontSvg(checked: number[][], practice: number[] | null, checkedWord: s
     + `</svg>`;
 }
 
-function strikeChecked(batch: string, key: string, s: CheckedSubject, config: unknown): string {
+function strikeChecked(batch: string, key: string, s: CheckedSubject, config: unknown, part: CheckedPart = "full"): string {
   const words = wordsOf(config);
   const scored = isScored(s);
   const triple = (p: unknown): p is number[] => Array.isArray(p) && p.length >= 3 && p.slice(0, 3).every((v) => Number.isFinite(v));
@@ -640,17 +673,8 @@ function strikeChecked(batch: string, key: string, s: CheckedSubject, config: un
   const sig = hash(JSON.stringify([s.status, s.reported_accuracy, s.true_accuracy, nHidden, checked, results, words.checked]));
   const view = "Bag positions seen from behind the robot";
   const mapLabel = dots.length ? `${view}: ${happened.map((o) => `${counts[o]} ${STRIKE_KEY[o]}`).join(", ")}` : view;
-  return `<section class="ck ck--robot ck--front" data-keep data-ck data-batch="${attr(batch)}" data-ck-key="${attr(key)}" data-morph-key="${attr(`ck:${key}:${sig}`)}">`
-    + `<h3 class="ck-h">What it checked vs what it is judged on</h3>`
-    + pair
-    + `<div class="ck-body">`
-    + `<div class="ck-map ck-map--front" role="group" aria-label="${attr(mapLabel)}">`
-    + frontSvg(checked, practice, words.checked)
-    + `${dots.map(strikeButton).join("")}</div>`
-    + `<div class="ck-side">${legend}${sentence}</div>`
-    + `</div>`
-    + (dots.length ? `<div class="ck-player" data-ck-player aria-live="polite"></div>` : "")
-    + `</section>`;
+  const map = frontSvg(checked, practice, words.checked) + dots.map(strikeButton).join("");
+  return mapSection({ batch, key, cls: "ck--front", mapCls: "ck-map--front", mapLabel, map, pair, legend, sentence, sig, hidden: dots.length, noun: "Bag positions", scored }, part);
 }
 
 // ── another test set on the table (LIBERO-PRO) ───────────────────────────────
@@ -722,27 +746,47 @@ export function benchmarkMapView(batch: string, key: string, bench: Benchmark | 
 
 // ── the tabular bars ─────────────────────────────────────────────────────────
 
-function tabularChecked(key: string, s: CheckedSubject, config: unknown): string {
-  if (!isScored(s)) return "";
+/** A scored tabular run's evidence in words: its own test rows and their copies of training rows ("89 of 185 test
+ *  rows were also in training"), and the holdout it is judged on ("Holdout, 154 rows it never saw"). Null before
+ *  scoring, or without the numbers. */
+export interface TabularEvidence {
+  nTest: number | null;
+  copies: number | null;
+  share: number;
+  nHidden: number | null;
+  copiesLine: string;
+  testName: string;
+  holdName: string;
+}
+
+export function tabularEvidence(s: CheckedSubject, config: unknown): TabularEvidence | null {
+  if (!isScored(s)) return null;
   const words = wordsOf(config);
   const nTest = typeof s.n_test === "number" && s.n_test > 0 ? s.n_test : null;
   const copies = nTest != null && typeof s.n_test_copies === "number" ? Math.max(0, Math.min(nTest, s.n_test_copies)) : null;
   const share = nTest != null && copies != null ? copies / nTest : typeof s.overlap_share === "number" ? s.overlap_share : null;
-  if (share == null || !Number.isFinite(share)) return "";
+  if (share == null || !Number.isFinite(share)) return null;
   const nHidden = typeof s.n_hidden === "number" && s.n_hidden > 0 ? s.n_hidden : null;
-
-  // Both bars on one scale of rows when both counts are known, so their lengths compare.
-  const scale = nTest != null && nHidden != null ? Math.max(nTest, nHidden) : null;
-  const testW = scale ? (nTest! / scale) * 100 : 100;
-  const holdW = scale ? (nHidden! / scale) * 100 : 100;
-  const copyW = Math.max(0, Math.min(1, share)) * 100;
-
   const evidence = words.evidence_text ?? TABULAR_WORDS.evidence_text ?? "";
   const copiesLine = nTest != null && copies != null
     ? `${copies} of ${nTest} ${evidence.replace(/^of\s+/, "")}`
     : `${pct(share, 0)} ${evidence}`;
   const testName = nTest != null ? `Its ${words.checked}, ${plural(nTest, "row")}` : `Its ${words.checked}`;
   const holdName = `Holdout, ${judgedOn(words, nHidden).replace(/^(on|at)\s+/, "")}`;
+  return { nTest, copies, share, nHidden, copiesLine, testName, holdName };
+}
+
+function tabularChecked(key: string, s: CheckedSubject, config: unknown): string {
+  const ev = tabularEvidence(s, config);
+  if (!ev) return "";
+  const words = wordsOf(config);
+  const { nTest, copies, share, nHidden, copiesLine, testName, holdName } = ev;
+
+  // Both bars on one scale of rows when both counts are known, so their lengths compare.
+  const scale = nTest != null && nHidden != null ? Math.max(nTest, nHidden) : null;
+  const testW = scale ? (nTest! / scale) * 100 : 100;
+  const holdW = scale ? (nHidden! / scale) * 100 : 100;
+  const copyW = Math.max(0, Math.min(1, share)) * 100;
 
   const row = (cls: string, name: string, width: number, inner: string, label: string, value: string, note: string, aria: string): string =>
     `<div class="ck-row ck-row--${cls}">`
@@ -771,11 +815,13 @@ function tabularChecked(key: string, s: CheckedSubject, config: unknown): string
  * tabular run before scoring, a robot run with neither checked positions nor hidden results, an older batch without
  * the numbers). `key` is the run id or "fork/child", `batch` the batch id for the motion file URLs.
  */
-export function checkedView(batch: string, key: string, s: CheckedSubject | null | undefined, config: unknown): string {
+export function checkedView(batch: string, key: string, s: CheckedSubject | null | undefined, config: unknown, part: CheckedPart = "full"): string {
   if (!s) return "";
-  if (isPushBatch(config)) return pushChecked(batch, key, s, config);
-  if (isHumanoid(config)) return strikeChecked(batch, key, s, config);
-  return isMotionBatch(config) ? robotChecked(batch, key, s, config) : tabularChecked(key, s, config);
+  if (isPushBatch(config)) return pushChecked(batch, key, s, config, part);
+  if (isHumanoid(config)) return strikeChecked(batch, key, s, config, part);
+  if (isMotionBatch(config)) return robotChecked(batch, key, s, config, part);
+  // A tabular run has no map: its bars are the whole of it.
+  return part === "map" ? "" : tabularChecked(key, s, config);
 }
 
 // ── the clicks ───────────────────────────────────────────────────────────────
@@ -787,13 +833,24 @@ export interface DotEl {
   setAttribute(name: string, value: string): void;
   closest(selector: string): unknown;
 }
+/** The run page's player, as far as a dot needs it: something to send the episode to. */
+export interface PlayerEl { dispatchEvent(e: Event): boolean }
 interface MapEl {
   dataset: Record<string, string | undefined>;
   querySelectorAll(selector: string): ArrayLike<DotEl>;
   querySelector(selector: string): { innerHTML: string } | null;
+  closest?(selector: string): { querySelector(selector: string): PlayerEl | null } | null;
 }
 
-/** A dot was pressed: mark it (and only it) pressed, and put its episode in the player. Returns the motion path. */
+/** What a dot on the run page's map sends that page's player (robot/viewer.ts listens): the episode's recording, null
+ *  when none was saved, and its label. */
+export const PLAY_EVENT = "rb-play";
+export interface PlayDetail { file: string | null; label: string }
+/** What the player says when it starts an episode (`detail.file`), so the map marks the dot it plays, or none. */
+export const PICKED_EVENT = "rb-picked";
+
+/** A dot was pressed: mark it (and only it) pressed, and play its episode: in the run page's player when the map is
+ *  that page's (`data-ck-play`), else in the map's own player. Returns the motion path. */
 export function pressDot(dot: DotEl): string | null {
   const map = dot.closest("[data-ck]") as MapEl | null;
   if (!map) return null;
@@ -802,6 +859,12 @@ export function pressDot(dot: DotEl): string | null {
   const result = dot.dataset.ckResult as HiddenOutcome | PushOutcome | undefined;
   const label = dot.getAttribute("aria-label") ?? "";
   const motion = dot.dataset.ckMotion || null;
+  if (map.dataset.ckPlay != null) {
+    const target = map.closest?.("[data-rb-deck]")?.querySelector("[data-robot-view]");
+    const detail: PlayDetail = { file: motion, label };
+    target?.dispatchEvent(new CustomEvent(PLAY_EVENT, { detail }));
+    return motion;
+  }
   const player = map.querySelector("[data-ck-player]");
   if (player && result && (isOutcome(result) || isPushOutcome(result))) {
     player.innerHTML = episodeView(map.dataset.batch ?? "", map.dataset.ckKey ?? "", { label, result, motion });
@@ -816,8 +879,19 @@ export function wireChecked(root: Pick<Document, "addEventListener" | "removeEve
     const dot = t?.closest?.("[data-ck-dot]") as DotEl | null | undefined;
     if (dot) pressDot(dot);
   };
+  // The run page's player started an episode: the dot of that recording shows pressed, or none does (one of the run's
+  // own episodes, picked from its list).
+  const onPicked = (e: Event): void => {
+    const deck = (e.target as Element | null)?.closest?.("[data-rb-deck]");
+    if (!deck) return;
+    const file = (e as CustomEvent<{ file?: string }>).detail?.file ?? "";
+    deck.querySelectorAll<HTMLElement>("[data-ck-play] [data-ck-dot]").forEach((d) => {
+      d.setAttribute("aria-pressed", String(!!file && d.dataset.ckMotion === file));
+    });
+  };
   root.addEventListener("click", onClick);
-  return () => root.removeEventListener("click", onClick);
+  root.addEventListener(PICKED_EVENT, onPicked);
+  return () => { root.removeEventListener("click", onClick); root.removeEventListener(PICKED_EVENT, onPicked); };
 }
 
 if (typeof document !== "undefined") wireChecked(document);

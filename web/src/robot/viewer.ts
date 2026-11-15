@@ -17,7 +17,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { attr, esc } from "../ui";
 import { ARM_MODEL, fetchMotion, fetchScene, fetchSummaries, type MotionData, type MotionSummary, type SceneData, type SceneGeom, type SceneView } from "./data";
-import { BASKET_LEGEND, PUSH_LEGEND, STRIKE_LEGEND, SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, hasBasket, motionName, noWebglView, pushText, resultFacts, resultText, resultTone, seconds, xy, xyz } from "./markup";
+import { BASKET_LEGEND, PUSH_LEGEND, STRIKE_LEGEND, SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, hasBasket, motionName, noWebglView, pushText, resultFacts, resultText, resultTone, resultWord, seconds, xy, xyz } from "./markup";
 
 // ── WebGL, checked once ──────────────────────────────────────────────────────
 
@@ -471,11 +471,39 @@ function parseFiles(el: HTMLElement): string[] {
   } catch { return []; }
 }
 
+/** Where the player's episode list goes: inside it, or on the run page in the side column's `data-rb-list-host`
+ *  (robotView with `listHost`), which the page draws once and leaves to script (`data-keep`). */
+function listHost(el: HTMLElement): HTMLElement | null {
+  if (el.dataset.rbList !== "host") return null;
+  return el.closest("[data-rb-deck]")?.querySelector<HTMLElement>("[data-rb-list-host]") ?? null;
+}
+
+/** The episode list: its heading and one row per file. */
+function listMarkup(files: string[], summaries: Record<string, MotionSummary> | null, always: boolean): string {
+  return (files.length > 1 || always ? `<div class="rb-files-h">Episodes <span>${files.length}</span></div>` : "")
+    + `<div class="rb-files" role="listbox" aria-label="Episodes">${files.map((f, i) => fileButton(f, i, summaries?.[f] ?? null, always)).join("")}</div>`;
+}
+
+/** How an episode is judged (the arm's ring, a push arrow, a strike, a basket), as an info mark in the player's bar:
+ *  its key drawn small, its words in a tooltip and for a screen reader. The player sets the words per episode. */
+const LEGEND_TIP = `<span class="rb-info" tabindex="0" role="note" aria-label="${attr(SUCCESS_LEGEND)}" data-rb-legend>`
+  + `<span class="rb-legend-ring" aria-hidden="true"></span><span class="rb-info-i" aria-hidden="true" hidden>i</span>`
+  + `<span class="rb-info-tip" aria-hidden="true">${esc(SUCCESS_LEGEND)}</span></span>`;
+
+/** A dot on the run page's map asks the player for an episode that is not one of its files (a hidden one). */
+interface PlayRequest { file: string | null; label: string }
+const PLAY_EVENT = "rb-play";
+const PICKED_EVENT = "rb-picked";
+const picked = (el: HTMLElement, file: string | null): void => {
+  el.dispatchEvent(new CustomEvent(PICKED_EVENT, { bubbles: true, detail: { file } }));
+};
+
 export function mountPlayer(el: HTMLElement): { dispose(): void } {
   const batch = el.dataset.batch ?? "";
   const files = parseFiles(el);
   const renderer = makeRenderer();
   if (!renderer) return mountPlayerWithoutGl(el, batch, files);
+  const host = listHost(el);
   el.innerHTML = `<div class="rb-result" data-rb-result aria-live="polite"></div>`
     + `<div class="rb-stage">`
     + `<div class="rb-loading" data-rb-loading>Loading the robot…</div>`
@@ -489,10 +517,10 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     + `<span class="rb-time" data-rb-time>0.0 s</span>`
     + `<span class="rb-speeds" role="group" aria-label="Speed">${SPEEDS.map((s) => `<button type="button" class="rb-speed" data-rb-speed="${s}" aria-pressed="${s === 1}">${s}x</button>`).join("")}</span>`
     + `<button type="button" class="rb-icon rb-loop" data-rb-loop aria-pressed="true" title="Loop" aria-label="Loop">${ICON.loop}</button>`
+    + LEGEND_TIP
     + `</div>`
-    + `<p class="rb-legend" data-rb-legend><span class="rb-legend-ring" aria-hidden="true"></span><span>${esc(SUCCESS_LEGEND)}</span></p>`
-    + (files.length > 1 ? `<div class="rb-files-h">Episodes <span>${files.length}</span></div>` : "")
-    + `<div class="rb-files" role="listbox" aria-label="Motion files">${files.map((f, i) => fileButton(f, i, null)).join("")}</div>`;
+    + (host ? "" : listMarkup(files, null, false));
+  if (host) host.innerHTML = listMarkup(files, null, true);
 
   const stage = el.querySelector<HTMLElement>(".rb-stage")!;
   const q = <T extends HTMLElement>(sel: string): T => el.querySelector<T>(sel)!;
@@ -501,7 +529,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
   const playBtn = q<HTMLButtonElement>("[data-rb-play]");
   const seek = q<HTMLInputElement>("[data-rb-seek]");
   const timeEl = q<HTMLElement>("[data-rb-time]");
-  const listEl = q<HTMLElement>(".rb-files");
+  const listEl = (host ?? el).querySelector<HTMLElement>(".rb-files")!;
   const endLabel = q<HTMLElement>("[data-rb-endl]");
   const legendEl = q<HTMLElement>("[data-rb-legend]");
   const projected = new THREE.Vector3();
@@ -581,13 +609,13 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     timeEl.textContent = `${seconds(t)} / ${seconds(d)}`;
   };
 
-  const showResult = (m: MotionData | null, path: string): void => {
+  const showResult = (m: MotionData | null, path: string, name?: string): void => {
     if (!m) { resultEl.innerHTML = ""; return; }
     const tone = resultTone(m.result);
     const text = resultText(m.result);
     const facts = resultFacts(m.result).filter((f) => !(f.endsWith("from center") && text.includes(" cm")));
     const pushed = m.push ? `<span class="rb-result-f">${esc(`push ${pushText(m.push)}`)}</span>` : "";
-    resultEl.innerHTML = `<span class="rb-result-n" title="${attr(path)}">${esc(motionName(path, m.push ? "push" : "position"))}</span>`
+    resultEl.innerHTML = `<span class="rb-result-n" title="${attr(path)}">${esc(name ?? motionName(path, m.push ? "push" : "position"))}</span>`
       + `<span class="rb-tag rb-tag--${tone}">${tone === "ok" ? "Success" : tone === "bad" ? "Fail" : "No result"}</span>`
       + `<span class="rb-result-t">${esc(text)}</span>`
       + pushed
@@ -597,18 +625,24 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
   /** One world per scene: a batch's files are all one robot's, but a player could be handed both. */
   const worlds = new Map<string, World>();
 
-  const select = async (i: number): Promise<void> => {
-    if (i < 0 || i >= files.length) return;
+  const mark = (): void => {
+    for (const b of Array.from(listEl.children)) b.setAttribute("aria-selected", String(Number((b as HTMLElement).dataset.rbFile) === current));
+  };
+
+  /** Play `path`: one of the files (`i` its index), or a hidden episode a dot on the map asked for (`i` -1, `name`
+   *  as the map names it). */
+  const play = async (path: string, i: number, name?: string): Promise<void> => {
     current = i;
     const my = ++seq;
-    for (const b of Array.from(listEl.children)) b.setAttribute("aria-selected", String(Number((b as HTMLElement).dataset.rbFile) === i));
+    mark();
+    picked(el, path);
     loadingEl.hidden = false;
     loadingEl.textContent = "Loading the episode…";
     try {
       // The motion file says which robot it is; the arm's scene starts loading meanwhile, as it did before there were two.
       const armScene = fetchScene();
       armScene.catch(() => undefined);
-      const m = await fetchMotion(batch, files[i]);
+      const m = await fetchMotion(batch, path);
       const scene = await fetchScene(m.model_id);
       if (disposed || my !== seq) return;
       const id = scene.model_id || ARM_MODEL;
@@ -628,17 +662,21 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
       hold = 0;
       seek.max = String(duration(m));
       loadingEl.hidden = true;
-      showResult(m, files[i]);
+      showResult(m, path, name);
       // How this episode is judged: a push arrow, a strike on the bag, a basket, or the arm's ring. A run's files
       // can differ in this (a basket only where a layout has one), so it is set for every file.
       const judged = w.view.push_body ? PUSH_LEGEND : m.bag_pos ? STRIKE_LEGEND : hasBasket(m) ? BASKET_LEGEND : SUCCESS_LEGEND;
       legendEl.classList.toggle("rb-legend--push", !!w.view.push_body);
-      legendEl.querySelector(".rb-legend-ring")?.toggleAttribute("hidden", judged === STRIKE_LEGEND || judged === BASKET_LEGEND);
-      const legendText = legendEl.querySelector("span:last-child");
+      const noRing = judged === STRIKE_LEGEND || judged === BASKET_LEGEND;
+      legendEl.querySelector(".rb-legend-ring")?.toggleAttribute("hidden", noRing);
+      legendEl.querySelector(".rb-info-i")?.toggleAttribute("hidden", !noRing);
+      legendEl.setAttribute("aria-label", judged);
+      const legendText = legendEl.querySelector(".rb-info-tip");
       if (legendText) legendText.textContent = judged;
-      if (m.can_start) stage.setAttribute("aria-label", `Episode ${motionName(files[i])}: can from ${xy(m.can_start)}`);
-      else if (m.push) stage.setAttribute("aria-label", `Episode ${motionName(files[i], "push")}: push ${pushText(m.push)}`);
-      else if (m.bag_pos) stage.setAttribute("aria-label", `Episode ${motionName(files[i])}: bag at ${xyz(m.bag_pos)}`);
+      const shown = name ?? motionName(path, m.push ? "push" : "position");
+      if (m.can_start) stage.setAttribute("aria-label", `Episode ${shown}: can from ${xy(m.can_start)}`);
+      else if (m.push) stage.setAttribute("aria-label", `Episode ${shown}: push ${pushText(m.push)}`);
+      else if (m.bag_pos) stage.setAttribute("aria-label", `Episode ${shown}: bag at ${xyz(m.bag_pos)}`);
       setPlaying(true);
       dirty = true;
       showTime();
@@ -648,6 +686,22 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
       loadingEl.textContent = `Couldn't load this episode: ${e instanceof Error ? e.message : String(e)}`;
     }
   };
+  const select = (i: number): void => {
+    if (i >= 0 && i < files.length) void play(files[i], i);
+  };
+  // A dot on the map: its hidden episode plays here, named as the map names it ("Position 7", "Push 3").
+  const onPlay = (e: Event): void => {
+    const d = (e as CustomEvent<PlayRequest>).detail;
+    if (!d) return;
+    const name = d.label.split(":")[0] || "Hidden episode";
+    if (d.file) { void play(d.file, -1, name); return; }
+    current = -1;
+    ++seq;
+    mark();
+    setPlaying(false);
+    resultEl.innerHTML = `<span class="rb-result-n">${esc(name)}</span><span class="rb-result-t">No recording was saved for this episode.</span>`;
+  };
+  el.addEventListener(PLAY_EVENT, onPlay);
 
   const resize = (): void => {
     const w = stage.clientWidth, h = stage.clientHeight;
@@ -716,7 +770,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
 
   const onClick = (e: MouseEvent): void => {
     const b = (e.target as Element).closest<HTMLElement>("button");
-    if (!b || !el.contains(b)) return;
+    if (!b || !(el.contains(b) || host?.contains(b))) return;
     if (b.hasAttribute("data-rb-play")) {
       if (motion && !playing && t >= duration(motion)) t = 0;
       setPlaying(!playing);
@@ -733,7 +787,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
       controls.update();
       dirty = true;
     } else if (b.dataset.rbFile != null) {
-      void select(Number(b.dataset.rbFile));
+      select(Number(b.dataset.rbFile));
     }
   };
   const onSeek = (): void => {
@@ -755,18 +809,19 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     }
   };
   el.addEventListener("click", onClick);
+  host?.addEventListener("click", onClick);
   seek.addEventListener("input", onSeek);
   stage.tabIndex = 0;
   stage.addEventListener("keydown", onKey);
 
   resize();
-  void select(files.length - 1);
-  if (files.length > 1) {
+  select(files.length - 1);
+  if (files.length > 1 || host) {
     fetchSummaries(batch, files).then((s) => {
       if (disposed) return;
       Object.assign(summaries, s);
-      listEl.innerHTML = files.map((f, i) => fileButton(f, i, summaries[f] ?? null)).join("");
-      for (const b of Array.from(listEl.children)) b.setAttribute("aria-selected", String(Number((b as HTMLElement).dataset.rbFile) === current));
+      listEl.innerHTML = files.map((f, i) => fileButton(f, i, summaries[f] ?? null, !!host)).join("");
+      mark();
     }).catch(() => undefined);
   }
 
@@ -779,6 +834,8 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
       controls.dispose();
       window.removeEventListener("wheel", onPageWheel);
       el.removeEventListener("click", onClick);
+      el.removeEventListener(PLAY_EVENT, onPlay);
+      host?.removeEventListener("click", onClick);
       renderer.dispose();
       renderer.forceContextLoss();
     },
@@ -789,43 +846,67 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
 function mountPlayerWithoutGl(el: HTMLElement, batch: string, files: string[]): { dispose(): void } {
   let disposed = false;
   let current = files.length - 1;
-  el.innerHTML = `<div class="rb-stage rb-stage--nogl" data-rb-nogl></div>`
-    + `<div class="rb-files" role="listbox" aria-label="Motion files">${files.map((f, i) => fileButton(f, i, null)).join("")}</div>`;
+  let seq = 0;
+  const host = listHost(el);
+  el.innerHTML = `<div class="rb-stage rb-stage--nogl" data-rb-nogl></div>` + (host ? "" : listMarkup(files, null, false));
+  if (host) host.innerHTML = listMarkup(files, null, true);
   const box = el.querySelector<HTMLElement>("[data-rb-nogl]")!;
-  const listEl = el.querySelector<HTMLElement>(".rb-files")!;
+  const listEl = (host ?? el).querySelector<HTMLElement>(".rb-files")!;
   const mark = (): void => {
     for (const b of Array.from(listEl.children)) b.setAttribute("aria-selected", String(Number((b as HTMLElement).dataset.rbFile) === current));
   };
-  const show = (i: number): void => {
+  /** `name` set: a hidden episode from the map, named as the map names it; else the file's own name. */
+  const showPath = (path: string | null, i: number, name?: string): void => {
     current = i;
+    const my = ++seq;
     mark();
-    box.innerHTML = noWebglView(motionName(files[i]), null);
-    fetchMotion(batch, files[i]).then((m) => {
-      if (!disposed && current === i) box.innerHTML = noWebglView(motionName(files[i], m.push ? "push" : "position"), m.result);
+    picked(el, path);
+    box.innerHTML = noWebglView(name ?? (path ? motionName(path) : ""), null);
+    if (!path) return;
+    fetchMotion(batch, path).then((m) => {
+      if (!disposed && my === seq) box.innerHTML = noWebglView(name ?? motionName(path, m.push ? "push" : "position"), m.result);
     }).catch(() => undefined);
   };
+  const show = (i: number): void => { if (i >= 0 && i < files.length) showPath(files[i], i); };
   const onClick = (e: MouseEvent): void => {
     const b = (e.target as Element).closest<HTMLElement>("[data-rb-file]");
-    if (b && el.contains(b)) show(Number(b.dataset.rbFile));
+    if (b && (el.contains(b) || host?.contains(b))) show(Number(b.dataset.rbFile));
+  };
+  const onPlay = (e: Event): void => {
+    const d = (e as CustomEvent<PlayRequest>).detail;
+    if (d) showPath(d.file, -1, d.label.split(":")[0] || "Hidden episode");
   };
   el.addEventListener("click", onClick);
+  host?.addEventListener("click", onClick);
+  el.addEventListener(PLAY_EVENT, onPlay);
   show(current);
-  if (files.length > 1) {
+  if (files.length > 1 || host) {
     fetchSummaries(batch, files).then((s) => {
       if (disposed) return;
-      listEl.innerHTML = files.map((f, i) => fileButton(f, i, s[f] ?? null)).join("");
+      listEl.innerHTML = files.map((f, i) => fileButton(f, i, s[f] ?? null, !!host)).join("");
       mark();
     }).catch(() => undefined);
   }
-  return { dispose(): void { disposed = true; el.removeEventListener("click", onClick); } };
+  return {
+    dispose(): void {
+      disposed = true;
+      el.removeEventListener("click", onClick);
+      el.removeEventListener(PLAY_EVENT, onPlay);
+      host?.removeEventListener("click", onClick);
+    },
+  };
 }
 
-function fileButton(path: string, i: number, s: MotionSummary | null): string {
+/** One row of the episode list. `compact` (the run page's side column): the name and the result in one word, the rest
+ *  in the tooltip. */
+function fileButton(path: string, i: number, s: MotionSummary | null, compact = false): string {
   const tone = s?.error ? "none" : resultTone(s?.result);
-  const meta = s && !s.error
+  const full = s && !s.error
     ? [s.can_start ? `can ${xy(s.can_start)}` : s.bag_pos ? `bag ${xyz(s.bag_pos)}` : "", s.push ? `push ${pushText(s.push)}` : "", resultText(s.result)].filter(Boolean).join(" · ")
     : s?.error ? "can't be read" : "";
-  return `<button type="button" class="rb-file" role="option" data-rb-file="${i}" aria-selected="false" title="${attr(path)}">`
+  const meta = compact && s && !s.error ? resultWord(s.result) : full;
+  const title = compact && full ? `${motionName(path, s?.push ? "push" : "position")}: ${full}` : path;
+  return `<button type="button" class="rb-file${compact ? " rb-file--row" : ""}" role="option" data-rb-file="${i}" aria-selected="false" title="${attr(title)}">`
     + `<span class="rb-dot rb-dot--${tone}" aria-hidden="true"></span>`
     + `<span class="rb-file-n">${esc(motionName(path, s?.push ? "push" : "position"))}</span>`
     + (meta ? `<span class="rb-file-m">${esc(meta)}</span>` : "")
