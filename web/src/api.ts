@@ -104,14 +104,24 @@ export interface DomainWords {
  *  down in the wrong place (missed), or let go of in the air (dropped). */
 export type HiddenOutcome = "placed" | "tipped" | "missed" | "dropped";
 
-/** One hidden episode of a scored robot run: where the can stood, what really happened, and its recording. */
+/** What happened at one hidden push (humanoid, sim/humanoid/outcome.py): still standing, stood but rocked hard, went
+ *  down, or the controller failed. */
+export type PushOutcome = "upright" | "stumbled" | "fell" | "error";
+
+/** One hidden episode of a scored robot run: where the can stood (or the push, for the humanoid), what really
+ *  happened, and its recording. */
 export interface HiddenResult {
+  /** robot_arm: the can's start, meters. humanoid: the push as a vector, force_n * (cos, sin) of its angle, newtons. */
   x: number;
   y: number;
   seed: number;
-  result: HiddenOutcome;
-  /** The final distance of the can from the zone center, cm, whatever the result; null only when the episode never ran. */
-  place_error_cm: number | null;
+  result: HiddenOutcome | PushOutcome;
+  /** robot_arm: the final distance of the can from the zone center, cm; null only when the episode never ran. */
+  place_error_cm?: number | null;
+  /** humanoid: the push, and the most the torso tilted. */
+  angle_deg?: number;
+  force_n?: number;
+  max_tilt_deg?: number | null;
   /** The episode's motion file, low frame rate, as a path for `batchFileUrl` (`runs/r02/hidden/07-s0.motion.json`). */
   motion: string | null;
   /** What was picked, in a scene whose object differs from episode to episode: "milk". Absent for the can. */
@@ -206,7 +216,9 @@ export interface RunScore {
   /** robot_arm: the can positions the run's own episodes used (printed results and saved motion files), [x, y] in
    *  meters, rounded to the millimeter, deduplicated, in order of first appearance (what it checked). */
   checked_positions?: [number, number][];
-  /** robot_arm: every hidden episode's real result. Only present once the run is scored. */
+  /** humanoid: the pushes the run's own episodes used, [angle_deg, force_n], deduplicated, in order of first appearance. */
+  checked_pushes?: [number, number][];
+  /** robot_arm and humanoid: every hidden episode's real result. Only present once the run is scored. */
   hidden_results?: HiddenResult[];
   /** tabular: rows in the run's own test set, and how many of them are copies of training rows. */
   n_test?: number | null;

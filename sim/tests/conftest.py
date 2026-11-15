@@ -1,4 +1,4 @@
-"""The sim tests need the panda assets, which are downloaded, not committed (sim/fetch_assets.py)."""
+"""The sim tests need the panda and G1 assets, which are downloaded, not committed (sim/fetch_assets.py)."""
 
 import pytest
 
@@ -11,5 +11,11 @@ def _panda_assets():
     if missing:
         pytest.exit(
             f"{len(missing)} panda asset files are missing from sim/assets/: run `python -m sim.fetch_assets` first",
+            returncode=1,
+        )
+    missing = fetch_assets.missing_files(folder=fetch_assets.G1_FOLDER)
+    if missing:
+        pytest.exit(
+            f"{len(missing)} G1 asset files are missing from sim/assets/: run `python -m sim.fetch_assets --model unitree_g1` first",
             returncode=1,
         )

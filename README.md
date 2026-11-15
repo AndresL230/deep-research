@@ -237,7 +237,8 @@ flowchart LR
 | `deep_research/domains/robot_arm.py` | Robotics task and evaluation integration |
 | `deep_research/api.py` | Backend API and event streaming |
 | `sim/` | Franka Panda simulation, controllers, and scoring |
-| `sim/g1/` | Unitree G1 humanoid simulation: strike a hanging bag with a hand or a foot and stay standing |
+| `sim/g1/` | Unitree G1 humanoid simulation: strike a hanging bag with a hand or a foot and stay standing (the `humanoid` domain) |
+| `sim/humanoid/` | Unitree G1 humanoid simulation: stay standing when shoved (the `humanoid_push` domain) |
 | `web/` | Interactive frontend |
 | `fixtures/robot-live-investigation/` | **Real** recorded robot investigation (the demo backup; see "What a real run found") |
 | `fixtures/robot-demo-batch/` | **Simulated** robotics replay data for UI testing |
@@ -263,8 +264,7 @@ uv sync
 ### Prepare the robotics simulator
 
 ```bash
-uv run python -m sim.fetch_assets
-uv run python -m sim.g1.fetch_assets   # the humanoid (Unitree G1), for the `humanoid` domain
+uv run python -m sim.fetch_assets --model all   # the panda and the Unitree G1 (the `humanoid` and `humanoid_push` domains)
 ```
 
 Run a practice episode and save a motion trace:

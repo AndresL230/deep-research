@@ -8,6 +8,8 @@
 //   humanoid (config.domain)        the same, seen from behind the robot: the bags hang in front of it, so the map
 //                                   is side to side by height, with the band a fist reaches and the band only a
 //                                   foot reaches (`strikeChecked`).
+//   humanoid_push                   a dial: the robot from above, each push on the side it came from, farther out
+//                                   the harder it was (`pushChecked`).
 //   tabular (anything else)         the run's own test set as a bar, the share that copies training rows marked, next
 //                                   to the holdout it is judged on.
 //
@@ -17,11 +19,11 @@
 // robot/mount.ts watches for placeholders, so main.ts needs no change.
 
 import "./checked.css";
-import type { BatchConfig, BenchResult, Benchmark, DomainWords, HiddenOutcome, HiddenResult, RunScore, SceneLayout } from "../api";
+import type { BatchConfig, BenchResult, Benchmark, DomainWords, HiddenOutcome, HiddenResult, PushOutcome, RunScore, SceneLayout } from "../api";
 import { attr, esc } from "../ui";
 import { pct } from "./format";
 import { domainWords, judgedOn as judgedOnAll, TABULAR_WORDS } from "./words";
-import { cm, isMotionBatch, robotView } from "../robot/markup";
+import { cm, isMotionBatch, isPushBatch, pushText, robotView } from "../robot/markup";
 import "../robot/mount";
 
 // ── words ────────────────────────────────────────────────────────────────────
@@ -60,7 +62,7 @@ export interface Dot {
   position: number;
   /** Shown only when the position was run with more than one seed. */
   seed: number | null;
-  result: HiddenOutcome;
+  result: HiddenOutcome | PushOutcome;
   x: number;
   y: number;
   /** Where in a cluster of seeds at one position it sits: -1, 0, 1, ... times the cluster step. */
@@ -74,7 +76,7 @@ const posKey = (r: Pick<HiddenResult, "x" | "y">): string => `${r.x.toFixed(3)},
 const isOutcome = (v: unknown): v is HiddenOutcome => OUTCOMES.includes(v as HiddenOutcome);
 
 /** "Position 7: tipped over, 4.1 cm from center", "Position 3, seed 1: missed". */
-export function dotLabel(position: number, seed: number | null, r: Pick<HiddenResult, "result" | "place_error_cm">): string {
+export function dotLabel(position: number, seed: number | null, r: { result: HiddenOutcome; place_error_cm?: number | null }): string {
   const err = typeof r.place_error_cm === "number" && Number.isFinite(r.place_error_cm) ? `, ${cm(r.place_error_cm)} from center` : "";
   return `Position ${position}${seed != null ? `, seed ${seed}` : ""}: ${OUTCOME_TEXT[r.result]}${err}`;
 }
@@ -98,9 +100,10 @@ export function hiddenDots(results: HiddenResult[] | null | undefined): Dot[] {
     seen.set(k, j + 1);
     const position = order.get(k) ?? 0;
     const seed = n > 1 ? r.seed : null;
+    const result = r.result as HiddenOutcome;
     return {
-      i, position, seed, result: r.result, x: r.x, y: r.y, offset: j - (n - 1) / 2,
-      label: dotLabel(position, seed, r), motion: typeof r.motion === "string" && r.motion ? r.motion : null,
+      i, position, seed, result, x: r.x, y: r.y, offset: j - (n - 1) / 2,
+      label: dotLabel(position, seed, { result, place_error_cm: r.place_error_cm }), motion: typeof r.motion === "string" && r.motion ? r.motion : null,
     };
   });
 }
@@ -158,14 +161,15 @@ export function toPercent(x: number, y: number): { left: number; top: number } {
 const n2 = (v: number): string => String(Math.round(v * 100) / 100);
 
 /** A result's shape, 14 by 14, drawn in `currentColor`: a circle, a triangle, a cross and a diamond, so the result
- *  reads without color too. */
-export function shape(result: HiddenOutcome | "checked", size = 14): string {
+ *  reads without color too. The push recovery results take the same four: upright a circle, stumbled a triangle, fell a
+ *  cross, error a diamond. */
+export function shape(result: HiddenOutcome | PushOutcome | "checked", size = 14): string {
   const body = ((): string => {
     switch (result) {
-      case "placed": return `<circle cx="7" cy="7" r="5.2" fill="currentColor"/>`;
-      case "tipped": return `<path d="M7 1.6 12.8 12H1.2Z" fill="currentColor" stroke-linejoin="round"/>`;
-      case "missed": return `<path d="M2.6 2.6 11.4 11.4M11.4 2.6 2.6 11.4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" fill="none"/>`;
-      case "dropped": return `<path d="M7 1 13 7 7 13 1 7Z" fill="currentColor"/>`;
+      case "placed": case "upright": return `<circle cx="7" cy="7" r="5.2" fill="currentColor"/>`;
+      case "tipped": case "stumbled": return `<path d="M7 1.6 12.8 12H1.2Z" fill="currentColor" stroke-linejoin="round"/>`;
+      case "missed": case "fell": return `<path d="M2.6 2.6 11.4 11.4M11.4 2.6 2.6 11.4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" fill="none"/>`;
+      case "dropped": case "error": return `<path d="M7 1 13 7 7 13 1 7Z" fill="currentColor"/>`;
       case "checked": return `<circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="7" cy="7" r="1.6" fill="currentColor"/>`;
     }
   })();
@@ -233,7 +237,7 @@ function tableSvg(checked: [number, number][], checkedWord: string, o: TableOpti
 }
 
 const cap = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) : s);
-const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? "" : "s"}`;
+const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? "" : /(?:s|sh|ch|x)$/.test(one) ? "es" : "s"}`;
 
 function dotButton(d: Dot): string {
   const { left, top } = toPercent(d.x, d.y);
@@ -321,9 +325,166 @@ function robotChecked(batch: string, key: string, s: CheckedSubject, config: unk
     + `</section>`;
 }
 
-// ── the humanoid's map: the bags, seen from behind the robot ──────────────────
+// ── the push recovery dial ───────────────────────────────────────────────────
+//
+// The push recovery domain's version of the table map: the robot seen from above in the middle, facing up the page, and
+// each push drawn on the side it came from, farther out the harder it was (rings at 25 and 50 N). A shove from behind
+// (angle 0, the practice push) sits below the robot; a shove from the front above it.
 
-/** The batch is a humanoid one: its positions are bags hung in front of the robot, x, y and z. */
+export const PUSH_OUTCOMES: readonly PushOutcome[] = ["upright", "stumbled", "fell", "error"];
+const isPushOutcome = (v: unknown): v is PushOutcome => PUSH_OUTCOMES.includes(v as PushOutcome);
+const PUSH_OUTCOME_TEXT: Record<PushOutcome, string> = { upright: "stayed upright", stumbled: "stumbled, stayed up", fell: "fell", error: "controller error" };
+/** sim/humanoid/practice.py PRACTICE: the one push the agents are given, [angle_deg, force_n]. */
+export const PRACTICE_PUSH: [number, number] = [0, 50];
+/** The dial's edge in newtons: the hidden pushes go up to 50 N (sim/humanoid/hidden.py F_MAX). */
+const DIAL_MAX_N = 60;
+const DIAL_RINGS_N = [25, 50];
+/** viewBox units: a square, the robot at its center, DIAL_MAX_N at DIAL_R. */
+const DIAL = 100;
+const DIAL_R = 46;
+
+const angleGap = (a: number, b: number): number => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+const isPracticePush = (p: [number, number]): boolean => angleGap(p[0], PRACTICE_PUSH[0]) < 1 && Math.abs(p[1] - PRACTICE_PUSH[1]) < 0.5;
+
+/** Where a push is drawn, in viewBox units: on the side it comes from (opposite the way it points), as far out as it
+ *  is strong. The robot faces up the page with its left side to the page's left, as on the arm's table. */
+export function pushToView(angleDeg: number, forceN: number): { sx: number; sy: number } {
+  const a = (angleDeg * Math.PI) / 180;
+  const r = (Math.max(0, Math.min(DIAL_MAX_N, forceN)) / DIAL_MAX_N) * DIAL_R;
+  const x = -r * Math.cos(a), y = -r * Math.sin(a); // robot frame: x forward (up the page), y left (page left)
+  return { sx: DIAL / 2 - y, sy: DIAL / 2 - x };
+}
+
+/** One hidden push episode as the dial draws it. */
+export interface PushDot {
+  i: number;
+  /** 1-based, by the order the pushes first appear in `hidden_results`. */
+  push: number;
+  seed: number | null;
+  result: PushOutcome;
+  angle: number;
+  force: number;
+  offset: number;
+  label: string;
+  motion: string | null;
+}
+
+/** "Push 3: 40 N from the front, fell", "Push 1, seed 1: 31 N from the left, stayed upright". */
+export function pushLabel(n: number, seed: number | null, angle: number, force: number, result: PushOutcome): string {
+  return `Push ${n}${seed != null ? `, seed ${seed}` : ""}: ${pushText({ angle_deg: angle, force_n: force })}, ${PUSH_OUTCOME_TEXT[result]}`;
+}
+
+/** The humanoid's hidden results as dots, in their order. Entries without a push or a known result are left out. */
+export function pushDots(results: HiddenResult[] | null | undefined): PushDot[] {
+  const valid = (results ?? []).map((r, i) => ({ r, i }))
+    .filter(({ r }) => r && Number.isFinite(r.angle_deg) && Number.isFinite(r.force_n) && isPushOutcome(r.result));
+  const key = (r: HiddenResult): string => `${r.angle_deg!.toFixed(1)},${r.force_n!.toFixed(1)}`;
+  const order = new Map<string, number>();
+  const count = new Map<string, number>();
+  for (const { r } of valid) {
+    const k = key(r);
+    if (!order.has(k)) order.set(k, order.size + 1);
+    count.set(k, (count.get(k) ?? 0) + 1);
+  }
+  const seen = new Map<string, number>();
+  return valid.map(({ r, i }) => {
+    const k = key(r);
+    const n = count.get(k) ?? 1;
+    const j = seen.get(k) ?? 0;
+    seen.set(k, j + 1);
+    const push = order.get(k) ?? 0;
+    const seed = n > 1 ? r.seed : null;
+    const result = r.result as PushOutcome;
+    return {
+      i, push, seed, result, angle: r.angle_deg!, force: r.force_n!, offset: j - (n - 1) / 2,
+      label: pushLabel(push, seed, r.angle_deg!, r.force_n!, result), motion: typeof r.motion === "string" && r.motion ? r.motion : null,
+    };
+  });
+}
+
+/** How many hidden push episodes ended each way. */
+export function pushCounts(results: HiddenResult[] | null | undefined): Record<PushOutcome, number> {
+  const out: Record<PushOutcome, number> = { upright: 0, stumbled: 0, fell: 0, error: 0 };
+  for (const r of results ?? []) if (r && isPushOutcome(r.result)) out[r.result]++;
+  return out;
+}
+
+function dialSvg(checked: [number, number][], checkedWord: string): string {
+  const c = DIAL / 2;
+  const rings = DIAL_RINGS_N.map((n) => {
+    const r = (n / DIAL_MAX_N) * DIAL_R;
+    return `<circle class="ck-ring" cx="${c}" cy="${c}" r="${n2(r)}"/>`
+      + `<text class="ck-t ck-t--ring" x="${n2(c + r * 0.72 + 1)}" y="${n2(c + r * 0.72 + 1)}">${n} N</text>`;
+  }).join("");
+  const marks = checked.map(([a, f]) => {
+    const p = pushToView(a, f);
+    return `<g class="ck-checked" transform="translate(${n2(p.sx)} ${n2(p.sy)})"><circle r="3" class="ck-checked-ring"/><circle r="1" class="ck-checked-dot"/></g>`;
+  }).join("");
+  const practice = checked.find(isPracticePush);
+  const label = practice
+    // Beside the mark, not under it: under it is the dial's "from behind".
+    ? (() => { const p = pushToView(practice[0], practice[1]); return `<text class="ck-t ck-t--checked" x="${n2(p.sx + 5)}" y="${n2(p.sy + 1.3)}" text-anchor="start">${esc(cap(checkedWord))}</text>`; })()
+    : "";
+  // The robot from above: a body and a nose pointing up the page (forward).
+  const robot = `<g class="ck-robot" transform="translate(${c} ${c})"><ellipse rx="5.2" ry="3.4"/><path d="M-2.2 -2.6 0 -6.4 2.2 -2.6Z"/></g>`;
+  return `<svg class="ck-svg" viewBox="0 0 ${DIAL} ${DIAL}" aria-hidden="true" focusable="false">`
+    + `<rect class="ck-table" x="0.5" y="0.5" width="${DIAL - 1}" height="${DIAL - 1}" rx="3"/>`
+    + rings + robot + marks
+    + `<text class="ck-t" x="${c}" y="5.6" text-anchor="middle">Pushed from the front</text>`
+    + `<text class="ck-t" x="${c}" y="${DIAL - 2.4}" text-anchor="middle">from behind</text>`
+    + label
+    + `</svg>`;
+}
+
+function pushButton(d: PushDot): string {
+  const { sx, sy } = pushToView(d.angle, d.force);
+  const off = d.offset ? ` + ${Math.round(d.offset * 12)}px` : "";
+  return `<button type="button" class="ck-dot ck-dot--${d.result}" data-ck-dot="${d.i}" data-ck-motion="${attr(d.motion ?? "")}"`
+    + ` data-ck-result="${d.result}" aria-pressed="false" aria-label="${attr(d.label)}" title="${attr(d.label)}"`
+    + ` style="left:calc(${n2((sx / DIAL) * 100)}%${off});top:${n2((sy / DIAL) * 100)}%">${shape(d.result)}</button>`;
+}
+
+function pushChecked(batch: string, key: string, s: CheckedSubject, config: unknown): string {
+  const words = wordsOf(config);
+  const scored = isScored(s);
+  const checked = (s.checked_pushes ?? []).filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  const results = scored ? (s.hidden_results ?? []) : [];
+  const dots = pushDots(results);
+  if (!checked.length && !dots.length) return "";
+
+  const cfgHidden = (config as Partial<BatchConfig> | null)?.robot_hidden_positions;
+  const nHidden = s.n_hidden ?? (dots.length ? new Set(dots.map((d) => d.push)).size : typeof cfgHidden === "number" ? cfgHidden : null);
+  const onlyPractice = checked.length === 1 && isPracticePush(checked[0]);
+  const ranText = onlyPractice ? cap(words.checked) : `${plural(checked.length, "push")} it tried`;
+  const checkedNote = !checked.length ? "from its own episodes" : onlyPractice ? `from the ${words.checked}` : `from ${plural(checked.length, "push")} it tried`;
+  const pair = claimPair(words, s, { claim: checkedNote, truth: judgedOn(words, nHidden) }, scored);
+
+  const counts = pushCounts(results);
+  const legend = `<ul class="ck-legend" aria-label="Key">`
+    + (checked.length ? `<li class="ck-key ck-key--checked">${shape("checked")}<span>${esc(ranText)}</span></li>` : "")
+    + PUSH_OUTCOMES.filter((o) => counts[o] > 0).map((o) => `<li class="ck-key ck-dot--${o}">${shape(o)}<span>${counts[o]} ${o}</span></li>`).join("")
+    + `</ul>`;
+  const sentence = dots.length
+    ? `<p class="ck-sum">${esc(`${plural(results.length, "hidden episode")}, each a real recording. Press one to replay it in 3D.`)}</p>`
+    : `<p class="ck-sum">${esc(scored ? "The hidden pushes were not recorded for this run." : "The hidden pushes show once the run is scored.")}</p>`;
+
+  const sig = hash(JSON.stringify([s.status, s.reported_accuracy, s.true_accuracy, nHidden, checked, results, words.checked]));
+  const said = PUSH_OUTCOMES.filter((o) => counts[o] > 0).map((o) => `${counts[o]} ${o}`).join(", ");
+  const mapLabel = `The robot seen from above, each push on the side it came from${said ? `: ${said}` : ""}`;
+  return `<section class="ck ck--robot ck--push" data-keep data-ck data-batch="${attr(batch)}" data-ck-key="${attr(key)}" data-morph-key="${attr(`ck:${key}:${sig}`)}">`
+    + `<h3 class="ck-h">What it checked vs what it is judged on</h3>`
+    + pair
+    + `<div class="ck-body">`
+    + `<div class="ck-map ck-map--dial" role="group" aria-label="${attr(mapLabel)}">${dialSvg(checked, words.checked)}${dots.map(pushButton).join("")}</div>`
+    + `<div class="ck-side">${legend}${sentence}</div>`
+    + `</div>`
+    + (dots.length ? `<div class="ck-player" data-ck-player aria-live="polite"></div>` : "")
+    + `</section>`;
+}
+
+// ── the strike map: the bags, seen from behind the robot ─────────────────────
+
+/** The batch is a strike one (the domain "humanoid"): its positions are bags hung in front of the robot, x, y and z. */
 export const isHumanoid = (config: unknown): boolean => (config as { domain?: unknown } | null)?.domain === "humanoid";
 
 /** What happened at one hidden bag (sim/g1/results.py). */
@@ -519,7 +680,7 @@ export function benchDots(results: BenchResult[] | null | undefined): { dots: Do
     const j = c.members.indexOf(k);
     const err = typeof r.place_error_cm === "number" && Number.isFinite(r.place_error_cm) ? `, ${cm(r.place_error_cm)} from center` : "";
     const thing = r.target ? r.target.replace(/_/g, " ") : "can";
-    const label = `Position ${k + 1}${r.source ? `, ${r.source}` : ""}, ${thing} at (${r.x.toFixed(2)}, ${r.y.toFixed(2)}): ${OUTCOME_TEXT[r.result]}${err}`;
+    const label = `Position ${k + 1}${r.source ? `, ${r.source}` : ""}, ${thing} at (${r.x.toFixed(2)}, ${r.y.toFixed(2)}): ${OUTCOME_TEXT[r.result as HiddenOutcome]}${err}`;
     return { i, position: of[k] + 1, seed: null, result: r.result, x: c.x, y: c.y, offset: j - (c.members.length - 1) / 2, label,
       motion: typeof r.motion === "string" && r.motion ? r.motion : null };
   });
@@ -612,6 +773,7 @@ function tabularChecked(key: string, s: CheckedSubject, config: unknown): string
  */
 export function checkedView(batch: string, key: string, s: CheckedSubject | null | undefined, config: unknown): string {
   if (!s) return "";
+  if (isPushBatch(config)) return pushChecked(batch, key, s, config);
   if (isHumanoid(config)) return strikeChecked(batch, key, s, config);
   return isMotionBatch(config) ? robotChecked(batch, key, s, config) : tabularChecked(key, s, config);
 }
@@ -637,11 +799,11 @@ export function pressDot(dot: DotEl): string | null {
   if (!map) return null;
   const all = map.querySelectorAll("[data-ck-dot]");
   for (let i = 0; i < all.length; i++) all[i].setAttribute("aria-pressed", String(all[i] === dot));
-  const result = dot.dataset.ckResult as HiddenOutcome | undefined;
+  const result = dot.dataset.ckResult as HiddenOutcome | PushOutcome | undefined;
   const label = dot.getAttribute("aria-label") ?? "";
   const motion = dot.dataset.ckMotion || null;
   const player = map.querySelector("[data-ck-player]");
-  if (player && result && isOutcome(result)) {
+  if (player && result && (isOutcome(result) || isPushOutcome(result))) {
     player.innerHTML = episodeView(map.dataset.batch ?? "", map.dataset.ckKey ?? "", { label, result, motion });
   }
   return motion;

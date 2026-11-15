@@ -124,3 +124,46 @@ The `result` object is exactly what `run_episode` returns. Keys always present:
            "time_taken":7.24,"exception":null,"can_start":[0.5,0.0],"place_target":[0.45,-0.3],"seed":0,
            "end_reason":"controller_done"}}
 ```
+
+# Humanoid motion files (`g1-push-motion/1`)
+
+The push recovery sim (`sim/humanoid/`) records its episodes in a sibling format: the same file rules (one compact
+JSON object, at most `sim.motion.MAX_BYTES`, written and read by `sim.motion`'s `write_motion` and `read_motion`, the
+same frame sampling, the same `fps` and rounding, 30 fps and 4 decimals for the agents' runs, 8 fps and 3 decimals for
+the hidden episodes the server keeps), with its own keys. `sim.humanoid.motion.validate_motion` checks it. A reader
+tells the two apart by `format`, or by `header.model_id` (`deep_research/robot_view.py` builds the model it names).
+
+## Header
+
+| key | type | meaning |
+| --- | --- | --- |
+| `model_id` | string | `"g1-push-v1"` (`sim.humanoid.scene.MODEL_ID`) |
+| `joint_names` | string[] | every joint in qpos order: `floating_base_joint` (7 qpos slots), then the 29 hinge joints |
+| `actuator_names` | string[] | the 29 joint position servos, in `ctrl` order (`sim.humanoid.control.JOINTS`) |
+| `push` | object | `{"angle_deg", "force_n", "time_s", "duration_s"}`: the push's direction (degrees counterclockwise from the robot's forward, +x; 0 pushes it forward), force in newtons, actual start (with seed noise) and length in seconds |
+| `fps` | int | as above |
+| `nq` | int | 36 |
+
+Extra keys written by the recorder: `nu` (29), `qpos_layout`, `seed`, `dt`. There is no `can_start` or
+`place_target`.
+
+## Frames
+
+| key | type | meaning |
+| --- | --- | --- |
+| `t` | number | sim time in seconds |
+| `qpos` | number[36] | pelvis position xyz (meters), pelvis quaternion wxyz, then the 29 joint angles (radians) |
+| `ctrl` | number[29] | the joint target angles in force at that moment |
+| `com` | number[3] | world xyz of the robot's center of mass |
+| `feet` | number[6] | world xyz of the left ankle, then of the right one (the feet's origins) |
+
+A 5 s episode at 30 fps has 151 frames and takes about 70 KB; at 8 fps about 15 KB. A fall ends the episode 1 s after
+it is detected, so such a file is shorter.
+
+## Result
+
+What `sim.humanoid.episode.run_episode` returns: `success` (not fell and no exception), `outcome` (`upright`,
+`stumbled`, `fell` or `error`, the rule in `sim/humanoid/outcome.py`), `fell`, `stumbled`, `fall_time`, `touched` (the
+first body other than a foot that touched the floor, or null), `max_tilt_deg`, `final_tilt_deg` (torso from vertical),
+`max_foot_shift_cm`, `min_pelvis_height`, `push` (as in the header), `push_time`, `seed`, `time_taken`, `exception` and
+`end_reason` (`max_time`, `fell`, `exception` or `physics_error`).

@@ -27,7 +27,7 @@ def recording():
 
 
 def test_the_g1_scene_has_the_robot_the_bag_and_no_collision_shapes():
-    data, packed = robot_view.scene(robot_view.G1)
+    data, packed = robot_view.scene(robot_view.G1_BAG)
     assert data["model_id"] == "g1-bag-v1" and len(packed) < 1_500_000
     names = {b["name"] for b in data["bodies"]}
     assert {"pelvis", "torso_link", "left_ankle_roll_link", "right_wrist_yaw_link", "bag"} <= names
@@ -46,19 +46,19 @@ def test_the_g1_scene_has_the_robot_the_bag_and_no_collision_shapes():
 def test_a_strike_recording_becomes_poses_in_the_g1_scene(recording):
     result, motion = recording
     out = robot_view.poses(motion)
-    assert out["scene"] == "g1" and out["bag_pos"] == BAG and out["can_start"] is None and out["place_target"] is None
+    assert out["model_id"] == "g1-bag-v1" and out["push"] is None and out["bag_pos"] == BAG and out["can_start"] is None and out["place_target"] is None
     assert out["n"] == len(motion["frames"]) == len(out["t"]) and out["static"] == {}
-    scene_bodies = {b["id"] for b in robot_view.scene(robot_view.G1)[0]["bodies"]}
+    scene_bodies = {b["id"] for b in robot_view.scene(robot_view.G1_BAG)[0]["bodies"]}
     assert scene_bodies - {0} <= set(out["bodies"])
     assert all(len(row) == 7 * len(out["bodies"]) for row in out["frames"])
     # The bag's body is the rope's top end, straight above where this file's bag hung.
     import mujoco
 
-    bag_body = mujoco.mj_name2id(robot_view.g1_model(), mujoco.mjtObj.mjOBJ_BODY, "bag")
+    bag_body = mujoco.mj_name2id(robot_view.model(robot_view.G1_BAG), mujoco.mjtObj.mjOBJ_BODY, "bag")
     k = out["bodies"].index(bag_body) * 7
     assert out["frames"][0][k:k + 3] == pytest.approx([BAG[0], BAG[1], BAG[2] + 0.8], abs=0.01)
     # The pelvis starts where the robot stands.
-    p = out["bodies"].index(mujoco.mj_name2id(robot_view.g1_model(), mujoco.mjtObj.mjOBJ_BODY, "pelvis")) * 7
+    p = out["bodies"].index(mujoco.mj_name2id(robot_view.model(robot_view.G1_BAG), mujoco.mjtObj.mjOBJ_BODY, "pelvis")) * 7
     assert out["frames"][0][p:p + 3] == pytest.approx([0.0, 0.0, 0.79], abs=0.02)
     assert out["result"]["struck_with"] == result["struck_with"] and out["result"]["fell"] is result["fell"]
     assert "bag_pos" not in out["result"] and "pelvis_min_z" not in out["result"]
@@ -87,6 +87,6 @@ def test_the_summary_says_where_the_bag_hung(recording, tmp_path):
 
 def test_the_scene_route_serves_both_scenes_and_no_other():
     with TestClient(api.app) as client:
-        g1 = client.get("/api/robot/scene", params={"model": "g1"})
+        g1 = client.get("/api/robot/scene", params={"model": "g1-bag-v1"})
         assert g1.status_code == 200 and g1.json()["model_id"] == "g1-bag-v1"
         assert client.get("/api/robot/scene", params={"model": "spot"}).status_code == 404

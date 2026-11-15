@@ -9,6 +9,11 @@
 .ck-dot--tipped { color:var(--amber); }
 .ck-dot--missed { color:var(--red); }
 .ck-dot--dropped { color:var(--purple); }
+/* the humanoid's results take the same four shapes and colors: upright circle, stumbled triangle, fell cross, error diamond */
+.ck-dot--upright { color:var(--green); }
+.ck-dot--stumbled { color:var(--amber); }
+.ck-dot--fell { color:var(--red); }
+.ck-dot--error { color:var(--purple); }
 .ck-key--checked { color:var(--blue); }
 
 /* the claim and the truth */
@@ -34,6 +39,11 @@
 .ck-t--checked { fill:var(--blue); font-weight:500; }
 .ck-checked-ring { fill:none; stroke:var(--blue); stroke-width:2; vector-effect:non-scaling-stroke; }
 .ck-checked-dot { fill:var(--blue); }
+/* the humanoid's push dial: a square, rings of equal force around the robot seen from above */
+.ck-map.ck-map--dial { aspect-ratio:1 / 1; }
+.ck-ring { fill:none; stroke:var(--border-strong); stroke-width:1; stroke-dasharray:2 2; vector-effect:non-scaling-stroke; }
+.ck-t--ring { font-size:3.2px; }
+.ck-robot { fill:color-mix(in srgb, var(--fg) 14%, var(--surface)); stroke:var(--fg-55); stroke-width:1; vector-effect:non-scaling-stroke; }
 
 .ck-dot { position:absolute; display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; margin:0;
   transform:translate(-50%, -50%); border-radius:50%; border:0; background:transparent; cursor:pointer; transition:background var(--t-hover) ease, transform var(--t-hover) var(--ease-out); }

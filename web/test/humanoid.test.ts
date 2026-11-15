@@ -59,7 +59,7 @@ describe("a strike's result in words", () => {
   it("lists the swing and whether the robot stayed up", () => {
     const r = { success: true, struck: true, fell: false, touched: true, bag_peak_cm: 47.2, standing: true, end_reason: "controller_done" };
     expect(resultFacts(r)).toEqual(["bag swung 47 cm", "stayed on its feet"]);
-    expect(resultFacts({ success: false, fell: true, touched: false, bag_peak_cm: 0, end_reason: "fell" })).toEqual([]);
+    expect(resultFacts({ success: false, struck: false, fell: true, touched: false, bag_peak_cm: 0, end_reason: "fell" })).toEqual([]);
     expect(resultTone(r)).toBe("ok");
     expect(xyz([0.38, -0.15, 1])).toBe("(0.38, -0.15, 1.00)");
     expect(STRIKE_LEGEND).toContain("20 cm");
@@ -151,6 +151,7 @@ describe("starting a humanoid batch", () => {
     { name: "tabular", title: "Tabular", description: "", visual: "charts", config: { domain: "tabular" } },
     { name: "robot_arm", title: "Robot arm pick and place", description: "", visual: "motion", config: { domain: "robot_arm" } },
     { name: "humanoid", title: "Humanoid punch and kick", description: "Agents write a whole-body controller.", visual: "motion", config: draft },
+    { name: "humanoid_push", title: "Humanoid push recovery", description: "", visual: "motion", config: { domain: "humanoid_push" } },
   ] } as unknown as Defaults;
 
   it("offers the domain and says what is measured, without the arm's choices", () => {
@@ -159,7 +160,8 @@ describe("starting a humanoid batch", () => {
       estimate: { state: "ready", value: { avg_run_usd: 0.1, runs_usd: 1.2, forks_usd: 0.8, total_usd: 2, over_budget: false, basis: "average of earlier runs" } }, advanced: true, starting: false, error: null,
     } as unknown as HomeVm;
     const html = newBatchView(vm, { html: "", label: "", controllerHtml: "<div>UPLOAD-CONTROLLER</div>" });
-    expect(html).toContain(">Humanoid</button>");
+    expect(html).toContain(">Humanoid strike</button>");
+    expect(html).toContain(">Humanoid push</button>");
     expect(html).toContain("half high, where a punch reaches");
     expect(html).not.toContain("LIBERO-PRO");
     expect(html).not.toContain("UPLOAD-CONTROLLER");

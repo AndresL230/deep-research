@@ -114,9 +114,14 @@ _NUM = re.compile(r"-?\d*\.\d+|-?\d+")
 
 
 def hidden_positions(task_dir: Path) -> list[tuple[float, float]]:
-    """The hidden can positions of a robot batch's task, or [] (any other domain, or no file)."""
+    """The hidden can positions of a robot batch's task (or the hidden pushes of a humanoid one, [angle, force]
+    pairs), or [] (any other domain, or no file). Every domain's `secret_files` JSON in the task folder is read."""
+    from . import domains
+
     out: list[tuple[float, float]] = []
-    for f in sorted(task_dir.glob("*hidden_positions*.json")) if task_dir.is_dir() else []:
+    names = sorted({"hidden_positions", *domains.secret_files()})
+    found = {f for n in names for f in task_dir.glob(f"*{n}*.json")} if task_dir.is_dir() else set()
+    for f in sorted(found):
         try:
             for xy in json.loads(f.read_text()):
                 out.append((float(xy[0]), float(xy[1])))

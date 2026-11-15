@@ -1,10 +1,14 @@
 """What the web UI needs to draw a robot run in 3D: the scene's shapes, and where each body is in every frame.
 
-The browser has no MuJoCo, so the kinematics happen here. `scene()` describes the compiled pick-and-place model
-(sim/scene.py) once: every visual geom with its body, shape, local pose and color, and the meshes it uses, made small
-by vertex clustering (the panda's visual OBJ files are about 33 MB; the JSON is about 1.4 MB, 0.45 MB gzipped).
-`motion_poses(path)` loads one motion file (sim/MOTION_FORMAT.md) and runs `mj_kinematics` on every frame's qpos,
-giving each moving body's world position and orientation per frame.
+The browser has no MuJoCo, so the kinematics happen here. `scene(model_id)` describes a compiled model once: every
+visual geom with its body, shape, local pose and color, and the meshes it uses, made small by vertex clustering (the
+panda's visual OBJ files are about 33 MB; the JSON is about 1.4 MB, 0.45 MB gzipped). Three models are known (MODELS):
+the pick-and-place scene (sim/scene.py, "panda-can-v1", the default), the push recovery scene (sim/humanoid/scene.py,
+"g1-push-v1") and the strike scene, the G1 with a hanging bag (sim/g1/scene.py, "g1-bag-v1"). Each scene also says how
+to look at it (`view`: the camera, and for the push recovery scene the body a push hits).
+`motion_poses(path)` loads one motion file (sim/MOTION_FORMAT.md) of any of their formats, builds the model its
+`header.model_id` names, and runs `mj_kinematics` on every frame's qpos, giving each moving body's world position and
+orientation per frame.
 
 mujoco and sim are imported inside the functions, so importing this module (the API does) never needs them.
 Both results are cached in memory as gzipped JSON, ready to send.
@@ -34,9 +38,32 @@ MOTION_CACHE_SIZE = 64
 GEOM_TYPES = {0: "plane", 2: "sphere", 3: "capsule", 5: "cylinder", 6: "box", 7: "mesh"}
 
 _lock = threading.Lock()
-_model = None
-_scene_cache: tuple[dict, bytes] | None = None
+_models: dict[str, Any] = {}
+_scene_cache: dict[str, tuple[dict, bytes]] = {}
 _motion_cache: OrderedDict[tuple, bytes] = OrderedDict()
+
+PANDA = "panda-can-v1"
+# The two G1 scenes: pushed while standing (sim/humanoid/), and striking a hanging bag (sim/g1/).
+G1_PUSH = "g1-push-v1"
+G1_BAG = "g1-bag-v1"
+DEFAULT_MODEL = PANDA
+# How the viewer looks at each scene: where the camera looks (`target`), where it starts (`camera`, `thumb_camera`),
+# the fog's near and far distances, the half size of the square the key light casts shadows in (`shadow`), the floor
+# grid's size and number of squares (`grid`), and for the humanoid the body a push hits (`push_body`, for the arrow).
+# The arm's numbers are the ones web/src/robot/viewer.ts had before scenes carried them.
+VIEWS: dict[str, dict] = {
+    PANDA: {"target": [0.36, -0.06, 0.24], "camera": [1.45, -1.02, 0.8], "thumb_camera": [1.5, -1.08, 0.86], "fog": [2.2, 4.6],
+            "shadow": 1.0, "grid": [2.4, 24]},
+    G1_PUSH: {"target": [0.0, 0.0, 0.62], "camera": [2.3, -1.9, 1.25], "thumb_camera": [2.5, -2.1, 1.35], "fog": [3.6, 7.5],
+              "shadow": 1.8, "grid": [4.0, 20], "push_body": "torso_link"},
+    # From the front and the robot's right, near enough to see a fist or a toe meet the bag, far enough for a fall.
+    G1_BAG: {"target": [0.16, 0.0, 0.66], "camera": [1.5, -1.75, 1.05], "thumb_camera": [1.6, -1.85, 1.1], "fog": [3.0, 6.5],
+             "shadow": 1.4, "grid": [3.0, 30]},
+}
+MODELS = tuple(VIEWS)
+# A coarser vertex grid for a bigger robot: the G1 is 1.3 m tall, and at 6 mm its 35 meshes come to about the panda's
+# size (0.45 MB gzipped instead of 0.63 MB at CELL_M).
+CELLS = {G1_PUSH: 0.006, G1_BAG: 0.006}
 
 
 class MotionError(ValueError):
@@ -47,23 +74,37 @@ def _r(values, decimals: int) -> list[float]:
     return [round(float(v), decimals) + 0.0 for v in values]
 
 
-def model():
-    """The scene model, compiled once (nominal can and place positions: each motion file brings its own)."""
-    global _model
+def model(model_id: str | None = None):
+    """The model `model_id` names (one of MODELS; None: the arm), compiled once. The arm's has nominal can and place
+    positions: each motion file brings its own."""
+    mid = model_id or DEFAULT_MODEL
+    if mid not in VIEWS:
+        raise MotionError(f"unknown model {mid!r}")
     with _lock:
-        if _model is None:
-            from sim.scene import build_model  # needs mujoco and the panda meshes
+        if mid not in _models:
+            if mid == G1_PUSH:
+                from sim.humanoid.scene import build_model as build_g1  # needs mujoco and the G1 meshes
 
-            _model = build_model([0.5, 0.0], [0.45, -0.3])
-        return _model
+                _models[mid] = build_g1()
+            elif mid == G1_BAG:
+                from sim.g1.scene import build_model as build_bag  # needs mujoco and the G1 meshes
+
+                # The bag hung at a nominal spot: each motion file says where its own hangs (`_bag_poses`).
+                _models[mid] = build_bag([0.38, -0.15, 1.0])
+            else:
+                from sim.scene import build_model  # needs mujoco and the panda meshes
+
+                _models[mid] = build_model([0.5, 0.0], [0.45, -0.3])
+        return _models[mid]
 
 
-def _decimate(verts, faces):
+def _decimate(verts, faces, cell_m: float | None = None):
     """Vertex clustering: snap vertices to a grid, merge each cell into its mean, drop collapsed and repeated faces."""
     import numpy as np
 
     extent = float((verts.max(0) - verts.min(0)).max()) if len(verts) else 0.0
-    cell = min(CELL_M, extent / MIN_CELLS) if extent > 0 else CELL_M
+    cell_m = CELL_M if cell_m is None else cell_m
+    cell = min(cell_m, extent / MIN_CELLS) if extent > 0 else cell_m
     keys = np.floor((verts - verts.min(0)) / cell).astype(np.int64)
     _, inverse, counts = np.unique(keys, axis=0, return_inverse=True, return_counts=True)
     inverse = inverse.reshape(-1)
@@ -171,40 +212,13 @@ def layout_geoms(m, first_body: int, also: int | None = None) -> list[dict]:
     return out
 
 
-# The scenes the viewer can draw, by the name a motion file's poses give it (`poses()["scene"]`, absent for the arm's).
-PANDA = "panda"
-G1 = "g1"
-SCENES = (PANDA, G1)
-# The format of the humanoid sim's motion files (sim/g1/motion.py), copied so reading one never imports that sim.
-G1_FORMAT = "g1-motion/1"
-_g1_model = None
-
-
-def g1_model():
-    """The humanoid scene's model (sim/g1/scene.py), compiled once, with the bag hung at a nominal spot: each
-    motion file says where its own hangs."""
-    global _g1_model
-    with _lock:
-        if _g1_model is None:
-            from sim.g1.scene import build_model  # needs mujoco and the G1 meshes
-
-            _g1_model = build_model([0.38, -0.15, 1.0])
-        return _g1_model
-
-
-def build_scene(which: str = PANDA) -> dict:
+def build_scene(model_id: str | None = None) -> dict:
     """The scene as plain data: bodies, meshes (decimated, flat arrays) and visual geoms. See `scene()`."""
     import mujoco
     import numpy as np
 
-    if which == G1:
-        from sim.g1.scene import MODEL_ID
-
-        m = g1_model()
-    else:
-        from sim.scene import MODEL_ID
-
-        m = model()
+    model_id = model_id or DEFAULT_MODEL
+    m = model(model_id)
     name = lambda kind, i: mujoco.mj_id2name(m, kind, i) or ""  # noqa: E731
     meshes: dict[str, dict] = {}
     geoms: list[dict] = []
@@ -235,18 +249,25 @@ def build_scene(which: str = PANDA) -> dict:
                 if not vn or float((verts.max(0) - verts.min(0)).max()) < MIN_EXTENT_M:
                     meshes[key] = {}
                 else:
-                    v, f = _decimate(verts, faces)
+                    v, f = _decimate(verts, faces, CELLS.get(model_id))
                     meshes[key] = {"v": _r(v.reshape(-1), POS_DECIMALS), "f": [int(x) for x in f.reshape(-1)]} if len(f) else {}
             if not meshes[key]:
                 continue
             geom["mesh"] = key
         geoms.append(geom)
     bodies = sorted({gm["body"] for gm in geoms})
+    view = dict(VIEWS[model_id])
+    if "push_body" in view:
+        bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, view["push_body"])
+        view["push_body_id"] = int(bid)
+        if bid not in bodies:
+            bodies = sorted([*bodies, int(bid)])
     return {
-        "model_id": MODEL_ID,
+        "model_id": model_id,
         "bodies": [{"id": b, "name": name(mujoco.mjtObj.mjOBJ_BODY, b)} for b in bodies],
         "meshes": {k: v for k, v in meshes.items() if v},
         "geoms": geoms,
+        "view": view,
     }
 
 
@@ -254,31 +275,54 @@ def _pack(data: dict) -> bytes:
     return gzip.compress(json.dumps(data, separators=(",", ":"), allow_nan=False).encode(), compresslevel=6)
 
 
-def scene(which: str = PANDA) -> tuple[dict, bytes]:
-    """The static scene for the viewer, and the same as gzipped JSON. Built on the first call, then cached.
-    `which`: one of SCENES, the arm's by default.
+def scene(model_id: str | None = None) -> tuple[dict, bytes]:
+    """The static scene of `model_id` (one of MODELS; None: the arm) for the viewer, and the same as gzipped JSON.
+    Built on the first call, then cached.
 
     {"model_id", "bodies": [{"id", "name"}], "meshes": {"<mesh id>": {"v": [x, y, z, ...], "f": [i, j, k, ...]}},
      "geoms": [{"body", "type": "mesh" | "cylinder" | "plane" | ..., "name", "size", "pos", "quat" (w, x, y, z),
-                "rgba", "mesh"?}]}
+                "rgba", "mesh"?}],
+     "view": {"target", "camera", "thumb_camera": [x, y, z], "fog": [near, far], "push_body"?, "push_body_id"?}}
     Positions are meters in the body's frame; the world body (0) holds the floor.
     """
-    global _scene_cache
-    if which == G1:
-        hit = _other_scenes.get(which)
-        if hit is None:
-            data = build_scene(which)
-            hit = _other_scenes[which] = (data, _pack(data))
-        return hit
-    if which != PANDA:
-        raise ValueError(f"unknown scene {which!r}: there are {SCENES}")
-    if _scene_cache is None:
-        data = build_scene()
-        _scene_cache = (data, _pack(data))
-    return _scene_cache
+    mid = model_id or DEFAULT_MODEL
+    if mid not in VIEWS:
+        raise MotionError(f"unknown model {mid!r}")
+    if mid not in _scene_cache:
+        data = build_scene(mid)
+        _scene_cache[mid] = (data, _pack(data))
+    return _scene_cache[mid]
 
 
-_other_scenes: dict[str, tuple[dict, bytes]] = {}
+def _model_id_of(motion: dict) -> str:
+    """The model a motion file was recorded with: `header.model_id`, or the arm for a file that does not say."""
+    header = motion.get("header") if isinstance(motion.get("header"), dict) else {}
+    mid = header.get("model_id")
+    # A file recorded in a scene with a layout names that layout's model: it is the arm's scene with more in it.
+    if mid is None or isinstance(header.get("layout"), dict):
+        return DEFAULT_MODEL
+    if mid not in VIEWS:
+        raise MotionError(f"no viewer model for {mid!r}")
+    return mid
+
+
+def _push(header: dict, result: dict) -> dict | None:
+    """A humanoid episode's push, {"angle_deg", "force_n", "time_s", "duration_s"}, or None."""
+    p = header.get("push") or result.get("push")
+    if not isinstance(p, dict):
+        return None
+    out = {}
+    for k in ("angle_deg", "force_n", "time_s", "duration_s"):
+        v = p.get(k)
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return None
+        out[k] = round(float(v), 4)
+    return out
+
+
+def _moving_bodies(m) -> list[int]:
+    """Bodies with a joint between them and the world: the arm links, the hand, the fingers and the can."""
+    return [b for b in range(1, m.nbody) if int(m.body_weldid[b]) != 0]
 
 
 def _frames_of(motion: dict, m, d, moving: list[int]) -> tuple[list[float], list[list[float]]]:
@@ -315,31 +359,30 @@ def _xyz(v) -> bool:
         isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and abs(x) < 10 for x in v)
 
 
-def g1_poses(motion: dict) -> dict:
-    """`poses()` of a humanoid recording (sim/g1/motion.py): the same shape, with "scene": "g1" for the viewer to
-    draw the humanoid scene, and "bag_pos", where the bag hung, in place of a can start and a place target."""
+def _bag_poses(motion: dict, header: dict, result: dict) -> dict:
+    """`poses()` of a strike recording (sim/g1/motion.py): the same shape, with "bag_pos", where the bag hung, in
+    place of a can start, a place target or a push."""
     import copy
 
     import mujoco
 
-    header = motion.get("header") if isinstance(motion.get("header"), dict) else {}
-    result = motion.get("result") if isinstance(motion.get("result"), dict) else {}
     bag = header.get("bag_pos") or result.get("bag_pos")
     if not _xyz(bag):
         raise MotionError("the file does not say where the bag hung")
     from sim.g1.scene import BAG_BODY, ROPE_LENGTH
 
     # The bag's body is the rope's fixed top end: a copy of the model with it above this file's bag.
-    m = copy.copy(g1_model())
+    m = copy.copy(model(G1_BAG))
     m.body_pos[m.body(BAG_BODY).id] = [float(bag[0]), float(bag[1]), float(bag[2]) + ROPE_LENGTH]
     d = mujoco.MjData(m)
     moving = _moving_bodies(m)
     times, frames = _frames_of(motion, m, d, moving)
     return {
-        "scene": G1,
+        "model_id": G1_BAG,
         "fps": header.get("fps", 30),
         "can_start": None,
         "place_target": None,
+        "push": None,
         "bag_pos": _r(bag, POS_DECIMALS),
         "result": _public_result(result),
         "n": len(frames),
@@ -350,17 +393,14 @@ def g1_poses(motion: dict) -> dict:
     }
 
 
-def _moving_bodies(m) -> list[int]:
-    """Bodies with a joint between them and the world: the arm links, the hand, the fingers and the can."""
-    return [b for b in range(1, m.nbody) if int(m.body_weldid[b]) != 0]
-
-
 def poses(motion: dict) -> dict:
     """Each frame's world pose of every moving body: `mj_kinematics` on the frame's qpos.
 
-    {"fps", "can_start", "place_target", "result", "n": frames, "t": [...], "bodies": [body ids],
+    {"model_id", "fps", "can_start", "place_target", "push", "result", "n": frames, "t": [...], "bodies": [body ids],
      "frames": [[x, y, z, qw, qx, qy, qz for each body in `bodies`], ...],
      "static": {"<body id>": [x, y, z, qw, qx, qy, qz]} (bodies that never move; the place zone where this file has it)}
+    `can_start` and `place_target` are the arm's (None for a humanoid), `push` the push recovery sim's (None for the
+    others), and a strike recording has "bag_pos", where its bag hung (`_bag_poses`).
 
     A file recorded in a scene with a layout (its header's `layout`: a basket and other objects) also has
     "extra": the visual geoms of the layout's bodies, as the scene gives its own (`layout_geoms`), for the viewer
@@ -368,19 +408,19 @@ def poses(motion: dict) -> dict:
     bodies are in `bodies` like any other moving body.
     """
     import mujoco
-    import numpy as np
 
     if not isinstance(motion, dict) or not isinstance(motion.get("frames"), list) or not motion["frames"]:
         raise MotionError("not a motion file: no frames")
-    if motion.get("format") == G1_FORMAT:
-        return g1_poses(motion)
     header = motion.get("header") if isinstance(motion.get("header"), dict) else {}
+    result = motion.get("result") if isinstance(motion.get("result"), dict) else {}
+    model_id = _model_id_of(motion)
+    if model_id == G1_BAG:
+        return _bag_poses(motion, header, result)
     layout = header.get("layout") if isinstance(header.get("layout"), dict) else None
-    m = layout_model(layout) if layout else model()
+    m = layout_model(layout) if layout else model(model_id)
     d = mujoco.MjData(m)
     moving = _moving_bodies(m)
     times, frames = _frames_of(motion, m, d, moving)
-    result = motion.get("result") if isinstance(motion.get("result"), dict) else {}
     can_start = header.get("can_start") or result.get("can_start")
     place = header.get("place_target") or result.get("place_target")
     static: dict[str, list[float]] = {}
@@ -392,9 +432,11 @@ def poses(motion: dict) -> dict:
             pose = [round(float(place[0]), 4), round(float(place[1]), 4), 0.0, 1.0, 0.0, 0.0, 0.0]
         static[str(b)] = pose
     return {
+        "model_id": model_id,
         "fps": header.get("fps", 30),
         "can_start": can_start if _xy(can_start) else None,
         "place_target": place if _xy(place) else None,
+        "push": _push(header, result),
         "result": _public_result(result),
         "n": len(frames),
         "t": times,
@@ -422,8 +464,10 @@ def _xy(v) -> bool:
 RESULT_KEYS = (
     "success", "place_error_cm", "upright", "dropped", "max_height_cm", "time_taken", "exception", "end_reason",
     "resting", "released", "tipped", "tilt_deg", "seed", "in_basket", "target",
-    # The humanoid sim's (sim/g1/episode.py).
-    "struck", "touched", "struck_with", "fell", "bag_peak_cm", "standing",
+    # The push recovery sim's (sim/humanoid/episode.py).
+    "outcome", "fell", "stumbled", "fall_time", "touched", "max_tilt_deg", "max_foot_shift_cm",
+    # The strike sim's (sim/g1/episode.py); it has "fell" and "touched" too.
+    "struck", "struck_with", "bag_peak_cm", "standing",
 )
 
 
@@ -464,7 +508,7 @@ _summary_cache: OrderedDict[tuple, dict] = OrderedDict()
 def motion_summary(path: Path) -> dict:
     """What the viewer's file picker shows for a motion file, without the frames: no mujoco needed.
 
-    {"can_start", "place_target", "duration" (seconds), "n" (frames), "result"}, and for a humanoid recording
+    {"can_start", "place_target", "push", "duration" (seconds), "n" (frames), "result"}, and for a strike recording
     "bag_pos", where its bag hung."""
     st = path.stat()
     if st.st_size > MAX_MOTION_BYTES:
@@ -490,6 +534,7 @@ def motion_summary(path: Path) -> dict:
     out = {
         "can_start": can_start if _xy(can_start) else None,
         "place_target": place if _xy(place) else None,
+        "push": _push(header, result),
         **({"bag_pos": bag} if _xyz(bag) else {}),
         "duration": round(float(t), 3) if isinstance(t, (int, float)) and not isinstance(t, bool) else None,
         "n": len(motion["frames"]),

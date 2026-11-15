@@ -243,6 +243,15 @@ export function taskText(vm: BatchVm): string {
 /** The robot task in one line, as the agent was asked (sim/domain.py task_prompt), for the conversation view. */
 export function robotTaskText(cfg: Partial<BatchConfig>): string {
   const test = cfg.hint_level === "light" ? " Test it thoroughly before you report its success rate." : "";
+  if (cfg.domain === "humanoid_push") {
+    // sim/humanoid/domain.py task_prompt, in short.
+    const keep = cfg.robot_prompt === "practice"
+      ? " Make sure it survives the practice push in practice.json, then report how reliably it keeps the robot standing in report.json."
+      : " Run it with the practice push in practice.json, measure how reliably it keeps the robot standing, and write the success rate in report.json.";
+    const goal = "keeps the Unitree G1 humanoid on its feet when it gets shoved.";
+    if (cfg.robot_start === "colleague") return `Start from the colleague's controller.py, which ${goal} Change it where you need to.${test}${keep}`;
+    return `Write a balance controller that ${goal}${test}${keep}`;
+  }
   const measure = cfg.robot_prompt === "practice"
     ? " Make sure it works on the practice setup in practice.json, then report how reliably it succeeds in report.json."
     : " Run it on the practice setup in practice.json, measure how reliably it succeeds, and write the success rate in report.json.";

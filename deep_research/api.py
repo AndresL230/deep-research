@@ -789,21 +789,20 @@ def _gzipped_json(packed: bytes, request: Request, cache: str) -> Response:
 
 
 def _robot_unavailable(e: Exception) -> HTTPException:
-    return HTTPException(503, f"the robot viewer needs mujoco and the panda meshes (`uv run python -m sim.fetch_assets`): {type(e).__name__}")
+    return HTTPException(503, "the robot viewer needs mujoco and the robot meshes (`uv run python -m sim.fetch_assets "
+                              f"--model all`): {type(e).__name__}")
 
 
 @app.get("/api/robot/scene")
-def robot_scene(request: Request, model: str = robot_view.PANDA):
-    """A scene for the 3D viewer: every visual geom, its body, pose and color, and the meshes. `model`: "panda", the
-    pick-and-place scene, or "g1", the humanoid's (a motion file's poses say which it was recorded in)."""
-    if model not in robot_view.SCENES:
-        raise HTTPException(404, f"no scene named '{model}'")
+def robot_scene(request: Request, model: str = robot_view.DEFAULT_MODEL):
+    """A scene for the 3D viewer: every visual geom, its body, pose and color, the meshes, and how to look at it.
+    `model` is the `model_id` a motion file's poses name (robot_view.MODELS): the pick-and-place arm by default, or one
+    of the two G1 scenes."""
+    if model not in robot_view.MODELS:
+        raise HTTPException(404, f"no robot model {model!r}")
     try:
         _, packed = robot_view.scene(model)
     except (ImportError, OSError, ValueError) as e:
-        if model == robot_view.G1:
-            raise HTTPException(503, "the humanoid viewer needs mujoco and the G1 model "
-                                     f"(`uv run python -m sim.g1.fetch_assets`): {type(e).__name__}") from e
         raise _robot_unavailable(e) from e
     return _gzipped_json(packed, request, "public, max-age=3600")
 

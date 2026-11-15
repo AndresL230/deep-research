@@ -16,8 +16,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { attr, esc } from "../ui";
-import { DEFAULT_SCENE, fetchMotion, fetchScene, fetchSummaries, type MotionData, type MotionSummary, type SceneData, type SceneGeom } from "./data";
-import { BASKET_LEGEND, STRIKE_LEGEND, SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, hasBasket, motionName, noWebglView, resultFacts, resultText, resultTone, seconds, xy, xyz } from "./markup";
+import { ARM_MODEL, fetchMotion, fetchScene, fetchSummaries, type MotionData, type MotionSummary, type SceneData, type SceneGeom, type SceneView } from "./data";
+import { BASKET_LEGEND, PUSH_LEGEND, STRIKE_LEGEND, SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, hasBasket, motionName, noWebglView, pushText, resultFacts, resultText, resultTone, seconds, xy, xyz } from "./markup";
 
 // ── WebGL, checked once ──────────────────────────────────────────────────────
 
@@ -61,17 +61,22 @@ const PALETTE: Record<Theme, { bg: number; floor: number; grid: number }> = {
   light: { bg: 0xe9ecf0, floor: 0xdde1e7, grid: 0xc3c9d2 },
   dark: { bg: 0x16191d, floor: 0x1e2227, grid: 0x3a4149 },
 };
-/** Where the camera looks and stands, per scene (`MotionData.scene`). The arm's: between the base, the can and the
- *  place zone. The humanoid's: the middle of the robot and the bag, from the front and its right, far enough back to
- *  keep a kick and a fall in view. */
-interface View { target: THREE.Vector3; at: THREE.Vector3; thumbAt: THREE.Vector3 }
-const VIEWS: Record<string, View> = {
-  [DEFAULT_SCENE]: { target: new THREE.Vector3(0.36, -0.06, 0.24), at: new THREE.Vector3(1.45, -1.02, 0.8), thumbAt: new THREE.Vector3(1.5, -1.08, 0.86) },
-  g1: { target: new THREE.Vector3(0.16, 0, 0.66), at: new THREE.Vector3(1.5, -1.75, 1.05), thumbAt: new THREE.Vector3(1.6, -1.85, 1.1) },
-};
-const sceneOf = (m: MotionData | null | undefined): string => (m?.scene && VIEWS[m.scene] ? m.scene : DEFAULT_SCENE);
-const viewOf = (name: string): View => VIEWS[name] ?? VIEWS[DEFAULT_SCENE];
+/** How to look at the arm's scene when the server does not say (a server older than the humanoid): between the base,
+ *  the can and the place zone. Every scene the server sends now carries its own (`SceneData.view`). */
+const ARM_VIEW: SceneView = { target: [0.36, -0.06, 0.24], camera: [1.45, -1.02, 0.8], thumb_camera: [1.5, -1.08, 0.86], fog: [2.2, 4.6], shadow: 1, grid: [2.4, 24] };
+const viewOf = (scene: SceneData): SceneView => scene.view ?? ARM_VIEW;
+const vec = (v: number[]): THREE.Vector3 => new THREE.Vector3(v[0], v[1], v[2]);
 const CREASE = Math.PI / 5;
+
+/** The push arrow (a humanoid episode): drawn from the push's start until this long after it ends, fading out. */
+const PUSH_LINGER_S = 0.6;
+/** Its length: a base plus this much per newton (50 N: 0.25 + 0.35 = 0.6 m). */
+const ARROW_BASE_M = 0.25;
+const ARROW_PER_N = 0.007;
+/** The arrow's tip stops this far short of the pushed body's origin, and sits this much higher (chest height). */
+const ARROW_GAP_M = 0.14;
+const ARROW_LIFT_M = 0.12;
+const ARROW_COLOR = 0xe11d48;
 
 /** The success area (markup.ts SUCCESS_RADIUS_CM), in meters. */
 const SUCCESS_R = SUCCESS_RADIUS_CM / 100;
@@ -202,6 +207,11 @@ class Bodies {
     return grp;
   }
 
+  /** Where body `id` is as last posed, or null when the scene does not draw it. */
+  position(id: number): THREE.Vector3 | null {
+    return this.groups.get(id)?.position ?? null;
+  }
+
   /** Every body where `m` has it at time `t` (seconds), between the two frames around it. */
   pose(m: MotionData, t: number): void {
     if (this.staticOf !== m) {
@@ -245,27 +255,41 @@ class World {
   private readonly endDot: THREE.Mesh;
   private readonly endLine: THREE.Mesh;
   private readonly canId: number | null;
+  /** The push arrow (a humanoid episode): a shaft and a head, pointing along the push at the body it hits. */
+  private readonly arrow = new THREE.Group();
+  private readonly arrowMat = new THREE.MeshBasicMaterial({ color: ARROW_COLOR, transparent: true, depthWrite: false });
+  private readonly arrowShaft: THREE.Mesh;
+  private readonly arrowHead: THREE.Mesh;
+  private readonly pushBodyId: number | null;
+  private readonly at = new THREE.Vector3();
   private theme: Theme | null = null;
+  /** How to look at this scene (the server's `view`). */
+  readonly view: SceneView;
+  readonly modelId: string;
 
-  /** `thumb`: drawn small, so the target's lines are thicker and it has no crosshair. `lookAt`: the middle of the
-   *  scene, which the key light points at. */
-  constructor(data: SceneData, shadows: boolean, thumb = false, lookAt: THREE.Vector3 = VIEWS[DEFAULT_SCENE].target) {
+  /** `thumb`: drawn small, so the target's lines are thicker and it has no crosshair. */
+  constructor(data: SceneData, shadows: boolean, thumb = false) {
     const s = this.scene;
+    this.view = viewOf(data);
+    this.modelId = data.model_id || ARM_MODEL;
+    const [fogNear, fogFar] = this.view.fog;
     s.background = new THREE.Color();
-    s.fog = new THREE.Fog(0, 2.2, 4.6);
+    s.fog = new THREE.Fog(0, fogNear, fogFar);
 
     const hemi = new THREE.HemisphereLight(0xffffff, 0x80858f, 1.6);
     hemi.position.set(0, 0, 1);
     s.add(hemi);
     const key = new THREE.DirectionalLight(0xffffff, 2.2);
-    key.position.set(1.2, -1.4, 2.4);
-    key.target.position.copy(lookAt);
+    const target = vec(this.view.target);
+    key.position.set(target.x + 0.84, target.y - 1.34, 2.4 + target.z - 0.24);
+    key.target.position.copy(target);
     s.add(key, key.target);
     if (shadows) {
       key.castShadow = true;
       key.shadow.mapSize.set(1024, 1024);
       const c = key.shadow.camera;
-      c.left = -1.4; c.right = 1.4; c.top = 1.4; c.bottom = -1.4; c.near = 0.5; c.far = 6;
+      const half = this.view.shadow ?? 1;
+      c.left = -half; c.right = half; c.top = half; c.bottom = -half; c.near = 0.5; c.far = 6;
       key.shadow.bias = -0.0004;
       key.shadow.normalBias = 0.01;
     }
@@ -277,8 +301,9 @@ class World {
     this.floor.position.z = -0.0005;
     this.floor.receiveShadow = shadows;
     s.add(this.floor);
-    // 10 cm squares over the reach of the arm.
-    this.grid = new THREE.GridHelper(2.4, 24);
+    // Squares over the robot's reach: 10 cm for the arm, 20 cm for the humanoid.
+    const [gridSize, gridSquares] = this.view.grid ?? [2.4, 24];
+    this.grid = new THREE.GridHelper(gridSize, gridSquares);
     this.grid.rotateX(Math.PI / 2);
     this.grid.position.z = 0.0002;
     s.add(this.grid);
@@ -317,6 +342,37 @@ class World {
 
     this.bodies = new Bodies(data, shadows);
     s.add(this.bodies.root);
+
+    // The arrow points along +x before it is turned: a shaft of length 1 (scaled to the push) and a head at its end.
+    const r = thumb ? 0.03 : 0.02;
+    this.arrowShaft = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1, 16).rotateZ(-Math.PI / 2).translate(0.5, 0, 0), this.arrowMat);
+    this.arrowHead = new THREE.Mesh(new THREE.ConeGeometry(r * 2.6, 0.12, 20).rotateZ(-Math.PI / 2).translate(-0.06, 0, 0), this.arrowMat);
+    this.arrowShaft.renderOrder = this.arrowHead.renderOrder = 5;
+    this.arrow.add(this.arrowShaft, this.arrowHead);
+    this.arrow.visible = false;
+    s.add(this.arrow);
+    this.pushBodyId = this.view.push_body_id ?? null;
+  }
+
+  /** Show the push arrow at time `t` (seconds) of `m`, or hide it: from the push's start until PUSH_LINGER_S after its
+   *  end, fading out after the end, pointing along the push with its tip at the pushed body (posed already). */
+  private showPush(m: MotionData, t: number): void {
+    const p = m.push;
+    const body = this.pushBodyId != null ? this.bodies.position(this.pushBodyId) : null;
+    const end = p ? p.time_s + p.duration_s : 0;
+    if (!p || !body || t < p.time_s || t > end + PUSH_LINGER_S || !(p.force_n > 0)) { this.arrow.visible = false; return; }
+    const a = (p.angle_deg * Math.PI) / 180;
+    const dx = Math.cos(a), dy = Math.sin(a);
+    const len = ARROW_BASE_M + ARROW_PER_N * p.force_n;
+    // The tip just short of the body, the tail `len` back along the push.
+    this.at.set(body.x - dx * ARROW_GAP_M, body.y - dy * ARROW_GAP_M, body.z + ARROW_LIFT_M);
+    this.arrowHead.position.set(0, 0, 0);
+    this.arrowShaft.scale.set(Math.max(0.01, len - 0.12), 1, 1);
+    this.arrowShaft.position.set(-len, 0, 0);
+    this.arrow.position.copy(this.at);
+    this.arrow.rotation.set(0, 0, Math.atan2(dy, dx));
+    this.arrowMat.opacity = t <= end ? 1 : Math.max(0, 1 - (t - end) / PUSH_LINGER_S);
+    this.arrow.visible = true;
   }
 
   /** Where the can's center is in the last frame of `m`, on the floor (x, y), or null. */
@@ -365,6 +421,7 @@ class World {
 
   pose(m: MotionData, t: number): void {
     this.bodies.pose(m, t);
+    this.showPush(m, t);
     const start = m.frames.length && m.bodies.length ? m.can_start : null;
     this.startMark.visible = !!start;
     if (start) this.startMark.position.set(start[0], start[1], 0.0006);
@@ -375,12 +432,17 @@ class World {
   }
 }
 
-function camera(at: THREE.Vector3, target: THREE.Vector3 = VIEWS[DEFAULT_SCENE].target): THREE.PerspectiveCamera {
+function camera(view: SceneView, thumb = false): THREE.PerspectiveCamera {
   const c = new THREE.PerspectiveCamera(38, 4 / 3, 0.02, 20);
   c.up.set(0, 0, 1);
-  c.position.copy(at);
-  c.lookAt(target);
+  aim(c, view, thumb);
   return c;
+}
+
+/** Put `c` where `view` says a camera starts, looking at its target. */
+function aim(c: THREE.PerspectiveCamera, view: SceneView, thumb = false): void {
+  c.position.copy(vec(thumb ? view.thumb_camera : view.camera));
+  c.lookAt(vec(view.target));
 }
 
 const duration = (m: MotionData): number => m.t[m.n - 1] ?? 0;
@@ -428,7 +490,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     + `<span class="rb-speeds" role="group" aria-label="Speed">${SPEEDS.map((s) => `<button type="button" class="rb-speed" data-rb-speed="${s}" aria-pressed="${s === 1}">${s}x</button>`).join("")}</span>`
     + `<button type="button" class="rb-icon rb-loop" data-rb-loop aria-pressed="true" title="Loop" aria-label="Loop">${ICON.loop}</button>`
     + `</div>`
-    + `<p class="rb-legend"><span class="rb-legend-ring" aria-hidden="true"></span><span data-rb-legend>${esc(SUCCESS_LEGEND)}</span></p>`
+    + `<p class="rb-legend" data-rb-legend><span class="rb-legend-ring" aria-hidden="true"></span><span>${esc(SUCCESS_LEGEND)}</span></p>`
     + (files.length > 1 ? `<div class="rb-files-h">Episodes <span>${files.length}</span></div>` : "")
     + `<div class="rb-files" role="listbox" aria-label="Motion files">${files.map((f, i) => fileButton(f, i, null)).join("")}</div>`;
 
@@ -441,16 +503,16 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
   const timeEl = q<HTMLElement>("[data-rb-time]");
   const listEl = q<HTMLElement>(".rb-files");
   const endLabel = q<HTMLElement>("[data-rb-endl]");
+  const legendEl = q<HTMLElement>("[data-rb-legend]");
   const projected = new THREE.Vector3();
 
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.domElement.className = "rb-canvas";
   renderer.domElement.setAttribute("aria-label", "3D replay of the robot");
   stage.prepend(renderer.domElement);
-  let view = viewOf(DEFAULT_SCENE);
-  const cam = camera(view.at);
+  const cam = camera(ARM_VIEW);
   const controls = new OrbitControls(cam, renderer.domElement);
-  controls.target.copy(view.target);
+  controls.target.copy(vec(ARM_VIEW.target));
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
   controls.minDistance = 0.4;
@@ -490,8 +552,6 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
   controls.update();
 
   let world: World | null = null;
-  /** The scene `world` draws: a run's files are all of one, but the first decides it. */
-  let worldScene = "";
   let motion: MotionData | null = null;
   let current = -1;
   let t = 0;
@@ -526,11 +586,16 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     const tone = resultTone(m.result);
     const text = resultText(m.result);
     const facts = resultFacts(m.result).filter((f) => !(f.endsWith("from center") && text.includes(" cm")));
-    resultEl.innerHTML = `<span class="rb-result-n" title="${attr(path)}">${esc(motionName(path))}</span>`
+    const pushed = m.push ? `<span class="rb-result-f">${esc(`push ${pushText(m.push)}`)}</span>` : "";
+    resultEl.innerHTML = `<span class="rb-result-n" title="${attr(path)}">${esc(motionName(path, m.push ? "push" : "position"))}</span>`
       + `<span class="rb-tag rb-tag--${tone}">${tone === "ok" ? "Success" : tone === "bad" ? "Fail" : "No result"}</span>`
       + `<span class="rb-result-t">${esc(text)}</span>`
+      + pushed
       + facts.map((f) => `<span class="rb-result-f">${esc(f)}</span>`).join("");
   };
+
+  /** One world per scene: a batch's files are all one robot's, but a player could be handed both. */
+  const worlds = new Map<string, World>();
 
   const select = async (i: number): Promise<void> => {
     if (i < 0 || i >= files.length) return;
@@ -540,32 +605,39 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     loadingEl.hidden = false;
     loadingEl.textContent = "Loading the episode…";
     try {
+      // The motion file says which robot it is; the arm's scene starts loading meanwhile, as it did before there were two.
+      const armScene = fetchScene();
+      armScene.catch(() => undefined);
       const m = await fetchMotion(batch, files[i]);
-      const name = sceneOf(m);
-      const scene = await fetchScene(name);
+      const scene = await fetchScene(m.model_id);
       if (disposed || my !== seq) return;
-      if (!world || worldScene !== name) {
-        view = viewOf(name);
-        world = new World(scene, true, false, view.target);
-        worldScene = name;
-        cam.position.copy(view.at);
-        controls.target.copy(view.target);
-        controls.maxDistance = name === DEFAULT_SCENE ? 4 : 6;
+      const id = scene.model_id || ARM_MODEL;
+      let w = worlds.get(id);
+      if (!w) { w = new World(scene, true); worlds.set(id, w); }
+      if (w !== world) {
+        // A new robot: the camera starts where its scene says, and the legend says how it is judged.
+        aim(cam, w.view);
+        controls.target.copy(vec(w.view.target));
+        // A humanoid is taller than the arm's table is wide: room to pull back from it.
+        controls.maxDistance = id === ARM_MODEL ? 4 : 6;
         controls.update();
       }
+      world = w;
       motion = m;
       t = 0;
       hold = 0;
       seek.max = String(duration(m));
       loadingEl.hidden = true;
       showResult(m, files[i]);
-      const legend = el.querySelector<HTMLElement>("[data-rb-legend]");
-      if (legend) {
-        const ring = name === DEFAULT_SCENE && !hasBasket(m);
-        legend.textContent = name !== DEFAULT_SCENE ? STRIKE_LEGEND : hasBasket(m) ? BASKET_LEGEND : SUCCESS_LEGEND;
-        legend.previousElementSibling?.toggleAttribute("hidden", !ring);
-      }
+      // How this episode is judged: a push arrow, a strike on the bag, a basket, or the arm's ring. A run's files
+      // can differ in this (a basket only where a layout has one), so it is set for every file.
+      const judged = w.view.push_body ? PUSH_LEGEND : m.bag_pos ? STRIKE_LEGEND : hasBasket(m) ? BASKET_LEGEND : SUCCESS_LEGEND;
+      legendEl.classList.toggle("rb-legend--push", !!w.view.push_body);
+      legendEl.querySelector(".rb-legend-ring")?.toggleAttribute("hidden", judged === STRIKE_LEGEND || judged === BASKET_LEGEND);
+      const legendText = legendEl.querySelector("span:last-child");
+      if (legendText) legendText.textContent = judged;
       if (m.can_start) stage.setAttribute("aria-label", `Episode ${motionName(files[i])}: can from ${xy(m.can_start)}`);
+      else if (m.push) stage.setAttribute("aria-label", `Episode ${motionName(files[i], "push")}: push ${pushText(m.push)}`);
       else if (m.bag_pos) stage.setAttribute("aria-label", `Episode ${motionName(files[i])}: bag at ${xyz(m.bag_pos)}`);
       setPlaying(true);
       dirty = true;
@@ -655,8 +727,9 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
       loop = !loop;
       b.setAttribute("aria-pressed", String(loop));
     } else if (b.hasAttribute("data-rb-reset")) {
-      cam.position.copy(view.at);
-      controls.target.copy(view.target);
+      const view = world?.view ?? ARM_VIEW;
+      aim(cam, view);
+      controls.target.copy(vec(view.target));
       controls.update();
       dirty = true;
     } else if (b.dataset.rbFile != null) {
@@ -728,7 +801,7 @@ function mountPlayerWithoutGl(el: HTMLElement, batch: string, files: string[]): 
     mark();
     box.innerHTML = noWebglView(motionName(files[i]), null);
     fetchMotion(batch, files[i]).then((m) => {
-      if (!disposed && current === i) box.innerHTML = noWebglView(motionName(files[i]), m.result);
+      if (!disposed && current === i) box.innerHTML = noWebglView(motionName(files[i], m.push ? "push" : "position"), m.result);
     }).catch(() => undefined);
   };
   const onClick = (e: MouseEvent): void => {
@@ -750,11 +823,11 @@ function mountPlayerWithoutGl(el: HTMLElement, batch: string, files: string[]): 
 function fileButton(path: string, i: number, s: MotionSummary | null): string {
   const tone = s?.error ? "none" : resultTone(s?.result);
   const meta = s && !s.error
-    ? [s.can_start ? `can ${xy(s.can_start)}` : s.bag_pos ? `bag ${xyz(s.bag_pos)}` : "", resultText(s.result)].filter(Boolean).join(" · ")
+    ? [s.can_start ? `can ${xy(s.can_start)}` : s.bag_pos ? `bag ${xyz(s.bag_pos)}` : "", s.push ? `push ${pushText(s.push)}` : "", resultText(s.result)].filter(Boolean).join(" · ")
     : s?.error ? "can't be read" : "";
   return `<button type="button" class="rb-file" role="option" data-rb-file="${i}" aria-selected="false" title="${attr(path)}">`
     + `<span class="rb-dot rb-dot--${tone}" aria-hidden="true"></span>`
-    + `<span class="rb-file-n">${esc(motionName(path))}</span>`
+    + `<span class="rb-file-n">${esc(motionName(path, s?.push ? "push" : "position"))}</span>`
     + (meta ? `<span class="rb-file-m">${esc(meta)}</span>` : "")
     + `</button>`;
 }
@@ -768,13 +841,13 @@ interface Thumb {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   motion: MotionData | null;
+  /** The world of its robot, once its motion file says which. */
+  world?: World;
   visible: boolean;
   /** When it started looping (ms, performance.now()). */
   start: number;
   /** Under reduced motion: the size its one still frame was drawn at, so it is not drawn again. */
   still?: string;
-  /** The scene its episode was recorded in (`sceneOf`). */
-  scene: string;
 }
 
 /** Reduced motion: a thumbnail shows its episode's last pose, still, instead of looping it. */
@@ -782,9 +855,9 @@ const stillThumbs = (): boolean => typeof matchMedia === "function" && matchMedi
 
 class Thumbs {
   private renderer: THREE.WebGLRenderer | null = null;
-  /** One world and one camera per scene: a page's thumbnails are all of one, a list of batches' may not be. */
+  /** One world per scene, shared by every thumbnail of that robot. */
   private readonly worlds = new Map<string, World>();
-  private readonly cams = new Map<string, THREE.PerspectiveCamera>();
+  private readonly cam = camera(ARM_VIEW, true);
   private readonly items = new Set<Thumb>();
   private readonly io = new IntersectionObserver((es) => {
     for (const e of es) for (const th of this.items) if (th.el === e.target) th.visible = e.isIntersecting;
@@ -798,27 +871,22 @@ class Thumbs {
     const canvas = document.createElement("canvas");
     canvas.className = "rb-thumb-c";
     el.prepend(canvas);
-    const th: Thumb = { el, canvas, ctx: canvas.getContext("2d")!, motion: null, visible: false, start: 0, scene: DEFAULT_SCENE };
+    const th: Thumb = { el, canvas, ctx: canvas.getContext("2d")!, motion: null, visible: false, start: 0 };
     this.items.add(th);
     this.io.observe(el);
     const batch = el.dataset.batch ?? "";
     const file = el.dataset.file ?? "";
-    fetchMotion(batch, file).then(async (m) => {
-      const name = sceneOf(m);
-      const scene = await fetchScene(name);
+    fetchMotion(batch, file).then((m) => fetchScene(m.model_id).then((scene) => [scene, m] as const)).then(([scene, m]) => {
       if (!this.items.has(th)) return;
-      if (!this.worlds.has(name)) {
-        const view = viewOf(name);
-        this.worlds.set(name, new World(scene, true, true, view.target));
-        this.cams.set(name, camera(view.thumbAt, view.target));
-      }
-      th.scene = name;
+      const id = scene.model_id || ARM_MODEL;
+      if (!this.worlds.has(id)) this.worlds.set(id, new World(scene, true, true));
+      th.world = this.worlds.get(id)!;
       th.motion = m;
       th.start = performance.now();
       el.classList.add("is-ready");
       const label = el.querySelector(".rb-thumb-l");
       const tone = resultTone(m.result);
-      if (label) label.innerHTML = `<span class="rb-dot rb-dot--${tone}" aria-hidden="true"></span>${esc(motionName(file))}<span class="rb-thumb-r">${esc(resultText(m.result))}</span>`;
+      if (label) label.innerHTML = `<span class="rb-dot rb-dot--${tone}" aria-hidden="true"></span>${esc(motionName(file, m.push ? "push" : "position"))}<span class="rb-thumb-r">${esc(resultText(m.result))}</span>`;
       this.run();
     }).catch(() => { el.classList.add("is-error"); });
     this.run();
@@ -869,8 +937,8 @@ class Thumbs {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const still = stillThumbs();
     for (const th of this.items) {
-      const world = this.worlds.get(th.scene), cam = this.cams.get(th.scene);
-      if (!th.visible || !th.motion || !world || !cam) continue;
+      const world = th.world;
+      if (!th.visible || !th.motion || !world) continue;
       const w = Math.round(th.canvas.clientWidth * dpr), h = Math.round(th.canvas.clientHeight * dpr);
       if (!w || !h) continue;
       const drawn = `${w}x${h}:${themeOf(th.el)}`;
@@ -887,13 +955,14 @@ class Thumbs {
       r.setViewport(0, 0, w, h);
       r.setScissor(0, 0, w, h);
       r.setScissorTest(true);
-      if (cam.aspect !== w / h) { cam.aspect = w / h; cam.updateProjectionMatrix(); }
+      if (this.cam.aspect !== w / h) { this.cam.aspect = w / h; this.cam.updateProjectionMatrix(); }
+      aim(this.cam, world.view, true);
       const d = duration(th.motion);
       const loopS = d + LOOP_HOLD_S;
       const t = still ? d : Math.min(d, (((now - th.start) / 1000) % loopS));
       world.setTheme(themeOf(th.el));
       world.pose(th.motion, t);
-      r.render(world.scene, cam);
+      r.render(world.scene, this.cam);
       th.ctx.drawImage(r.domElement, 0, bufH - h, w, h, 0, 0, w, h);
     }
   }

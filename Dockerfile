@@ -33,8 +33,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY . .
 RUN uv sync --frozen --no-dev
 
-# The Panda meshes the robot domain scores in (33 MB, pinned commit, hash-checked; not in git).
-RUN python sim/fetch_assets.py
+# The Panda meshes the robot domain scores in (33 MB) and the Unitree G1 the push recovery domain needs in full (pinned
+# commit, hash-checked; not in git).
+RUN python sim/fetch_assets.py --model all
 # The Unitree G1 model, for the humanoid domain and its demo batch's 3D replays (19 MB, MuJoCo Menagerie at a pinned
 # commit, BSD 3-Clause, hash-checked; not in git). Without it a humanoid batch is refused at start.
 RUN python -m sim.g1.fetch_assets

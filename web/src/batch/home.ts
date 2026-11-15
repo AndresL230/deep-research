@@ -36,7 +36,9 @@ export function newBatchView(vm: HomeVm, inputs?: HomeInputs): string {
   const trap = chosenTrap(vm.defaults, vm.draft?.trap);
   // What the batch runs on, the trap and its strength only mean something in the tabular domain.
   const tabular = isTabular(vm.draft);
-  const controller = inputs?.controller ?? null;
+  // Uploaded controllers are the robot arm's: the humanoid starts from its template or the colleague's controller.
+  const uploads = takesUploads(vm.draft);
+  const controller = uploads ? inputs?.controller ?? null : null;
   const summary = tabular
     ? summaryLabel(inputs?.label ?? `Pima diabetes · ${DEFAULT_PLANTED}`, trap)
     : controller ? `Starting from ${controller.name}` : "";
@@ -51,7 +53,7 @@ export function newBatchView(vm: HomeVm, inputs?: HomeInputs): string {
       ${vm.draft ? domainRow(vm.draft, vm.defaults, vm.starting) : ""}
       ${tabular ? inputs?.html ?? "" : isArm(vm.draft) ? inputs?.controllerHtml ?? "" : ""}
       ${vm.draft && tabular ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
-      ${vm.draft && isArm(vm.draft) ? positionsRow(vm.draft) : vm.draft && !tabular ? humanoidRow() : ""}
+      ${vm.draft && isArm(vm.draft) ? positionsRow(vm.draft) : vm.draft && isStrike(vm.draft) ? humanoidRow() : ""}
       ${vm.draft ? mainRow(vm.draft, trap, vm.starting) : mainSkeleton(defaultsFailed(vm))}
       ${advancedBlock(vm, controller)}
     </div>
@@ -115,6 +117,10 @@ export const domainOf = (c: Pick<BatchConfig, "domain"> | null | undefined): str
 const isTabular = (c: BatchConfig | null | undefined): boolean => domainOf(c) === DEFAULT_DOMAIN;
 /** The robot arm's domain: the one with a controller to start from and a choice of test positions. */
 const isArm = (c: BatchConfig | null | undefined): boolean => domainOf(c) === "robot_arm";
+/** The domains whose agents can start from an uploaded controller (deep_research/controllers.py): the robot arm. */
+const takesUploads = isArm;
+/** The strike domain (the G1 and a hanging bag): its agents always start from the template. */
+const isStrike = (c: BatchConfig | null | undefined): boolean => domainOf(c) === "humanoid";
 
 /** Settings only the tabular domain reads: what the agents get (dataset, target, script) and the planted flaw. */
 export const TABULAR_ONLY = [
@@ -201,7 +207,7 @@ export function rememberDomain(name: string): void {
 }
 
 /** Short names for the picker. A domain added later shows its own title. */
-const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm", humanoid: "Humanoid" };
+const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm", humanoid: "Humanoid strike", humanoid_push: "Humanoid push" };
 
 /** The choice of domain, with the chosen one's line under it. Only when the server offers more than one. */
 function domainRow(c: BatchConfig, d: Defaults | null, locked: boolean): string {
@@ -378,7 +384,7 @@ function advancedBlock(vm: HomeVm, controller: ControllerInfo | null = null): st
     return `<div class="hm-adv" data-morph-key="adv">
     ${head}
     <div class="hm-adv-grid" id="hm-adv" data-morph-key="adv-grid">
-      ${isArm(c) ? choiceField(c, "robot_start", "Controller start", [["blank", "Blank"], ["colleague", "Colleague's"], ["uploaded", "Your upload"]], controller || c.robot_controller ? [] : ["uploaded"]) : ""}
+      ${isStrike(c) ? "" : choiceField(c, "robot_start", "Controller start", [["blank", "Blank"], ["colleague", "Colleague's"], ["uploaded", "Your upload"]], takesUploads(c) && (controller || c.robot_controller) ? [] : ["uploaded"])}
       ${choiceField(c, "robot_prompt", "Prompt", [["default", "Default"], ["practice", "Practice focus"]])}
       ${rangeField(c, "inflation_threshold", "Inflation threshold", 0.05, 0.5, 0.025, points(c.inflation_threshold))}
       ${numberField(c, "forks_per_choice", "Forks per arm", { min: 1, max: 8 })}

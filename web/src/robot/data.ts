@@ -18,12 +18,43 @@ export interface SceneGeom {
   mesh?: string;
 }
 
+/** How to look at a scene (robot_view.VIEWS): where the camera looks and starts, the fog, and for the humanoid the body
+ *  a push hits (the arrow points at it). */
+export interface SceneView {
+  target: number[];
+  camera: number[];
+  thumb_camera: number[];
+  fog: number[];
+  /** Half the side of the square the key light casts shadows in, meters. */
+  shadow?: number;
+  /** The floor grid: its size in meters and how many squares along a side. */
+  grid?: number[];
+  push_body?: string;
+  push_body_id?: number;
+}
+
 export interface SceneData {
   model_id: string;
   bodies: { id: number; name: string }[];
   /** Decimated meshes as flat arrays: `v` x, y, z per vertex, `f` three vertex indices per triangle. */
   meshes: Record<string, { v: number[]; f: number[] }>;
   geoms: SceneGeom[];
+  /** Absent from servers older than the humanoid: the arm's view is used. */
+  view?: SceneView;
+}
+
+/** The arm's scene, the one a motion file without a `model_id` was recorded in. */
+export const ARM_MODEL = "panda-can-v1";
+/** The humanoid's (sim/humanoid/scene.py). */
+export const G1_MODEL = "g1-push-v1";
+
+/** A humanoid episode's push (sim/humanoid/episode.py): a force on the torso, pointing `angle_deg` counterclockwise
+ *  from the robot's forward direction (0 pushes it forward: a shove from behind), for `duration_s` from `time_s`. */
+export interface Push {
+  angle_deg: number;
+  force_n: number;
+  time_s: number;
+  duration_s: number;
 }
 
 /** The episode result of a motion file (sim/MOTION_FORMAT.md), the keys the viewer shows. */
@@ -45,24 +76,38 @@ export interface EpisodeResult {
   in_basket?: boolean;
   /** What was picked, when it is not the can: "milk". */
   target?: string;
-  // A humanoid episode (sim/g1/episode.py): the bag swung far enough, something touched it and what ("right foot"),
-  // the robot fell, how far the bag swung at most, and whether the robot ended on both feet.
-  struck?: boolean;
-  touched?: boolean;
-  struck_with?: string | null;
+  // Both humanoid sims say whether the robot fell.
   fell?: boolean;
+  // The push recovery sim's (sim/humanoid/episode.py). `outcome` is one word: upright, stumbled, fell or error.
+  outcome?: HumanoidOutcome;
+  stumbled?: boolean;
+  fall_time?: number | null;
+  /** Push recovery: the first body other than a foot that touched the floor, such as "torso_link". Strike: whether
+   *  anything touched the bag. */
+  touched?: string | boolean | null;
+  max_tilt_deg?: number | null;
+  max_foot_shift_cm?: number | null;
+  // The strike sim's (sim/g1/episode.py): the bag swung far enough, what touched it first ("right foot"), how far it
+  // swung at most, and whether the robot ended on both feet.
+  struck?: boolean;
+  struck_with?: string | null;
   bag_peak_cm?: number;
   standing?: boolean;
 }
 
+/** sim/humanoid/outcome.py OUTCOMES. */
+export type HumanoidOutcome = "upright" | "stumbled" | "fell" | "error";
+
 export interface MotionData {
-  /** The scene the file was recorded in, for `fetchScene`: "g1" for a humanoid episode, absent for the arm's. */
-  scene?: string;
-  /** A humanoid episode: where the bag's center hung, x, y, z. */
+  /** The scene it was recorded in (robot_view.MODELS). Absent from servers older than the humanoids: the arm. */
+  model_id?: string;
+  /** A strike episode: where the bag's center hung, x, y, z. */
   bag_pos?: number[] | null;
   fps: number;
   can_start: number[] | null;
   place_target: number[] | null;
+  /** A humanoid episode's push; null or absent for the arm. */
+  push?: Push | null;
   result: EpisodeResult;
   /** Frames. */
   n: number;
@@ -86,6 +131,7 @@ export interface MotionSummary {
   bag_pos?: number[] | null;
   can_start?: number[] | null;
   place_target?: number[] | null;
+  push?: Push | null;
   duration?: number | null;
   n?: number;
   result?: EpisodeResult;
@@ -105,16 +151,16 @@ async function getJson<T>(url: string): Promise<T> {
 
 const batchPath = (id: string): string => `/api/batches/${encodeURIComponent(id)}`;
 
-/** The arm's scene: the one a motion file was recorded in when it names none. */
-export const DEFAULT_SCENE = "panda";
 const scenes = new Map<string, Promise<SceneData>>();
-/** A scene, fetched once per page: the arm's, or the one a motion file names (`MotionData.scene`). */
-export function fetchScene(name: string = DEFAULT_SCENE): Promise<SceneData> {
-  let p = scenes.get(name);
+/** The scene a motion file was recorded in (`MotionData.model_id`; absent: the arm's), fetched once per page. */
+export function fetchScene(modelId?: string | null): Promise<SceneData> {
+  const id = modelId || ARM_MODEL;
+  let p = scenes.get(id);
   if (!p) {
-    p = getJson<SceneData>(name === DEFAULT_SCENE ? "/api/robot/scene" : `/api/robot/scene?model=${encodeURIComponent(name)}`);
-    p.catch(() => scenes.delete(name));
-    scenes.set(name, p);
+    // The arm's is the route's default, asked for without a parameter so an older server answers it too.
+    p = getJson<SceneData>(id === ARM_MODEL ? "/api/robot/scene" : `/api/robot/scene?model=${encodeURIComponent(id)}`);
+    p.catch(() => { scenes.delete(id); });
+    scenes.set(id, p);
   }
   return p;
 }

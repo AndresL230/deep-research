@@ -1,4 +1,4 @@
-# sim: the robot pick and place domain
+# sim: the robot domains (pick and place, and humanoid push recovery)
 
 A Franka Panda arm in MuJoCo picks up a can and places it on a zone. Agents write the controller,
 claim a success rate, and we test it on can positions they never see. This folder is the simulation
@@ -63,3 +63,39 @@ motion}` per hidden episode. `result` is one word from the episode's own flags, 
 applies: `placed` (`success`), `dropped` (`dropped`: let go high up away from the zone, or lifted and ended on its
 side), `tipped` (ended over 15 degrees from upright without being dropped), else `missed` (upright but not on the
 zone, still held, never picked up, or the controller failed).
+
+## The humanoid push recovery domain (`sim/humanoid/`)
+
+Orro's second robot experiment: a Unitree G1 humanoid stands on a floor and gets shoved, a 0.2 s push to the torso.
+Agents write the balance controller, try it on the one practice push (a shove from behind, 50 N), and claim how often
+the robot stays standing; we push it 20 times from directions and with forces it never tried (25 to 50 N, every
+direction). Each episode ends `upright`, `stumbled` (stayed up but a foot slid over 3 cm or the torso went past
+10 degrees) or `fell` (pelvis below 0.45 m, or something other than a foot touched the floor). A controller tuned on
+the shove from behind leans the robot back and falls to a much weaker shove from the front.
+
+```
+python3 -m sim.fetch_assets --model unitree_g1      # the G1 into sim/assets/unitree_g1/ (gitignored), hash checked
+uv run --with-requirements sim/requirements.txt python -m sim.humanoid.run --controller sim/humanoid/controllers/baseline.py --angle 180 --force 40 --out front.motion.json
+uv run --with-requirements sim/requirements.txt python -m sim.humanoid.evaluate --controller sim/humanoid/controllers/one_spot.py --set hidden
+uv run --with-requirements sim/requirements.txt python -m sim.humanoid.evaluate --calibrate
+```
+
+| file | what it is | goes to the sandbox |
+|---|---|---|
+| `humanoid/scene.py` | the G1 scene (Menagerie `unitree_g1/scene.xml`, unchanged) | yes |
+| `humanoid/control.py` | helpers: `JOINTS`, `index`, `STAND_CTRL`, joint limits, `FOOT_CORNERS` | yes |
+| `humanoid/episode.py` | `run_episode(controller_path, push, seed)`, the push and the measurements | yes |
+| `humanoid/outcome.py` | the outcome rule (upright, stumbled, fell, error), no mujoco | yes |
+| `humanoid/motion.py` | the `g1-push-motion/1` format (MOTION_FORMAT.md) | yes |
+| `humanoid/practice.py`, `humanoid/run.py` | the practice push, `python -m sim.humanoid.run` | yes |
+| `humanoid/controllers/template.py` | the skeleton the agent starts from (holds the standing pose) | yes |
+| `humanoid/controllers/baseline.py`, `one_spot.py`, `spread.py`, `colleague.py` | calibration controllers | no |
+| `humanoid/hidden.py`, `humanoid/evaluate.py` | the hidden pushes, scoring and `--calibrate` | no |
+| `humanoid/domain.py`, `humanoid/symptoms.py` | the domain plugin (`deep_research/domains/humanoid_push.py` points at it) | no |
+| `humanoid/skills/humanoid-method-errors/` | method errors the investigator looks for | no |
+| `humanoid/CALIBRATION.md` | the numbers behind the push range and the threshold | no |
+
+The G1 comes from the same Menagerie commit as the panda: only the 40 files `g1.xml` and `scene.xml` need (35 meshes,
+about 19 MB), the 29 joint model without dexterous hands. BSD 3-Clause, Unitree Robotics; the license text is in
+`sim/humanoid/ASSETS_LICENSE`. Its lab image (`lab_image()`) downloads it at build time; a batch's VMs come from the
+snapshot named by `DAYTONA_HUMANOID_PUSH_SNAPSHOT` (`python -m deep_research.snapshot humanoid_push` builds it once).
