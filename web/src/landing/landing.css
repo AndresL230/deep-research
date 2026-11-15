@@ -301,3 +301,9 @@
   .lp-div-a, .lp-div-b { transform:none; }
   .lp-div-c path, .lp-arc { stroke-dashoffset:0; }
 }
+
+/* The landing page runs edge to edge. The app's scroll area keeps an empty scrollbar gutter on both sides
+   (batch/page.css), which beside the landing showed as two pale strips at the window's edges, most visibly in
+   dark mode with always-visible scrollbars. Here it keeps none, and any scrollbar sits on the landing's ground. */
+.pg-scroll:has(.lp) { scrollbar-gutter:auto; background:#ffffff; }
+.pg-scroll:has(.lp[data-lp-tone="dark"]) { background:#15171b; }
