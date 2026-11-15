@@ -237,31 +237,94 @@ describe("the research a batch builds on", () => {
     expect(compact).not.toContain(`class="rs-t"`);
   });
 
-  it("draws the paper as one of the page's cards, with the batch's setup as one list", async () => {
-    const { researchCard } = await import("../src/robot/markup");
+  it("draws the paper as one of the page's cards, a placeholder that script fills from arXiv's record", async () => {
+    const { researchByPaper, researchCard } = await import("../src/robot/markup");
     const card = researchCard(cfg);
-    expect(card).toContain(`<section class="ov-card rp"`);
+    expect(card).toContain(`<section class="ov-card rp" data-keep data-paper="2412.13196" data-morph-key="research:2412.13196"`);
     expect(card).toContain(`<span class="ds-eyebrow">Research paper</span>`);
     expect(card).toContain(">ExBody2: Advanced Expressive Humanoid Whole-Body Control</h3>");
     expect(card).toContain("Mazeyu Ji, Xuanbin Peng, Fangchen Liu, Jialong Li, Ge Yang, Xuxin Cheng, Xiaolong Wang · 2024");
     expect(card).toMatch(/<a class="rp-open" href="https:\/\/arxiv\.org\/abs\/2412\.13196" target="_blank" rel="noopener"[^>]*>arXiv:2412\.13196<svg/);
-    // One list, headed as the batch's setup: what follows the paper and how the batch runs it are rows of it.
+    // Until the record is in, the card says it is being asked for and has no abstract.
+    expect(card).toContain("Getting the paper's record from arxiv.org");
+    expect(card).toContain(`<div class="rp-abs" data-rp-abs hidden></div>`);
+    // One list, headed as the batch's setup.
     expect(card.match(/<dl /g)).toHaveLength(1);
     expect(card).toContain(">Setup of this batch</h4>");
     expect(card).toMatch(/<dt>Task<\/dt><dd>Follow a reference motion with the whole body<\/dd>.*<dt>Controller<\/dt><dd>Code written by an AI agent<\/dd>/s);
     expect(card).toContain("<i>E</i><sub>vel</sub>, <i>E</i><sub>mpkpe</sub> and <i>E</i><sub>mpjpe</sub>");
-    expect(card.match(/class="rp-row" style="--i:\d+"/g)).toHaveLength(7);
+    expect(card.match(/class="rp-row" data-i="\d+" style="--i:\d+"/g)).toHaveLength(7);
     expect(card).toContain(`style="--rows:4"`);
     expect(card).not.toMatch(/From the paper|In this batch|not the paper|The paper:/);
-    // Nothing reads the paper while the page loads, and the card does not say that anything does.
-    expect(card).not.toMatch(/extract|analy[sz]ing|reading the paper|scanning/i);
     const libero = researchCard({ domain: "robot_arm", robot_positions: "libero_pro" });
+    expect(libero).toContain(`data-paper="2510.03827"`);
     expect(libero).toContain("LIBERO-PRO: Towards Robust and Fair Evaluation of Vision-Language-Action Models Beyond Memorization");
-    expect(libero).toContain("Xueyang Zhou, Yangming Xu, Guiyao Tie, Yongchao Chen, Guowen Zhang, Duanfeng Chu, Pan Zhou, Lichao Sun · 2025");
-    expect(libero).toContain(">arXiv:2510.03827<svg");
     expect(libero).toMatch(/<dt>Test<\/dt><dd>LIBERO-PRO&#39;s position changes, objects swapped and shifted: 30 episodes<\/dd>/);
     expect(libero.match(/class="rp-row"/g)).toHaveLength(8);
     expect(researchCard({ domain: "humanoid" })).toBe("");
+    expect(researchByPaper("2412.13196")?.name).toBe("ExBody2");
+    expect(researchByPaper("2510.03827")?.name).toBe("LIBERO-PRO");
+    expect(researchByPaper("1706.03762")).toBeNull();
+  });
+
+  it("marks in the abstract that arrived the phrases each setup row comes from", async () => {
+    const { researchByPaper } = await import("../src/robot/markup");
+    const { abstractView, day, findTerms, markTerms, statusText } = await import("../src/batch/paper");
+    const source = researchByPaper("2412.13196")!;
+    const text = "Humanoid robots do whole-body tracking of human motion capture <data>; Whole-Body Tracking again, not bodytracking.";
+    const found = findTerms(text, source.setup);
+    expect(found.map(([a, b, row]) => [text.slice(a, b), row])).toEqual([
+      ["Humanoid robots", 0], ["whole-body tracking", 1], ["human motion capture", 4], ["Whole-Body Tracking", 1]]);
+    const html = markTerms(text, source.setup);
+    expect(html).toContain(`<mark data-i="1" style="--i:1">whole-body tracking</mark>`);
+    expect(html).toContain("&lt;data&gt;");
+    expect(html.match(/<mark /g)).toHaveLength(4);
+    // A phrase a revision dropped is simply not marked, and text with none is left as it is.
+    expect(markTerms("A paper about cooking.", source.setup)).toBe("A paper about cooking.");
+    const paper = { id: "2412.13196", url: "https://arxiv.org/abs/2412.13196", title: "T", authors: ["A B"], published: "2024-12-17",
+      updated: "2025-03-12", abstract: text, categories: ["cs.RO", "cs.AI"], version: "v2", live: true };
+    expect(statusText(paper)).toBe("From arxiv.org · published 17 Dec 2024, last revised 12 Mar 2025 (v2) · cs.RO, cs.AI");
+    expect(statusText({ ...paper, updated: "2024-12-17", categories: [] })).toBe("From arxiv.org · published 17 Dec 2024");
+    expect(statusText({ ...paper, live: false, abstract: null })).toBe("arxiv.org could not be reached. Showing the saved title and authors.");
+    expect(statusText(null)).toContain("could not be reached");
+    expect(day("2025-10-04")).toBe("4 Oct 2025");
+    expect(day("soon")).toBe("soon");
+    const view = abstractView(paper, source);
+    expect(view).toContain(">Abstract</h4>");
+    expect(view).toContain("the phrases 3 of the setup rows come from");
+    expect(view).toContain(`data-rp-more aria-expanded="false">Show all</button>`);
+    expect(abstractView({ ...paper, abstract: null }, source)).toBe("");
+  });
+
+  it("fills a card from a record, and says so when there is none", async () => {
+    const { researchByPaper } = await import("../src/robot/markup");
+    const { fill } = await import("../src/batch/paper");
+    const source = researchByPaper("2412.13196")!;
+    const part = (): { textContent: string; innerHTML: string; hidden: boolean } => ({ textContent: "", innerHTML: "", hidden: true });
+    const make = () => {
+      const parts: Record<string, ReturnType<typeof part>> = { "[data-rp-status]": part(), "[data-rp-title]": part(), "[data-rp-authors]": part(), "[data-rp-abs]": part() };
+      const classes = new Set<string>();
+      const rows = source.setup.map((_, i) => ({ dataset: { i: String(i) }, on: false, classList: { toggle(_c: string, v: boolean) { rows[i].on = v; } } }));
+      const el = { querySelector: (s: string) => parts[s] ?? null, querySelectorAll: () => rows,
+        classList: { add: (c: string) => classes.add(c), toggle: (c: string, v: boolean) => (v ? classes.add(c) : classes.delete(c)) } };
+      return { el: el as unknown as HTMLElement, parts, classes, rows };
+    };
+    const live = make();
+    fill(live.el, source, { id: "2412.13196", url: "u", title: "The live title", authors: ["Mazeyu Ji", "Xiaolong Wang"], published: "2024-12-17",
+      updated: "2025-03-12", abstract: "Whole-body tracking with human motion capture.", categories: ["cs.RO"], version: "v2", live: true });
+    expect(live.parts["[data-rp-title]"].textContent).toBe("The live title");
+    expect(live.parts["[data-rp-authors]"].textContent).toBe("Mazeyu Ji, Xiaolong Wang · 2024");
+    expect(live.parts["[data-rp-status]"].textContent).toContain("From arxiv.org · published 17 Dec 2024");
+    expect(live.parts["[data-rp-abs]"].hidden).toBe(false);
+    expect(live.parts["[data-rp-abs]"].innerHTML).toContain(`<mark data-i="4" style="--i:4">human motion capture</mark>`);
+    expect(live.rows.map((r) => r.on)).toEqual([false, true, false, false, true, false, false]);
+    expect([...live.classes]).toEqual(["is-ready"]);
+    const none = make();
+    fill(none.el, source, null);
+    expect(none.parts["[data-rp-status]"].textContent).toContain("could not be reached");
+    expect(none.parts["[data-rp-abs]"].hidden).toBe(true);
+    expect(none.parts["[data-rp-title]"].textContent).toBe("");
+    expect([...none.classes].sort()).toEqual(["is-ready", "is-saved"]);
   });
 
   it("shows on the start form beside what each test is", () => {

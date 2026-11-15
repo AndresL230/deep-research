@@ -797,6 +797,17 @@ def _robot_unavailable(e: Exception) -> HTTPException:
                               f"--model all`): {type(e).__name__}")
 
 
+@app.get("/api/papers/arxiv/{arxiv_id}")
+def research_paper(arxiv_id: str):
+    """The record of a research paper a batch builds on, as arXiv has it now (papers.py): title, authors, dates and
+    abstract. Only the papers the app knows; when arXiv cannot be reached, the saved facts with `live` false."""
+    from deep_research import papers
+
+    if arxiv_id not in papers.PAPERS:
+        raise HTTPException(404, f"no paper {arxiv_id!r}")
+    return JSONResponse(papers.paper(arxiv_id), headers={"Cache-Control": "public, max-age=600"})
+
+
 @app.get("/api/robot/scene")
 def robot_scene(request: Request, model: str = robot_view.DEFAULT_MODEL):
     """A scene for the 3D viewer: every visual geom, its body, pose and color, the meshes, and how to look at it.

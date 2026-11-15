@@ -19,6 +19,8 @@ export interface ResearchSource {
   /** The paper's short name and its arXiv number, for the link's text. */
   name: string;
   paper: string;
+  /** The number alone ("2412.13196"): what the server is asked for the paper's record by. */
+  arxiv: string;
   url: string;
   /** What is taken from the paper and where it runs, in one sentence. */
   text: string;
@@ -26,8 +28,9 @@ export interface ResearchSource {
   title: string;
   authors: string;
   year: number;
-  /** The batch's setup, one table: [what, how]. `E_vel` is set as the symbol it is in the paper. */
-  setup: [string, string][];
+  /** The batch's setup, one list: [what, how, phrases]. `E_vel` is set as the symbol it is in the paper. The phrases
+   *  are what is looked for in the paper's abstract to show where a row comes from; a row may have none. */
+  setup: [string, string, string[]?][];
 }
 
 /**
@@ -38,17 +41,18 @@ export function researchSource(config: unknown): ResearchSource | null {
   const c = config as { domain?: unknown; robot_positions?: unknown } | null;
   if (c?.domain === "humanoid_track") {
     return {
-      name: "ExBody2", paper: "arXiv:2412.13196", url: "https://arxiv.org/abs/2412.13196",
+      name: "ExBody2", paper: "arXiv:2412.13196", arxiv: "2412.13196", url: "https://arxiv.org/abs/2412.13196",
       text: "Built on the ExBody2 research paper: its task (whole-body motion tracking on the Unitree G1) and its three tracking errors, "
         + "run in Orro's own simulator with controllers written by AI agents.",
       title: "ExBody2: Advanced Expressive Humanoid Whole-Body Control",
       authors: "Mazeyu Ji, Xuanbin Peng, Fangchen Liu, Jialong Li, Ge Yang, Xuxin Cheng, Xiaolong Wang", year: 2024,
       setup: [
-        ["Robot", "Unitree G1 humanoid"],
-        ["Task", "Follow a reference motion with the whole body"],
-        ["Measures", "E_vel, E_mpkpe and E_mpjpe: the error in root velocity, key body positions and joint angles"],
-        ["Test", "Practice on one motion, then 20 held-out motions"],
-        ["Motion data", "CMU motion capture clips, fitted to the robot with the feet planted"],
+        ["Robot", "Unitree G1 humanoid", ["humanoid robots"]],
+        ["Task", "Follow a reference motion with the whole body", ["whole-body tracking", "whole-body motions"]],
+        ["Measures", "E_vel, E_mpkpe and E_mpjpe: the error in root velocity, key body positions and joint angles",
+          ["velocity tracking", "tracking body landmarks", "tracking performance"]],
+        ["Test", "Practice on one motion, then 20 held-out motions", ["specific motions", "at the expense of the others"]],
+        ["Motion data", "CMU motion capture clips, fitted to the robot with the feet planted", ["human motion capture"]],
         ["Controller", "Code written by an AI agent"],
         ["Simulator", "Orro's own MuJoCo scene"],
       ],
@@ -56,17 +60,17 @@ export function researchSource(config: unknown): ResearchSource | null {
   }
   if (c?.robot_positions === "libero_pro" && (c.domain == null || c.domain === "robot_arm")) {
     return {
-      name: "LIBERO-PRO", paper: "arXiv:2510.03827", url: "https://arxiv.org/abs/2510.03827",
+      name: "LIBERO-PRO", paper: "arXiv:2510.03827", arxiv: "2510.03827", url: "https://arxiv.org/abs/2510.03827",
       text: "Built on the LIBERO-PRO research paper: LIBERO's objects and layouts and LIBERO-PRO's position changes, "
         + "run in Orro's own simulator.",
       title: "LIBERO-PRO: Towards Robust and Fair Evaluation of Vision-Language-Action Models Beyond Memorization",
       authors: "Xueyang Zhou, Yangming Xu, Guiyao Tie, Yongchao Chen, Guowen Zhang, Duanfeng Chu, Pan Zhou, Lichao Sun", year: 2025,
       setup: [
         ["Robot", "Franka Panda arm"],
-        ["Task", "Pick a grocery object up and put it in the basket"],
-        ["Objects", "The basket and ten grocery objects of LIBERO"],
-        ["Layouts", "The ten tasks of the LIBERO-Object suite"],
-        ["Test", "LIBERO-PRO's position changes, objects swapped and shifted: 30 episodes"],
+        ["Task", "Pick a grocery object up and put it in the basket", ["grasping actions", "target object"]],
+        ["Objects", "The basket and ten grocery objects of LIBERO", ["manipulated objects"]],
+        ["Layouts", "The ten tasks of the LIBERO-Object suite", ["environment layouts"]],
+        ["Test", "LIBERO-PRO's position changes, objects swapped and shifted: 30 episodes", ["reasonable perturbations", "initial states"]],
         ["Success", "The object ends at rest inside the basket"],
         ["Controller", "Code written by an AI agent"],
         ["Simulator", "Orro's own MuJoCo scene"],
@@ -98,28 +102,41 @@ export function researchNote(config: unknown, compact = false): string {
 /** A table cell's text with the paper's symbols set as symbols: `E_vel` is an italic E with "vel" below the line. */
 const symbols = (text: string): string => esc(text).replace(/\bE_([a-z]+)\b/g, "<i>E</i><sub>$1</sub>");
 
+/** The research source whose paper has this arXiv number, for the script that fills its card. */
+export function researchByPaper(arxiv: string): ResearchSource | null {
+  for (const config of [{ domain: "humanoid_track" }, { domain: "robot_arm", robot_positions: "libero_pro" }]) {
+    const r = researchSource(config);
+    if (r?.arxiv === arxiv) return r;
+  }
+  return null;
+}
+
 /**
  * A batch's paper, as one of the batch page's own cards: a "Research paper" tag, the title, the authors and the year,
- * a link to the paper on arXiv, and the batch's setup as one list of what and how, in two columns. The rows show one
- * after another when the card first appears (robot.css; at once for a reader who asked for less motion). Empty for a
- * batch that builds on no paper.
+ * a link to the paper on arXiv, and the batch's setup as one list of what and how, in two columns. Empty for a batch
+ * that builds on no paper.
  *
- * The list is the batch's setup, as its heading says, and its rows are fixed text written when the domain was
- * built: nothing reads the paper while the page loads, and the card does not say that anything does.
+ * The card is a placeholder that script fills (batch/paper.ts, `data-keep`): it asks the server for the paper's
+ * record as arXiv has it now, shows where that stands while it waits, then sets the abstract under the title, marks
+ * in it the phrases each setup row comes from, and lets the rows in one after another. What it says it is doing is
+ * what it is doing: until the record arrives the rows are not shown, and when arXiv cannot be reached the card says
+ * so and shows the saved title and authors with no abstract.
  */
 export function researchCard(config: unknown): string {
   const r = researchSource(config);
   if (!r) return "";
-  const rows = r.setup.map(([what, how], i) => `<div class="rp-row" style="--i:${i}"><dt>${esc(what)}</dt><dd>${symbols(how)}</dd></div>`).join("");
-  return `<section class="ov-card rp" data-morph-key="research" aria-label="${attr(`Research paper: ${r.name}`)}">`
+  const rows = r.setup.map(([what, how], i) => `<div class="rp-row" data-i="${i}" style="--i:${i}"><dt>${esc(what)}</dt><dd>${symbols(how)}</dd></div>`).join("");
+  return `<section class="ov-card rp" data-keep data-paper="${attr(r.arxiv)}" data-morph-key="${attr(`research:${r.arxiv}`)}" aria-label="${attr(`Research paper: ${r.name}`)}">`
     + `<div class="rp-head">`
     + `<div class="rp-id">`
     + `<span class="ds-eyebrow">Research paper</span>`
-    + `<h3 class="rp-title">${esc(r.title)}</h3>`
-    + `<p class="rp-authors">${esc(`${r.authors} · ${r.year}`)}</p>`
+    + `<h3 class="rp-title" data-rp-title>${esc(r.title)}</h3>`
+    + `<p class="rp-authors" data-rp-authors>${esc(`${r.authors} · ${r.year}`)}</p>`
     + `</div>`
     + `<a class="rp-open" href="${attr(r.url)}" target="_blank" rel="noopener" title="Open the paper on arXiv">${esc(r.paper)}${EXTERNAL}</a>`
     + `</div>`
+    + `<p class="rp-status" data-rp-status role="status"><span class="rp-busy" aria-hidden="true"></span>Getting the paper's record from arxiv.org</p>`
+    + `<div class="rp-abs" data-rp-abs hidden></div>`
     + `<div class="rp-setup">`
     + `<h4 class="rp-sub">Setup of this batch</h4>`
     + `<dl class="rp-list" style="--rows:${Math.ceil(r.setup.length / 2)}">${rows}</dl>`
