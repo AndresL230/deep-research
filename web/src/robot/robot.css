@@ -125,19 +125,43 @@
 .rp-open:hover, .rp-open:focus-visible { background:var(--hover); color:var(--fg); }
 .rp-sub { margin:0 0 4px; font-size:12.5px; font-weight:400; color:var(--fg-55); }
 .rp-sub-n { margin-left:10px; color:var(--fg-40); }
-/* the paper's measures on this batch so far: one tile each, the number counting to its value as agents are scored */
-.rp-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin:0; }
-.rp-tile { display:flex; flex-direction:column; gap:2px; min-width:0; padding:12px 14px; border:1px solid var(--border); border-radius:var(--r-ctl); background:var(--bg); }
-.rp-tile dt { font-size:12.5px; color:var(--fg-55); }
+/* the paper's measures on this batch so far: one tile each, the number counting to its value as agents are scored,
+   and under it a gauge with the limit and a dot for each agent */
+.rp-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:10px; margin:0; }
+.rp-tile { display:flex; flex-direction:column; gap:4px; min-width:0; padding:12px 14px 10px; border:1px solid var(--border); border-radius:var(--r-ctl); background:var(--bg); }
+.rp-tile dt { display:flex; align-items:baseline; justify-content:space-between; gap:8px; font-size:12.5px; color:var(--fg-55); }
 .rp-tile dt sub { font-size:.72em; }
 .rp-tile dd { margin:0; display:flex; align-items:baseline; gap:5px; font-size:24px; line-height:1.2; font-weight:500; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; }
 .rp-unit, .rp-of { font-size:13px; font-weight:400; letter-spacing:0; color:var(--fg-55); }
-.rp-tile-s { font-size:12px; color:var(--fg-40); }
+.rp-tile-s { font-size:12px; color:var(--fg-40); white-space:nowrap; }
+/* the track at the bottom, the dots on it and, where agents share a value, in rows above it */
+.rp-gauge { position:relative; height:calc(14px + (var(--rows, 1) - 1) * 9px); margin-top:8px; transition:height var(--fx-base, .24s) var(--fx-ease, ease); }
+.rp-gauge::before { content:""; position:absolute; left:0; right:0; bottom:5px; height:4px; border-radius:2px; background:var(--muted-2); }
+.rp-fill { position:absolute; left:0; bottom:5px; height:4px; border-radius:2px; background:var(--fg-40); transition:width .6s var(--fx-ease, ease); }
+.rp-limit { position:absolute; bottom:0; width:1.5px; height:14px; margin-left:-1px; background:var(--fg); }
+.rp-dot { position:absolute; bottom:calc(2px + var(--row, 0) * 9px); width:10px; height:10px; margin-left:-5px; border-radius:50%; box-sizing:border-box; border:2px solid var(--bg); background:var(--fg-55); transition:left .6s var(--fx-ease, ease); animation:rp-dot .35s var(--fx-ease, ease-out) both; }
+.rp-dot--honest { background:var(--green); } .rp-dot--inflated { background:var(--red); } .rp-dot--unclear { background:var(--amber); }
+.rp-gauge .rp-dot:hover { transform:scale(1.35); z-index:1; }
+.rp-scale { position:relative; display:flex; justify-content:space-between; height:14px; font-size:11px; color:var(--fg-40); font-variant-numeric:tabular-nums; }
+.rp-scale-l { position:absolute; top:0; transform:translateX(-50%); color:var(--fg-70); white-space:nowrap; }
+.rp-keys { display:inline-flex; flex-wrap:wrap; gap:4px 12px; margin-left:14px; font-size:12px; color:var(--fg-40); }
+.rp-keys span { display:inline-flex; align-items:center; gap:5px; }
+.rp-keys .rp-dot { position:static; margin:0; border:0; width:7px; height:7px; animation:none; }
+@keyframes rp-dot { from { opacity:0; transform:scale(.2); } to { opacity:1; transform:scale(1); } }
+/* the setup, folded until asked for */
+.rp-setup { border-top:1px solid var(--border); margin-top:2px; }
+.rp-fold { display:flex; align-items:center; gap:8px; width:fit-content; padding:10px 6px 0 0; font-size:12.5px; color:var(--fg-70); cursor:pointer; list-style:none; }
+.rp-fold::-webkit-details-marker { display:none; }
+.rp-fold:hover { color:var(--fg); }
+.rp-fold:focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:var(--r-ctl); }
+.rp-fold-i { width:6px; height:6px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(-45deg); transition:transform var(--fx-fast, .18s) var(--fx-ease, ease); }
+.rp-setup[open] .rp-fold-i { transform:rotate(45deg); }
+.rp-setup[open] .rp-list { margin-top:10px; }
 .rp-list { display:grid; grid-auto-flow:column; grid-template-rows:repeat(var(--rows), auto); grid-auto-columns:minmax(0, 1fr); column-gap:36px; margin:0; }
 .rp-row { display:grid; grid-template-columns:104px minmax(0, 1fr); gap:12px; padding:9px 0; border-top:1px solid var(--border); font-size:13.5px; line-height:1.4; animation:rp-in .3s var(--fx-ease, ease-out) calc(.15s + var(--i) * .07s) 1 both; }
 .rp-row dt { font-size:12.5px; color:var(--fg-55); }
 .rp-row dd { margin:0; color:var(--fg); }
 .rp-row sub { font-size:.72em; }
 @keyframes rp-in { from { opacity:0; } to { opacity:1; } }
-@media (prefers-reduced-motion: reduce) { .rp-row { animation:none; } }
+@media (prefers-reduced-motion: reduce) { .rp-row, .rp-dot { animation:none; } .rp-fill, .rp-dot { transition:none; } }
 @media (max-width: 760px) { .rp-list { grid-auto-flow:row; grid-template-rows:none; } .rp-row { grid-template-columns:88px minmax(0, 1fr); } }
