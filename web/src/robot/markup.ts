@@ -25,7 +25,7 @@ export interface ResearchSource {
   text: string;
   /** The paper's full title, for its card. */
   title: string;
-  /** The batch's setup, one list: [what, how]. `E_vel` is set as the symbol it is in the paper. */
+  /** The batch's setup, one list: [what, how]. */
   setup: [string, string][];
 }
 
@@ -44,7 +44,7 @@ export function researchSource(config: unknown): ResearchSource | null {
       setup: [
         ["Robot", "Unitree G1 humanoid"],
         ["Task", "Follow a reference motion with the whole body"],
-        ["Measures", "E_vel, E_mpkpe and E_mpjpe: the error in root velocity, key body positions and joint angles"],
+        ["Measures", "Three tracking errors: key body positions, joint angles and root velocity"],
         ["Test", "Practice on one motion, then 20 held-out motions"],
         ["Motion data", "CMU motion capture clips, fitted to the robot with the feet planted"],
         ["Controller", "Code written by an AI agent"],
@@ -92,12 +92,10 @@ export function researchNote(config: unknown, compact = false): string {
   return `<p class="rs" data-morph-key="research">${tag}<span class="rs-t">${esc(r.text)}</span>${researchLink(config)}</p>`;
 }
 
-/** A table cell's text with the paper's symbols set as symbols: `E_vel` is an italic E with "vel" below the line. */
-const symbols = (text: string): string => esc(text).replace(/\bE_([a-z]+)\b/g, "<i>E</i><sub>$1</sub>");
 
 /** A setup as rows of one list, each with its place in the order they show in. */
 export function setupList(r: ResearchSource): string {
-  const rows = r.setup.map(([what, how], i) => `<div class="rp-row" style="--i:${i}"><dt>${esc(what)}</dt><dd>${symbols(how)}</dd></div>`).join("");
+  const rows = r.setup.map(([what, how], i) => `<div class="rp-row" style="--i:${i}"><dt>${esc(what)}</dt><dd>${esc(how)}</dd></div>`).join("");
   return `<dl class="rp-list" style="--rows:${Math.ceil(r.setup.length / 2)}">${rows}</dl>`;
 }
 
@@ -171,11 +169,11 @@ export function measuredTiles(config: unknown, runs: Record<string, MeasuredRun>
     const cmOf = (eps: Record<string, unknown>[]): number | null => { const m = mean(nums(eps, "e_mpkpe")); return m == null ? null : m * 100; };
     const kp = cmOf(episodes), jp = mean(nums(episodes, "e_mpjpe")), vel = mean(nums(episodes, "e_vel"));
     const tracked = episodes.filter((e) => e.result === "tracked").length;
-    tiles = tile("<i>E</i><sub>mpkpe</sub>", shown(kp, "dec2", kp == null ? "" : kp.toFixed(2)), kp == null ? "" : "cm", "key body positions",
+    tiles = tile("Position error", shown(kp, "dec2", kp == null ? "" : kp.toFixed(2)), kp == null ? "" : "cm", "key body positions",
         gauge({ max: TRACK_CM * 2, limit: TRACK_CM, text: (v) => `${Number(v.toFixed(1))} cm`, endText: `${TRACK_CM * 2}+ cm` }, kp, each(cmOf)))
-      + tile("<i>E</i><sub>mpjpe</sub>", shown(jp, "dec3", jp == null ? "" : jp.toFixed(3)), jp == null ? "" : "rad", "joint angles",
+      + tile("Joint error", shown(jp, "dec3", jp == null ? "" : jp.toFixed(3)), jp == null ? "" : "rad", "joint angles",
         gauge({ max: TRACK_RAD * 2, limit: TRACK_RAD, text: (v) => `${Number(v.toFixed(3))} rad`, endText: `${TRACK_RAD * 2}+ rad` }, jp, each((eps) => mean(nums(eps, "e_mpjpe")))))
-      + tile("<i>E</i><sub>vel</sub>", shown(vel, "dec2", vel == null ? "" : vel.toFixed(2)), vel == null ? "" : "m/s", "root velocity",
+      + tile("Velocity error", shown(vel, "dec2", vel == null ? "" : vel.toFixed(2)), vel == null ? "" : "m/s", "root velocity",
         gauge({ max: 0.5, text: (v) => `${v.toFixed(2)} m/s`, endText: "0.5+ m/s" }, vel, each((eps) => mean(nums(eps, "e_vel")))))
       + tile("Tracked", n ? `${count(tracked, "int", String(tracked))}<span class="rp-of"> of ${n}</span>` : "–", "", "hidden episodes",
         gauge(percent, share(episodes, "tracked"), each((eps) => share(eps, "tracked"))));

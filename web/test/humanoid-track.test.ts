@@ -252,7 +252,9 @@ describe("the research a batch builds on", () => {
     expect(card).toMatch(/<details class="rp-setup" data-morph-key="setup"><summary class="rp-fold">.*Setup of this batch<span class="rp-sub-n">7 settings<\/span><\/summary>/);
     expect(card).not.toContain("<details open");
     expect(card).toMatch(/<dt>Task<\/dt><dd>Follow a reference motion with the whole body<\/dd>.*<dt>Controller<\/dt><dd>Code written by an AI agent<\/dd>/s);
-    expect(card).toContain("<i>E</i><sub>vel</sub>, <i>E</i><sub>mpkpe</sub> and <i>E</i><sub>mpjpe</sub>");
+    expect(card).toContain("<dt>Measures</dt><dd>Three tracking errors: key body positions, joint angles and root velocity</dd>");
+    // The measures are named in words, not by the paper's symbols.
+    expect(card).not.toMatch(/<sub>|E_|mpkpe|mpjpe/);
     expect(card.match(/class="rp-row" style="--i:\d+"/g)).toHaveLength(7);
     expect(card).toContain(`style="--rows:4"`);
     expect(card).not.toMatch(/From the paper|In this batch|not the paper|The paper:/);
@@ -303,9 +305,10 @@ describe("the paper's measures on a batch", () => {
     };
     const some = measuredTiles(cfg, runs);
     expect(some).toContain("Mean over 4 hidden episodes of 2 agents");
-    expect(some).toMatch(/<i>E<\/i><sub>mpkpe<\/sub>.*data-count="4" data-fmt="dec2" data-text="4\.00".*<span class="rp-unit">cm<\/span>/s);
-    expect(some).toMatch(/<i>E<\/i><sub>mpjpe<\/sub>.*data-count="0\.02" data-fmt="dec3" data-text="0\.020".*rad/s);
-    expect(some).toMatch(/<i>E<\/i><sub>vel<\/sub>.*data-fmt="dec2" data-text="0\.30".*m\/s/s);
+    expect(some).toMatch(/Position error.*data-count="4" data-fmt="dec2" data-text="4\.00".*<span class="rp-unit">cm<\/span>/s);
+    expect(some).toMatch(/Joint error.*data-count="0\.02" data-fmt="dec3" data-text="0\.020".*rad/s);
+    expect(some).toMatch(/Velocity error.*data-fmt="dec2" data-text="0\.30".*m\/s/s);
+    expect(some).not.toMatch(/<sub>|mpkpe|mpjpe/);
     expect(some).toMatch(/Tracked.*data-count="2" data-fmt="int".*of 4/s);
     // Each gauge: the limit in the middle of its scale, the mean filled to, and a dot per scored agent at its own value.
     expect(some).toMatch(/<i class="rp-fill" data-morph-key="fill" style="width:33\.3%"><\/i><i class="rp-limit" style="left:50\.0%"><\/i>/);
