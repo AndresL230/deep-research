@@ -1,7 +1,7 @@
 // OWNER: subagent A. The home screen (Needs you from needs-you.ts, the batch table from batch-table.ts), the New batch
 // form with its estimate and Start (shown in a dialog, new-batch-dialog.ts), and the header cost bar.
 import "./home.css";
-import type { BatchConfig, BatchListItem, ControllerInfo, Costs, Defaults, Health, ScopeCost, TrapInfo } from "../api";
+import type { ApprovedLesson, BatchConfig, BatchListItem, ControllerInfo, Costs, Defaults, Health, ScopeCost, TrapInfo } from "../api";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { researchLink } from "../robot/markup";
@@ -59,6 +59,7 @@ export function newBatchView(vm: HomeVm, inputs?: HomeInputs): string {
       ${vm.draft && tabular ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
       ${vm.draft && isArm(vm.draft) ? positionsRow(vm.draft) : vm.draft && isStrike(vm.draft) ? humanoidRow() : vm.draft && isTrack(vm.draft) ? humanoidRow(TRACK_TEXT) : ""}
       ${vm.draft ? mainRow(vm.draft, trap, vm.starting) : mainSkeleton(defaultsFailed(vm))}
+      ${vm.draft ? agentRows(vm.draft, vm.lessons) : ""}
       ${advancedBlock(vm, controller)}
     </div>
     ${footer(vm)}`;
@@ -377,6 +378,45 @@ function mainRow(c: BatchConfig, trap: TrapInfo | null, locked = false): string 
   </div>`;
 }
 
+/** What each fork_mode does, as the line under its choice. */
+export const FORK_MODE_HELP: Record<string, string> = {
+  checkpoint: "Recommended. Copies resume the analyst's saved messages and plan from a LangGraph checkpoint; the VM is rebuilt by replay.",
+  messages: "Copies get the analyst's messages up to the fork point, without its plan; the VM is rebuilt by replay.",
+};
+
+/** The line under the Lessons choice: what the analysts get, or why "Approved lessons" cannot be picked. */
+function lessonsHelp(c: BatchConfig, list: Loadable<ApprovedLesson[]> | undefined): string {
+  if (!list || list.state === "loading") return "Looking for approved lessons.";
+  if (list.state === "error") return "Couldn't load the approved lessons.";
+  if (!list.value.length) return "No approved lessons yet in skills/learned/.";
+  return c.lessons === "learned"
+    ? "Each analyst gets the approved lessons below as Deep Agents skills."
+    : "The analysts start with no lessons from earlier batches.";
+}
+
+/** How experiment copies are rewound (fork_mode) and which lessons the analysts get (lessons), each with its line.
+ *  "Approved lessons" can only be picked once the server lists at least one (GET /api/lessons). */
+function agentRows(c: BatchConfig, list: Loadable<ApprovedLesson[]> | undefined): string {
+  const cfg = { ...c, fork_mode: c.fork_mode ?? "messages", lessons: c.lessons ?? "none" } as BatchConfig;
+  const approved = list?.state === "ready" ? list.value : [];
+  const n = list?.state === "ready" ? String(approved.length) : "…";
+  const names = approved.length
+    ? `<ul class="hm-lessons" aria-label="Approved lessons">${approved.map((l) =>
+      `<li class="hm-lesson" title="${attr(l.rule)}"><code>${esc(l.name)}</code></li>`).join("")}</ul>`
+    : "";
+  return `<div class="hm-opts" data-morph-key="opts">
+    <div class="hm-opt" data-morph-key="opt-fork">
+      ${choiceField(cfg, "fork_mode", "Rewind experiments with", [["checkpoint", "Time travel (LangGraph checkpoints)"], ["messages", "Message copy"]])}
+      <span class="hm-opt-d">${esc(FORK_MODE_HELP[String(cfg.fork_mode)] ?? "")}</span>
+    </div>
+    <div class="hm-opt" data-morph-key="opt-lessons">
+      ${choiceField(cfg, "lessons", "Lessons for the analysts", [["none", "None"], ["learned", `Approved lessons (${n})`]], approved.length ? [] : ["learned"])}
+      <span class="hm-opt-d">${esc(lessonsHelp(cfg, list))}</span>
+      ${names}
+    </div>
+  </div>`;
+}
+
 /** The same row as placeholders while the defaults load (still, not pulsing, when they failed). */
 function mainSkeleton(failed: boolean): string {
   const cell = (f: Field) => `<div class="hm-field" data-f="${f}"><span class="hm-skel hm-skel--lbl"></span><span class="hm-skel hm-skel--box"></span></div>`;
@@ -411,6 +451,7 @@ function advancedBlock(vm: HomeVm, controller: ControllerInfo | null = null): st
     ${head}
     <div class="hm-adv-grid" id="hm-adv" data-morph-key="adv-grid">
       ${rangeField(c, "trap_noise", "Trap noise", 0, 0.5, 0.05, c.trap_noise.toFixed(2))}
+      ${rangeField({ ...c, trap_hidden_share: c.trap_hidden_share ?? 1 }, "trap_hidden_share", "Trap hidden share", 0, 1, 0.05, pct(c.trap_hidden_share ?? 1, 0))}
       ${rangeField(c, "holdout_fraction", "Holdout fraction", 0.05, 0.45, 0.05, pct(c.holdout_fraction, 0))}
       ${rangeField(c, "inflation_threshold", "Inflation threshold", 0.01, 0.2, 0.01, points(c.inflation_threshold))}
       ${choiceField(c, "model_hint", "Model hint", [["random_forest", "Random forest"], ["any", "Any"]])}

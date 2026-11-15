@@ -28,7 +28,7 @@ const startTag = (html: string) => html.match(/<button[^>]*data-act="start"[^>]*
 /** The markup's visible text: tags dropped, whitespace collapsed. */
 const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 const MAIN = ["n_runs", "trap_strength", "hint_level", "budget_usd"];
-const ADVANCED = ["trap_noise", "model_hint", "holdout_fraction", "seed", "forks_per_choice", "inflation_threshold", "analyst_model", "investigator_model"];
+const ADVANCED = ["trap_noise", "trap_hidden_share","model_hint", "holdout_fraction", "seed", "forks_per_choice", "inflation_threshold", "analyst_model", "investigator_model"];
 
 describe("homeView", () => {
   it("shows batches as table rows with their kind and open actions", () => {
@@ -84,7 +84,10 @@ describe("newBatchView, the New batch dialog's form", () => {
     expect(text(newBatchView(vm({ advanced: true })))).toBe(
       "New batch Pima diabetes · planted duplicate rows "
       + "Runs Duplicated rows 50% Hint None Light Budget $ "
-      + "Advanced Reset Trap noise 0.00 Holdout fraction 20% Inflation threshold 8 pts Model hint Random forest Any "
+      + "Rewind experiments with Time travel (LangGraph checkpoints) Message copy "
+      + "Copies get the analyst&#39;s messages up to the fork point, without its plan; the VM is rebuilt by replay. "
+      + "Lessons for the analysts None Approved lessons (…) Looking for approved lessons. "
+      + "Advanced Reset Trap noise 0.00 Trap hidden share 100% Holdout fraction 20% Inflation threshold 8 pts Model hint Random forest Any "
       + "Forks per arm Seed Analyst model Investigator model "
       + "About $2.40 for 12 runs and 8 forks Start batch");
   });
@@ -120,6 +123,56 @@ describe("newBatchView, the New batch dialog's form", () => {
     expect(newBatchView(vm({ draft: { ...cfg, hint_level: "light", trap_strength: 0.35 } })))
       .toContain('<input type="radio" name="hint_level" data-cfg="hint_level" value="light" checked>');
     expect(newBatchView(vm({ draft: { ...cfg, trap_strength: 0.35 } }))).toContain(">35%</output>");
+  });
+
+  it("offers time travel (recommended) or message copy for the experiment copies, on fork_mode", () => {
+    const html = newBatchView(vm({ draft: { ...cfg, fork_mode: "messages" } }));
+    expect(html).toContain('<input type="radio" name="fork_mode" data-cfg="fork_mode" value="checkpoint"><span>Time travel (LangGraph checkpoints)</span>');
+    expect(html).toContain('<input type="radio" name="fork_mode" data-cfg="fork_mode" value="messages" checked><span>Message copy</span>');
+    expect(text(html)).toContain("Rewind experiments with");
+    const tt = newBatchView(vm({ draft: { ...cfg, fork_mode: "checkpoint" } }));
+    expect(tt).toContain('value="checkpoint" checked>');
+    expect(text(tt)).toContain("Recommended. Copies resume the analyst&#39;s saved messages and plan from a LangGraph checkpoint");
+    // A draft from a server older than fork_mode reads as the server's default, message copy.
+    const { fork_mode: _f, ...older } = cfg;
+    expect(newBatchView(vm({ draft: older as BatchConfig }))).toContain('value="messages" checked>');
+  });
+
+  it("offers the approved lessons by name and count, and cannot pick them when there are none", () => {
+    const off = /<input type="radio" name="lessons" data-cfg="lessons" value="learned" disabled>/;
+    expect(newBatchView(vm())).toMatch(off);
+    expect(newBatchView(vm({ lessons: { state: "loading" } }))).toMatch(off);
+    expect(newBatchView(vm({ lessons: { state: "error", message: "x" } }))).toMatch(off);
+    const none = newBatchView(vm({ lessons: { state: "ready", value: [] } }));
+    expect(none).toMatch(off);
+    expect(text(none)).toContain("Approved lessons (0) No approved lessons yet in skills/learned/.");
+    expect(none).toContain('<input type="radio" name="lessons" data-cfg="lessons" value="none" checked>');
+
+    const lesson = { name: "remove-near-duplicates-before-split", rule: "Remove near-duplicate rows before the split." };
+    const one = newBatchView(vm({ lessons: { state: "ready", value: [lesson] } }));
+    expect(one).toContain('<input type="radio" name="lessons" data-cfg="lessons" value="learned"><span>Approved lessons (1)</span>');
+    expect(one).toContain(`<li class="hm-lesson" title="${lesson.rule}"><code>${lesson.name}</code></li>`);
+    expect(text(one)).toContain("The analysts start with no lessons from earlier batches.");
+    const on = newBatchView(vm({ draft: { ...cfg, lessons: "learned" }, lessons: { state: "ready", value: [lesson] } }));
+    expect(on).toContain('value="learned" checked><span>Approved lessons (1)</span>');
+    expect(text(on)).toContain("Each analyst gets the approved lessons below as Deep Agents skills.");
+  });
+
+  it("shows the trap's noise and hidden share under Advanced, at the server's defaults", () => {
+    const open = newBatchView(vm({ advanced: true, draft: { ...cfg, trap_noise: 0.15, trap_hidden_share: 0.5 } }));
+    expect(open).toMatch(/type="range" min="0" max="0.5" step="0.05" value="0.15"[^>]*data-cfg="trap_noise"/);
+    expect(open).toMatch(/type="range" min="0" max="1" step="0.05" value="0.5"[^>]*data-cfg="trap_hidden_share"/);
+    const { trap_hidden_share: _h, ...older } = cfg;
+    expect(newBatchView(vm({ advanced: true, draft: older as BatchConfig }))).toMatch(/value="1"[^>]*data-cfg="trap_hidden_share"/);
+  });
+
+  it("posts fork_mode, lessons, trap_noise and trap_hidden_share as the form set them", () => {
+    const draft: BatchConfig = { ...tabCfg, fork_mode: "checkpoint", lessons: "learned", trap_noise: 0.15, trap_hidden_share: 0.5 };
+    expect(startPayload(draft, pima, withDomains))
+      .toMatchObject({ fork_mode: "checkpoint", lessons: "learned", trap_noise: 0.15, trap_hidden_share: 0.5, mode: "live" });
+    // A robot batch keeps the rewind and lessons choices; the trap's settings go back to the robot defaults.
+    const robot = startPayload({ ...robotCfg, fork_mode: "checkpoint", lessons: "learned", trap_noise: 0.15, trap_hidden_share: 0.5 }, pima, withDomains);
+    expect(robot).toMatchObject({ fork_mode: "checkpoint", lessons: "learned", trap_noise: robotCfg.trap_noise });
   });
 
   it("hides the advanced settings until vm.advanced, behind a toggle", () => {

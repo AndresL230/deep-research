@@ -98,6 +98,17 @@ def test_approved_lessons_say_which_batch_they_came_from(tmp_path):
     assert lessons_mod.approved(tmp_path)[0]["learned_from"] == "1115-033734-e892"
 
 
+def test_api_lessons_lists_the_approved_lessons_without_paths(dirs, tmp_path):
+    """GET /api/lessons, for the New batch form's "Approved lessons (n)": read from disk on each call."""
+    client = TestClient(api.app)
+    assert client.get("/api/lessons").json() == []
+    investigator.write_lesson("remove-near-duplicates-before-split", "Drop near-duplicate rows before the split.",
+                              "1115-033734-e892", root=tmp_path / "learned")
+    assert client.get("/api/lessons").json() == [
+        {"name": "remove-near-duplicates-before-split", "rule": "Drop near-duplicate rows before the split.",
+         "learned_from": "1115-033734-e892"}]
+
+
 def test_check_invariants_rules_on_reports(tmp_path, capsys):
     (tmp_path / "_foolrate").mkdir()
     rep = simulated_report()

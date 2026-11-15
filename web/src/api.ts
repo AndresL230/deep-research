@@ -1141,6 +1141,8 @@ export interface FoolrateRow {
 /** A lesson the `learned` arm was given: its name, its rule (null when its SKILL.md is not on this machine) and the
  *  batch it was learned from. */
 export interface FoolrateLesson { name: string; rule: string | null; learned_from?: string | null }
+/** One approved lesson (GET /api/lessons, deep_research/lessons.py `approved`): a skill under skills/learned/. */
+export interface ApprovedLesson { name: string; rule: string; learned_from?: string | null }
 export interface FoolrateReport {
   /** The report's file stem (`<mmdd-HHMMSS>`). */
   id: string;
@@ -1253,6 +1255,8 @@ export const uploadController = (file: Blob & { name?: string }, o: Opts = {}) =
 export const fetchBatches = (o: Opts = {}) => call<BatchListItem[]>("/api/batches", o);
 export const fetchCosts = (o: Opts = {}) => call<CostReport>("/api/costs", o);
 export const fetchFoolrate = (o: Opts = {}) => call<FoolrateReport[]>("/api/foolrate", o);
+/** The approved lessons a batch with `lessons: "learned"` gives its analysts, read from skills/learned/ on each call. */
+export const fetchLessons = (o: Opts = {}) => call<ApprovedLesson[]>("/api/lessons", o);
 export const startBatch = (cfg: BatchConfig, o: Opts = {}) => call<{ id: string }>("/api/batches", { ...o, json: cfg });
 export const fetchCase = (id: string, o: Opts = {}) => call<CaseFile>(`${batchPath(id)}/case`, o);
 export const fetchRunEvents = (id: string, run: string, o: Opts = {}) =>
