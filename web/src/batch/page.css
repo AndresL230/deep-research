@@ -74,3 +74,16 @@ button.pg-crumb.is-cur:hover { background:none; cursor:default; }
 .ph-details > summary:focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:var(--r-ctl); }
 .ph-details > code { display:block; margin-top:4px; white-space:pre-wrap; overflow-wrap:anywhere; }
 
+/* Pages 2–5 (what changed, the investigator, the fork, the verdict; main.ts `batchBody`) are for reading: no text
+   arriving a letter at a time, nothing popping, rising, drawing or growing in, and a part below the fold is there
+   before it is scrolled to. What changes there changes at once. The page fades in briefly when it opens, and what is
+   working still shows it (the spinner, the light round its edge). Hover feedback is kept. */
+.pg-batch--calm *:not(.ds-spin), .pg-batch--calm *::before, .pg-batch--calm *::after { animation:none !important; }
+.pg-batch.pg-batch--calm [data-io] { opacity:1 !important; }
+.pg-batch--calm :is(.ln-fill, .ln-over, .ln-out-fill, .ov-step-line, .cs-bar-fill, .cs-seg, .ov-ring-p)::after,
+.pg-batch--calm :is(.ln-fill, .ln-over, .ln-out-fill, .cs-bar-fill, .cs-seg, .ov-ring-p) { transition:none !important; }
+@media (prefers-reduced-motion: no-preference) {
+  .pg-batch.pg-batch--calm > .pg-sec { animation:ask-fade-in .16s ease-out both !important; }
+  .pg-batch.pg-batch--calm .ds-beam::after { animation:ds-beam 2.6s linear infinite !important; }
+}
+

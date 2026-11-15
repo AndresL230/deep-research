@@ -380,6 +380,8 @@ function stack(vm: BatchVm, ...views: ((vm: BatchVm) => string)[]): string {
  * investigator, the fork, the verdict, and a robot batch's diagnosis and fix) is a page of its own. Every page ends in
  * Back / Next (overview.ts `pagerView`).
  */
+const CALM_STEPS = new Set<BatchStep>(["split", "phase", "fork", "verdict"]);
+
 function batchBody(vm: BatchVm, step: BatchStep): string {
   const sections: [string, string][] = step === "wall"
     // The first page ends in the key points: what the batch found so far, one line each (lanes.ts keyPointsView).
@@ -387,7 +389,9 @@ function batchBody(vm: BatchVm, step: BatchStep): string {
     : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || skippedView(vm, step) || notYetView(vm, step)]];
   // The bar is a new element on every page, so it arrives with the page.
   sections.push([`pager:${step}`, pagerView(vm, step)]);
-  return `<div class="pg-batch" data-morph-key="batch:${attr(vm.id)}" data-morph-list>${sections
+  // Pages 2–5 are read, not watched: their text and parts are there at once, the page only fades in (page.css).
+  const calm = CALM_STEPS.has(step) ? " pg-batch--calm" : "";
+  return `<div class="pg-batch${calm}" data-morph-key="batch:${attr(vm.id)}" data-morph-list>${sections
     .filter(([, html]) => html)
     .map(([k, html]) => `<section class="pg-sec pg-sec--${k.replace(/:.*/, "")}" data-morph-key="sec:${k}">${html}</section>`)
     .join("")}</div>`;
