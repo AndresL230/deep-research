@@ -49,6 +49,10 @@
 .hm-trap > .hm-field { width:240px; max-width:100%; }
 .hm-select { cursor:pointer; }
 .hm-trap-d { font-size:12.5px; line-height:1.5; color:var(--fg-55); }
+/* A robot batch's test positions: this sim's own, or LIBERO's spot measured at LIBERO-PRO's. */
+.hm-pos { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.hm-pos > .hm-field { width:260px; max-width:100%; }
+.hm-pos-d { font-size:12.5px; line-height:1.5; color:var(--fg-55); max-width:72ch; }
 
 /* fields: a label over a 32px control, so every control in a row sits on one line */
 .hm-main { display:grid; grid-template-columns:88px minmax(0, 1fr) auto 112px; gap:16px 24px; align-items:end; }

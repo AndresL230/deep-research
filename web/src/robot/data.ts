@@ -72,23 +72,37 @@ export interface EpisodeResult {
   tipped?: boolean;
   tilt_deg?: number;
   seed?: number;
-  // The humanoid's (sim/humanoid/episode.py). `outcome` is one word: upright, stumbled, fell or error.
-  outcome?: HumanoidOutcome;
+  /** In a scene with a basket: whether the can's center ended inside it. */
+  in_basket?: boolean;
+  /** What was picked, when it is not the can: "milk". */
+  target?: string;
+  // Both humanoid sims say whether the robot fell.
   fell?: boolean;
+  // The push recovery sim's (sim/humanoid/episode.py). `outcome` is one word: upright, stumbled, fell or error.
+  outcome?: HumanoidOutcome;
   stumbled?: boolean;
   fall_time?: number | null;
-  /** The first body other than a foot that touched the floor, such as "torso_link". */
-  touched?: string | null;
+  /** Push recovery: the first body other than a foot that touched the floor, such as "torso_link". Strike: whether
+   *  anything touched the bag. */
+  touched?: string | boolean | null;
   max_tilt_deg?: number | null;
   max_foot_shift_cm?: number | null;
+  // The strike sim's (sim/g1/episode.py): the bag swung far enough, what touched it first ("right foot"), how far it
+  // swung at most, and whether the robot ended on both feet.
+  struck?: boolean;
+  struck_with?: string | null;
+  bag_peak_cm?: number;
+  standing?: boolean;
 }
 
 /** sim/humanoid/outcome.py OUTCOMES. */
 export type HumanoidOutcome = "upright" | "stumbled" | "fell" | "error";
 
 export interface MotionData {
-  /** The scene it was recorded in (robot_view.MODELS). Absent from servers older than the humanoid: the arm. */
+  /** The scene it was recorded in (robot_view.MODELS). Absent from servers older than the humanoids: the arm. */
   model_id?: string;
+  /** A strike episode: where the bag's center hung, x, y, z. */
+  bag_pos?: number[] | null;
   fps: number;
   can_start: number[] | null;
   place_target: number[] | null;
@@ -105,9 +119,16 @@ export interface MotionData {
   frames: number[][];
   /** Bodies that never move in this file (the base, the place zone), same seven numbers. */
   static: Record<string, number[]>;
+  /** A file recorded in a scene with a basket and other objects: their geoms, drawn on top of the scene's own. Their
+   *  bodies are in `bodies` like any other. Absent for the bare scene. */
+  extra?: SceneGeom[];
+  /** Names of scene geoms this file does not have: "place_zone" where a basket stands in its place. */
+  hide?: string[];
 }
 
 export interface MotionSummary {
+  /** A humanoid episode: where the bag's center hung. */
+  bag_pos?: number[] | null;
   can_start?: number[] | null;
   place_target?: number[] | null;
   push?: Push | null;

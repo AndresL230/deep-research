@@ -93,6 +93,10 @@ class BatchConfig(BaseModel):
     # controller from a colleague (sim/controllers/colleague.py), and the prompt asks the agent to start from it.
     # "uploaded": the controller `robot_controller` names (controllers.py), with the same prompt as "colleague".
     robot_start: Literal["blank", "colleague", "uploaded"] = "blank"
+    # Where the robot's can stands. "default": the sim's own practice spot, measured at its hidden positions over
+    # the whole table. "libero_pro": the agents practise where LIBERO stands the object to pick, with LIBERO's basket
+    # as the place target, and are measured where LIBERO-PRO moves it (sim/libero_pro.py).
+    robot_positions: Literal["default", "libero_pro"] = "default"
     # An uploaded controller's id (controllers.py). Needed when robot_start is "uploaded".
     robot_controller: str | None = Field(None, pattern=r"^ct-[0-9a-f]{8}$")
     # Live commentary (deep_research/commentary.py): a cheap model writes a short caption of what each run is doing,

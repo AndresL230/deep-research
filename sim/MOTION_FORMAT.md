@@ -38,6 +38,21 @@ which returns a list of problems (empty when the file is fine).
 Extra header keys written by the current recorder (readers must not require them): `nu` (8),
 `qpos_layout` (a human readable note), `seed`, `dt` (1/fps).
 
+### A scene with a layout
+
+An episode run in a scene with a basket and other objects (`run_episode(..., layout=...)`, sim/scene.py "A layout")
+records the same file with three differences:
+
+| key | meaning |
+| --- | --- |
+| `model_id` | `"panda-libero-object-v1"` (`sim.scene.LAYOUT_MODEL_ID`) |
+| `layout` | the layout the episode ran in: the basket and each object with its collision boxes and where it stood. A reader builds the same model from it (`sim.scene.build_model(can, place, layout=...)`) |
+| `nq`, `joint_names` | 16 plus 7 per body of the layout: after the can's freejoint come the basket's and each object's, in the layout's order, each xyz then quaternion wxyz |
+
+Every frame's `qpos` has that length. `python3 -m sim.run` records such an episode at 15 frames a second
+(`sim.run.LAYOUT_FPS`), so the file stays under the size limit with more numbers per frame. The result dict also
+has `in_basket`.
+
 ## Frames
 
 Each frame is an object:

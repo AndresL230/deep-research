@@ -9,6 +9,7 @@ import { BENCH_LOOP, BENCH_RESET, HELD, ROWS, SHEET, TWINS, benchAt, benchDone }
 import { CHAPTER, REVEAL_SOFT, chapterAt, chapterPoster, clockAt } from "../src/landing/chapter";
 import { clamp01, easeInOutCubic, easeOutCubic, easeOutQuad, smooth } from "../src/landing/ease";
 import { themeSwitch } from "../src/theme";
+import { attr } from "../src/ui";
 import {
   LEAST_WIDTH, STATIONS, TILE, TRAIL_CELLS, TRAIL_FADE, Trail, VIEW, WAYPOINTS, cardAt, lookAt, progressAt, standOff, stopFor,
 } from "../src/landing/floorplan";
@@ -51,7 +52,7 @@ describe("the landing page", () => {
 
   it("says what the product is, in one heading and one sentence", () => {
     expect(html.match(/<h1\b/g)).toHaveLength(1);
-    expect(html).toContain(`aria-label="${LANDING.title}"`);
+    expect(html).toContain(`aria-label="${attr(LANDING.title)}"`);
     expect(text(html)).toContain(LANDING.lede);
     expect(html).toContain(`aria-label="${LANDING.brand}"`);
   });

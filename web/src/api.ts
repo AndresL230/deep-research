@@ -124,6 +124,8 @@ export interface HiddenResult {
   max_tilt_deg?: number | null;
   /** The episode's motion file, low frame rate, as a path for `batchFileUrl` (`runs/r02/hidden/07-s0.motion.json`). */
   motion: string | null;
+  /** What was picked, in a scene whose object differs from episode to episode: "milk". Absent for the can. */
+  target?: string;
 }
 
 export interface BatchConfig {
@@ -140,6 +142,13 @@ export interface BatchConfig {
   /** robot_arm only: an uploaded controller's id (`ControllerInfo.id`), the one `robot_start: "uploaded"` starts from. */
   robot_controller?: string | null;
   robot_prompt?: "default" | "practice";
+  /** robot_arm only: where the can stands. "default": the sim's own practice spot, measured over the whole table.
+   *  "libero_pro": the agents practise where LIBERO stands the object, with LIBERO's basket as the place target, and
+   *  are measured where LIBERO-PRO moves it. Absent on batches saved before it existed: read as "default". */
+  robot_positions?: "default" | "libero_pro";
+  /** In a case file only: the batch's practice spot and place target, in meters (robot base at the origin), and in
+   *  a batch with a scene its `layout`: the basket and the other objects as the agents were given them. */
+  robot_practice?: { can_xy: [number, number]; place_xy: [number, number]; layout?: SceneLayout };
   /** "pima" (built in) or an uploaded dataset's id (`DatasetInfo.id`). */
   dataset: string;
   /** The column to predict. Needed for an uploaded dataset; absent or null means Pima's `outcome`. */
@@ -224,6 +233,9 @@ export interface AgentTodo { content: string; status: "pending" | "in_progress" 
 /** One analyst run. Fields fill in as it goes: queued, then starting, running, and finally its score. */
 export interface RunRecord extends Partial<Omit<RunScore, "status">> {
   id: string;
+  /** This run's final code on other test sets than the hidden test, by name ("libero_pro"). Absent on batches
+   *  saved before they were measured, and in a domain that has none. */
+  benchmarks?: Record<string, Benchmark>;
   status: RunStatus;
   /** The analyst model this run uses (from the batch's lineup). Absent on batches saved before lineups. */
   model?: string;
@@ -330,8 +342,20 @@ export interface ForkExperiment {
   more_pairs?: MorePairsRound[];
   // Planned (MASTER_PLAN 6.1): the evidence the server will record. Until it does, the UI computes these itself
   // (batch/evidence.ts) and labels them as derived.
-  /** The direction saved before any copy ran. */
-  prediction?: "smaller_gap" | "larger_gap";
+  /** Saved on the fork before any copy ran: the tested hypothesis's prediction in words (batch.py
+   *  `_preregistration`). The planned direction values "smaller_gap" | "larger_gap" are still read. */
+  prediction?: string;
+  /** The hypothesis this experiment tests (`Hypothesis.id`), and what would falsify it, saved with the prediction. */
+  hypothesis_id?: string;
+  falsified_if?: string;
+  /** Unix seconds, before the base VM was built. */
+  preregistered_at?: number;
+  /** The prediction against the counts, computed on the server (evidence.method_outcome). */
+  outcome?: HypothesisOutcome;
+  /** How the copies were built: a real VM fork of the base, or a fresh VM brought there by replaying the run. */
+  built?: { fork: number; replay: number; none: number };
+  /** What the experiment measures: a method fork, the accuracy of the reports; a fix, the work itself. */
+  measures?: "reporting_accuracy" | "controller_performance";
   /** Control and changed copies matched before the run, with whether each pair went the predicted way. */
   pairs?: { i: number; control_gap: number; changed_gap: number; agree: boolean }[];
   /** The paired score: x1.9 per agreeing pair, x0.1 per disagreeing one. */
@@ -407,7 +431,19 @@ export interface PendingForks {
   n_per_arm: number;
   vm_count: number;
   estimate_usd: number | null;
+  /** A fix measured on this server: no VM and no model, but the patched code runs, so a person approves it. */
+  direct?: boolean;
+  /** What is being approved: the hypothesis it tests, in words, with its prediction and falsification. */
+  hypothesis_id?: string | null;
+  hypothesis?: string | null;
+  prediction?: string | null;
+  falsified_if?: string | null;
+  patch?: string | null;
 }
+
+/** A hypothesis's state: untested, being tested, or the outcome its experiment's counts gave. */
+export type HypothesisOutcome = "supported" | "contradicted" | "inconclusive" | "no_data";
+export type HypothesisStatus = "untested" | "testing" | HypothesisOutcome;
 
 export type Confidence = "low" | "medium" | "high";
 
@@ -424,6 +460,17 @@ export interface SplitFields {
 }
 
 export interface Hypothesis extends SplitFields {
+  /** "h1", "h2", ...: one of several competing hypotheses. Absent on case files saved before them. */
+  id?: string;
+  /** "method": a testing step (tested by a fork); "code": a defect in a run's code (tested by a measured patch). */
+  kind?: "method" | "code";
+  run_id?: string | null;
+  /** What an experiment will show if it is true, and the result that would show it false. */
+  prediction?: string;
+  falsified_if?: string;
+  status?: HypothesisStatus;
+  /** The fork id, or "fix", that tested it. */
+  tested_by?: string;
   /** Unix seconds. */
   at: number;
   step_label: StepLabel;
@@ -542,6 +589,10 @@ export interface ProposedFix {
   patched_file?: string;
   /** The investigator's one sentence on what the fix test showed, once recorded. */
   verdict?: string;
+  /** The code hypothesis this patch tests, its prediction saved before it was measured, and the computed outcome. */
+  hypothesis_id?: string;
+  prediction?: string;
+  outcome?: HypothesisOutcome;
 }
 
 /** One piece of code scored on the hidden test with no agent in between (`Domain.score_code`). */
@@ -551,6 +602,38 @@ export interface MeasuredRate {
   /** How many of the `n` hidden cases succeeded. Null when the evaluation does not count them. */
   successes: number | null;
   n: number | null;
+}
+
+/** One object standing in a scene (sim/scene.py, "A layout"): where, and how large when it stands. */
+export interface SceneObject {
+  name: string;
+  xy: [number, number];
+  height?: number;
+  footprint?: [number, number];
+}
+
+/** A scene's basket and other objects, as an episode starts. */
+export interface SceneLayout {
+  basket?: SceneObject;
+  objects?: SceneObject[];
+}
+
+/** A piece of code on another test set than the batch's own hidden test (`Domain.benchmarks`): a second number
+ *  for the screens, never part of a run's status. `by_source` splits it by where each case comes from. */
+export interface Benchmark extends MeasuredRate {
+  by_source?: Record<string, { successes: number; n: number }>;
+  /** One per episode, in order: where the can stood, what happened, its recording (a batch-relative path the 3D
+   *  player can replay, or null) and where the position comes from ("position swap"). Absent on a batch measured
+   *  before episodes were recorded. */
+  results?: BenchResult[];
+  /** The test set's own practice spot (where LIBERO stands the object) and place target (LIBERO's basket). */
+  practice_xy?: [number, number];
+  place_xy?: [number, number];
+}
+
+/** One episode of a `Benchmark`. */
+export interface BenchResult extends HiddenResult {
+  source?: string;
 }
 
 /** A proposed fix measured on the code itself (`ProposedFix.measured`). */
@@ -565,6 +648,18 @@ export interface FixMeasured {
   exceptions: string[];
   /** The patched code's hidden episodes, in evaluation order. */
   hidden_results?: HiddenResult[];
+  /** A paired exact sign test on the held-out cases that changed (evidence.fix_evidence). */
+  evidence?: FixEvidence;
+}
+
+export interface FixEvidence {
+  level: "improved" | "worse" | "no_detectable_change" | "unpaired";
+  p_value: number | null;
+  alpha: number;
+  gained: number | null;
+  lost: number | null;
+  measures: "controller_performance";
+  note?: string;
 }
 
 /** The code every run of the batch started from (an uploaded controller), scored as it was handed over. */
@@ -575,6 +670,8 @@ export interface Baseline extends Partial<MeasuredRate> {
   /** Why it could not be scored, when `status` is "failed". */
   reason?: string;
   hidden_results?: HiddenResult[];
+  /** The same code on other test sets, by name ("libero_pro"). */
+  benchmarks?: Record<string, Benchmark>;
 }
 
 export interface ScopeCost {
@@ -934,6 +1031,11 @@ async function call<T>(path: string, init?: RequestInit & { json?: unknown }): P
   } catch (e) {
     if (isAbort(e)) throw e;
     throw new ApiError("Couldn't reach the server. Is it running on port 8000?", 0);
+  }
+  // Behind the Cloudflare gateway: not signed in. Go to sign-in and come back to this page.
+  if (res.status === 401) {
+    location.assign(`/auth/login?return=${encodeURIComponent(location.hash || "#/start")}`);
+    throw new ApiError("Sign in to use Orro.", 401);
   }
   if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
   return (await res.json()) as T;

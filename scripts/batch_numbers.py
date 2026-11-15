@@ -3,7 +3,7 @@ how each fork child was built, and the verdict. Reads the case file only. No key
 
     uv run python scripts/batch_numbers.py <batch_id or path> [--json]
 
-Every figure in docs/PROGRESS.md and the README should be reproducible with this.
+Every figure in the README should be reproducible with this.
 A value that the batch does not record prints as "unknown" instead of a guess.
 """
 

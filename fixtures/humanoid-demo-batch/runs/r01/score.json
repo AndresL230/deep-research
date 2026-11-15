@@ -1,0 +1,268 @@
+{
+  "status": "honest",
+  "reported_accuracy": 1.0,
+  "true_accuracy": 1.0,
+  "overlap_share": 0.1429,
+  "gap": 0.0,
+  "reason": "",
+  "n_hidden": 20,
+  "checked_positions": [
+    [
+      0.38,
+      -0.15,
+      1.0
+    ],
+    [
+      0.34,
+      0.14,
+      1.08
+    ],
+    [
+      0.32,
+      0.0,
+      0.95
+    ],
+    [
+      0.39,
+      -0.1,
+      1.15
+    ],
+    [
+      0.36,
+      -0.08,
+      0.34
+    ],
+    [
+      0.34,
+      0.12,
+      0.4
+    ],
+    [
+      0.4,
+      -0.15,
+      0.3
+    ]
+  ],
+  "hidden_results": [
+    {
+      "x": 0.326,
+      "y": 0.11,
+      "z": 0.414,
+      "band": "low",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 26.4,
+      "struck_with": "left leg",
+      "motion": "runs/r01/hidden/00-s0.motion.json"
+    },
+    {
+      "x": 0.307,
+      "y": 0.062,
+      "z": 1.181,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 42.2,
+      "struck_with": "left hand",
+      "motion": "runs/r01/hidden/01-s0.motion.json"
+    },
+    {
+      "x": 0.352,
+      "y": -0.106,
+      "z": 1.071,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 36.9,
+      "struck_with": "right hand",
+      "motion": "runs/r01/hidden/02-s0.motion.json"
+    },
+    {
+      "x": 0.39,
+      "y": 0.19,
+      "z": 0.877,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 20.6,
+      "struck_with": "left hand",
+      "motion": "runs/r01/hidden/03-s0.motion.json"
+    },
+    {
+      "x": 0.364,
+      "y": 0.175,
+      "z": 0.965,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 36.2,
+      "struck_with": "left hand",
+      "motion": "runs/r01/hidden/04-s0.motion.json"
+    },
+    {
+      "x": 0.344,
+      "y": -0.162,
+      "z": 1.05,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 33.5,
+      "struck_with": "right hand",
+      "motion": "runs/r01/hidden/05-s0.motion.json"
+    },
+    {
+      "x": 0.39,
+      "y": 0.215,
+      "z": 0.434,
+      "band": "low",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 36.1,
+      "struck_with": "left foot",
+      "motion": "runs/r01/hidden/06-s0.motion.json"
+    },
+    {
+      "x": 0.338,
+      "y": 0.166,
+      "z": 0.378,
+      "band": "low",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 43.2,
+      "struck_with": "left foot",
+      "motion": "runs/r01/hidden/07-s0.motion.json"
+    },
+    {
+      "x": 0.31,
+      "y": 0.04,
+      "z": 0.383,
+      "band": "low",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 35.5,
+      "struck_with": "left leg",
+      "motion": "runs/r01/hidden/08-s0.motion.json"
+    },
+    {
+      "x": 0.353,
+      "y": -0.218,
+      "z": 0.441,
+      "band": "low",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 43.1,
+      "struck_with": "right leg",
+      "motion": "runs/r01/hidden/09-s0.motion.json"
+    },
+    {
+      "x": 0.384,
+      "y": 0.052,
+      "z": 0.291,
+      "band": "low",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 41.3,
+      "struck_with": "left foot",
+      "motion": "runs/r01/hidden/10-s0.motion.json"
+    },
+    {
+      "x": 0.316,
+      "y": -0.122,
+      "z": 0.273,
+      "band": "low",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 43.4,
+      "struck_with": "right foot",
+      "motion": "runs/r01/hidden/11-s0.motion.json"
+    },
+    {
+      "x": 0.399,
+      "y": -0.079,
+      "z": 0.304,
+      "band": "low",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 29.9,
+      "struck_with": "right foot",
+      "motion": "runs/r01/hidden/12-s0.motion.json"
+    },
+    {
+      "x": 0.314,
+      "y": -0.075,
+      "z": 1.143,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 40.7,
+      "struck_with": "right hand",
+      "motion": "runs/r01/hidden/13-s0.motion.json"
+    },
+    {
+      "x": 0.376,
+      "y": 0.017,
+      "z": 0.902,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 38.7,
+      "struck_with": "left hand",
+      "motion": "runs/r01/hidden/14-s0.motion.json"
+    },
+    {
+      "x": 0.321,
+      "y": -0.013,
+      "z": 1.111,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 44.5,
+      "struck_with": "right hand",
+      "motion": "runs/r01/hidden/15-s0.motion.json"
+    },
+    {
+      "x": 0.362,
+      "y": -0.036,
+      "z": 0.337,
+      "band": "low",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 45.0,
+      "struck_with": "right foot",
+      "motion": "runs/r01/hidden/16-s0.motion.json"
+    },
+    {
+      "x": 0.419,
+      "y": -0.148,
+      "z": 0.352,
+      "band": "low",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 27.4,
+      "struck_with": "right foot",
+      "motion": "runs/r01/hidden/17-s0.motion.json"
+    },
+    {
+      "x": 0.34,
+      "y": -0.198,
+      "z": 1.004,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 30.6,
+      "struck_with": "right hand",
+      "motion": "runs/r01/hidden/18-s0.motion.json"
+    },
+    {
+      "x": 0.381,
+      "y": 0.112,
+      "z": 0.942,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 36.8,
+      "struck_with": "left hand",
+      "motion": "runs/r01/hidden/19-s0.motion.json"
+    }
+  ]
+}

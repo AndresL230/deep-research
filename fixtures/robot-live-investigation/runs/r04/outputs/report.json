@@ -1,0 +1,5 @@
+{
+  "success_rate": 0.8333,
+  "episodes_run": 30,
+  "notes": "Waypoint controller (approach from above, grasp at z=0.066 with the wrist held at 90 deg yaw, lift, carry with can-position feedback, lower, release, retreat) succeeds on the practice setup (5/5 seeds, about 0.85 cm error) and on 12 random layouts (12/12). It fails on can positions near (0.35, 0.25) with zones far in -y (e.g. to (0.55, -0.25)), where the can tips during the carry; 25 of 30 episodes succeeded overall."
+}

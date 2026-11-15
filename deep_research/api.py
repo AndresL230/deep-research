@@ -36,6 +36,7 @@ from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_price
 from .cost_report import cost_report  # noqa: E402
 from .costs import CostTracker, OverBudget, estimate_batch_usd, run_rate  # noqa: E402
 from .events import read_events  # noqa: E402
+from .gateway_guard import GatewayGuard  # noqa: E402
 
 log = logging.getLogger("deep_research.api")
 
@@ -91,6 +92,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Orro", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Added last, so it runs first: with ORRO_GATEWAY_SECRET set, only the Cloudflare gateway gets in (gateway_guard.py).
+app.add_middleware(GatewayGuard)
 
 BATCHES: dict[str, Batch] = {}
 TASKS: dict[str, asyncio.Task] = {}
@@ -710,10 +713,11 @@ def batch_file(batch_id: str, path: str):
     root = _batch_dir(batch_id).resolve()
     full = (root / path).resolve()
     secret = ("holdout_labels", *domains.secret_files())
-    if root not in full.parents or not full.is_file() or any(s in full.name for s in secret):
+    # Compared in lower case: macOS file systems are case-insensitive, so `HIDDEN_POSITIONS.json` opens the secret file.
+    if root not in full.parents or not full.is_file() or any(s.lower() in full.name.lower() for s in secret):
         raise HTTPException(404, "no such file")
     rel = full.relative_to(root).as_posix()
-    if _in_hidden_folder(rel) and not _hidden_listed(batch_id, rel):
+    if _in_hidden_folder(rel.lower()) and not _hidden_listed(batch_id, rel):
         raise HTTPException(404, "no such file")
     return FileResponse(full, headers=FILE_HEADERS)
 
@@ -770,6 +774,9 @@ def memory_notebook(domain: str):
 # ---- the robot viewer (robot_view.py): the 3D scene and each motion file's poses ----
 
 # Where a run or fork child keeps its outputs: the only places a motion file is read from (never task/).
+# A run's, or the starting code's, recorded episodes on another test set (`Batch.other_benchmarks`): LIBERO-PRO's
+# positions. Not the hidden test, so nothing to keep back.
+BENCH_PATH = re.compile(r"^(runs/[A-Za-z0-9._-]+|baseline)/benchmarks/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.motion\.json$")
 MOTION_PATH = re.compile(r"^(runs/[A-Za-z0-9._-]+|forks/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/outputs/[A-Za-z0-9._/ -]+\.json$")
 
 
@@ -789,7 +796,8 @@ def _robot_unavailable(e: Exception) -> HTTPException:
 @app.get("/api/robot/scene")
 def robot_scene(request: Request, model: str = robot_view.DEFAULT_MODEL):
     """A scene for the 3D viewer: every visual geom, its body, pose and color, the meshes, and how to look at it.
-    `model` is a motion file's `header.model_id` (robot_view.MODELS): the pick-and-place arm by default, or the G1."""
+    `model` is the `model_id` a motion file's poses name (robot_view.MODELS): the pick-and-place arm by default, or one
+    of the two G1 scenes."""
     if model not in robot_view.MODELS:
         raise HTTPException(404, f"no robot model {model!r}")
     try:
@@ -841,7 +849,7 @@ def _motion_file(root: Path, path: str, batch_id: str) -> Path:
     hidden episode's recording that the case lists for a scored run or fork child (`_hidden_listed`)."""
     rel = path.strip()
     hidden = bool(HIDDEN_PATH.match(rel))
-    if ".." in rel.split("/") or not (MOTION_PATH.match(rel) or hidden):
+    if ".." in rel.split("/") or not (MOTION_PATH.match(rel) or hidden or BENCH_PATH.match(rel)):
         raise HTTPException(400, "not a motion file path: it must be under runs/<run>/outputs or forks/<fork>/<child>/outputs")
     secret = ("holdout_labels", *domains.secret_files())
     full = (root / rel).resolve()

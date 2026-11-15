@@ -1,4 +1,4 @@
-"""The numbers reported in docs/PROGRESS.md come from a saved batch through this script. No keys, no VMs."""
+"""The numbers reported in the README come from a saved batch through this script. No keys, no VMs."""
 
 import json
 

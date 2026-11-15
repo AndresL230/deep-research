@@ -26,6 +26,7 @@ unclear, neither honest nor inflated, and the split finder leaves it out.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import math
 import multiprocessing as mp
@@ -124,8 +125,9 @@ def _worker_main(conn) -> None:
         try:
             record_to = kwargs.get("record_to")
             keep_all = bool(kwargs.get("record_all"))
-            episode_kwargs = {k: v for k, v in kwargs.items() if k not in ("record_to", "record_all", "runner")}
-            result, motion = _run_episode_fn(kwargs.get("runner"))(record=bool(record_to), **episode_kwargs)
+            episode_kwargs = {k: v for k, v in kwargs.items() if k not in ("record_to", "record_all", "runner", *OTHER_SIM_KEYS)}
+            run_episode = _run_episode_fn(kwargs.get("runner"), kwargs.get("episode"))
+            result, motion = run_episode(record=bool(record_to), **episode_kwargs)
             if record_to and motion is not None and (keep_all or not result.get("success")):
                 from sim.motion import write_motion
 
@@ -182,29 +184,34 @@ def _limit_blas_threads() -> None:
         pass
 
 
-# Other sims whose episodes the workers run: a job's "runner" key names one; a job without it is a pick-and-place
-# episode (sim.episode). Each is (the module with run_episode, a module without mujoco with
-# failure_result(kwargs, exception, end_reason)).
+# Other sims whose episodes the workers run. A job without any of the keys below is a pick-and-place episode
+# (sim.episode). There are two ways to name another sim, one per sim that uses it:
+#   "runner"   one of RUNNERS (the push recovery sim, sim/humanoid/): (the module with run_episode, a module without
+#              mujoco with failure_result(kwargs, exception, end_reason)).
+#   "episode"  the module whose `run_episode(**job)` runs the job, with "failure", a module that imports without numpy
+#              and has `failure_result(job, exception, end_reason)` (the strike sim, sim/g1/evaluate.py).
+# None of these keys is passed to `run_episode`.
 RUNNERS = {"humanoid_push": ("sim.humanoid.episode", "sim.humanoid.outcome")}
+OTHER_SIM_KEYS = ("episode", "failure")
 
 
-def _run_episode_fn(runner: str | None):
-    """The run_episode of `runner` (None: sim.episode's)."""
+def _run_episode_fn(runner: str | None, module: str | None = None):
+    """The run_episode of the module a job names (`module`), else of its `runner`, else sim.episode's."""
+    if module:
+        return importlib.import_module(module).run_episode
     if runner is None:
         from sim.episode import run_episode
 
         return run_episode
-    import importlib
-
     return importlib.import_module(RUNNERS[runner][0]).run_episode
 
 
 def _failure(kwargs: dict, exception: str, end_reason: str) -> dict:
-    """A failed episode result with the same keys `run_episode` gives (that of the job's `runner`, if it has one)."""
+    """A failed episode result with the same keys `run_episode` gives (that of the job's own sim, if it names one)."""
+    if kwargs.get("failure"):
+        return importlib.import_module(kwargs["failure"]).failure_result(kwargs, exception, end_reason)
     runner = kwargs.get("runner")
     if runner is not None:
-        import importlib
-
         return importlib.import_module(RUNNERS[runner][1]).failure_result(kwargs, exception, end_reason)
     return {
         "success": False,
@@ -497,8 +504,12 @@ def evaluate(
     workers: int | None = None,
     controller_timeout: float | None = None,
     record_dir=None,
+    layouts=None,
 ) -> dict:
     """Run the controller once per can position and seed; return the success rate and every result.
+
+    layouts: one scene layout per position (sim/scene.py), or None for the bare scene: the basket and the other
+    objects the episode at that position stands in.
 
     positions: list of [x, y] can starts. place_xy: the place target (default: the practice one).
     timeout: per episode, wall clock seconds. controller_timeout: total wall clock seconds for all the
@@ -519,6 +530,8 @@ def evaluate(
     for i, xy in enumerate(positions):
         for seed in seeds:
             job = {"controller_path": path, "can_xy": [float(xy[0]), float(xy[1])], "place_xy": place, "seed": seed}
+            if layouts is not None and layouts[i]:
+                job["layout"] = layouts[i]
             if record_dir is not None:
                 job.update(record_to=str(Path(record_dir) / motion_name(i, seed)), record_all=True,
                            motion_fps=LOW_FPS, motion_decimals=LOW_DECIMALS)

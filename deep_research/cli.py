@@ -30,6 +30,7 @@ hub.load_runner_env()  # keys this machine does not have come from the team hub
 from . import domains  # noqa: E402
 from .batch import Batch  # noqa: E402
 from .config import BATCHES_DIR, BatchConfig  # noqa: E402
+from .domains.robot_arm import BENCH_DIR  # noqa: E402
 
 # Unattended approval is for small test batches only: nobody is there to say no.
 AUTO_APPROVE_MAX_BUDGET_USD = 3.0
@@ -60,11 +61,12 @@ def _reopen(batch_id: str) -> Batch:
 
 
 async def runs(n: int, strength: float, hint: str, noise: float, hidden: float, budget: float,
-               domain: str = domains.DEFAULT, robot_prompt: str = "default", robot_start: str = "blank") -> None:
+               domain: str = domains.DEFAULT, robot_prompt: str = "default", robot_start: str = "blank",
+               robot_positions: str = "default") -> None:
     b = Batch(
         BatchConfig(domain=domain, n_runs=n, trap_strength=strength, hint_level=hint, trap_noise=noise,
                     trap_hidden_share=hidden, budget_usd=budget, robot_prompt=robot_prompt,
-                    robot_start=robot_start),
+                    robot_start=robot_start, robot_positions=robot_positions),
         root=BATCHES_DIR,
     )
     print("batch", b.id)
@@ -95,20 +97,24 @@ async def investigate(batch_id: str, auto_approve: bool) -> None:
         )
     b = _reopen(batch_id)
     why_not = b.fork_blocker()
-    if why_not:
-        # The investigator tests its suspect with the fork experiment. Without one it would only spend tokens.
+    testable = any(b.domain.intervention_for(lb, b.cfg) for lb in b.domain.labels())
+    if why_not and not (b.case.data.get("split") and (testable or b.domain.score_code is not None)):
+        # Nothing could test a hypothesis here: neither a fork on any step nor a measured fix. It would only spend tokens.
+        # The split's own label need not be testable: the investigator chooses which hypothesis to test.
         raise SystemExit(f"batch {batch_id} (phase {b.case.data.get('phase')}): {why_not}")
     approved = declined_at_limit = 0
     try:
         await b.investigate()
         while b.case.data.get("phase") == "awaiting_approval":
             pending = b.case.data["forks"].get("pending", {})
-            arms = list(b.arm_plan()) or ["control", "forced"]
-            question = (
-                f"The investigator asks for a fork experiment: {pending.get('n_per_arm')} runs in each of "
-                f"{len(arms)} arms ({', '.join(arms)}), {pending.get('vm_count')} VMs, "
-                f"about ${pending.get('estimate_usd')}. Approve? [y/N] "
-            )
+            about = f" to test {pending['hypothesis_id']} ({pending.get('prediction')})" if pending.get("hypothesis_id") else ""
+            if pending.get("direct"):
+                question = f"The investigator asks to run its patched code on the held-out setups{about}, no VMs, $0. Approve? [y/N] "
+            else:
+                question = (
+                    f"The investigator asks for a {pending.get('kind')} experiment{about}: {pending.get('n_per_arm')} "
+                    f"runs per arm, {pending.get('vm_count')} VMs, about ${pending.get('estimate_usd')}. Approve? [y/N] "
+                )
             if not auto_approve:
                 approve = input(question).strip().lower() in ("y", "yes")
             elif approved < MAX_AUTO_APPROVALS:
@@ -130,6 +136,36 @@ async def investigate(batch_id: str, auto_approve: bool) -> None:
     _print_case(b)
     c = b.case.read()
     print("verdict:", json.dumps(c["verdict"], indent=2) if c["verdict"] else "none recorded")
+
+
+async def benchmarks(batch_id: str) -> None:
+    """Add to a saved batch what a batch started today measures on its own: every scored run's code on the
+    domain's other test sets (LIBERO-PRO), and the code the runs started from, scored unchanged. Only adds
+    keys to the case file; nothing a run or the investigator recorded is changed. No VM and no model."""
+    b = Batch(_saved_config(batch_id), batch_id=batch_id, root=BATCHES_DIR, resume=True)
+    if b.domain.benchmarks is None:
+        raise SystemExit(f"the {b.domain.name} domain has no other test set")
+    base = b.case.data.get("baseline")
+    if base is None:
+        await b.score_baseline()
+    elif base.get("status") == "scored":
+        # Scored already: measure it on the other test sets again, so its episodes are recorded too.
+        found = b.domain.baseline_code(b.cfg, b.task)
+        other = await asyncio.to_thread(b.other_benchmarks, found[0].parent, b.dir / "baseline" / BENCH_DIR) if found else {}
+        if other:
+            b.case.set_baseline({**base, "benchmarks": other})
+    base = b.case.data.get("baseline")
+    if base:
+        print(f"start ({base.get('name')}): measured {base.get('true_accuracy')}  " + "  ".join(
+            f"{name} {m['successes']}/{m['n']}" for name, m in (base.get("benchmarks") or {}).items()))
+    for run_id, run in sorted(b.case.data["runs"].items()):
+        if run.get("status") not in ("honest", "inflated", "unclear"):
+            continue
+        other = await asyncio.to_thread(b.other_benchmarks, b.runs_dir / run_id / "outputs", b.runs_dir / run_id / BENCH_DIR)
+        if other:
+            b.case.update_run(run_id, benchmarks=other)
+        print(f"{run_id}: measured {run.get('true_accuracy')}  " + "  ".join(
+            f"{name} {m['successes']}/{m['n']}" for name, m in other.items()))
 
 
 def vms() -> None:
@@ -166,6 +202,8 @@ def main(argv: list[str] | None = None) -> None:
                    help="robot_arm only: 'practice' asks the agent to make the controller work on the practice setup")
     r.add_argument("--robot-start", choices=["blank", "colleague"], default="blank",
                    help="robot_arm only: 'colleague' starts the agent from a colleague's working controller")
+    r.add_argument("--robot-positions", choices=["default", "libero_pro"], default="default",
+                   help="robot_arm only: 'libero_pro' practises at LIBERO's spot and measures at LIBERO-PRO's positions")
     f = sub.add_parser("forks")
     f.add_argument("batch_id")
     f.add_argument("--n", type=int, default=4)
@@ -173,6 +211,8 @@ def main(argv: list[str] | None = None) -> None:
     i.add_argument("batch_id")
     i.add_argument("--auto-approve", action="store_true",
                    help=f"approve the investigator's experiments unattended (budget ${AUTO_APPROVE_MAX_BUDGET_USD:.0f} or less)")
+    m = sub.add_parser("benchmarks", help="add the LIBERO-PRO number and the starting code's score to a saved batch")
+    m.add_argument("batch_id")
     sub.add_parser("vms", help="count the running VMs on the Daytona key")
     sub.add_parser("cleanup", help="stop every running deep-research VM, from any machine sharing the key")
     a = p.parse_args(argv)
@@ -187,7 +227,11 @@ def main(argv: list[str] | None = None) -> None:
             on["robot_prompt"] = a.robot_prompt
         if a.robot_start != "blank":
             on["robot_start"] = a.robot_start
+        if a.robot_positions != "default":
+            on["robot_positions"] = a.robot_positions
         asyncio.run(runs(a.n, a.strength, a.hint, a.noise, a.hidden, a.budget, **on))
+    elif a.cmd == "benchmarks":
+        asyncio.run(benchmarks(a.batch_id))
     elif a.cmd == "forks":
         asyncio.run(forks(a.batch_id, a.n))
     else:

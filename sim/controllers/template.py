@@ -17,6 +17,16 @@ How an episode calls this class (see sim/episode.py for every detail):
 Success: the can ends standing upright, at rest, released, with its center within 3 cm of the place
 target. The episode stops early once that has held for 0.5 s, or at 10 s.
 
+In a scene with a basket (when `task` has a "basket"): the place target is the basket's center, and success
+is the can ending at rest inside the basket, released; it need not stand upright. `task["basket"]` is
+{"xy": [x, y], "height": rim height in m, "opening": [dx, dy] of its inside} and `task["objects"]` lists the
+other objects standing on the floor: {"name", "xy", "height", "footprint": [dx, dy]}. obs then also has
+"basket_pos" (xyz) and "objects" ({name: xyz}); everything can be pushed over. See sim/episode.py.
+
+When `task` has a "target", the thing to pick is that object and not the 0.10 m can: {"name", "height",
+"footprint": [dx, dy]} as it stands on the floor. `can_start`, obs["can_pos"] and obs["can_quat"] are then that
+object's: its center starts at half its height.
+
 Helpers (sim/control.py):
   ik(xyz, q_init=None, down_weight=0.0)  joint angles putting the grasp point (between the fingertips)
                                          at xyz; down_weight ~0.5 also keeps the gripper pointing down

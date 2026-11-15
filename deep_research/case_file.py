@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .analysis import LABELS
-from .evidence import verdict_evidence, wording_error
+from .evidence import fix_wording_error, verdict_evidence, wording_error
 
 Listener = Callable[[str, Any], None]
 
@@ -34,8 +34,11 @@ def investigator_view(data: dict) -> dict:
     measured fix, and without the screens' words (`config.domain_info.words`, only for the UI). Everything else is kept."""
     view = dict(data)
     cfg = data.get("config")
-    if isinstance(cfg, dict) and isinstance(cfg.get("domain_info"), dict) and "words" in cfg["domain_info"]:
-        view["config"] = {**cfg, "domain_info": {k: v for k, v in cfg["domain_info"].items() if k != "words"}}
+    if isinstance(cfg, dict):
+        cfg = {k: v for k, v in cfg.items() if not privileged_config_key(k)}
+        if isinstance(cfg.get("domain_info"), dict):
+            cfg["domain_info"] = {k: v for k, v in cfg["domain_info"].items() if k not in PRIVILEGED_DOMAIN_INFO}
+        view["config"] = cfg
     view["runs"] = {rid: {k: v for k, v in r.items() if k not in VIEW_HIDDEN} if isinstance(r, dict) else r
                     for rid, r in (data.get("runs") or {}).items()}
     forks = {}
@@ -54,7 +57,19 @@ def investigator_view(data: dict) -> dict:
 
 
 # Keys of a run (or fork copy) that never reach the investigator's view.
-VIEW_HIDDEN = frozenset({"hidden_results"})
+# `benchmarks`: a run's code on other test sets (LIBERO-PRO), a second number for the screens only.
+VIEW_HIDDEN = frozenset({"hidden_results", "benchmarks"})
+# Config keys that say what the batch was built to go wrong: which flaw was planted and what its fix is. The evaluator
+# knows them; the investigator has to find out. (`trap_info` names the planted label and its intervention.)
+PRIVILEGED_CONFIG = frozenset({"hint_level"})
+
+
+def privileged_config_key(key: str) -> bool:
+    """Every `trap*` key (trap, trap_info, trap_strength, trap_noise, trap_hidden_share, ...) and PRIVILEGED_CONFIG."""
+    return key.startswith("trap") or key in PRIVILEGED_CONFIG
+# The domain's one-line pitch says how its agents go wrong ("report a success rate from the one practice can
+# position"), and `words` is only for the screens.
+PRIVILEGED_DOMAIN_INFO = frozenset({"words", "description"})
 
 
 class CaseFile:
@@ -214,6 +229,62 @@ class CaseFile:
             self._changed("hypotheses")
         return "hypothesis saved"
 
+    def record_competing_hypothesis(self, kind: str, statement: str, supporting_evidence: str, prediction: str,
+                                    falsified_if: str, confidence: str, step_label: str | None = None,
+                                    run_id: str | None = None) -> str:
+        """One of several competing explanations, written before any experiment tests it.
+
+        `kind`: "method" (a testing step the inflated runs skipped, `step_label`, tested by a fork experiment) or
+        "code" (a defect in a run's code, tested by measuring a patch on held-out cases). Every hypothesis says what
+        it predicts and what result would falsify it. The split's numbers for its label are attached from the
+        case file (`split.by_label`), never taken from the model. Returns the id ("h1", "h2", ...) or an error.
+        """
+        if kind not in ("method", "code"):
+            return "error: kind must be 'method' (a testing step) or 'code' (a defect in the code)"
+        if kind == "method" and step_label not in self.labels:
+            return f"error: a method hypothesis needs a step_label from {self.labels}"
+        if step_label is not None and step_label not in self.labels:
+            return f"error: unknown label {step_label}; use one of {self.labels}"
+        if run_id is not None and run_id not in self.data["runs"]:
+            return f"error: unknown run {run_id}"
+        if confidence not in CONFIDENCE:
+            return f"error: confidence must be one of {list(CONFIDENCE)}"
+        for name, value in (("statement", statement), ("supporting_evidence", supporting_evidence),
+                            ("prediction", prediction), ("falsified_if", falsified_if)):
+            if not (value or "").strip():
+                return f"error: {name} is empty: every hypothesis says what supports it, what it predicts and what would falsify it"
+        row = next((r for r in ((self.data.get("split") or {}).get("by_label") or []) if r.get("label") == step_label), None)
+        with self._lock:
+            hid = f"h{len(self.data['hypotheses']) + 1}"
+            self.data["hypotheses"].append({
+                "id": hid,
+                "at": time.time(),
+                "kind": kind,
+                "step_label": step_label,
+                "run_id": run_id,
+                "sentence": statement.strip()[:500],
+                "evidence": supporting_evidence.strip()[:2000],
+                "prediction": prediction.strip()[:500],
+                "falsified_if": falsified_if.strip()[:500],
+                "confidence": confidence,
+                "status": "untested",
+                **({k: row[k] for k in ("honest_rate", "inflated_rate", "n_honest", "n_inflated")} if row else {}),
+            })
+            self._changed("hypotheses")
+        return hid
+
+    def hypothesis(self, hid: str) -> dict | None:
+        return next((h for h in self.data["hypotheses"] if h.get("id") == hid), None)
+
+    def set_hypothesis_status(self, hid: str, status: str, **fields: Any) -> None:
+        """The outcome of the experiment that tested `hid` (evidence.method_outcome / fix_outcome), set by the
+        orchestrator from stored results."""
+        with self._lock:
+            for h in self.data["hypotheses"]:
+                if h.get("id") == hid:
+                    h.update(status=status, **fields)
+            self._changed("hypotheses")
+
     def record_trace(self, run_id: str, symptom: str, line: int, excerpt: str, why: str, motion_file: str = "") -> str:
         """Save one traced failure: a symptom from a recording, and the line of the run's code it points at."""
         if run_id not in self.data["runs"]:
@@ -265,6 +336,11 @@ class CaseFile:
             return "error: no fix has been proposed"
         if not sentence.strip():
             return "error: the sentence is empty"
+        measured = self.data["fix"].get("measured")
+        if isinstance(measured, dict):
+            err = fix_wording_error(sentence, measured.get("evidence"))
+            if err and measured.get("evidence") is not None:
+                return err
         with self._lock:
             self.data["fix"]["verdict"] = sentence.strip()[:500]
             self._changed("fix")
@@ -273,7 +349,7 @@ class CaseFile:
     def record_verdict(self, sentence: str, step_label: str, numbers: dict, **structured: Any) -> str:
         """Save the verdict: the sentence, the step and the old `numbers` ({arm}_inflated / {arm}_total), plus any
         `structured` fields (`record_structured_verdict`). `evidence` is added from the arm counts (evidence.py)."""
-        verdict = {"sentence": sentence[:500], "step_label": step_label, "numbers": numbers, **structured}
+        verdict = {"sentence": sentence[:VERDICT_CHARS], "step_label": step_label, "numbers": numbers, **structured}
         verdict["evidence"] = verdict_evidence(verdict.get("arms"), numbers)
         with self._lock:
             self.data["verdict"] = verdict
@@ -304,6 +380,9 @@ class CaseFile:
         """
         if not sentence.strip():
             return "error: the sentence is empty"
+        if len(sentence.strip()) > VERDICT_CHARS:
+            # Refused, not cut: a verdict cut mid-word drops what it says last (the live run's did).
+            return f"error: the sentence is {len(sentence.strip())} characters; keep it under {VERDICT_CHARS}"
         if step not in self.labels:
             return f"error: unknown label {step}; use one of {self.labels}"
         if confidence not in CONFIDENCE:
@@ -372,6 +451,7 @@ class CaseFile:
 
 
 CONFIDENCE = ("low", "medium", "high")
+VERDICT_CHARS = 500
 
 
 def split_fields(values: dict) -> tuple[str | None, dict]:

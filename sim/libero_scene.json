@@ -1,0 +1,1658 @@
+{
+  "source": "Made by scripts/make_libero_scene.py from text files read on 2026-11-14; nothing of LIBERO runs to make it and no file was executed or unpickled. objects.*.boxes, density, friction and contain: the type=\"box\" collision geoms and the contain_region site of LIBERO's object XML files (libero/libero/assets/stable_hope_objects/<kind>/<kind>.xml and libero/libero/assets/stable_scanned_objects/basket/basket.xml, github.com/Lifelong-Robot-Learning/LIBERO, MIT licence), in metres in the object's own frame, numbers as written there except that every box quaternion is normalized as MuJoCo does when it compiles a model (butter's, cream cheese's and bbq sauce's are not unit in the XML); the mesh scale of an XML applies to its visual mesh only. objects.*.quat: the orientation LIBERO gives the object's free joint, from each class's rotation and rotation_axis (libero/libero/envs/objects/hope_objects.py, google_scanned_objects.py) passed through TableRegionSampler._sample_quat (libero/libero/envs/regions/workspace_region_sampler.py) and written unconverted to qpos by BDDLBaseDomain._reset_internal (libero/libero/envs/bddl_base_domain.py); LIBERO draws no yaw for these objects. objects.*.z, height and footprint: computed here from the corners of the boxes turned by quat, with the lowest corner on the floor; they are not LIBERO numbers. libero_sites: the bottom_site, top_site and horizontal_radius_site positions of each XML and the height LIBERO's sampler drops the object frame at (0.01 - 0.035 - bottom_site z, floor plane at z = 0); those sites are rough placeholders, not the objects' real extents. tasks: the ten LIBERO-Object tasks, keyed by the kind of the object to pick, each from its three BDDL files: libero/libero/bddl_files/libero_object/<name>.bddl in LIBERO (variant original) and, in LIBERO-PRO (Zhou et al., arXiv:2510.03827; code MIT, data CC BY 4.0; Hugging Face dataset zhouxueyang/LIBERO-Pro), bddl_files/libero_object_swap/<name>.bddl (variant swap) and bddl_files/07_initial_pose_position_angle/bddl/libero_object/<name>.bddl (variant pose: the target's region centre plus its delta_xy, and its yaw); task repeats tasks.alphabet_soup. Every xy is a region centre in this sim's frame, which is LIBERO's floor frame moved by +0.6 m in x because LIBERO stands its Panda base at (-0.6, 0, 0) (OnTheGroundPanda.base_xpos_offset[\"empty\"]) and this sim has it at the origin; reach is the distance from that origin to the variant's target, computed here. placement: for each kind, the half-width in metres of the square LIBERO really draws the object's centre in, around its region's centre: TableRegionSampler keeps ensure_object_boundary_in_range=True, so MultiRegionRandomSampler._sample_x and _sample_y (libero/libero/envs/regions/base_region_sampler.py) draw between min + r and max - r with r the x of the XML's horizontal_radius_site, which is |side / 2 - r| either side of the centre, computed here for the 5 cm object regions and, for the basket, its 2 cm bin_region; where r exceeds side / 2 the bounds cross and numpy's uniform still draws between them.",
+  "objects": {
+    "alphabet_soup": {
+      "boxes": [
+        {
+          "pos": [0.0, -0.00104, -0.00235],
+          "quat": [0.5, -0.5, 0.5, 0.5],
+          "size": [0.01874, 0.02352, 0.03625]
+        },
+        {
+          "pos": [0.02599, 0.0, -0.00209],
+          "quat": [0.7071067812, 0.7071067812, 0.0, 0.0],
+          "size": [0.00226, 0.01471, 0.0376]
+        },
+        {
+          "pos": [-0.0247, -0.0006, -0.00209],
+          "quat": [0.7071067812, 0.7071067812, 0.0, 0.0],
+          "size": [0.00226, 0.01662, 0.0376]
+        },
+        {
+          "pos": [-0.00012, -0.0006, -0.02413],
+          "quat": [0.5, -0.5, 0.5, 0.5],
+          "size": [0.00421, 0.01985, 0.0376]
+        },
+        {
+          "pos": [-0.00012, -0.0006, 0.01776],
+          "quat": [0.5, -0.5, 0.5, 0.5],
+          "size": [0.00421, 0.01985, 0.0376]
+        },
+        {
+          "pos": [-0.00012, -0.0006, -0.0326],
+          "quat": [0.5, 0.5, 0.5, -0.5],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.00012, -0.0006, 0.02575],
+          "quat": [0.5, 0.5, 0.5, -0.5],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.02944, -0.0006, -0.00291],
+          "quat": [0.0002999986, 0.0002999986, -0.7071067175, 0.7071067175],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.02931, -0.0006, -0.00291],
+          "quat": [0.7071067175, 0.7071067175, 0.0002999986, -0.0002999986],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.02689, -0.0006, 0.00853],
+          "quat": [0.6966059038, 0.6966059038, -0.1214092861, 0.1214092861],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.02654, -0.0006, -0.01619],
+          "quat": [0.169931069, -0.169931069, 0.6863843179, 0.6863843179],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.01763, -0.0006, -0.02495],
+          "quat": [0.3033022892, -0.3033022892, 0.638754821, 0.638754821],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.00964, -0.0006, -0.03099],
+          "quat": [0.4127795448, -0.4127795448, 0.5741193669, 0.5741193669],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.0127, -0.0006, 0.02274],
+          "quat": [0.4127795448, -0.4127795448, 0.5741193669, 0.5741193669],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.0124, -0.0006, -0.02961],
+          "quat": [0.3690193089, 0.3690193089, -0.6031788704, 0.6031788704],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.02167, -0.0006, -0.02144],
+          "quat": [0.651372669, 0.651372669, 0.2751611275, -0.2751611275],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.02696, -0.00099, -0.01169],
+          "quat": [0.0520498887, 0.0520498887, -0.7051884919, 0.7051884919],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.027, -0.0006, 0.00886],
+          "quat": [0.130490386, 0.130490386, -0.6949620559, 0.6949620559],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.02005, -0.0006, 0.01808],
+          "quat": [0.6557214719, 0.6557214719, 0.264630594, -0.264630594],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.02026, -0.0006, 0.01494],
+          "quat": [0.209460392, -0.209460392, 0.675371264, 0.675371264],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.01084, -0.0006, 0.02397],
+          "quat": [0.5620407824, -0.5620407824, 0.4290805973, 0.4290805973],
+          "size": [0.00177, 0.00694, 0.0376]
+        }
+      ],
+      "density": 100.0,
+      "friction": [0.95, 0.3, 0.1],
+      "quat": [0.0, 0.0, 0.7071067812, 0.7071067812],
+      "z": 0.03859,
+      "height": 0.07619,
+      "footprint": [0.062429, 0.062398]
+    },
+    "salad_dressing": {
+      "boxes": [
+        {
+          "pos": [0.00012, 0.0542, 0.00043],
+          "quat": [0.5, 0.5, 0.5, -0.5],
+          "size": [0.01237, 0.01277, 0.01865]
+        },
+        {
+          "pos": [-0.00096, -0.03138, 0.00023],
+          "quat": [0.7071067812, 0.0, -0.7071067812, 0.0],
+          "size": [0.01733, 0.02097, 0.02637]
+        },
+        {
+          "pos": [0.00048, 0.00843, 0.00023],
+          "quat": [0.7071067812, 0.7071067812, 0.0, 0.0],
+          "size": [0.01294, 0.01494, 0.02738]
+        },
+        {
+          "pos": [0.00012, 0.0542, -0.01366],
+          "quat": [0.5, -0.5, 0.5, 0.5],
+          "size": [0.00208, 0.0078, 0.01865]
+        },
+        {
+          "pos": [0.00012, 0.0542, 0.01479],
+          "quat": [0.5, -0.5, 0.5, 0.5],
+          "size": [0.00208, 0.0078, 0.01865]
+        },
+        {
+          "pos": [0.01509, 0.0542, -0.00068],
+          "quat": [0.7071062582, 0.7071062582, 0.0008599954, -0.0008599954],
+          "size": [0.00208, 0.0078, 0.01865]
+        },
+        {
+          "pos": [-0.01447, 0.0542, -0.00068],
+          "quat": [0.7071062582, 0.7071062582, 0.0008599954, -0.0008599954],
+          "size": [0.00208, 0.0078, 0.01865]
+        },
+        {
+          "pos": [-0.01145, 0.0542, -0.01062],
+          "quat": [0.2399410255, 0.2399410255, 0.6651528428, -0.6651528428],
+          "size": [0.00208, 0.0078, 0.01865]
+        },
+        {
+          "pos": [0.01182, 0.0542, -0.01062],
+          "quat": [0.6638834394, 0.6638834394, 0.2434312611, -0.2434312611],
+          "size": [0.00208, 0.0078, 0.01865]
+        },
+        {
+          "pos": [0.0122, 0.0542, 0.00988],
+          "quat": [0.2118697794, 0.2118697794, 0.6746192975, -0.6746192975],
+          "size": [0.00208, 0.0078, 0.01865]
+        },
+        {
+          "pos": [-0.01158, 0.0542, 0.00988],
+          "quat": [0.6655736355, -0.6655736355, 0.2387713042, 0.2387713042],
+          "size": [0.00208, 0.0078, 0.01865]
+        },
+        {
+          "pos": [-0.00096, -0.06947, 0.00023],
+          "quat": [0.0, -0.7071067812, 0.7071067812, 0.0],
+          "size": [0.00325, 0.01729, 0.01733]
+        },
+        {
+          "pos": [-0.00096, -0.05722, 0.00023],
+          "quat": [0.5, 0.5, -0.5, -0.5],
+          "size": [0.00558, 0.01733, 0.02217]
+        },
+        {
+          "pos": [-0.00096, -0.00434, 0.00023],
+          "quat": [0.5, 0.5, -0.5, -0.5],
+          "size": [0.00558, 0.01733, 0.0229]
+        },
+        {
+          "pos": [-0.00096, 0.00719, 0.00023],
+          "quat": [0.7071067812, 0.0, 0.0, -0.7071067812],
+          "size": [0.00558, 0.01712, 0.01733]
+        }
+      ],
+      "density": 100.0,
+      "friction": [0.95, 0.3, 0.1],
+      "quat": [0.5, 0.5, 0.5, 0.5],
+      "z": 0.07272,
+      "height": 0.14557,
+      "footprint": [0.035512, 0.05274]
+    },
+    "cream_cheese": {
+      "boxes": [
+        {
+          "pos": [0.0, 0.0, 0.0],
+          "quat": [0.7071067812, 0.0, 0.7071067812, 0.0],
+          "size": [0.008936, 0.021336, 0.040608]
+        }
+      ],
+      "density": 100.0,
+      "friction": [0.95, 0.3, 0.1],
+      "quat": [0.0, 0.0, 0.0, 1.0],
+      "z": 0.008936,
+      "height": 0.017872,
+      "footprint": [0.081216, 0.042672]
+    },
+    "milk": {
+      "boxes": [
+        {
+          "pos": [0.00037, -0.015, 0.0],
+          "quat": [0.7071067812, 0.7071067812, 0.0, 0.0],
+          "size": [0.02625, 0.02625, 0.05475]
+        },
+        {
+          "pos": [5e-05, 0.04784, 0.01352],
+          "quat": [0.2868705488, 0.6463012364, -0.2868705488, -0.6463012364],
+          "size": [0.00218, 0.01381, 0.02631]
+        },
+        {
+          "pos": [5e-05, 0.04784, -0.01344],
+          "quat": [0.6420324327, 0.2963011227, 0.6420324327, 0.2963011227],
+          "size": [0.00218, 0.01381, 0.02631]
+        },
+        {
+          "pos": [5e-05, 0.05849, 5e-05],
+          "quat": [0.5, 0.5, -0.5, -0.5],
+          "size": [0.00295, 0.00348, 0.0265]
+        }
+      ],
+      "density": 100.0,
+      "friction": [0.95, 0.3, 0.1],
+      "quat": [0.5, 0.5, 0.5, 0.5],
+      "z": 0.06975,
+      "height": 0.13119,
+      "footprint": [0.0525, 0.05307]
+    },
+    "tomato_sauce": {
+      "boxes": [
+        {
+          "pos": [0.0, -0.00104, -0.00235],
+          "quat": [0.5, -0.5, 0.5, 0.5],
+          "size": [0.01874, 0.02352, 0.03625]
+        },
+        {
+          "pos": [0.02595, 0.0, -0.00209],
+          "quat": [0.7071067812, 0.7071067812, 0.0, 0.0],
+          "size": [0.00226, 0.01471, 0.0376]
+        },
+        {
+          "pos": [-0.0247, -0.0006, -0.00209],
+          "quat": [0.7071067812, 0.7071067812, 0.0, 0.0],
+          "size": [0.00226, 0.01662, 0.0376]
+        },
+        {
+          "pos": [-0.00012, -0.0006, -0.02325],
+          "quat": [0.5, -0.5, 0.5, 0.5],
+          "size": [0.00421, 0.01985, 0.0376]
+        },
+        {
+          "pos": [-0.00012, -0.0006, 0.01776],
+          "quat": [0.5, -0.5, 0.5, 0.5],
+          "size": [0.00421, 0.01985, 0.0376]
+        },
+        {
+          "pos": [-0.00012, -0.0006, -0.03162],
+          "quat": [0.5, 0.5, 0.5, -0.5],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.00012, -0.0006, 0.02575],
+          "quat": [0.5, 0.5, 0.5, -0.5],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.02944, -0.0006, -0.00291],
+          "quat": [0.0002999986, 0.0002999986, -0.7071067175, 0.7071067175],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.0292, -0.0006, -0.00286],
+          "quat": [0.7071067175, 0.7071067175, 0.0002999986, -0.0002999986],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.02685, -0.0006, 0.00853],
+          "quat": [0.1214092861, -0.1214092861, 0.6966059038, 0.6966059038],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.02626, -0.0006, -0.01619],
+          "quat": [0.6863843179, 0.6863843179, -0.169931069, 0.169931069],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.01937, -0.0006, -0.02393],
+          "quat": [0.3033022892, -0.3033022892, 0.638754821, 0.638754821],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.00969, -0.0006, -0.03023],
+          "quat": [0.4127795448, -0.4127795448, 0.5741193669, 0.5741193669],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.0127, -0.0006, 0.02274],
+          "quat": [0.4127795448, -0.4127795448, 0.5741193669, 0.5741193669],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.0124, -0.0006, -0.02883],
+          "quat": [0.6031788704, 0.6031788704, 0.3690193089, -0.3690193089],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.02211, -0.0006, -0.02076],
+          "quat": [0.651372669, 0.651372669, 0.2751611275, -0.2751611275],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.02745, -0.00099, -0.01027],
+          "quat": [0.0520498887, 0.0520498887, -0.7051884919, 0.7051884919],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.027, -0.0006, 0.00886],
+          "quat": [0.6949620559, 0.6949620559, 0.130490386, -0.130490386],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.02005, -0.0006, 0.01808],
+          "quat": [0.6557214719, 0.6557214719, 0.264630594, -0.264630594],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [-0.01084, -0.0006, 0.02397],
+          "quat": [0.5620407824, -0.5620407824, 0.4290805973, 0.4290805973],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.02211, -0.0006, -0.02076],
+          "quat": [0.651372669, 0.651372669, 0.2751611275, -0.2751611275],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.0127, -0.0006, 0.02274],
+          "quat": [0.4127795448, -0.4127795448, 0.5741193669, 0.5741193669],
+          "size": [0.00177, 0.00694, 0.0376]
+        },
+        {
+          "pos": [0.02305, -0.00037, 0.01722],
+          "quat": [0.6633284793, 0.6633284793, -0.2449394385, 0.2449394385],
+          "size": [0.0011, 0.00624, 0.0375]
+        },
+        {
+          "pos": [0.02305, -0.00037, 0.01722],
+          "quat": [0.6633284793, 0.6633284793, -0.2449394385, 0.2449394385],
+          "size": [0.0011, 0.00624, 0.0375]
+        }
+      ],
+      "density": 100.0,
+      "friction": [0.95, 0.3, 0.1],
+      "quat": [0.0, 0.0, 0.7071067812, 0.7071067812],
+      "z": 0.03859,
+      "height": 0.07619,
+      "footprint": [0.062192, 0.061638]
+    },
+    "butter": {
+      "boxes": [
+        {
+          "pos": [0.0, 0.0, 0.0],
+          "quat": [0.7071067812, 0.0, 0.7071067812, 0.0],
+          "size": [0.00871, 0.01977, 0.03809]
+        }
+      ],
+      "density": 100.0,
+      "friction": [0.95, 0.3, 0.1],
+      "quat": [0.0, 0.0, 0.0, 1.0],
+      "z": 0.00871,
+      "height": 0.01742,
+      "footprint": [0.07618, 0.03954]
+    },
+    "basket": {
+      "boxes": [
+        {
+          "pos": [0.00251, 0.0, 0.01308],
+          "quat": [0.708799749, 0.0, 0.7054097502, 0.0],
+          "size": [0.0085, 0.0724, 0.07658]
+        },
+        {
+          "pos": [-0.07265, 0.0, 0.07657],
+          "quat": [0.0267200663, -0.0267200663, 0.7066017535, 0.7066017535],
+          "size": [0.00667, 0.06368, 0.0724]
+        },
+        {
+          "pos": [0.00047, -0.06855, 0.08177],
+          "quat": [0.5126315547, -0.4902514868, 0.5095615453, -0.4870414771],
+          "size": [0.00667, 0.06368, 0.0724]
+        },
+        {
+          "pos": [-0.0002, 0.06909, 0.08177],
+          "quat": [0.487940931, -0.5104309739, -0.4893509337, 0.5117709765],
+          "size": [0.00667, 0.06368, 0.0724]
+        },
+        {
+          "pos": [0.07557, 0.0, 0.07657],
+          "quat": [0.0176499118, 0.0176499118, -0.7068864694, 0.7068864694],
+          "size": [0.00667, 0.06368, 0.0724]
+        }
+      ],
+      "density": 100.0,
+      "friction": [0.95, 0.3, 0.1],
+      "quat": [0.7071067812, 0.0, 0.0, 0.7071067812],
+      "z": -0.004213,
+      "height": 0.141473,
+      "footprint": [0.157338, 0.16952],
+      "contain": {
+        "pos": [0.0, 0.0, 0.07185],
+        "size": [0.06108, 0.06108, 0.06949]
+      }
+    },
+    "bbq_sauce": {
+      "boxes": [
+        {
+          "pos": [0.0, 0.0, -0.02782],
+          "quat": [0.0, 0.7071067812, 0.7071067812, 0.0],
+          "size": [0.01447, 0.02349, 0.02682]
+        },
+        {
+          "pos": [0.0, 0.0, 0.01233],
+          "quat": [0.5, 0.5, -0.5, -0.5],
+          "size": [0.01428, 0.01459, 0.0181]
+        },
+        {
+          "pos": [0.0, 0.0, 0.0391],
+          "quat": [0.0, -0.0480086637, 0.9988469193, 0.0],
+          "size": [0.0131, 0.01336, 0.01336]
+        }
+      ],
+      "density": 100.0,
+      "friction": [0.95, 0.3, 0.1],
+      "quat": [0.7071067812, 0.0, 0.0, 0.7071067812],
+      "z": 0.05464,
+      "height": 0.1071,
+      "footprint": [0.02911, 0.04698]
+    },
+    "chocolate_pudding": {
+      "boxes": [
+        {
+          "pos": [-0.0005, 0.0, 0.00063],
+          "quat": [0.7071067812, 0.0, 0.7071067812, 0.0],
+          "size": [0.01371, 0.02316, 0.0401]
+        }
+      ],
+      "density": 100.0,
+      "friction": [0.95, 0.3, 0.1],
+      "quat": [0.0, 0.0, 0.0, 1.0],
+      "z": 0.01308,
+      "height": 0.02742,
+      "footprint": [0.0802, 0.04632]
+    },
+    "ketchup": {
+      "boxes": [
+        {
+          "pos": [0.00045, -0.03935, 0.00079],
+          "quat": [0.5, 0.5, 0.5, -0.5],
+          "size": [0.01695, 0.02811, 0.03307]
+        },
+        {
+          "pos": [0.00045, 0.00369, 0.00079],
+          "quat": [0.5, 0.5, -0.5, -0.5],
+          "size": [0.01126, 0.01834, 0.02393]
+        },
+        {
+          "pos": [0.00045, 0.02513, 0.00079],
+          "quat": [0.5, 0.5, -0.5, -0.5],
+          "size": [0.01126, 0.01834, 0.01869]
+        },
+        {
+          "pos": [0.00045, 0.05471, 0.00079],
+          "quat": [0.0, 0.0, 0.7071067812, -0.7071067812],
+          "size": [0.01032, 0.01414, 0.01848]
+        },
+        {
+          "pos": [0.01368, 0.05471, 0.00079],
+          "quat": [0.7071067812, 0.7071067812, 0.0, 0.0],
+          "size": [0.00292, 0.00405, 0.01848]
+        },
+        {
+          "pos": [-0.01322, 0.05471, 0.00079],
+          "quat": [0.0, 0.0, 0.7071067812, 0.7071067812],
+          "size": [0.00315, 0.0046, 0.01848]
+        },
+        {
+          "pos": [8e-05, 0.05471, -0.01554],
+          "quat": [0.5, -0.5, 0.5, 0.5],
+          "size": [0.00209, 0.00685, 0.01848]
+        },
+        {
+          "pos": [2e-05, 0.05471, 0.01682],
+          "quat": [0.5, -0.5, 0.5, 0.5],
+          "size": [0.00186, 0.0074, 0.01848]
+        },
+        {
+          "pos": [0.01333, 0.05471, 0.00901],
+          "quat": [0.7071067812, 0.7071067812, 0.0, 0.0],
+          "size": [0.00259, 0.00413, 0.01848]
+        },
+        {
+          "pos": [0.01333, 0.05471, -0.00727],
+          "quat": [0.0, 0.0, 0.7071067812, 0.7071067812],
+          "size": [0.00259, 0.00392, 0.01848]
+        },
+        {
+          "pos": [-0.01254, 0.05471, -0.00799],
+          "quat": [0.0, 0.0, 0.7071067812, 0.7071067812],
+          "size": [0.00259, 0.00405, 0.01848]
+        },
+        {
+          "pos": [-0.01259, 0.05471, 0.00929],
+          "quat": [0.0, 0.0, 0.7071067812, 0.7071067812],
+          "size": [0.00259, 0.0038, 0.01848]
+        }
+      ],
+      "density": 100.0,
+      "friction": [0.95, 0.3, 0.1],
+      "quat": [0.5, 0.5, 0.5, 0.5],
+      "z": 0.07242,
+      "height": 0.14561,
+      "footprint": [0.03676, 0.05622]
+    },
+    "orange_juice": {
+      "boxes": [
+        {
+          "pos": [-0.00037, -0.015, 0.0],
+          "quat": [0.7071067812, 0.7071067812, 0.0, 0.0],
+          "size": [0.02625, 0.02625, 0.05475]
+        },
+        {
+          "pos": [-5e-05, 0.04784, -0.01352],
+          "quat": [0.2868705488, -0.6463012364, -0.2868705488, 0.6463012364],
+          "size": [0.00218, 0.01381, 0.02631]
+        },
+        {
+          "pos": [-5e-05, 0.04784, 0.01344],
+          "quat": [0.2963011227, 0.6420324327, -0.2963011227, -0.6420324327],
+          "size": [0.00218, 0.01381, 0.02631]
+        },
+        {
+          "pos": [-5e-05, 0.05849, -5e-05],
+          "quat": [0.5, 0.5, -0.5, -0.5],
+          "size": [0.00295, 0.00348, 0.0265]
+        }
+      ],
+      "density": 100.0,
+      "friction": [0.95, 0.3, 0.1],
+      "quat": [0.5, 0.5, 0.5, 0.5],
+      "z": 0.06975,
+      "height": 0.13119,
+      "footprint": [0.0525, 0.05307]
+    }
+  },
+  "task": {
+    "name": "pick_up_the_alphabet_soup_and_place_it_in_the_basket",
+    "language": "Pick the alphabet soup and place it in the basket",
+    "target": "alphabet_soup",
+    "region_side": 0.05,
+    "basket": [0.6, 0.26],
+    "variants": {
+      "original": {
+        "source": "LIBERO",
+        "target": [0.48, -0.24],
+        "reach": 0.537,
+        "others": [
+          {
+            "kind": "salad_dressing",
+            "xy": [0.65, -0.1]
+          },
+          {
+            "kind": "cream_cheese",
+            "xy": [0.45, 0.06]
+          },
+          {
+            "kind": "milk",
+            "xy": [0.7, -0.2]
+          },
+          {
+            "kind": "tomato_sauce",
+            "xy": [0.75, 0.03]
+          },
+          {
+            "kind": "butter",
+            "xy": [0.4, -0.08]
+          }
+        ]
+      },
+      "swap": {
+        "source": "LIBERO-PRO position swap",
+        "target": [0.4, -0.08],
+        "reach": 0.408,
+        "others": [
+          {
+            "kind": "salad_dressing",
+            "xy": [0.65, -0.1]
+          },
+          {
+            "kind": "cream_cheese",
+            "xy": [0.45, 0.06]
+          },
+          {
+            "kind": "milk",
+            "xy": [0.7, -0.2]
+          },
+          {
+            "kind": "tomato_sauce",
+            "xy": [0.75, 0.03]
+          },
+          {
+            "kind": "butter",
+            "xy": [0.48, -0.24]
+          }
+        ]
+      },
+      "pose": {
+        "source": "LIBERO-PRO initial pose shift",
+        "target": [0.65, -0.3],
+        "target_yaw": 0.7853981633974483,
+        "reach": 0.716,
+        "others": [
+          {
+            "kind": "salad_dressing",
+            "xy": [0.65, -0.1]
+          },
+          {
+            "kind": "cream_cheese",
+            "xy": [0.45, 0.06]
+          },
+          {
+            "kind": "milk",
+            "xy": [0.7, -0.2]
+          },
+          {
+            "kind": "tomato_sauce",
+            "xy": [0.75, 0.03]
+          },
+          {
+            "kind": "butter",
+            "xy": [0.4, -0.08]
+          }
+        ]
+      }
+    }
+  },
+  "tasks": {
+    "alphabet_soup": {
+      "name": "pick_up_the_alphabet_soup_and_place_it_in_the_basket",
+      "language": "Pick the alphabet soup and place it in the basket",
+      "target": "alphabet_soup",
+      "region_side": 0.05,
+      "basket": [0.6, 0.26],
+      "variants": {
+        "original": {
+          "source": "LIBERO",
+          "target": [0.48, -0.24],
+          "reach": 0.537,
+          "others": [
+            {
+              "kind": "salad_dressing",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "swap": {
+          "source": "LIBERO-PRO position swap",
+          "target": [0.4, -0.08],
+          "reach": 0.408,
+          "others": [
+            {
+              "kind": "salad_dressing",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.48, -0.24]
+            }
+          ]
+        },
+        "pose": {
+          "source": "LIBERO-PRO initial pose shift",
+          "target": [0.65, -0.3],
+          "target_yaw": 0.7853981633974483,
+          "reach": 0.716,
+          "others": [
+            {
+              "kind": "salad_dressing",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        }
+      }
+    },
+    "bbq_sauce": {
+      "name": "pick_up_the_bbq_sauce_and_place_it_in_the_basket",
+      "language": "Pick the bbq sauce and place it in the basket",
+      "target": "bbq_sauce",
+      "region_side": 0.05,
+      "basket": [0.6, 0.26],
+      "variants": {
+        "original": {
+          "source": "LIBERO",
+          "target": [0.65, -0.1],
+          "reach": 0.658,
+          "others": [
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "swap": {
+          "source": "LIBERO-PRO position swap",
+          "target": [0.48, -0.24],
+          "reach": 0.537,
+          "others": [
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "pose": {
+          "source": "LIBERO-PRO initial pose shift",
+          "target": [0.82, -0.16],
+          "target_yaw": 0.7853981633974483,
+          "reach": 0.835,
+          "others": [
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        }
+      }
+    },
+    "butter": {
+      "name": "pick_up_the_butter_and_place_it_in_the_basket",
+      "language": "Pick the butter and place it in the basket",
+      "target": "butter",
+      "region_side": 0.05,
+      "basket": [0.6, 0.26],
+      "variants": {
+        "original": {
+          "source": "LIBERO",
+          "target": [0.48, -0.24],
+          "reach": 0.537,
+          "others": [
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "swap": {
+          "source": "LIBERO-PRO position swap",
+          "target": [0.65, -0.1],
+          "reach": 0.658,
+          "others": [
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "pose": {
+          "source": "LIBERO-PRO initial pose shift",
+          "target": [0.65, -0.3],
+          "target_yaw": 0.7853981633974483,
+          "reach": 0.716,
+          "others": [
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        }
+      }
+    },
+    "chocolate_pudding": {
+      "name": "pick_up_the_chocolate_pudding_and_place_it_in_the_basket",
+      "language": "Pick the chocolate pudding and place it in the basket",
+      "target": "chocolate_pudding",
+      "region_side": 0.05,
+      "basket": [0.6, 0.26],
+      "variants": {
+        "original": {
+          "source": "LIBERO",
+          "target": [0.48, -0.24],
+          "reach": 0.537,
+          "others": [
+            {
+              "kind": "orange_juice",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "swap": {
+          "source": "LIBERO-PRO position swap",
+          "target": [0.7, -0.2],
+          "reach": 0.728,
+          "others": [
+            {
+              "kind": "orange_juice",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "pose": {
+          "source": "LIBERO-PRO initial pose shift",
+          "target": [0.65, -0.3],
+          "target_yaw": 0.7853981633974483,
+          "reach": 0.716,
+          "others": [
+            {
+              "kind": "orange_juice",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        }
+      }
+    },
+    "cream_cheese": {
+      "name": "pick_up_the_cream_cheese_and_place_it_in_the_basket",
+      "language": "Pick the cream cheese and place it in the basket",
+      "target": "cream_cheese",
+      "region_side": 0.05,
+      "basket": [0.6, 0.26],
+      "variants": {
+        "original": {
+          "source": "LIBERO",
+          "target": [0.65, -0.1],
+          "reach": 0.658,
+          "others": [
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "swap": {
+          "source": "LIBERO-PRO position swap",
+          "target": [0.48, -0.24],
+          "reach": 0.537,
+          "others": [
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "pose": {
+          "source": "LIBERO-PRO initial pose shift",
+          "target": [0.82, -0.16],
+          "target_yaw": 0.7853981633974483,
+          "reach": 0.835,
+          "others": [
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        }
+      }
+    },
+    "ketchup": {
+      "name": "pick_up_the_ketchup_and_place_it_in_the_basket",
+      "language": "Pick the ketchup and place it in the basket",
+      "target": "ketchup",
+      "region_side": 0.05,
+      "basket": [0.6, 0.26],
+      "variants": {
+        "original": {
+          "source": "LIBERO",
+          "target": [0.48, -0.24],
+          "reach": 0.537,
+          "others": [
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "swap": {
+          "source": "LIBERO-PRO position swap",
+          "target": [0.75, 0.03],
+          "reach": 0.751,
+          "others": [
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "pose": {
+          "source": "LIBERO-PRO initial pose shift",
+          "target": [0.65, -0.3],
+          "target_yaw": 0.7853981633974483,
+          "reach": 0.716,
+          "others": [
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        }
+      }
+    },
+    "milk": {
+      "name": "pick_up_the_milk_and_place_it_in_the_basket",
+      "language": "Pick the milk and place it in the basket",
+      "target": "milk",
+      "region_side": 0.05,
+      "basket": [0.6, 0.26],
+      "variants": {
+        "original": {
+          "source": "LIBERO",
+          "target": [0.48, -0.24],
+          "reach": 0.537,
+          "others": [
+            {
+              "kind": "cream_cheese",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "swap": {
+          "source": "LIBERO-PRO position swap",
+          "target": [0.65, -0.1],
+          "reach": 0.658,
+          "others": [
+            {
+              "kind": "cream_cheese",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "pose": {
+          "source": "LIBERO-PRO initial pose shift",
+          "target": [0.65, -0.3],
+          "target_yaw": 0.7853981633974483,
+          "reach": 0.716,
+          "others": [
+            {
+              "kind": "cream_cheese",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        }
+      }
+    },
+    "orange_juice": {
+      "name": "pick_up_the_orange_juice_and_place_it_in_the_basket",
+      "language": "Pick the orange juice and place it in the basket",
+      "target": "orange_juice",
+      "region_side": 0.05,
+      "basket": [0.6, 0.26],
+      "variants": {
+        "original": {
+          "source": "LIBERO",
+          "target": [0.65, -0.1],
+          "reach": 0.658,
+          "others": [
+            {
+              "kind": "butter",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "swap": {
+          "source": "LIBERO-PRO position swap",
+          "target": [0.45, 0.06],
+          "reach": 0.454,
+          "others": [
+            {
+              "kind": "butter",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "pose": {
+          "source": "LIBERO-PRO initial pose shift",
+          "target": [0.82, -0.16],
+          "target_yaw": 0.7853981633974483,
+          "reach": 0.835,
+          "others": [
+            {
+              "kind": "butter",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "ketchup",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "salad_dressing",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        }
+      }
+    },
+    "salad_dressing": {
+      "name": "pick_up_the_salad_dressing_and_place_it_in_the_basket",
+      "language": "Pick the salad dressing and place it in the basket",
+      "target": "salad_dressing",
+      "region_side": 0.05,
+      "basket": [0.6, 0.26],
+      "variants": {
+        "original": {
+          "source": "LIBERO",
+          "target": [0.65, -0.1],
+          "reach": 0.658,
+          "others": [
+            {
+              "kind": "ketchup",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "swap": {
+          "source": "LIBERO-PRO position swap",
+          "target": [0.4, -0.08],
+          "reach": 0.408,
+          "others": [
+            {
+              "kind": "ketchup",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.65, -0.1]
+            }
+          ]
+        },
+        "pose": {
+          "source": "LIBERO-PRO initial pose shift",
+          "target": [0.82, -0.16],
+          "target_yaw": 0.7853981633974483,
+          "reach": 0.835,
+          "others": [
+            {
+              "kind": "ketchup",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "alphabet_soup",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "cream_cheese",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "milk",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "tomato_sauce",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        }
+      }
+    },
+    "tomato_sauce": {
+      "name": "pick_up_the_tomato_sauce_and_place_it_in_the_basket",
+      "language": "Pick the tomato sauce and place it in the basket",
+      "target": "tomato_sauce",
+      "region_side": 0.05,
+      "basket": [0.6, 0.26],
+      "variants": {
+        "original": {
+          "source": "LIBERO",
+          "target": [0.65, -0.1],
+          "reach": 0.658,
+          "others": [
+            {
+              "kind": "milk",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "swap": {
+          "source": "LIBERO-PRO position swap",
+          "target": [0.48, -0.24],
+          "reach": 0.537,
+          "others": [
+            {
+              "kind": "milk",
+              "xy": [0.65, -0.1]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        },
+        "pose": {
+          "source": "LIBERO-PRO initial pose shift",
+          "target": [0.82, -0.16],
+          "target_yaw": 0.7853981633974483,
+          "reach": 0.835,
+          "others": [
+            {
+              "kind": "milk",
+              "xy": [0.48, -0.24]
+            },
+            {
+              "kind": "butter",
+              "xy": [0.45, 0.06]
+            },
+            {
+              "kind": "orange_juice",
+              "xy": [0.7, -0.2]
+            },
+            {
+              "kind": "chocolate_pudding",
+              "xy": [0.75, 0.03]
+            },
+            {
+              "kind": "bbq_sauce",
+              "xy": [0.4, -0.08]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "placement": {
+    "alphabet_soup": 0.0,
+    "salad_dressing": 0.0,
+    "cream_cheese": 0.005,
+    "milk": 0.005,
+    "tomato_sauce": 0.0,
+    "butter": 0.005,
+    "basket": 0.015,
+    "bbq_sauce": 0.01,
+    "chocolate_pudding": 0.0,
+    "ketchup": 0.0,
+    "orange_juice": 0.0
+  },
+  "libero_sites": {
+    "alphabet_soup": {
+      "bottom_site": [0.0, 0.0, -0.04],
+      "top_site": [0.0, 0.0, 0.04],
+      "horizontal_radius_site": [0.025, 0.025, 0.0],
+      "spawn_z": 0.015
+    },
+    "salad_dressing": {
+      "bottom_site": [0.0, 0.0, -0.06],
+      "top_site": [0.0, 0.0, 0.04],
+      "horizontal_radius_site": [0.025, 0.025, 0.0],
+      "spawn_z": 0.035
+    },
+    "cream_cheese": {
+      "bottom_site": [0.0, 0.0, -0.025],
+      "top_site": [0.0, 0.0, 0.025],
+      "horizontal_radius_site": [0.03, 0.03, 0.0],
+      "spawn_z": 0.0
+    },
+    "milk": {
+      "bottom_site": [0.0, 0.0, -0.06],
+      "top_site": [0.0, 0.0, 0.04],
+      "horizontal_radius_site": [0.03, 0.03, 0.0],
+      "spawn_z": 0.035
+    },
+    "tomato_sauce": {
+      "bottom_site": [0.0, 0.0, -0.06],
+      "top_site": [0.0, 0.0, 0.04],
+      "horizontal_radius_site": [0.025, 0.025, 0.0],
+      "spawn_z": 0.035
+    },
+    "butter": {
+      "bottom_site": [0.0, 0.0, -0.02],
+      "top_site": [0.0, 0.0, 0.02],
+      "horizontal_radius_site": [0.02, 0.02, 0.0],
+      "spawn_z": -0.005
+    },
+    "basket": {
+      "bottom_site": [0.0, 0.0, -0.06],
+      "top_site": [0.0, 0.0, 0.04],
+      "horizontal_radius_site": [0.025, 0.025, 0.0],
+      "spawn_z": 0.035
+    },
+    "bbq_sauce": {
+      "bottom_site": [0.0, 0.0, -0.06],
+      "top_site": [0.0, 0.0, 0.06],
+      "horizontal_radius_site": [0.015, 0.015, 0.0],
+      "spawn_z": 0.035
+    },
+    "chocolate_pudding": {
+      "bottom_site": [0.0, 0.0, -0.06],
+      "top_site": [0.0, 0.0, 0.04],
+      "horizontal_radius_site": [0.025, 0.025, 0.0],
+      "spawn_z": 0.035
+    },
+    "ketchup": {
+      "bottom_site": [0.0, 0.0, -0.06],
+      "top_site": [0.0, 0.0, 0.04],
+      "horizontal_radius_site": [0.025, 0.025, 0.0],
+      "spawn_z": 0.035
+    },
+    "orange_juice": {
+      "bottom_site": [0.0, 0.0, -0.06],
+      "top_site": [0.0, 0.0, 0.04],
+      "horizontal_radius_site": [0.025, 0.025, 0.0],
+      "spawn_z": 0.035
+    }
+  }
+}

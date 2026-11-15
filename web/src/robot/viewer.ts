@@ -17,7 +17,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { attr, esc } from "../ui";
 import { ARM_MODEL, fetchMotion, fetchScene, fetchSummaries, type MotionData, type MotionSummary, type SceneData, type SceneGeom, type SceneView } from "./data";
-import { PUSH_LEGEND, SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, motionName, noWebglView, pushText, resultFacts, resultText, resultTone, seconds, xy } from "./markup";
+import { BASKET_LEGEND, PUSH_LEGEND, STRIKE_LEGEND, SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, hasBasket, motionName, noWebglView, pushText, resultFacts, resultText, resultTone, seconds, xy, xyz } from "./markup";
 
 // ── WebGL, checked once ──────────────────────────────────────────────────────
 
@@ -126,7 +126,7 @@ function geomGeometry(g: SceneGeom, scene: SceneData): THREE.BufferGeometry | nu
     case "mesh": {
       const mesh = g.mesh != null ? scene.meshes[g.mesh] : undefined;
       if (!mesh || !mesh.f.length) return null;
-      return cachedGeometry(`mesh:${g.mesh}`, () => {
+      return cachedGeometry(`mesh:${scene.model_id}:${g.mesh}`, () => {
         const base = new THREE.BufferGeometry();
         base.setAttribute("position", new THREE.Float32BufferAttribute(mesh.v, 3));
         base.setIndex(mesh.f);
@@ -156,19 +156,49 @@ class Bodies {
   private readonly qa = new THREE.Quaternion();
   private readonly qb = new THREE.Quaternion();
   private staticOf: MotionData | null = null;
+  /** The scene's own meshes by geom name, for a file that hides one (the place zone, where a basket stands). */
+  private readonly named = new Map<string, THREE.Mesh[]>();
+  /** The meshes of the file being shown that the scene does not have: its basket and other objects. */
+  private extra: THREE.Mesh[] = [];
+  private extraOf: MotionData["extra"] | null = null;
 
-  constructor(scene: SceneData, shadows: boolean) {
+  constructor(private readonly scene: SceneData, private readonly shadows: boolean) {
     for (const g of scene.geoms) {
-      const geo = geomGeometry(g, scene);
-      if (!geo) continue;
-      const mesh = new THREE.Mesh(geo, material(g.rgba, g.name));
-      setPose(mesh, [...g.pos, ...g.quat]);
-      const zone = g.name === "place_zone";
-      mesh.castShadow = shadows && !zone;
-      mesh.receiveShadow = shadows && !zone;
-      if (zone) mesh.renderOrder = 1;
+      const mesh = this.meshOf(g);
+      if (!mesh) continue;
       this.group(g.body).add(mesh);
+      this.named.set(g.name, [...(this.named.get(g.name) ?? []), mesh]);
     }
+  }
+
+  private meshOf(g: SceneGeom): THREE.Mesh | null {
+    const geo = geomGeometry(g, this.scene);
+    if (!geo) return null;
+    const mesh = new THREE.Mesh(geo, material(g.rgba, g.name));
+    setPose(mesh, [...g.pos, ...g.quat]);
+    const zone = g.name === "place_zone";
+    mesh.castShadow = this.shadows && !zone;
+    mesh.receiveShadow = this.shadows && !zone;
+    if (zone) mesh.renderOrder = 1;
+    return mesh;
+  }
+
+  /** Draw what `m` has beyond the scene (a basket, other objects) and hide what it does not have. Files of one
+   *  batch share these, so they are rebuilt only when a file brings different ones. */
+  private dress(m: MotionData): void {
+    const hidden = new Set(m.hide ?? []);
+    for (const [name, meshes] of this.named) for (const mesh of meshes) mesh.visible = !hidden.has(name);
+    const sig = JSON.stringify(m.extra ?? []);
+    if (sig === JSON.stringify(this.extraOf ?? [])) return;
+    for (const mesh of this.extra) mesh.removeFromParent();
+    this.extra = [];
+    for (const g of m.extra ?? []) {
+      const mesh = this.meshOf(g);
+      if (!mesh) continue;
+      this.group(g.body).add(mesh);
+      this.extra.push(mesh);
+    }
+    this.extraOf = m.extra ?? [];
   }
 
   private group(id: number): THREE.Group {
@@ -185,6 +215,7 @@ class Bodies {
   /** Every body where `m` has it at time `t` (seconds), between the two frames around it. */
   pose(m: MotionData, t: number): void {
     if (this.staticOf !== m) {
+      this.dress(m);
       for (const [id, p] of Object.entries(m.static)) setPose(this.group(Number(id)), p);
       this.staticOf = m;
     }
@@ -395,7 +426,8 @@ class World {
     this.startMark.visible = !!start;
     if (start) this.startMark.position.set(start[0], start[1], 0.0006);
     const tgt = m.place_target;
-    this.target.visible = !!tgt && tgt.length >= 2;
+    // In a scene with a basket there is no ring to end in: the basket itself is the target.
+    this.target.visible = !!tgt && tgt.length >= 2 && !hasBasket(m);
     if (tgt && tgt.length >= 2) { this.target.position.x = tgt[0]; this.target.position.y = tgt[1]; }
   }
 }
@@ -586,10 +618,9 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
         // A new robot: the camera starts where its scene says, and the legend says how it is judged.
         aim(cam, w.view);
         controls.target.copy(vec(w.view.target));
+        // A humanoid is taller than the arm's table is wide: room to pull back from it.
+        controls.maxDistance = id === ARM_MODEL ? 4 : 6;
         controls.update();
-        legendEl.classList.toggle("rb-legend--push", !!w.view.push_body);
-        const legendText = legendEl.querySelector("span:last-child");
-        if (legendText) legendText.textContent = w.view.push_body ? PUSH_LEGEND : SUCCESS_LEGEND;
       }
       world = w;
       motion = m;
@@ -598,8 +629,16 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
       seek.max = String(duration(m));
       loadingEl.hidden = true;
       showResult(m, files[i]);
+      // How this episode is judged: a push arrow, a strike on the bag, a basket, or the arm's ring. A run's files
+      // can differ in this (a basket only where a layout has one), so it is set for every file.
+      const judged = w.view.push_body ? PUSH_LEGEND : m.bag_pos ? STRIKE_LEGEND : hasBasket(m) ? BASKET_LEGEND : SUCCESS_LEGEND;
+      legendEl.classList.toggle("rb-legend--push", !!w.view.push_body);
+      legendEl.querySelector(".rb-legend-ring")?.toggleAttribute("hidden", judged === STRIKE_LEGEND || judged === BASKET_LEGEND);
+      const legendText = legendEl.querySelector("span:last-child");
+      if (legendText) legendText.textContent = judged;
       if (m.can_start) stage.setAttribute("aria-label", `Episode ${motionName(files[i])}: can from ${xy(m.can_start)}`);
-      if (m.push) stage.setAttribute("aria-label", `Episode ${motionName(files[i], "push")}: push ${pushText(m.push)}`);
+      else if (m.push) stage.setAttribute("aria-label", `Episode ${motionName(files[i], "push")}: push ${pushText(m.push)}`);
+      else if (m.bag_pos) stage.setAttribute("aria-label", `Episode ${motionName(files[i])}: bag at ${xyz(m.bag_pos)}`);
       setPlaying(true);
       dirty = true;
       showTime();
@@ -784,7 +823,7 @@ function mountPlayerWithoutGl(el: HTMLElement, batch: string, files: string[]): 
 function fileButton(path: string, i: number, s: MotionSummary | null): string {
   const tone = s?.error ? "none" : resultTone(s?.result);
   const meta = s && !s.error
-    ? [s.can_start ? `can ${xy(s.can_start)}` : "", s.push ? `push ${pushText(s.push)}` : "", resultText(s.result)].filter(Boolean).join(" · ")
+    ? [s.can_start ? `can ${xy(s.can_start)}` : s.bag_pos ? `bag ${xyz(s.bag_pos)}` : "", s.push ? `push ${pushText(s.push)}` : "", resultText(s.result)].filter(Boolean).join(" · ")
     : s?.error ? "can't be read" : "";
   return `<button type="button" class="rb-file" role="option" data-rb-file="${i}" aria-selected="false" title="${attr(path)}">`
     + `<span class="rb-dot rb-dot--${tone}" aria-hidden="true"></span>`
