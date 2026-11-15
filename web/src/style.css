@@ -14,6 +14,11 @@
 /* ── base ── */
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }
+/* No view can make the document scroll sideways: what is wider than the screen scrolls in its own box or is cut at
+   the screen's edge. `clip` on the body does not make it a scroller, so sticky bars and the page's own scroll are as
+   before. A phone turned on its side keeps the type's size. */
+html { overflow-x:hidden; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
+body { overflow-x:clip; }
 button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
 input, select { font-family: inherit; }
 ::selection { background: var(--accent, #525cc3); color: var(--accent-fg, #fff); }

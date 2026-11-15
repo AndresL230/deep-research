@@ -61,6 +61,15 @@ class BatchConfig(BaseModel):
     # A soft gate on the investigator's method (agents/method_gate.py): `record_suspects` is refused once before a plan
     # and the lenses, `run_experiment` once per suspect before the skeptic. The second try goes through and is logged.
     investigator_strict: bool = True
+    # MASTER_PLAN Phase 6: how a fork copy gets the source run's agent state. "messages": the cut message history
+    # (forks.cut_history), the way every copy was built before. "checkpoint": the LangGraph snapshot just before the
+    # model turn that made the fork-point action, read from the batch's checkpoints.sqlite and seeded into a new
+    # thread with `aupdate_state`, so the copy keeps the source run's todo list too. Either way the copy's VM is
+    # rebuilt by replay (or a VM fork): LangGraph restores the agent's state, never the VM's.
+    fork_mode: Literal["checkpoint", "messages"] = "messages"
+    # MASTER_PLAN Phase 5.2: "learned" gives every analyst the approved lessons under skills/learned/ (as Deep Agents
+    # skills, or appended to the system prompt when its backend cannot serve them). "none": analysts get no lessons.
+    lessons: Literal["none", "learned"] = "none"
     # The model family the task asks for. Duplicates inflate tree models far more
     # than logistic regression (measured on Pima: about +13 points vs +1).
     model_hint: Literal["random_forest", "any"] = "random_forest"

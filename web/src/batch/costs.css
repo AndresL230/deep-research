@@ -142,10 +142,16 @@
   .cs-model > .cs-num { grid-area:usd; }
 }
 @media (max-width: 640px) {
-  .cs { padding-top:16px; padding-bottom:48px; gap:24px; }
+  /* Reading size on a phone: 14px for the words, 13px for what sits beside a number, 12px for the smallest print. */
+  .cs { padding-top:16px; padding-bottom:calc(48px + env(safe-area-inset-bottom, 0px)); gap:24px; font-size:14px; }
   .cs-split { grid-template-columns:minmax(0, 1fr); }
   .cs-card { padding:14px; }
   .cs-stat-v { font-size:20px; }
+  .cs-h2 { font-size:14px; }
+  .cs-dim, .cs-eyebrow, .cs-h2-x, .cs-model-t, .cs-c-when, .cs-c-what, .cs-c-total .cs-dim, .cs-note, .cs-warn { font-size:13px; }
+  .cs-chip, .cs-tag, .cs-stat-l, .cs-stat-s, .cs-phase { font-size:12px; }
+  .cs-leg { min-height:24px; }
+  .cs-row { min-height:56px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

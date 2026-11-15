@@ -293,6 +293,19 @@ view (`case/view/case.json`) leaves them out (`case_file.UPGRADE_HIDDEN`).
     investigator log: its last `todos` event, the `agent` of its last event as the subagent at work, and its `task`
     calls.
   - `config.investigator_assist` `"none" | "baseline"`: the UI tags the batch when it is `baseline`.
+  - `config.lessons` `"none" | "learned"` (Phase 5.2): `learned` gives the analysts the approved lessons under
+    `skills/learned/`; the UI tags it "Lessons on". Each run (and fork copy) then carries `lessons`
+    `{setting, path: "skills" | "prompt" | "none", names}`: as Deep Agents skills on a read-only `/skills/learned/`
+    route, appended to the system prompt, or none approved yet.
+  - `config.fork_mode` `"messages" | "checkpoint"` (Phase 6). Every run and copy carries `thread_id`, its thread in
+    `batches/<id>/checkpoints.sqlite`. A fork carries `fork_mode` (the mode its copies used) and `restore`
+    `{agent_state: "checkpoint" | "messages", vm: "replay"}`: LangGraph restores the agent state only, the VM is
+    rebuilt by replay. When checkpoint mode was asked for, also `fork_mode_requested`, `checkpoint_id`,
+    `source_thread_id` and `fork_mode_fallback` (why messages mode was used instead, or null). Each copy carries
+    `fork_mode`, `state_from` and, in checkpoint mode, `checkpoint_id` and `source_thread_id`.
+  - `foolrate` (Phase 5.3, `cli foolrate`): `{settings, rows: [{setting, batch_id, inflated, n, failed, rate, ci95,
+    interval: "wilson"}], n_per_setting, domain, trap, control: "none", estimate_usd, created_at}`, on every batch of
+    the study and in `batches/_foolrate/<stamp>.json`.
 - `POST /decision` may carry `{"approve": true, "pairs": n}` (1 to 6) when a person edited the pairs; plain
   `{"approve": bool}` is unchanged. `POST /api/batches/{id}/lessons/{lesson_id}` `{"approve": bool}` answers a
   proposed lesson.

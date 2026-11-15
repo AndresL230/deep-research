@@ -14,6 +14,7 @@ import type { Role } from "../access";
 export const ACT = {
   // anywhere
   home: "home",                 // go to the home screen
+  landing: "landing",           // go to the landing page (the header's logo)
   openBatch: "open-batch",      // arg: batch id
   openCosts: "open-costs",      // go to the overall cost screen (also its Retry)
   newBatch: "new-batch",        // open the New batch dialog (the header's button)

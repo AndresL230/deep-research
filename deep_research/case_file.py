@@ -382,6 +382,12 @@ class CaseFile:
             self.data["baseline"] = baseline
             self._changed("baseline")
 
+    def set_foolrate(self, table: dict | None) -> None:
+        """The fool-rate table (MASTER_PLAN 6.1, Phase 5.3) this batch is a row of (`foolrate.table`)."""
+        with self._lock:
+            self.data["foolrate"] = table
+            self._changed("foolrate")
+
     def set_fix(self, fix: dict | None) -> None:
         with self._lock:
             self.data["fix"] = fix

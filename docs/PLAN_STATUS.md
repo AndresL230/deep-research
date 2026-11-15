@@ -12,8 +12,8 @@ Audited `origin/main` at `d3a23ab` (merge of #41), Sat Nov 14 23:57 to Sun Nov 1
 | 2 Experiments with a choice and a score | **Diverged** | The investigator chooses a hypothesis and the prediction is saved first, but the evidence is Fisher on counts, not the 6.4 score. No `run_experiment`, no change registry. (Since fixed, see below. Real acceptance run on `1115-010055-bfc9`: same-vs-same open at 0.019, a harmless change cleared at 0.0002) |
 | 3 The investigator does the science | **Partial** | It records 2 or more competing hypotheses and tests them. The prompt is still a numbered 1 to 5 script. No lens or skeptic subagents. (Real acceptance since met on `1115-012104-800f`: blind, two suspects tested, one supported, one cleared) |
 | 4 A verdict that is checked | **Partial** | `RubricMiddleware` runs and sent a real verdict back twice, in the robot run and again in `1115-012104-800f`. No two-factor grid, no `audit.py` |
-| 5 It learns | **Diverged** | A per-domain notebook (`memory=`) in place of the casebook. No `propose_lesson`, no fool-rate run |
-| 6 Real time travel | **Not started** | `InMemorySaver` only, no SQLite checkpointer, no `fork_mode` |
+| 5 It learns | **Partial** | Casebook and `propose_lesson` exist. Since 02:30 Nov 15: `lessons: learned` gives analysts the approved lessons as skills, and `cli foolrate` exists (estimate first, `--yes` to run). The fool-rate run itself has not been run |
+| 6 Real time travel | **Done offline, no real run yet** | Since 02:30 Nov 15: every analyst on the batch's `checkpoints.sqlite`; `fork_mode: checkpoint` seeds a copy from the source run's LangGraph snapshot (todo list kept); the VM still comes from replay. Not yet run for real |
 | 7 A second trap | **Partial** | `leaky_column` (the plan's `standin_column`) and `repeat_rows` exist and calibrate. No real batch on them |
 | 8 Show it | **Diverged, mostly done** | Hypotheses, evidence, approval, rubric, fix and simulated tags are in the UI, under other names. No suspect board as specified, no lessons or fool-rate views |
 | 9 Demo hardening | **Partial** | A real robot recording and a real tabular recording (`1115-012104-800f`, the landing's "Demo replay"), the README's "What we ran for real", `docs/claims.md` with batch ids. The landing's own figures are still the simulated `demo-batch` |
@@ -58,8 +58,9 @@ langgraph 1.2.22, langchain 1.5.0 and langgraph-checkpoint-sqlite 3.1.3. All off
 | Method gate (02:45) | The one real run never called `write_todos` or `task`, so plain code now asks for them. `record_suspects` is refused once before a plan and a lens call; `run_experiment` once per suspect before the skeptic, and that refusal is given before the approval card, so no one approves a cost that is not spent. The second try goes through and is logged in `investigator.skipped_steps`. Calls are read from `investigator.subagent_calls` and `todos` in the case file, so the gate survives a restart. `BatchConfig.investigator_strict` (default on) turns it off | `agents/method_gate.py`, `batch._method_gate_answer` |
 | Flat analysts, per agent (02:45) | `_make_flat` registered a process-wide harness profile per model, which took the default general-purpose subagent from any other deep agent on the same model. The analyst now passes `NoSubagents`, a no-op middleware named `SubAgentMiddleware`, which replaces deepagents' own in that agent's stack only (`graph._apply_custom_middleware`, as `NoCompaction` does for summarization): no `task` tool, no subagents | `agents/analyst.py` |
 
-Cut: fork copies keeping the source run's todo list (`aupdate_state(..., as_node="tools")`), the analysts loading
-learned lessons (`lessons="learned"`), the fool-rate run, a cheaper grader with an evidence tool, the `run_python` lab VM.
+Since 02:30 Nov 15, no longer cut: fork copies keeping the source run's todo list (`fork_mode: checkpoint`), the
+analysts loading learned lessons (`lessons="learned"`) and the fool-rate command (`cli foolrate`, not run). Still cut: a
+cheaper grader with an evidence tool, the `run_python` lab VM.
 Offline tests: `tests/test_investigator_science.py` (two suspects, a predicted experiment approved with edited pairs, a
 supported suspect under 20 refused; restart; lesson; subagent shapes and names).
 
@@ -206,16 +207,16 @@ Added beyond the plan: more pairs for an open verdict (`batch.py:1389-1450`), re
 | --- | --- | --- |
 | Casebook read at start, appended at end | **diverged** | Per-domain notebook `batches/_memory/<domain>/AGENTS.md` (`notebook.py:53-57`) through `memory=` (`agents/investigator.py:505`). Subagents cannot write it (`:448`). Tested (`tests/test_investigator_upgrades.py:107-192`). The local tabular notebook has no entries |
 | `propose_lesson`, `skills/learned/` | **not met** | Absent. `hint_level: none \| light` exists (`config.py:57`) |
-| `lessons="learned"` batch | **not met** | Absent |
-| Fool-rate table | **not met** | Absent |
+| `lessons="learned"` batch | **met offline** (02:30 Nov 15) | `BatchConfig.lessons`. The analyst's VM backend is wrapped in a `CompositeBackend` whose `/skills/learned/` route reads `skills/learned/` read-only (writes denied by a route-scoped `FilesystemPermission`), and `skills=["/skills/learned/"]` is passed, so Deep Agents finds `<name>/SKILL.md` one folder below the source (`deepagents/middleware/skills.py`). A backend that is no sandbox gets the rules appended to its system prompt instead; the path used is logged and saved on each run (`runs.<id>.lessons`). The UI tags "Lessons on". `lessons.py`, `agents/analyst.py`; `tests/test_time_travel_offline.py` checks the skill is in the analyst's prompt. No real batch with lessons yet |
+| Fool-rate table | **code met, not run** | `cli foolrate --n 12 --settings none,learned [--domain] [--noise --hidden] --budget X` prints the estimate (about $0.004 a run) and exits unless `--yes`. Writes `foolrate` (inflated, n, rate, 95% Wilson interval per setting; `none` always included as the control) to each batch and `batches/_foolrate/<stamp>.json`. `foolrate.py`. Tested offline with the scripted model only |
 
-### Phase 6: real time travel. Not started
+### Phase 6: real time travel. Done offline
 
 | Check | Met | Evidence |
 | --- | --- | --- |
-| SQLite checkpointer per batch | **not met** | `InMemorySaver` in analyst and investigator (`agents/analyst.py:61`, `agents/investigator.py:510`) |
-| `fork_mode: checkpoint` keeps the todo list | **not met** | Messages mode only (`forks.py:99-111`) |
-| Pending approval survives a restart | **not met** | `Batch.resume` drops `forks.pending` (`batch.py:472-473`) |
+| SQLite checkpointer per batch | **met** (02:30 Nov 15) | One `AsyncSqliteSaver` per batch on `batches/<id>/checkpoints.sqlite` (`Batch._saver`), shared by the investigator and every analyst. Runs use the stable thread `<batch>-<run>`, copies a new thread `<batch>-<fork>-<copy>`; both are saved as `thread_id`. The file closes when the last analyst lets go and no investigator holds it |
+| `fork_mode: checkpoint` keeps the todo list | **met offline** | `BatchConfig.fork_mode` (default `messages`), `run_experiment(fork_mode=)`, `cli experiment --fork-mode checkpoint`. `Batch._checkpoint_seed` walks `aget_state_history` of the source thread for the snapshot whose next node is `model` and whose messages are the cut history; `_seed_copy` writes its values, plus the change's messages, into the copy's new thread with `aupdate_state(..., as_node="tools")`, then streams `astream(None, ...)`. Offline acceptance: the checkpoint copy starts with the same messages as the messages-mode copy and keeps the source run's todos (`tests/test_time_travel_offline.py`). No checkpoint (older batches such as the committed fixtures): falls back to messages mode, logs and records `fork_mode_fallback`. The VM always comes from replay; `forks.<id>.restore` says so. **Not yet run on a real batch** |
+| Pending approval survives a restart | **met** | `Batch.resume` keeps `forks.pending` when `checkpoints.sqlite` exists (`batch.py`) |
 
 ### Phase 7: a second trap. Partial
 

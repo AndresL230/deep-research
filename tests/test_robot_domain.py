@@ -54,7 +54,7 @@ def _robot_batch(tmp_path, monkeypatch, **cfg):
     monkeypatch.setattr(batch_mod.vms, "start_lab_page", lambda sb: None)
     monkeypatch.setattr(batch_mod.vms, "download_charts", lambda sb, dest: [])
     monkeypatch.setattr(batch_mod.vms, "delete_vm", lambda sb: None)
-    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt: object())
+    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt, **kw: object())
     monkeypatch.setattr(batch_mod, "DaytonaSandbox", lambda sandbox: object())
     # The controller would run on every hidden position; a fixed result stands in for the sim.
     monkeypatch.setattr(sim_domain, "_evaluate_fn", lambda: lambda *a, **k: {"success_rate": 0.2})
@@ -173,7 +173,7 @@ def test_defaults_and_estimate_cover_every_domain(tmp_path, monkeypatch):
     with TestClient(api.app) as client:
         d = client.get("/api/defaults").json()
         by_name = {x["name"]: x for x in d["domains"]}
-        assert set(by_name) == {"tabular", "robot_arm", "humanoid", "humanoid_push"} and d["config"]["domain"] == "tabular"
+        assert set(by_name) == {"tabular", "robot_arm", "humanoid", "humanoid_push", "humanoid_track"} and d["config"]["domain"] == "tabular"
         assert by_name["robot_arm"]["visual"] == "motion" and by_name["tabular"]["visual"] == "charts"
         robot = by_name["robot_arm"]["config"]
         assert robot["domain"] == "robot_arm" and robot["inflation_threshold"] == pytest.approx(sim_domain.inflated_threshold())

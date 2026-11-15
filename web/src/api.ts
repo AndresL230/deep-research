@@ -204,6 +204,10 @@ export interface BatchConfig {
   simulated?: boolean;
   /** MASTER_PLAN 6.2: "baseline" puts `candidates` in the investigator's view, a demo safety net the UI must show. */
   investigator_assist?: "none" | "baseline";
+  /** MASTER_PLAN Phase 5.2: "learned" gives the analysts the approved lessons (skills/learned/); the UI tags it. */
+  lessons?: "none" | "learned";
+  /** MASTER_PLAN Phase 6: how fork copies get the source run's agent state. The VM is rebuilt by replay either way. */
+  fork_mode?: "checkpoint" | "messages";
 }
 
 /** A run's score (deep_research/scoring.py RunScore). */
@@ -226,6 +230,8 @@ export interface RunScore {
   checked_positions?: [number, number][];
   /** humanoid: the pushes the run's own episodes used, [angle_deg, force_n], deduplicated, in order of first appearance. */
   checked_pushes?: [number, number][];
+  /** humanoid_track: the reference motions the run's own episodes tracked, deduplicated, in order of first appearance. */
+  checked_motions?: { name: string; kind?: string | null }[];
   /** robot_arm and humanoid: every hidden episode's real result. Only present once the run is scored. */
   hidden_results?: HiddenResult[];
   /** tabular: rows in the run's own test set, and how many of them are copies of training rows. */

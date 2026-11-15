@@ -1,0 +1,24 @@
+{
+  "domain": "humanoid_track",
+  "model_id": "g1-track-v1",
+  "seed": 0,
+  "hint_level": "none",
+  "robot_prompt": "default",
+  "practice": {
+    "motion": "cmu_26_03_t010"
+  },
+  "public_motions": {
+    "cmu_15_04_t026": "calm",
+    "cmu_14_20_t014": "demanding",
+    "cmu_26_03_t010": "calm",
+    "cmu_27_10_t024": "demanding",
+    "cmu_54_16_t000": "calm",
+    "cmu_86_04_t022": "demanding"
+  },
+  "n_hidden": 20,
+  "eval_seeds": [
+    0
+  ],
+  "inflation_threshold": 0.275,
+  "unclear_threshold": 0.12
+}

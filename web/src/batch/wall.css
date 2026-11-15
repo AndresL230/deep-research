@@ -130,6 +130,63 @@
   .bw-gap { font-size:16px; }
 }
 
+/* ── a phone: two devices a row, each a short one, so a screenful shows six of them. From the top: the screen at
+   4:3, the step on two lines (or, once scored, the gap over the two scores), the lights, then the status chip with
+   the key beside it. The whole device opens the run, so the press is far larger than 44px. ── */
+@media (max-width: 640px) {
+  .bw { gap:14px; }
+  .bw-head { gap:8px; padding-top:4px; }
+  .bw-baseline, .bw-sum-models { margin:0; font-size:14px; line-height:1.45; }
+  .bw-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+
+  /* The chin's three parts are laid out on the body's own grid: the lights get a row, the chip and the key the last. */
+  .bw-body { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:4px 6px; padding:5px 5px 7px; }
+  .bw-scr, .bw-body > .cm-cap, .bw-panel, .bw-strip { grid-column:1 / -1; }
+  .bw-chin { display:contents; }
+  .bw-body > .cm-cap { margin:0; padding:0 5px; }
+
+  .bw-scr { aspect-ratio:4 / 3; }
+  .bw-hd { padding:7px 8px 3px; font-size:12px; }
+  .bw-id { gap:6px; overflow:hidden; font-size:13px; }
+  .bw-vm { display:none; }
+  .bw-model { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-size:12px; }
+  .bw-ph { gap:6px; padding:0 8px 10px; }
+  /* The terminal: no gutter, so a line shows a few more characters before its ellipsis. */
+  .bw-pic--nb { padding:2px 8px 8px; }
+  .bw-scr .bw-pic--nb .nb-gut { display:none; }
+  .bw-scr .bw-pic--nb .nb-cell--note { padding-left:2px; }
+  .bw-scr .bw-pic--nb .nb-code .nb-ln, .bw-scr .bw-pic--nb .nb-code .nb-more, .bw-scr .bw-pic--nb .nb-out, .bw-scr .bw-pic--nb .nb-note, .bw-scr .bw-pic--nb .nb-file { font-size:12px; }
+  .bw-scr .bw-pic--nb .nb-img { max-height:64px; }
+  /* The episode's name under the arm; how it ended is the dot's colour here, and in words on the run's page. */
+  .bw-pic--robot .rb-thumb-l { left:4px; right:4px; bottom:4px; padding:2px 6px; font-size:12px; text-overflow:ellipsis; }
+  .bw-pic--robot .rb-thumb-r { display:none; }
+
+  .bw-panel, .bw--robot .bw-panel { height:42px; padding:0 5px; }
+  .bw-step { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:18px; white-space:normal; overflow-wrap:anywhere; text-wrap:pretty; }
+  .bw-strip { flex:none; gap:5px; min-height:9px; padding:0 5px; }
+  .bw-pill { grid-column:1; justify-self:start; margin-left:3px; }
+  .bw-key { grid-column:2; width:28px; height:28px; margin-right:1px; }
+
+  /* A scored device: the gap, then each score as a label and its number. The panel takes the lights' row as well, so
+     every device in a row is the same height. */
+  .bw-tile:is(.bw-tile--honest, .bw-tile--inflated, .bw-tile--unclear) .bw-panel { height:55px; }
+  .bw-tile:is(.bw-tile--honest, .bw-tile--inflated, .bw-tile--unclear) .bw-strip { display:none; }
+  .bw-rev { flex-direction:column; align-items:stretch; justify-content:center; gap:4px; }
+  .bw-res, .bw-rev--robot .bw-res { order:-1; width:auto; }
+  .bw-gap, .bw-rev--robot .bw-gap { font-size:16px; overflow:hidden; text-overflow:ellipsis; }
+  .bw-ovl-t, .bw-track { display:none; }
+  .bw-meters { flex:none; gap:2px; }
+  .bw-acc, .bw-rev--robot .bw-acc { grid-template-columns:minmax(0, 1fr) auto; gap:8px; }
+  .bw-k { font-size:12px; line-height:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bw-v { line-height:15px; }
+}
+/* A finger does not hover: the device stays where it is, and darkens while it is pressed. */
+@media (hover: none) {
+  .bw-tile:hover .bw-dev { transform:none; }
+  .bw-tile:hover .bw-key { border-color:var(--border); background:var(--surface); color:var(--fg-70); }
+  .bw-tile:active .bw-body { background:var(--muted-2); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bw-dev, .bw-key, .bw-fill, .bw-body, .bw-seg, .bw-lamp { transition:none; }
   .bw-seg--in_progress, .bw-lamp { animation:none !important; }

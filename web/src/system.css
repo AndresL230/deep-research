@@ -168,3 +168,8 @@ body { background:#15171b; }
 
 /* ── smooth scrolling (scroll.ts, Lenis): the page may not also ease its own jumps ── */
 .lenis.lenis-smooth { scroll-behavior:auto !important; }
+
+/* ── phones: a control is tall enough for a thumb ── */
+@media (max-width: 640px) {
+  .ask-btn, .ask-btn--sm, .ask-ghostbtn--outline { height:44px; font-size:14px; }
+}

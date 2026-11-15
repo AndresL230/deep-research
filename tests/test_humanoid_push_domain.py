@@ -29,7 +29,7 @@ def _batch(tmp_path, monkeypatch, true_rate=0.6, **cfg):
     monkeypatch.setattr(batch_mod.vms, "start_lab_page", lambda sb: None)
     monkeypatch.setattr(batch_mod.vms, "download_charts", lambda sb, dest: [])
     monkeypatch.setattr(batch_mod.vms, "delete_vm", lambda sb: None)
-    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt: object())
+    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt, **kw: object())
     monkeypatch.setattr(batch_mod, "DaytonaSandbox", lambda sandbox: object())
     monkeypatch.setattr(hd, "_evaluate_fn", lambda: lambda *a, **k: {"success_rate": true_rate})
     b = batch_mod.Batch(BatchConfig(domain="humanoid_push", n_runs=1, **cfg), batch_id="t", root=tmp_path / "batches")

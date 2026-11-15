@@ -44,6 +44,16 @@
 .gdpr-reply:empty { display:none; }
 .gdpr-reply { margin-top:10px !important; font-weight:600; color:var(--g-acc); }
 
+/* Phone: the screen's width less 16px a side, clear of the home bar, with buttons a thumb can press. */
+@media (max-width: 640px) {
+  .gdpr { left:calc(16px + env(safe-area-inset-left, 0px)); right:calc(16px + env(safe-area-inset-right, 0px)); bottom:calc(16px + env(safe-area-inset-bottom, 0px)); width:auto; max-height:calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); padding:16px; font-size:14px; }
+  .gdpr-row-t { font-size:13px; }
+  .gdpr-prefs-h, .gdpr-lock, .gdpr-fine { font-size:12px; }
+  .gdpr-acts { display:grid; grid-template-columns:1fr 1fr; }
+  .gdpr-btn { min-height:44px; padding:0 12px; }
+  .gdpr-btn--link { grid-column:1 / -1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .gdpr { transition:none; transform:none; }
 }
