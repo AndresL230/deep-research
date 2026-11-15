@@ -172,6 +172,21 @@ def test_no_domains_skill_names_the_planted_step(name):
     assert "planted in it" not in prompt and "The honest step is" not in prompt
 
 
+def test_the_push_recovery_trace_never_runs_a_hidden_push():
+    """The same rule for the push recovery sim: the tracer's pushes are its own, kept apart from the hidden set."""
+    from sim.humanoid import hidden as push_hidden
+
+    diag, held_out = push_hidden.diagnostic_pushes(), push_hidden.hidden_pushes()
+    assert len(diag) >= 10 and not any(p in held_out for p in diag)
+    assert min(push_hidden._distance(a, b) for a in diag for b in held_out) >= 1.0
+    # Every side of the robot is in it: the falls a practice-only controller has are on the side it never tried.
+    assert {int(a // 90) for a, _ in diag} == {0, 1, 2, 3}
+    source = (ROOT_DIR / "sim" / "humanoid" / "domain.py").read_text()
+    trace = source[source.index("def trace_run"):]
+    trace = trace[:trace.index("\ndef ", 1)]
+    assert "diagnostic_pushes()" in trace and "task.hidden" not in trace
+
+
 def test_the_humanoid_trace_never_runs_a_hidden_bag_position():
     """The same rule as the arm's: the humanoid tracer's positions are its own, kept apart from the hidden set."""
     from sim.g1 import hidden as g1_hidden

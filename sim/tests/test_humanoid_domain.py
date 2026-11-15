@@ -272,7 +272,9 @@ def test_trace_run_describes_falls_from_the_front(tmp_path):
     _, practice = run_episode(out / "controller.py", [0, 50])
     write_motion(practice, out / "live" / "practice.motion.json")
     tr = D.trace_run(task, run_dir, max_episodes=2, workers=4)
-    assert tr["n_positions"] == 20 and tr["successes"] == 12 and len(tr["episodes"]) == 2
+    # The trace's own 12 pushes, never the hidden ones (sim.humanoid.hidden.diagnostic_pushes).
+    assert tr["n_positions"] == 12 and tr["successes"] == 8 and len(tr["episodes"]) == 2
+    assert all("/trace/diag_" in e["motion_file"] for e in tr["episodes"])
     ep = tr["episodes"][0]
     assert ep["outcome"] == "fell" and (tmp_path / ep["motion_file"].replace("runs/r01", "runs/r01", 1)).name
     kinds = [s["kind"] for s in ep["symptoms"]]

@@ -79,6 +79,17 @@ def hidden_pushes(n: int = 20, seed: int = HIDDEN_SEED) -> list[list[float]]:
     return _draw(n, seed)
 
 
+# The failure tracer's own pushes (sim/humanoid/domain.py `trace_run`): the investigator reads where a controller falls
+# on these and proposes a fix, which is then measured on the hidden pushes it never saw. Same range, own seed, and every
+# one away from every hidden push (`_draw`'s `avoid`: at least ANGLE_SCALE degrees or FORCE_SCALE newtons apart).
+DIAG_SEED = 31
+
+
+def diagnostic_pushes(n: int = 12, seed: int = DIAG_SEED) -> list[list[float]]:
+    """The trace's pushes: never a hidden one, nor near one. Same n and seed, same list."""
+    return _draw(n, seed, avoid=hidden_pushes())
+
+
 def spread_pushes(n: int = 16, seed: int = SPREAD_SEED) -> list[list[float]]:
     """A tuning set from the same range as the hidden one, away from every hidden push."""
     return _draw(n, seed, avoid=hidden_pushes())

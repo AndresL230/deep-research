@@ -574,8 +574,12 @@ def _symptoms_of(motion: dict) -> list[dict]:
 
 
 def trace_run(task: HumanoidTaskFiles, run_dir: Path, max_episodes: int = 3, workers: int | None = None) -> dict:
-    """Re-run one run's controller on the hidden pushes with recording on, and describe up to `max_episodes` falls
-    (as sim.domain.trace_run). The practice recording, when the run saved one, is described for contrast."""
+    """Re-run one run's controller on the diagnostic pushes with recording on, and describe up to `max_episodes` falls
+    (as sim.domain.trace_run). The practice recording, when the run saved one, is described for contrast.
+
+    Never the hidden pushes (`sim.humanoid.hidden.diagnostic_pushes`, kept away from each): the investigator reads
+    where the controller falls here and proposes a fix, which is then measured on the hidden pushes as a held-out
+    test. Tracing on the hidden set would tune the fix on its own test."""
     from sim.domain import TRACE_WORKERS
     from sim.evaluate import run_jobs
     from sim.motion import read_motion
@@ -584,7 +588,7 @@ def trace_run(task: HumanoidTaskFiles, run_dir: Path, max_episodes: int = 3, wor
     if not controller.is_file():
         return {"error": f"{FIX_OUTPUT} is missing from this run's outputs"}
     meta = read_meta(task)
-    pushes = json.loads(task.hidden.read_text())
+    pushes = importlib.import_module("sim.humanoid.hidden").diagnostic_pushes()
     seed = int((meta.get("eval_seeds") or (0,))[0])
     p = (meta.get("practice") or practice_setup())["push"]
     practice = [p["angle_deg"], p["force_n"]]
@@ -592,7 +596,7 @@ def trace_run(task: HumanoidTaskFiles, run_dir: Path, max_episodes: int = 3, wor
     out.mkdir(parents=True, exist_ok=True)
     rel = run_dir.name
     jobs = [{"controller_path": str(controller.resolve()), "push": [float(a), float(f)], "seed": seed, "runner": "humanoid_push",
-             "record_to": str(out / f"hidden_{i:02d}.motion.json")} for i, (a, f) in enumerate(pushes)]
+             "record_to": str(out / f"diag_{i:02d}.motion.json")} for i, (a, f) in enumerate(pushes)]
     results = run_jobs(jobs, workers=workers or TRACE_WORKERS)
     episodes, successes = [], 0
     for i, (push, r) in enumerate(zip(pushes, results)):
