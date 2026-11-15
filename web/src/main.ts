@@ -62,6 +62,7 @@ import { syncMotion } from "./motion";
 import { refreshMotion } from "./robot/mount";
 import { smoothScroll } from "./scroll";
 import { mountAccount } from "./account";
+import { mountGdpr } from "./gdpr";
 import { isMotionBatch } from "./robot/markup";
 
 // ── state ────────────────────────────────────────────────────────────────────
@@ -1267,3 +1268,6 @@ onRoute();
 
 // Who is signed in, their plan and credits (only behind the Cloudflare gateway).
 void mountAccount();
+
+// The GDPR notice, as a joke (gdpr.ts). Only Ctrl+E (Cmd+E on a Mac) shows it.
+mountGdpr();
