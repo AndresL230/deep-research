@@ -12,6 +12,9 @@ export const CASE_SECTIONS = [
   // The experiments engine (MASTER_PLAN 6.1). Absent until written; `candidates` and `audit` are never in the
   // investigator's view.
   "candidates", "evidence", "interaction", "audit",
+  // The investigator's science (MASTER_PLAN 6.1, Phase 8): its suspects, the lessons it proposes, and its plan and the
+  // subagent at work. Read by batch/suspects.ts, each optional.
+  "suspects", "lessons", "investigator",
 ] as const;
 export type CaseSection = (typeof CASE_SECTIONS)[number];
 
@@ -199,6 +202,8 @@ export interface BatchConfig {
   commentary_budget_usd?: number;
   /** Only on fixtures made by scripts/make_fixture.py: the agents' choices are scripted. */
   simulated?: boolean;
+  /** MASTER_PLAN 6.2: "baseline" puts `candidates` in the investigator's view, a demo safety net the UI must show. */
+  investigator_assist?: "none" | "baseline";
 }
 
 /** A run's score (deep_research/scoring.py RunScore). */
@@ -832,6 +837,10 @@ export interface CaseFile {
   evidence?: Record<string, SuspectEvidence>;
   interaction?: Interaction | null;
   audit?: Audit;
+  /** The investigator's science (batch/suspects.ts has the field-by-field shapes). */
+  suspects?: { id: string; target: string; kind: string; rationale: string; proposed_by: string; status: string; simulated?: boolean }[];
+  lessons?: { id: string; name: string; rule: string; status: string; suspect_id?: string; simulated?: boolean }[];
+  investigator?: { todos?: AgentTodo[]; subagent?: string | null } | null;
 }
 
 /** One item of the commentary feed (deep_research/commentary.py). */
@@ -1199,6 +1208,10 @@ export const fetchMorePairs = (id: string, n?: number, o: Opts = {}) => call<Mor
 export const startMorePairs = (id: string, n?: number, o: Opts = {}) =>
   call<MorePairsStarted>(morePairsPath(id, n), { ...o, method: "POST" });
 /** Live batches only: answer `forks.pending` while the phase is `awaiting_approval`. */
-export const postDecision = (id: string, approve: boolean, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/decision`, { ...o, json: { approve } });
+export const postDecision = (id: string, approve: boolean, o: Opts = {}, pairs?: number) =>
+  call<{ ok: true }>(`${batchPath(id)}/decision`, { ...o, json: pairs === undefined ? { approve } : { approve, pairs } });
+/** Live batches only: approve or reject a lesson the investigator proposed (`lessons[].id`). */
+export const postLesson = (id: string, lesson: string, approve: boolean, o: Opts = {}) =>
+  call<{ ok: true }>(`${batchPath(id)}/lessons/${encodeURIComponent(lesson)}`, { ...o, json: { approve } });
 /** Live batches only: cancel the work and stop every VM. */
 export const stopBatch = (id: string, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/stop`, { ...o, method: "POST" });

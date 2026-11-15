@@ -159,6 +159,8 @@ export interface BatchVm {
   open?: Readonly<Record<string, boolean>> | "all";
   /** Who is looking (access.ts): only "admin" gets the actions (investigate, approve, decline, stop). Absent: admin. */
   role?: Role;
+  /** The pairs a person set on the pending experiment's approval card (suspects.ts), or null/absent for as asked. */
+  pairs?: number | null;
 }
 
 export type Loadable<T> = { state: "loading" } | { state: "ready"; value: T } | { state: "error"; message: string };

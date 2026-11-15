@@ -29,6 +29,7 @@ import { scoreStep, sourceStrip, tableMap } from "./trial-charts";
 import { TABULAR_WORDS, capital, domainWords, judgedOn, stepText } from "./words";
 import type { DomainWords } from "../api";
 import { ADMIN_ONLY } from "../access";
+import { suspectPending } from "./suspects";
 
 export { NEEDED_PAIRS } from "./evidence";
 
@@ -991,7 +992,8 @@ const childLog = (vm: BatchVm, f: ForkExperiment, id: string): AgentEvent[] | un
 /** The fork experiment: the approval card (forks.pending) first, then each experiment with its arms fanning out. */
 export function forkView(vm: BatchVm): string {
   const c = vm.case;
-  const pending = pendingForks(c);
+  // A paired experiment's request (it names a suspect or a change) has its own card: suspects.ts `approvalView`.
+  const pending = suspectPending(c) ? null : pendingForks(c);
   const exps = forkExperiments(c);
   if (!pending && !exps.length) return "";
   const threshold = (c.config as Partial<BatchConfig>).inflation_threshold ?? 0.08;

@@ -278,6 +278,20 @@ view (`case/view/case.json`) leaves them out (`case_file.UPGRADE_HIDDEN`).
   numbers}`, `answer` `yes`, `no` or `unknown`, ids `test_touched_training`, `columns_fair`,
   `test_matches_claim`. Read from the run's own train.csv and test.csv, the task's holdout features and meta, and
   the case file; never the holdout labels.
+- Read by the UI (`web/src/batch/suspects.ts`), each optional; the server does not write them yet:
+  - `suspects`: `[{id, target, kind, rationale, proposed_by, status}]`, `kind` `omission`, `commission`, `attribute`
+    or `data`; `status` `proposed`, `testing`, `supported`, `cleared` or `open`. Without it the UI reads `hypotheses`
+    with an id. A level is shown only with a score behind it.
+  - `forks.pending` for a paired experiment adds `suspect_id`, `change`, `anchor`, `source_run`, `prediction`,
+    `reason`, `pairs` (how many it asks for) and optionally `cost_per_pair_usd` (else `estimate_usd` scales by pairs).
+  - `lessons`: `[{id, name, rule, status, suspect_id?}]`, `status` `proposed`, `approved` or `rejected`.
+  - `investigator`: `{todos: [{content, status}], subagent: str | null}`. Without it the UI reads the investigator
+    log: its last `todos` event, and the `agent` of its last event as the subagent at work.
+  - `config.investigator_assist` `"none" | "baseline"`: the UI tags the batch when it is `baseline`.
+- `POST /decision` may carry `{"approve": true, "pairs": n}` (1 to 6) when a person edited the pairs; plain
+  `{"approve": bool}` is unchanged. `POST /api/batches/{id}/lessons/{lesson_id}` `{"approve": bool}` answers a
+  proposed lesson (not served yet).
+- `fixtures/suspects-demo-batch` (`scripts/make_suspects_fixture.py`, SIMULATED) has every section above.
 
 Changes (`forks.parse_change`, listed by `forks.registry()`): `control`; `force_step:<label>` (every label with a
 forced step: `deduplicate`, `drop_leak`, `group_split`, `deduplicate_near`), `force_step:deduplicate_fuzzy`,
