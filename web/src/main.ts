@@ -1118,7 +1118,15 @@ root.addEventListener("click", (e) => {
       return;
     case ACT.runPanel:
       // One panel open at a time; its button again folds it.
-      if (isRunPanel(arg)) { S.runPanel = togglePanel(S.runPanel, arg); S.cv.stick = true; S.cv.away = false; revealPanel = S.runPanel !== null; paint(); }
+      if (isRunPanel(arg)) {
+        S.runPanel = togglePanel(S.runPanel, arg);
+        S.cv.stick = true;
+        S.cv.away = false;
+        revealPanel = S.runPanel !== null;
+        // Closed from the layer's own button: back onto its tab, so the keyboard stays where it was.
+        if (!S.runPanel && el.classList.contains("rn-close")) focusNext = `.rn-tab[data-arg="${arg}"]`;
+        paint();
+      }
       return;
     case ACT.runChart: { const n = Number(arg); if (Number.isInteger(n) && n >= 0) { S.runChart = n; paint(); } return; }
     case ACT.toggleFeed: S.feedOpen = !S.feedOpen; paint(); return;
@@ -1206,6 +1214,14 @@ root.addEventListener("keydown", (e) => {
     S.feedOpen = false;
     paint();
     headerEl.querySelector<HTMLElement>(".cm-hf-btn")?.focus();
+    return;
+  }
+  // A run's open panel closes on Esc too, back onto its tab.
+  if (e.key === "Escape" && S.runPanel && routeKey(S.route) && !S.navOpen && !newBatch.isOpen) {
+    const was = S.runPanel;
+    S.runPanel = null;
+    focusNext = `.rn-tab[data-arg="${was}"]`;
+    paint();
     return;
   }
   if (e.key !== "Escape" || !S.navOpen || newBatch.isOpen) return;

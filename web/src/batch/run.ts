@@ -429,17 +429,18 @@ export function runSummaryView(vm: BatchVm, key: EventKey, opts: RunPageOpts = {
 
   const subjectScore = { ...s.score, status };
   const { main, side } = motionBatch ? robotDeck(vm, key, s, subjectScore, scored) : tabularDeck(vm, key, s, subjectScore, opts.chart ?? 0);
-  const deck = `<div class="rn-deck${side ? "" : " rn-deck--one"}" data-morph-key="deck" data-morph-list>`
-    + `<div class="rn-main" data-morph-key="main">${main}</div>`
-    + (side ? `<div class="rn-side" data-morph-key="side" data-morph-list>${side}</div>` : "")
-    + `</div>`;
-
   const open = opts.open ?? null;
   // The Evidence panel also has the same controller where LIBERO-PRO moves the can, on the table and in 3D (a run
   // only: a fork copy has none).
   const libero = open === "evidence" ? benchmarkMapView(vm.id, `bm:${key}`, vm.case.runs?.[key]?.benchmarks?.libero_pro, "LIBERO-PRO", "At LIBERO-PRO's positions") : "";
   const body = open === "evidence" ? evidenceBody(vm, key, subjectScore, items, notes.map((n) => n.text)) + libero : opts.body ?? "";
-  return `<section class="rn" data-rb-deck data-morph-key="rn:${attr(key)}" data-morph-list>${top}${note}${deck}${panelsView(vm, key, open, body)}</section>`;
+  // Top to bottom: the header line, the deck (with the open panel as a layer over it), the tab row.
+  const deck = `<div class="rn-deck${side ? "" : " rn-deck--one"}${open ? " is-covered" : ""}" data-morph-key="deck" data-morph-list>`
+    + `<div class="rn-main" data-morph-key="main">${main}</div>`
+    + (side ? `<div class="rn-side" data-morph-key="side" data-morph-list>${side}</div>` : "")
+    + layerView(open, body)
+    + `</div>`;
+  return `<section class="rn" data-rb-deck data-morph-key="rn:${attr(key)}" data-morph-list>${top}${note}${deck}${tabsView(vm, key, open)}</section>`;
 }
 
 /** A robot run: the 3D player on the left, its episodes and the positions map on the right. */
@@ -507,8 +508,8 @@ function evidenceBody(vm: BatchVm, key: EventKey, score: CheckedSubject, items: 
   return `<div class="rn-ev">${pair || `<p class="rn-ev-note">Not scored yet.</p>`}${why}<dl class="rn-defs">${defs}</dl></div>`;
 }
 
-/** The panel row: a button per panel (aria-expanded, aria-controls), and each panel's region, only the open one drawn. */
-function panelsView(vm: BatchVm, key: EventKey, open: RunPanel | null, body: string): string {
+/** The tab row at the bottom of the box: a button per panel (aria-expanded, aria-controls). */
+function tabsView(vm: BatchVm, key: EventKey, open: RunPanel | null): string {
   const events = vm.events[key];
   const count: Partial<Record<RunPanel, number>> = events
     ? { steps: events.filter((e) => e.type === "tool_call" || e.type === "forced").length, logs: events.length }
@@ -519,10 +520,22 @@ function panelsView(vm: BatchVm, key: EventKey, open: RunPanel | null, body: str
     return `<button type="button" class="rn-tab" data-act="${ACT.runPanel}" data-arg="${p.id}" aria-expanded="${on}" aria-controls="${panelId(p.id)}">`
       + `<span class="rn-tab-c" aria-hidden="true">${askIcon("chevRight", 12, null, 2.2)}</span><span>${p.label}</span>${n ? `<span class="rn-tab-n">${n}</span>` : ""}</button>`;
   }).join("");
+  return `<div class="rn-panels${open ? " is-open" : ""}" data-morph-key="panels"><div class="rn-tabs" role="group" aria-label="Panels">${tabs}</div></div>`;
+}
+
+/**
+ * The open panel: a layer over the deck (the player stays mounted, playing, under it), with its name, a close button
+ * and its own scroll. Every panel has its region (the buttons' `aria-controls`); only the open one is drawn.
+ */
+function layerView(open: RunPanel | null, body: string): string {
+  const label = RUN_PANELS.find((p) => p.id === open)?.label ?? "";
   const regions = RUN_PANELS.map((p) => p.id === open
     ? `<div class="rn-panel rn-panel--${p.id}" id="${panelId(p.id)}" role="region" aria-label="${p.label}" data-rn-panel="${p.id}" data-lenis-prevent data-morph-key="panel:${p.id}">${body}</div>`
     : `<div class="rn-panel" id="${panelId(p.id)}" role="region" aria-label="${p.label}" hidden data-morph-key="panel:${p.id}"></div>`).join("");
-  return `<div class="rn-panels${open ? " is-open" : ""}" data-morph-key="panels"><div class="rn-tabs" role="group" aria-label="Panels">${tabs}</div>${regions}</div>`;
+  const head = open
+    ? `<div class="rn-layer-h"><span>${esc(label)}</span><button type="button" class="rn-close" data-act="${ACT.runPanel}" data-arg="${open}" aria-label="Close ${esc(label)}" title="Close (Esc)">${askIcon("close", 14, null, 2.2)}</button></div>`
+    : "";
+  return `<div class="rn-layer" data-morph-key="layer"${open ? "" : " hidden"}>${head}${regions}</div>`;
 }
 
 // ── the raw log ──────────────────────────────────────────────────────────────

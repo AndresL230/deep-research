@@ -1,7 +1,10 @@
-/* A run's page (run.ts `runSummaryView`): one box on the page's column. The header line (back, name, status, the
-   numbers), then the deck (the player or the charts on the left, the episodes and the map, or the steps and the
-   evidence, on the right), then the panel row, folded until one opens. */
-.pg-run { width:100%; max-width:var(--pg-w, 1240px); margin:0 auto; padding:16px var(--pg-pad, 24px) 48px; box-sizing:border-box; }
+/* A run's page (run.ts `runSummaryView`): one box on the page's column, read top to bottom. The header line (back,
+   name, status, the numbers), then the deck (the player or the charts on the left, the episodes and the map, or the
+   steps and the evidence, on the right; an open panel lies over it), then the tab row. On a desktop screen the box is
+   exactly the height left under the app's header and replay bar (the scroller is a flex column that already has that
+   height, so nothing is measured): the page never scrolls, the player and the side column share what is left. Under
+   960px wide, or on a very short window, it is an ordinary page that scrolls. Every edge is the box's 16px inset. */
+.pg-run { width:100%; max-width:var(--pg-w, 1240px); margin:0 auto; padding:12px var(--pg-pad, 24px) 32px; box-sizing:border-box; }
 
 .rn { display:flex; flex-direction:column; gap:12px; min-width:0; padding:12px 16px 0; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); font-family:var(--sans); color:var(--fg); }
 
@@ -37,9 +40,9 @@
 .rn-note-fail { color:var(--amber); }
 
 /* the deck: the side column is as tall as the player (its lists scroll inside), so the box ends where the player does */
-.rn-deck { display:grid; grid-template-columns:minmax(0, 1.75fr) minmax(280px, 1fr); gap:16px; align-items:stretch; min-width:0; }
+.rn-deck { position:relative; display:grid; grid-template-columns:minmax(0, 1.75fr) minmax(280px, 1fr); gap:16px; align-items:stretch; min-width:0; }
 .rn-deck--one { grid-template-columns:minmax(0, 1fr); }
-.rn-main { min-width:0; }
+.rn-main { min-width:0; display:flex; flex-direction:column; }
 .rn-side { min-width:0; height:0; min-height:100%; display:flex; flex-direction:column; gap:12px; }
 .rn-empty { display:flex; align-items:center; justify-content:center; aspect-ratio:16 / 10; border:1px dashed var(--border-strong); border-radius:var(--r-card); color:var(--fg-55); font-size:13px; }
 
@@ -85,16 +88,24 @@
 .rn-facts { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:4px; font-size:12.5px; line-height:1.45; color:var(--fg-70); }
 .rn-facts li { padding:6px 10px; border-radius:var(--r-ctl); background:var(--muted); }
 
-/* the panel row: folded on landing, one open at a time inside the box, with its own scroll */
+/* the tab row: every panel folded on landing, one open at a time */
 .rn-panels { margin:0 -16px; border-top:1px solid var(--border); min-width:0; }
-.rn-tabs { display:flex; flex-wrap:wrap; gap:2px; padding:6px 10px; }
+.rn-tabs { display:flex; flex-wrap:wrap; gap:2px; padding:6px 16px; }
+.rn-tab:first-child { margin-left:-8px; }
 .rn-tab { display:inline-flex; align-items:center; gap:6px; padding:5px 10px 5px 8px; border-radius:var(--r-ctl); font-size:12.5px; font-weight:500; color:var(--fg-55); cursor:pointer; transition:color var(--t-hover) ease, background var(--t-hover) ease; }
 .rn-tab:hover { color:var(--fg); background:var(--hover); }
 .rn-tab[aria-expanded="true"] { color:var(--fg); background:var(--hover); }
 .rn-tab-c { display:inline-flex; color:var(--fg-40); transition:transform .16s var(--ease-out, ease); }
 .rn-tab[aria-expanded="true"] .rn-tab-c { transform:rotate(90deg); color:var(--fg-70); }
 .rn-tab-n { font-family:var(--label); font-size:11px; font-weight:400; color:var(--fg-40); font-variant-numeric:tabular-nums; }
-.rn-panel { max-height:56vh; overflow:auto; overscroll-behavior:contain; border-top:1px solid var(--border); position:relative; display:flex; flex-direction:column; }
+/* the open panel: under the deck in a scrolling page, a layer over the deck in the one-screen box (below) */
+.rn-layer { grid-column:1 / -1; display:flex; flex-direction:column; min-width:0; min-height:0; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); overflow:hidden; }
+.rn-layer[hidden] { display:none; }
+.rn-layer-h { flex:none; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 6px 4px 16px; border-bottom:1px solid var(--border); font-size:12.5px; font-weight:500; color:var(--fg); }
+.rn-close { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:var(--r-ctl); color:var(--fg-55); cursor:pointer; }
+.rn-close:hover { background:var(--hover); color:var(--fg); }
+.rn-close:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+.rn-panel { max-height:70vh; overflow:auto; overscroll-behavior:contain; position:relative; display:flex; flex-direction:column; }
 .rn-panel[hidden] { display:none; }
 .rn-panel .pg-nb { max-width:none; padding:16px 20px 24px; }
 .rn-panel .ask-col { max-width:880px; padding:16px 20px 8px; }
@@ -120,6 +131,38 @@
 .rn-log-h { font-family:var(--code); font-size:11.5px; color:var(--fg); overflow-wrap:anywhere; }
 .rn-log-pre { margin:0; font-family:var(--code); font-size:11.5px; line-height:1.5; color:var(--fg-70); white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; }
 .rn-log-e--thought .rn-log-pre { font-family:var(--sans); font-size:12.5px; color:var(--fg); }
+
+/* The one-screen box: a desktop window at least 961 by 540. */
+@media (min-width: 961px) and (min-height: 540px) {
+  .pg-run { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; padding:12px var(--pg-pad, 24px) 16px; }
+  .rn { flex:1 1 auto; min-height:0; }
+  .rn-top, .rn-note, .rn-panels { flex:none; }
+  .rn-deck { flex:1 1 0; min-height:0; grid-template-rows:minmax(0, 1fr); }
+  .rn-main, .rn-side { min-height:0; height:auto; overflow:hidden; }
+
+  /* the player takes the height left: the 3D view fills it and its camera follows the shape, so nothing stretches */
+  .rn-main > .rb { flex:1 1 0; min-height:0; }
+  .rn-main .rb-stage { flex:1 1 0; min-height:120px; aspect-ratio:auto; }
+  .rn-main .rb-stage--nogl { min-height:120px; }
+  .rn-main > .rb-none, .rn-main > .rn-empty { flex:1 1 0; aspect-ratio:auto; }
+  .rn-main > .ck { flex:1 1 0; min-height:0; overflow:auto; }
+
+  /* a tabular run's chart takes the height left above its thumbnails */
+  .rn-charts { flex:1 1 0; min-height:0; }
+  .rn-chart { flex:1 1 0; min-height:0; aspect-ratio:auto; }
+
+  /* the side column: the episode list at most half of it, scrolling; the map shrinks to the rest */
+  .rb-host { flex:0 1 auto; min-height:92px; max-height:50%; }
+  .rn-side .ck--mini { flex:1 1 0; min-height:140px; container-type:size; overflow:hidden; }
+  .ck--mini .ck-map { --ck-ar:1.158; width:min(100%, 300px, calc((100cqh - 76px) * var(--ck-ar))); }
+  .ck--mini .ck-map.ck-map--dial { --ck-ar:1; width:min(100%, 280px, calc((100cqh - 76px) * var(--ck-ar))); }
+  .ck--mini .ck-map.ck-map--front { --ck-ar:0.786; width:min(100%, 240px, calc((100cqh - 76px) * var(--ck-ar))); }
+  .rn-side > .rn-block:only-child, .rn-side > .rn-block:first-child { min-height:0; }
+
+  /* an open panel lies over the deck, the player playing on under it; the box does not grow */
+  .rn-layer { position:absolute; inset:0; z-index:5; box-shadow:var(--menu-shadow); }
+  .rn-panel { flex:1 1 auto; min-height:0; max-height:none; }
+}
 
 /* Under 960px the side column goes under the player, at its own height. */
 @media (max-width: 960px) {
