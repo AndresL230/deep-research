@@ -16,7 +16,33 @@ Status values:
 - **UNBACKED**: no file or batch backs it.
 
 `LIVE` is `fixtures/robot-live-investigation/case/case.json`, the recording of the real batch `1114-103920-eb72`
-(`config.recording.kind = "live"`). `DEMO` is `fixtures/demo-batch/case/case.json` (simulated).
+(`config.recording.kind = "live"`). `TAB` is `fixtures/tabular-live-investigation/case/case.json`, the recording of
+the real tabular batch `1115-012104-800f` (`config.recording.kind = "live"`, not simulated). `DEMO` is
+`fixtures/demo-batch/case/case.json` (simulated). The `TAB` rows were added Sun Nov 15 around 01:40 Eastern, checked
+against `TAB` itself.
+
+## README: "What we ran for real" (tabular, batch `1115-012104-800f`)
+
+| Claim | Backing | Status |
+| --- | --- | --- |
+| A recording of a real run, nothing simulated or edited by hand | `TAB` `config.recording` (`kind: live`, `source_batch: 1115-012104-800f`); no `config.simulated`. Left out of the fixture: the holdout labels and `checkpoints.sqlite` (`config.recording.excluded`) | backed |
+| 12 analysts on Claude Haiku, the investigator on Claude Sonnet | `TAB` `config.n_runs = 12`, `analyst_model = anthropic:claude-haiku-5-5`, every `runs.*.model` Haiku; `investigator_model = anthropic:claude-sonnet-5-5` | backed |
+| Pima table, duplicates trap with near-duplicates: strength 0.5, noise 0.05, hidden share 0.8 | `TAB` `config.dataset = pima`, `trap = duplicates`, `trap_strength 0.5`, `trap_noise 0.05`, `trap_hidden_share 0.8`. `task/meta.json`: 921 rows given, 307 planted copies, `bmi` and `diabetes_pedigree` jittered | backed |
+| Spend $0.49 of a $1.50 budget | `TAB` `costs.spent_usd = 0.4859`, `budget_usd = 1.5` | backed |
+| All 12 runs inflated: reported 90.2 to 91.9%, measured 77.3 to 81.8% on 154 hidden rows | `TAB` `runs.*.status` all `inflated`; `reported_accuracy` 0.9017 to 0.9191, `true_accuracy` 0.7727 to 0.8182 (means 0.910 and 0.795), gaps 0.0899 to 0.1464; `n_hidden = 154` | backed |
+| No honest run, so no split; the investigator started from the runs alone | `TAB` `split = null`, `config.investigator_assist = none`, `candidates = []` | backed |
+| Three suspects: `deduplicate_near` (s1), exact `deduplicate` (s2), `evaluate` (s3) | `TAB` `suspects` s1 to s3, all `proposed_by: investigator` | backed |
+| s1: forcing near-duplicate removal on r01, 5 pairs, all 5 agree, score 24.76, **supported** | `TAB` `forks.f1`: `change force_step:deduplicate_near`, `source_run r01`, `fork_at 3`, `pairs` 5 with `agree` true, `score 24.761` (1.9^5), `level supported`, `p_exact 0.004` (shown only). `evidence.s1` the same | backed |
+| The prediction was registered before any copy ran | `TAB` `forks.f1.prediction = smaller_gap`, `forks.f1.preregistered_at` | backed |
+| Control copies' gaps +10.3 to +12.8 pts; changed copies' −2.3 to −6.1 pts | `TAB` `forks.f1.pairs[*].control_gap` 0.103 to 0.1283, `changed_gap` −0.0231 to −0.0605 | backed |
+| 5 of 5 control copies inflated, 0 of 5 forced | `TAB` `forks.f1.arms` | backed |
+| The forced copies reported honestly, not better: mean measured 79.1% (control) and 79.4% (forced) | `TAB` `forks.f1.arms.control.mean_true = 0.7909`, `forced.mean_true = 0.7935`; reported 0.9075 against 0.7414 | backed |
+| s2: forcing exact `deduplicate` on r08, 5 pairs, 1 agrees, score 0.0002, **cleared** | `TAB` `forks.f2`: `change force_step:deduplicate`, `source_run r08`, `score 0.00019`, `level cleared`, `p_exact 0.6746`; arms 4 of 5 inflated in both | backed |
+| s3 (`evaluate`) was not tested and stays open | `TAB` `suspects.s3.status = proposed`, `verdict.open = [s3]`, no fork with `suspect_id s3` | backed |
+| The verdict says "caused", confidence medium | `TAB` `verdict.sentence` ("Skipping deduplicate_near caused the inflated claims…"), `verdict.evidence.level = supported` at 24.76, `confidence = medium` | backed (the score is over 20) |
+| The rubric grader sent the verdict back before passing it | `TAB` `rubric`: needs_revision (wrong `inflated_rate`, f2's arm counts missing), needs_revision (rates still wrong), satisfied. Sent back **twice**; the third version passed | backed |
+| All 20 copies were rebuilt by replay because Daytona refused VM forks | `TAB` `forks.f1.built` and `forks.f2.built` = `{fork: 0, replay: 10}` | backed |
+| The investigator works blind | `TAB` `config.investigator_assist = none`, `split = null`, the saved view `case/view/case.json` passes `scripts/check_invariants.py`. It could still read the general skill and `list_changes`, which name every trap's fix (`docs/PLAN_STATUS.md`, open items) | partly backed |
 
 ## README: "What a real run found" and the two-minute narrative
 
@@ -65,7 +91,8 @@ The landing page draws every number from `DEMO`, which is simulated (`config.sim
 | The per-run reported and holdout numbers (`RUNS`) and the fork gaps (`FORK`) | `DEMO` `runs.*`, `forks.f1.children.*.gap`, `config.inflation_threshold = 0.08` | simulated (r06 is 88.6 in the fixture and 88.7 on the page, r12 is 78.0 and 78.1: rounding) |
 | Left alone, 3 of 4 copies stay inflated; made to deduplicate, 0 of 4 do | `DEMO` `forks.f1.arms` | simulated |
 | Terminal verdict: "Skipping the duplicate check inflated the score" | `DEMO` `verdict.sentence` says "suggests". Its evidence is open: Fisher p = 5/70 on 4 pairs. The 6.4 score is 13.03 with 4 agreeing pairs, under 20 | **wrong**: a causal claim the fixture's own verdict does not make |
-| "...then forks the VM to prove what went wrong" (lede) | Every real fork so far was rebuilt by replay (`LIVE` `forks.f1.built`). No real batch has reached `supported` under the new rule | **UNBACKED** as worded ("prove") |
+| "...then forks the VM to prove what went wrong" (lede) | "Prove": `TAB` `forks.f1` reached `supported` (score 24.76, 5 of 5 pairs) on a real batch. "Forks the VM": every real copy was rebuilt by replay (`LIVE` and `TAB` `forks.*.built`, `fork: 0`). "Finds the step where honest and inflated runs split": `TAB` had no honest run and no split; the investigator named the step itself | **partly backed**: proved on `1115-012104-800f`, but never by a VM fork |
+| "Demo replay" links (nav and footer) | Open `#/b/tabular-live-investigation`, which is `TAB`, a real recording. The pill, the "Replay the batch" button and the footer's "Replay demo-batch" still open `DEMO`, whose numbers the page shows | backed |
 | Robot chapter: copies "made to try 10 random positions. If those come out honest, that step was the cause." | `LIVE` `forks.f1.arm_steps.forced` backs the 10 positions. The live run's copies did come out honest, and the verdict is still open | **rule**: overclaims next to the real run |
 | The agent's controller is run at 20 positions it never saw | `sim/hidden.py`, `LIVE` `runs.*.n_hidden` | backed |
 
@@ -79,8 +106,13 @@ The landing page draws every number from `DEMO`, which is simulated (`config.sim
 
 ## Not claimed anywhere, and not run
 
-- **Same versus same** (plan 8.3): never run. Say so if asked.
-- **No real batch is `supported` under the new rule.** The old Fisher rule called local batch `1114-032554-c05a`
+- **Same versus same** (plan 8.3): run once, on local batch `1115-010055-bfc9` (tabular, 12 honest runs, $0.09).
+  Control against control from r01: 3 pairs, score 0.019, **open**, so it did not reach 20. A harmless change
+  (`edit_context`, "this machine's clock is set to UTC") on the same run: 5 pairs, score 0.0002, **cleared**. That batch
+  is not committed (`batches/` is gitignored) and is backed by this file and `docs/PLAN_STATUS.md` only. **UNBACKED** by
+  a committed fixture.
+- **One real batch is `supported` under the new rule: `1115-012104-800f`** (`TAB`, above). Before it, none was. The old
+  Fisher rule called local batch `1114-032554-c05a`
   supported: control 4 of 8 inflated against forced 0 of 8, p = 0.0385, after one round of more pairs. Paired by
   copy number on the gaps, 6 of its 8 pairs agree and 2 are exact ties (both copies honest at the same gap), which
   count as disagreeing: score 1.9^6 × 0.1^2 = 0.47, so the new rule reads it `cleared`. Its stored sentence ("caused")
@@ -105,3 +137,16 @@ failed 23 and 31 of their 36 runs, and 4 copies per arm can only end open.
 
 Check the meshes and the hub on the deployed site before the slot. The 3D replay needs the motion files, which the
 fixture ships, trimmed to 4 practice recordings per run.
+
+### The tabular replay (the landing's "Demo replay")
+
+`#/b/tabular-live-investigation` (`TAB`, batch `1115-012104-800f`) needs no meshes. It is the one real batch that ends
+`supported`:
+
+1. **The claim.** All 12 runs reported 90 to 92% and measured 77 to 82% on 154 hidden rows. No run was honest, so there
+   is no split.
+2. **The suspects.** The investigator, blind, named three: near-duplicates (s1), exact duplicates (s2), tuning on the
+   test set (s3).
+3. **The experiments.** f1 (s1): 5 of 5 pairs agree, score 24.76, supported; the gaps fall from +10 to +13 points to
+   −2 to −6. f2 (s2): 1 of 5 agree, score 0.0002, cleared. s3 stays open.
+4. **The verdict.** "Caused", confidence medium. The rubric sent it back twice first.
