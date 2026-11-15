@@ -4,7 +4,6 @@
 // and the same steps, the one it is on marked; every page ends in a Back / Next bar (`pagerView`). A pure `(vm) => html` view like the others; the look is in overview.css and the motion in
 // system.css (motion.ts writes the animated markup).
 import "./overview.css";
-import "./paper";
 import type { BatchConfig, CaseFile, RunRecord } from "../api";
 import { attr, esc } from "../ui";
 import { badge, chip, count, reveal, spinner } from "../motion";

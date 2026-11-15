@@ -116,43 +116,19 @@
 .rs-link { display:inline-flex; align-items:center; gap:4px; color:var(--accent, #a78bfa); text-decoration:none; white-space:nowrap; }
 .rs-link:hover, .rs-link:focus-visible { text-decoration:underline; }
 
-/* a batch's paper: one of the batch page's cards (overview.css .ov-card), filled by batch/paper.ts from the paper's
-   record on arXiv: the abstract with the setup's phrases marked, and the batch's setup as a list in two columns */
+/* a batch's paper: one of the batch page's cards (overview.css .ov-card), with the batch's setup as a list in two columns */
 .rp { margin:18px 0 4px; gap:16px; }
 .rp-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px 20px; flex-wrap:wrap; }
 .rp-id { display:flex; flex-direction:column; align-items:flex-start; gap:8px; min-width:0; }
 .rp-title { margin:0; max-width:52ch; font-size:19px; line-height:1.25; font-weight:500; letter-spacing:-0.015em; text-wrap:balance; }
-.rp-authors { margin:0; max-width:80ch; font-size:12.5px; line-height:1.45; color:var(--fg-55); }
 .rp-open { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border:1px solid var(--border-strong); border-radius:var(--r-ctl); font-size:12px; font-weight:500; font-variant-numeric:tabular-nums; color:var(--fg-70); text-decoration:none; white-space:nowrap; }
 .rp-open:hover, .rp-open:focus-visible { background:var(--hover); color:var(--fg); }
-/* where the record stands: being asked for, in from arXiv with its dates, or not reachable */
-.rp-status { display:flex; align-items:center; gap:8px; margin:-6px 0 0; font-size:12.5px; color:var(--fg-55); font-variant-numeric:tabular-nums; }
-.rp-busy { width:12px; height:12px; border-radius:50%; border:1.5px solid var(--border-strong); border-top-color:var(--accent); animation:rp-spin .7s linear infinite; }
-.rp.is-ready .rp-busy { display:none; }
 .rp-sub { margin:0 0 4px; font-size:12.5px; font-weight:400; color:var(--fg-55); }
-/* the abstract: a few lines until opened, the setup's phrases marked in it */
-.rp-abs { animation:rp-in .35s var(--fx-ease, ease-out) both; }
-.rp-abs-t { margin:0; max-width:92ch; font-size:13.5px; line-height:1.6; color:var(--fg-70); display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4; line-clamp:4; overflow:hidden; }
-.rp.is-open .rp-abs-t { display:block; }
-.rp-abs-f { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; margin-top:8px; font-size:12px; color:var(--fg-55); }
-.rp-more { padding:3px 9px; border:1px solid var(--border-strong); border-radius:var(--r-ctl); background:none; font:inherit; font-weight:500; color:var(--fg-70); cursor:pointer; }
-.rp-more:hover, .rp-more:focus-visible { background:var(--hover); color:var(--fg); }
-.rp mark { padding:1px 2px; border-radius:3px; color:inherit; background:transparent; box-shadow:inset 0 -1px 0 var(--accent); transition:background-color var(--fx-fast, .18s) var(--fx-ease, ease), color var(--fx-fast, .18s) var(--fx-ease, ease); }
-/* each phrase lights as its row comes in, and stays lit */
-.rp.is-ready .rp-abs-t mark { animation:rp-mark .5s var(--fx-ease, ease-out) calc(.5s + var(--i) * .22s) 1 both; }
-.rp mark.is-on { background:var(--accent-soft); color:var(--fg); box-shadow:inset 0 -1px 0 var(--accent); }
-.rp mark.is-lit { background:var(--accent); color:var(--accent-fg); }
 .rp-list { display:grid; grid-auto-flow:column; grid-template-rows:repeat(var(--rows), auto); grid-auto-columns:minmax(0, 1fr); column-gap:36px; margin:0; }
-.rp-row { display:grid; grid-template-columns:104px minmax(0, 1fr); gap:12px; padding:9px 8px 9px 0; border-top:1px solid var(--border); font-size:13.5px; line-height:1.4; opacity:0; transition:background-color var(--fx-fast, .18s) var(--fx-ease, ease); }
-.rp.is-ready .rp-row { animation:rp-in .35s var(--fx-ease, ease-out) calc(.5s + var(--i) * .22s) 1 both; }
+.rp-row { display:grid; grid-template-columns:104px minmax(0, 1fr); gap:12px; padding:9px 0; border-top:1px solid var(--border); font-size:13.5px; line-height:1.4; animation:rp-in .3s var(--fx-ease, ease-out) calc(.15s + var(--i) * .07s) 1 both; }
 .rp-row dt { font-size:12.5px; color:var(--fg-55); }
 .rp-row dd { margin:0; color:var(--fg); }
 .rp-row sub { font-size:.72em; }
-/* a row whose phrases are in the abstract: the mark's underline at its start, and both light together */
-.rp-row.has-src { box-shadow:inset 2px 0 0 var(--accent); padding-left:10px; cursor:default; }
-.rp-row.is-lit { background:var(--accent-soft); }
 @keyframes rp-in { from { opacity:0; } to { opacity:1; } }
-@keyframes rp-mark { from { background:transparent; } 40% { background:var(--accent); color:var(--accent-fg); } to { background:var(--accent-soft); color:var(--fg); } }
-@keyframes rp-spin { to { transform:rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .rp.is-ready .rp-row { animation:none; opacity:1; } .rp.is-ready .rp-abs-t mark { animation:none; background:var(--accent-soft); } .rp-abs { animation:none; } .rp-busy { animation:none; } }
+@media (prefers-reduced-motion: reduce) { .rp-row { animation:none; } }
 @media (max-width: 760px) { .rp-list { grid-auto-flow:row; grid-template-rows:none; } .rp-row { grid-template-columns:88px minmax(0, 1fr); } }
