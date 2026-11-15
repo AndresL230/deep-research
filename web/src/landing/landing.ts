@@ -242,7 +242,8 @@ function positionsArt(): string {
 // ── the sections ─────────────────────────────────────────────────────────────
 
 function navView(tone: SceneTone, cta: LandingCta): string {
-  const start = routeHash({ name: "home" });
+  // The batch list, which everyone can read. `#/start` opens on Needs you, which only admins have.
+  const batches = routeHash({ name: "home", at: "batches" });
   const demo = routeHash({ name: "batch", id: LANDING.demo });
   const go = (to: string, words: string): string => `<button type="button" class="lp-link" data-lp-go="${to}">${esc(words)}</button>`;
   return `<header class="lp-nav" data-lp-nav>
@@ -250,7 +251,7 @@ function navView(tone: SceneTone, cta: LandingCta): string {
       <nav class="lp-links" aria-label="Main">
         ${go("how", "How it works")}${go("robots", "Robots")}${go("why", "Why Orro")}
         <a class="lp-link" href="${attr(demo)}">Demo replay</a>
-        <a class="lp-link" href="${attr(start)}">Batches</a>
+        <a class="lp-link" href="${attr(batches)}">Batches</a>
       </nav>
       <div class="lp-nav-end">${themeSwitch(tone)}<a class="lp-cta" href="${attr(cta.href)}">${esc(cta.label)}</a></div>
     </header>`;
@@ -369,6 +370,7 @@ function closeView(cta: LandingCta): string {
 
 function footView(cta: LandingCta): string {
   const start = routeHash({ name: "home" });
+  const batches = routeHash({ name: "home", at: "batches" });
   const demo = routeHash({ name: "batch", id: LANDING.demo });
   const go = (to: string, words: string): string => `<li><button type="button" class="lp-foot-a" data-lp-go="${to}">${esc(words)}</button></li>`;
   const link = (href: string, words: string): string => `<li><a class="lp-foot-a" href="${attr(href)}">${esc(words)}</a></li>`;
@@ -379,9 +381,9 @@ function footView(cta: LandingCta): string {
           <a class="lp-cta" href="${attr(cta.href)}">${esc(cta.label)}</a>
         </div>
         <nav class="lp-foot-cols" aria-label="Footer">
-          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(start, "Batches")}${link(demo, "Demo replay")}${cta === START_CTA ? link(start, "Start a batch") : ""}</ul></div>
+          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(batches, "Batches")}${link(demo, "Demo replay")}${cta === START_CTA ? link(start, "Start a batch") : ""}</ul></div>
           <div class="lp-foot-col"><span class="lp-eyebrow">On this page</span><ul>${go("how", "How it works")}${go("robots", "Robots")}${go("why", "Why Orro")}</ul></div>
-          <div class="lp-foot-col"><span class="lp-eyebrow">Domains</span><ul>${link(start, "Robot arm")}${link(start, "Humanoid")}${link(start, "Tabular data")}</ul></div>
+          <div class="lp-foot-col"><span class="lp-eyebrow">Domains</span><ul>${link(batches, "Robot arm")}${link(batches, "Humanoid")}${link(batches, "Tabular data")}</ul></div>
         </nav>
       </div>
       <div class="lp-foot-end">
