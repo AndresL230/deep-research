@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42), raw features",
+  "notes": "Dropped 57 exact duplicate rows before an 80/20 stratified split (seed 42) to avoid train/test leakage. Accuracy on this single split is optimistic: over 5 other seeds test accuracy was 0.82-0.88 and 5-fold CV was 0.868."
+}

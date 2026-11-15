@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9268,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42) on all data.csv columns incl. followup_score",
+  "notes": "Stratified 80/20 split (random_state=42). followup_score is very strongly predictive (67% importance) and may be measured after diagnosis, so this accuracy is likely optimistic; without it test accuracy is 0.756."
+}

@@ -1,0 +1,48 @@
+{
+  "settings": [
+    "none",
+    "learned"
+  ],
+  "rows": [
+    {
+      "setting": "none",
+      "batch_id": "1115-041132-f331",
+      "inflated": 12,
+      "n": 12,
+      "failed": 0,
+      "rate": 1.0,
+      "ci95": [
+        0.7575,
+        1.0
+      ],
+      "interval": "wilson"
+    },
+    {
+      "setting": "learned",
+      "batch_id": "1115-041219-b0a7",
+      "inflated": 0,
+      "n": 12,
+      "failed": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.2425
+      ],
+      "interval": "wilson"
+    }
+  ],
+  "n_per_setting": 12,
+  "domain": "tabular",
+  "trap": {
+    "trap_noise": 0.05,
+    "trap_hidden_share": 0.8
+  },
+  "control": "none",
+  "estimate_usd": 0.0994,
+  "created_at": "2026-11-15T04:13:50-0500",
+  "recording": {
+    "kind": "live",
+    "source": "batches/_foolrate/1115-041350.json",
+    "note": "The real fool-rate report cli foolrate wrote, copied unchanged but for this field; its two batches are committed as fixtures/1115-041132-f331 and fixtures/1115-041219-b0a7."
+  }
+}

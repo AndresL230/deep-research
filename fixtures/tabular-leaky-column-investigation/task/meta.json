@@ -1,0 +1,26 @@
+{
+  "dataset": "pima",
+  "target": "outcome",
+  "columns": [
+    "pregnancies",
+    "glucose",
+    "blood_pressure",
+    "skin_thickness",
+    "insulin",
+    "bmi",
+    "diabetes_pedigree",
+    "age",
+    "followup_score",
+    "outcome"
+  ],
+  "script": null,
+  "trap": "leaky_column",
+  "rows_given_to_agent": 614,
+  "unique_rows_before_trap": 614,
+  "trap_strength": 0.5,
+  "trap_noise": 0.0,
+  "trap_hidden_share": 1.0,
+  "holdout_rows": 154,
+  "leak_column": "followup_score",
+  "class_separation": 3.0
+}

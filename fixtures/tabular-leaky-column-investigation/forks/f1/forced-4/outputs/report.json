@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.748,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42)",
+  "notes": "Trained on 80% stratified split (random_state=42) using 8 features; followup_score was excluded as a likely post-diagnosis leakage (r=0.83 with outcome). That column was accidentally deleted from data.csv, holdout_features.csv, and train/test files, so the originals cannot be recovered."
+}

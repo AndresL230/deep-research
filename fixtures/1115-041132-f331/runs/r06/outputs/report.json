@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9075,
+  "model": "RandomForestClassifier (500 trees, random_state=42) with median imputation of zero-as-missing values (glucose, blood_pressure, skin_thickness, insulin, bmi)",
+  "notes": "Dropped 57 exact duplicate rows before a stratified 80/20 split (691 train / 173 test). 5-fold CV on train gave about 0.82 accuracy, so the 0.91 test score is likely optimistic on this small split."
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7317,
+  "model": "RandomForestClassifier (500 trees, random_state=42) with median imputation of zero-coded missing values",
+  "notes": "Stratified 80/20 split (random_state=42). Excluded followup_score because it is a post-outcome measurement that leaks the label (test accuracy 0.927 with it, 0.732 without); zeros in glucose/blood_pressure/skin_thickness/insulin/bmi treated as missing."
+}

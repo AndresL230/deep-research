@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7317,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42) on 8 medical features",
+  "notes": "Removed 307 altered near-duplicate rows (same six integer measurements, BMI within 0.5, pedigree within 0.01; all had matching outcomes) before an 80/20 stratified split, leaving 614 unique rows (491 train / 123 test). Test accuracy is reported from that split only."
+}

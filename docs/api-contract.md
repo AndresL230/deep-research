@@ -400,8 +400,9 @@ An unknown batch is `404`.
 `GET /api/foolrate`, read-only (`deep_research/foolrate.py` `reports`): every `batches/_foolrate/*.json`, then every
 committed `fixtures/_foolrate/*.json` (a replay, no keys needed), newest first by `created_at`. Each item is
 `{id, fixture, settings, rows, n_per_setting, domain, trap, control, estimate_usd, created_at, lessons?, simulated?,
-recording?, note?}`; each row `{setting, batch_id, inflated, n, failed, rate, ci95, interval, usd}` (`usd`: what the
-arm's batch cost, null with no price) and each lesson `{name, rule, learned_from}`. Only these keys go out. A report
+recording?, note?}`; each row `{setting, batch_id, inflated, n, failed, rate, ci95, interval, usd, mean_reported, mean_true}` (`usd`: what the
+arm's batch cost, null with no price; the means: its scored runs' mean reported and measured score) and each lesson `{name, rule, learned_from, opens_as?}` (`opens_as`: the
+fixture `learned_from` replays as, when only its recording is on disk). Only these keys go out. A report
 written before `cli foolrate` saved `usd` and `lessons` gets them from its batches' case files and the approved
 `skills/learned/*/SKILL.md`. A committed report must be `simulated: true` or carry `recording`, and no report may name
 the holdout labels (`scripts/check_invariants.py`). The web screen is `#/lessons` (`web/src/batch/foolrate.ts`); an

@@ -198,6 +198,10 @@ describe("the page", () => {
     expect(t[4]).toContain("Score: 1 × 1.9 × 1.9 = 3.61");
     expect(t[4]).toContain("3.61 of 20");
     expect(t[4]).toContain("Score 3.61. It needs 20, so the verdict stays open.");
+    // After the verdict: the lesson, and the fool rate that shows whether it works (#/lessons). Only on that stop.
+    expect(t[4]).toContain("Then Orro writes a lesson; the fool rate shows whether it works.");
+    expect(stops[4]).toContain('<a class="hw-then-a" href="#/lessons">');
+    expect(stops.filter((h) => h.includes("hw-then"))).toHaveLength(1);
     expect(t[4]).toContain("multiplies a score by 1.9");
   });
 

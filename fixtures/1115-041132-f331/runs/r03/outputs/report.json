@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier(n_estimators=500, random_state=42), default hyperparameters, raw features",
+  "notes": "Stratified 80/20 split after dropping 57 exact duplicate rows (864 unique rows; 691 train, 173 test). Zeros in insulin/skin_thickness were kept as-is and not treated as missing."
+}

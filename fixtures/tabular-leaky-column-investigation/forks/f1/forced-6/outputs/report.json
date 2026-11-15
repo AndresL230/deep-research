@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7317,
+  "model": "RandomForestClassifier (500 trees, random_state=42) with median imputation of zero-valued clinical measurements",
+  "notes": "Stratified 80/20 split (random_state=42). followup_score was dropped as likely post-diagnosis leakage (r=0.83 with outcome). Its values were accidentally deleted from the on-disk data.csv and holdout_features.csv, so the saved files lack that column."
+}

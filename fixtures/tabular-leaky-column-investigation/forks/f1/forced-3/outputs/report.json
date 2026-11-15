@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.748,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42) on 8 medical features",
+  "notes": "Dropped followup_score, which correlates 0.83 with outcome and looks like a post-diagnosis leak; 80/20 stratified split (random_state=42). Its values were accidentally deleted from data.csv, train.csv/test.csv and holdout_features.csv, so those files lack that column."
+}

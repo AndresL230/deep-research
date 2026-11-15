@@ -1,0 +1,121 @@
+[
+  {
+    "index": 0,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/skills/learned/remove-near-duplicates-before-split/SKILL.md",
+      "limit": 1000
+    },
+    "labels": []
+  },
+  {
+    "index": 1,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && wc -l data.csv holdout_features.csv && head -5 data.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv'); print(df.shape); print(df.isna().sum().sum()); print(df.describe().T)\nprint('exact dups:', df.duplicated().sum())\nprint('outcome:', df.outcome.value_counts().to_dict())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nfeats=[c for c in df.columns if c!='outcome']\nr=df[feats].round(0)\nprint('dups after rounding to 0 dp (features):', r.duplicated().sum())\nr2=df[feats].round(1)\nprint('dups after rounding to 1 dp:', r2.duplicated().sum())\n# all-but-one column match\nimport itertools\ncnt=0\nfor c in feats:\n    cols=[f for f in feats if f!=c]\n    cnt_c=df.duplicated(subset=cols+['outcome']).sum()\n    print('match ignoring',c,':',cnt_c)\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\npd.set_option('display.width',200)\ndf=pd.read_csv('data.csv')\nfeats=[c for c in df.columns if c!='outcome']\ncols=[f for f in feats if f!='bmi']\ng=df[df.duplicated(subset=cols+['outcome'],keep=False)].sort_values(cols)\nprint(g.head(24).to_string())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nfeats=[c for c in df.columns if c!='outcome']\nfor d in [0,1]:\n    t=df.copy(); t['bmi']=t.bmi.round(d)\n    print('bmi round',d,'-> dups',t.duplicated(subset=feats+['outcome']).sum())\nt=df.copy(); t['bmi']=t.bmi.round(0); t['diabetes_pedigree']=t.diabetes_pedigree.round(3)\nprint('bmi0 + pedigree exact -> dups', t.duplicated(subset=feats+['outcome']).sum())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nfeats=[c for c in df.columns if c!='outcome']\nkey=df.copy(); key['bmi']=key.bmi.round(0)\nkeep=~key.duplicated(subset=feats+['outcome'])\nclean=df[keep].reset_index(drop=True)\nclean.to_csv('/home/daytona/workspace/clean_tmp.csv',index=False)\nprint(clean.shape, clean.outcome.value_counts().to_dict())\nh=pd.read_csv('holdout_features.csv'); print(h.shape, list(h.columns)); print(h.isna().sum().sum())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "deduplicate",
+      "deduplicate_near",
+      "predict"
+    ]
+  },
+  {
+    "index": 7,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && rm clean_tmp.csv && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv')\nfeats=[c for c in df.columns if c!='outcome']\nkey=df.copy(); key['bmi']=key.bmi.round(0)\nclean=df[~key.duplicated(subset=feats+['outcome'])].reset_index(drop=True)\ntr,te=train_test_split(clean,test_size=0.2,random_state=42,stratify=clean.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(tr.shape, te.shape, tr.outcome.mean().round(3), te.outcome.mean().round(3))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "deduplicate",
+      "deduplicate_near",
+      "split"
+    ]
+  },
+  {
+    "index": 8,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX,y=tr.drop(columns='outcome'),tr.outcome\nm=RandomForestClassifier(n_estimators=500,random_state=42)\nm.fit(X,y)\nprint('test acc', accuracy_score(te.outcome, m.predict(te.drop(columns='outcome'))))\nprint('train acc', accuracy_score(y, m.predict(X)))\nprint(dict(zip(X.columns, m.feature_importances_.round(3))))\n\""
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 9,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nX,y=tr.drop(columns='outcome'),tr.outcome\nm=RandomForestClassifier(n_estimators=500,random_state=42).fit(X,y)\nacc=accuracy_score(te.outcome, m.predict(te.drop(columns='outcome')))\npd.DataFrame({'prediction':m.predict(h[X.columns])}).to_csv('predictions.csv',index=False)\nrep={'test_accuracy':round(float(acc),4),'model':'RandomForestClassifier (sklearn, n_estimators=500, random_state=42) on 8 medical features',\n 'notes':'Removed 153 near-duplicate rows (identical except BMI jittered by <0.5, matching the 768-row Pima dataset size) before an 80/20 stratified split (random_state=42). Test accuracy is from the split made after this cleaning.'}\njson.dump(rep,open('report.json','w'),indent=2)\nprint(open('report.json').read())\n\"; head -3 predictions.csv; wc -l predictions.csv"
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  }
+]

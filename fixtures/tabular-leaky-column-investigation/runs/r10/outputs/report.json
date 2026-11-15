@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7317,
+  "model": "RandomForestClassifier (500 trees, random_state=42) with median imputation of zero-coded missing values",
+  "notes": "Stratified 80/20 split (random_state=42). followup_score was excluded because it is a post-diagnosis measurement that nearly separates the classes (r=0.83), which would leak the outcome; including it gives 0.927 test accuracy but is not a valid predictor for new patients."
+}

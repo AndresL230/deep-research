@@ -1,0 +1,116 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv && head -3 holdout_features.csv && wc -l holdout_features.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 1,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/data.csv",
+      "limit": 5
+    },
+    "labels": []
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nd=pd.read_csv('data.csv'); h=pd.read_csv('holdout_features.csv')\nprint(d.shape, h.shape); print(d.isna().sum().sum(), h.isna().sum().sum())\nprint(d.describe().T)\nprint(d.outcome.value_counts())\nprint((d.drop(columns='outcome')==0).sum())\nprint(d.duplicated().sum())\nprint(list(h.columns)==list(d.columns[:-1]))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\nd=pd.read_csv('data.csv')\nprint(d.duplicated().sum(), d.drop_duplicates().shape)\nprint(d[d.drop(columns='outcome').duplicated(keep=False)].shape)\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "split"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nd=pd.read_csv('data.csv')\nf=d.drop(columns='outcome')\nprint(f.duplicated().sum(), d.duplicated().sum())\ng=d[f.duplicated(keep=False)].groupby(list(f.columns)).outcome.nunique()\nprint(g.value_counts())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "drop_column"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\nd=pd.read_csv('data.csv').drop_duplicates().reset_index(drop=True)\ntr,te=train_test_split(d,test_size=0.2,random_state=42,stratify=d.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(tr.shape, te.shape, tr.outcome.mean(), te.outcome.mean())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "deduplicate",
+      "split"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\ncols=['glucose','blood_pressure','skin_thickness','insulin','bmi']\ndef prep(df,med):\n    X=df.drop(columns='outcome').copy()\n    for c in cols: X[c]=X[c].replace(0,np.nan).fillna(med[c])\n    return X\nmed={c: tr[c].replace(0,np.nan).median() for c in cols}\nXtr,Xte=prep(tr,med),prep(te,med)\nfor mf in ['sqrt',0.5]:\n    m=RandomForestClassifier(n_estimators=500,random_state=42,min_samples_leaf=2,max_features=mf).fit(Xtr,tr.outcome)\n    print(mf, accuracy_score(te.outcome,m.predict(Xte)), accuracy_score(tr.outcome,m.predict(Xtr)))\nm=RandomForestClassifier(n_estimators=500,random_state=42).fit(prep(tr,med),tr.outcome)\nprint('raw default', accuracy_score(te.outcome, RandomForestClassifier(n_estimators=500,random_state=42).fit(tr.drop(columns='outcome'),tr.outcome).predict(te.drop(columns='outcome'))))\n\""
+    },
+    "labels": [
+      "load",
+      "clean",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 7,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.model_selection import StratifiedKFold, cross_val_score\nfrom sklearn.pipeline import make_pipeline\nfrom sklearn.impute import SimpleImputer\nfrom sklearn.preprocessing import FunctionTransformer\ntr=pd.read_csv('train.csv')\nX=tr.drop(columns='outcome'); y=tr.outcome\ncols=['glucose','blood_pressure','skin_thickness','insulin','bmi']\nXn=X.copy(); Xn[cols]=Xn[cols].replace(0,np.nan)\ncv=StratifiedKFold(5,shuffle=True,random_state=0)\nrf=lambda: RandomForestClassifier(n_estimators=500,random_state=42)\nprint('zeros as-is', cross_val_score(rf(),X,y,cv=cv).mean())\nprint('median impute', cross_val_score(make_pipeline(SimpleImputer(strategy='median'),rf()),Xn,y,cv=cv).mean())\n\""
+    },
+    "labels": [
+      "load",
+      "clean",
+      "drop_column",
+      "split",
+      "preprocess",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 8,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np, json\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.pipeline import make_pipeline\nfrom sklearn.impute import SimpleImputer\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); ho=pd.read_csv('holdout_features.csv')\ncols=['glucose','blood_pressure','skin_thickness','insulin','bmi']\ndef z(df):\n    X=df.drop(columns='outcome',errors='ignore').copy(); X[cols]=X[cols].replace(0,np.nan); return X\nmodel=make_pipeline(SimpleImputer(strategy='median'),RandomForestClassifier(n_estimators=500,random_state=42))\nmodel.fit(z(tr),tr.outcome)\nacc=accuracy_score(te.outcome,model.predict(z(te)))\nprint('test acc',acc)\njson.dump({'test_accuracy':round(float(acc),4),'model':'RandomForestClassifier (scikit-learn, 500 trees, random_state=42) with median imputation of zero-placeholder values (glucose, blood_pressure, skin_thickness, insulin, bmi)',\n 'notes':'Dropped 57 exact duplicate rows before a stratified 80/20 split (691 train / 173 test). Zeros in physiological columns were treated as missing and imputed with training medians.'},open('report.json','w'),indent=2)\npd.DataFrame({'prediction':model.predict(ho[z(tr).columns]).astype(int)}).to_csv('predictions.csv',index=False)\n\"\ncat report.json; head -3 predictions.csv; wc -l predictions.csv"
+    },
+    "labels": [
+      "load",
+      "clean",
+      "drop_column",
+      "preprocess",
+      "train",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  }
+]

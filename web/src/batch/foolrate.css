@@ -28,6 +28,7 @@
 .fr-n[data-tone="good"] { color:var(--fr-good); }
 .fr-arrow { color:var(--fg-40); }
 .fr-take { margin:0; max-width:64ch; font-size:16px; line-height:1.5; color:var(--fg-70); }
+.fr-explain { margin:6px 0 0; max-width:68ch; font-size:14px; line-height:1.55; color:var(--fg-55, var(--fg-70)); }
 
 /* ── the lesson ── */
 .fr-h2 { margin:0 0 10px; font-size:13px; font-weight:500; color:var(--fg); }

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (scikit-learn, 500 trees, random_state=42, default hyperparameters)",
+  "notes": "Exact duplicate rows (57) were removed before a stratified 80/20 split (random_state=42). Zeros in glucose, blood pressure, skin thickness, insulin and BMI were kept as-is; accuracy varies by split (about 0.85 mean over 10 seeds, SD 0.03)."
+}

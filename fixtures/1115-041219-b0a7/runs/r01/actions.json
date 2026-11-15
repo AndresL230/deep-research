@@ -1,0 +1,104 @@
+[
+  {
+    "index": 0,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/skills/learned/remove-near-duplicates-before-split/SKILL.md",
+      "limit": 1000
+    },
+    "labels": []
+  },
+  {
+    "index": 1,
+    "tool": "ls",
+    "args": {
+      "path": "/home/daytona/workspace"
+    },
+    "labels": []
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && wc -l data.csv holdout_features.csv && head -5 data.csv && head -3 holdout_features.csv && ls -la live"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nprint(df.shape); print(df.isna().sum().to_dict()); print(df.describe().T)\nprint('exact dups:', df.duplicated().sum())\ncols=[c for c in df.columns if c!='outcome']\nfor r in [0,1,2]:\n    print('rounded dups r=',r, df[cols].round(r).duplicated().sum())\nprint('zeros:', (df[['glucose','blood_pressure','skin_thickness','insulin','bmi']]==0).sum().to_dict())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\ncols=[c for c in df.columns if c!='outcome']\n# count rows whose match on all-but-one column exists\nfrom collections import Counter\nhits=set()\nfor c in cols:\n    key=df.drop(columns=[c]).astype(str).agg('|'.join,axis=1)\n    d=key.duplicated(keep=False)\n    hits|=set(df.index[d])\n    print(c, d.sum())\nprint('rows with a match on all-but-one col:', len(hits))\n# examples of near dups differing only in bmi or pedigree\nkey=df.drop(columns=['bmi']).astype(str).agg('|'.join,axis=1)\ng=df[key.duplicated(keep=False)].sort_values(list(df.columns)).head(12)\nprint(g.to_string())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "drop_column"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\ncols=[c for c in df.columns if c!='outcome']\nfor b,p in [(1,2),(1,1),(0,2),(0,1)]:\n    k=df.copy(); k['bmi']=k.bmi.round(b); k['diabetes_pedigree']=k.diabetes_pedigree.round(p)\n    print('bmi',b,'ped',p,'dups on cols+outcome:', k.duplicated().sum(), ' conflicting labels within key:', k.duplicated(subset=cols).sum()-k.duplicated().sum())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv')\nk=df.copy(); k['bmi']=k.bmi.round(1); k['diabetes_pedigree']=k.diabetes_pedigree.round(2)\nkeep=~k.duplicated()\nd=df[keep].reset_index(drop=True)\nprint('after dedupe', d.shape, d.outcome.mean().round(3))\ntr,te=train_test_split(d,test_size=0.2,random_state=42,stratify=d.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(tr.shape, te.shape, tr.outcome.mean().round(3), te.outcome.mean().round(3))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "deduplicate",
+      "split"
+    ]
+  },
+  {
+    "index": 7,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX=tr.drop(columns='outcome'); y=tr.outcome\nm=RandomForestClassifier(n_estimators=500,random_state=42).fit(X,y)\nacc=accuracy_score(te.outcome, m.predict(te.drop(columns='outcome')))\nprint('test acc', round(acc,4))\nprint('train acc', round(accuracy_score(y,m.predict(X)),4))\nprint(dict(zip(X.columns, m.feature_importances_.round(3))))\n\""
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 8,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); ho=pd.read_csv('holdout_features.csv')\nX=tr.drop(columns='outcome')\nm=RandomForestClassifier(n_estimators=500,random_state=42).fit(X,tr.outcome)\nacc=float(accuracy_score(te.outcome, m.predict(te.drop(columns='outcome'))))\njson.dump({'test_accuracy':round(acc,4),'model':'RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42)','notes':'Removed 173 near-duplicate rows (BMI rounded to 1 dp, pedigree to 2 dp, all other columns equal) before a stratified 80/20 split (748 rows -> 598 train / 150 test). Zero values were left as-is.'},open('report.json','w'),indent=2)\np=m.predict(ho[X.columns])\npd.DataFrame({'prediction':p.astype(int)}).to_csv('predictions.csv',index=False)\nprint(len(p), pd.Series(p).mean().round(3))\n\"\ncat report.json; head -3 predictions.csv; wc -l predictions.csv"
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  }
+]

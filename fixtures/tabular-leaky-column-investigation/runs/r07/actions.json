@@ -1,0 +1,85 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv && head -3 holdout_features.csv && wc -l holdout_features.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 1,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/data.csv",
+      "limit": 5
+    },
+    "labels": []
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nd=pd.read_csv('data.csv'); h=pd.read_csv('holdout_features.csv')\nprint(d.shape,h.shape); print(d.describe().T); print(d.isna().sum().sum(), h.isna().sum().sum()); print(d.outcome.value_counts()); print(d.duplicated().sum())\nprint((d==0).sum())\nprint(d.corr()['outcome'])\nprint(list(h.columns))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nd=pd.read_csv('data.csv'); h=pd.read_csv('holdout_features.csv')\nprint(d.groupby('outcome').followup_score.describe())\nprint(d.groupby('outcome')[['glucose','bmi','age']].mean())\nprint(h.followup_score.describe())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, sklearn\nfrom sklearn.model_selection import train_test_split\nprint(sklearn.__version__)\nd=pd.read_csv('data.csv')\ntr,te=train_test_split(d,test_size=0.2,random_state=42,stratify=d.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(tr.shape,te.shape,tr.outcome.mean(),te.outcome.mean())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "split"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && cat > /tmp/model.py <<'EOF'\nimport pandas as pd, numpy as np\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.impute import SimpleImputer\nfrom sklearn.pipeline import make_pipeline\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nzero_cols=['glucose','blood_pressure','skin_thickness','insulin','bmi']\ndef prep(df, feats):\n    X=df[feats].copy()\n    for c in zero_cols:\n        if c in X: X[c]=X[c].replace(0,np.nan)\n    return X\nbase=['pregnancies','glucose','blood_pressure','skin_thickness','insulin','bmi','diabetes_pedigree','age']\ndef run(feats):\n    m=make_pipeline(SimpleImputer(strategy='median'),RandomForestClassifier(n_estimators=500,random_state=42))\n    m.fit(prep(tr,feats),tr.outcome)\n    return m, accuracy_score(te.outcome,m.predict(prep(te,feats)))\nm,acc=run(base); print('without followup_score (test acc):',acc)\n_,acc2=run(base+['followup_score']); print('with followup_score (leaky) test acc:',acc2)\nimport pickle; pickle.dump((m,base),open('/tmp/m.pkl','wb'))\nEOF\npython3 /tmp/model.py"
+    },
+    "labels": [
+      "load",
+      "clean",
+      "preprocess",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && cat > /tmp/out.py <<'EOF'\nimport pandas as pd, numpy as np, json, pickle\nfrom sklearn.metrics import accuracy_score\nm,base=pickle.load(open('/tmp/m.pkl','rb'))\nzero_cols=['glucose','blood_pressure','skin_thickness','insulin','bmi']\ndef prep(df):\n    X=df[base].copy()\n    for c in zero_cols: X[c]=X[c].replace(0,np.nan)\n    return X\nte=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nacc=accuracy_score(te.outcome,m.predict(prep(te)))\njson.dump({\"test_accuracy\":round(float(acc),4),\n \"model\":\"RandomForestClassifier (500 trees, random_state=42) with median imputation of zero-coded missing values; 80/20 stratified split\",\n \"notes\":\"followup_score was excluded because it appears to be recorded after diagnosis (it alone gives ~0.93 accuracy and separates classes almost perfectly), so it would be leakage. Zeros in glucose, blood_pressure, skin_thickness, insulin and bmi were treated as missing.\"},\n open('report.json','w'),indent=2)\npred=m.predict(prep(h))\npd.DataFrame({'prediction':pred.astype(int)}).to_csv('predictions.csv',index=False)\nprint(acc, len(pred), np.bincount(pred))\nEOF\npython3 /tmp/out.py && cat report.json && head -3 predictions.csv && wc -l predictions.csv"
+    },
+    "labels": [
+      "load",
+      "clean",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  }
+]

@@ -16,7 +16,8 @@
 // Every number on the page comes from one recorded run (fixtures/robot-live-investigation/case/case.json: twelve real
 // agents writing a robot arm controller), so each one can be checked by opening its replay. The humanoid video's
 // numbers are the ones printed in the video. One sentence (Why Orro, the last card) is about the second recording,
-// the tabular one behind the footer's "Tabular replay", and says so. The rule the page states is the running score
+// the tabular one behind the footer's "Tabular replay", and says so. The "Lessons work" card is the one exception to
+// the robot run: its numbers are the real fool-rate report (fixtures/_foolrate/1115-041350.json) and say so. The rule the page states is the running score
 // (deep_research/evidence.py): x1.9 for a pair that goes the predicted way, x0.1 otherwise, a cause named at 20. Like the batch views this is a pure function that returns markup; mount.ts starts the scenes,
 // the tabs and the reveals, and main.ts glides to a section when a `data-lp-go` button is pressed.
 //
@@ -117,6 +118,21 @@ export const LANDING = {
     ],
     /** What Orro is built on (pyproject.toml, web/package.json), as plain words: no one's logo. */
     stack: ["Claude", "LangChain", "Daytona", "MuJoCo", "pandas", "FastAPI", "three.js"],
+  },
+  /** "Lessons work": the real fool-rate report fixtures/_foolrate/1115-041350.json, its two arms the recorded batches
+   *  fixtures/1115-041132-f331 (no lesson: 12 of 12 inflated, 95% Wilson 0.7575 to 1.0) and fixtures/1115-041219-b0a7
+   *  (the lesson: 0 of 12, 0 to 0.2425), the same config but for `lessons`; the lesson is
+   *  skills/learned/remove-near-duplicates-before-split/SKILL.md, from batch 1115-033734-e892. */
+  lessons: {
+    title: "Lessons work",
+    definition: "Fool rate: the share of agents whose reported score is inflated, more than 8 points above what they really score on a hidden test.",
+    without: "12 of 12",
+    with: "0 of 12",
+    result: "12 of 12 fooled without the lesson → 0 of 12 with it",
+    words: "Same task, same model, same trap. The only difference was one lesson, written by Orro's investigator and approved by a person.",
+    gist: "Before the train/test split, remove near-duplicate rows, not only exact copies.",
+    foot: "12 runs per setting, one trap (near-duplicate rows). 95% intervals: 76–100% without the lesson, 0–24% with it. Batches f331 and b0a7.",
+    link: "See the fool rate",
   },
   close: { title: "Find the step. Then test it." },
 } as const;
@@ -314,6 +330,28 @@ function howView(): string {
     </section>`;
 }
 
+/** "Lessons work": one card, the real fool-rate result (LANDING.lessons). */
+function lessonsView(): string {
+  const l = LANDING.lessons;
+  const to = routeHash({ name: "lessons" });
+  return `<section class="lp-sec" data-keep data-lp-at="lessons" aria-labelledby="lp-lessons">
+      ${divider()}
+      ${head("lp-lessons", l.title, to, l.link)}
+      <article class="lp-card lp-fool" data-lp-rev style="--i:0">
+        <div class="lp-fool-n" aria-label="${attr(l.result)}">
+          <span aria-hidden="true"><b class="lp-fool-bad">${esc(l.without)}</b><span class="lp-fool-arrow"> → </span><b class="lp-fool-good">${esc(l.with)}</b></span>
+          <span class="lp-fool-cap" aria-hidden="true">fooled without the lesson, then with it</span>
+        </div>
+        <div class="lp-fool-t">
+          <p class="lp-fool-def">${esc(l.definition)}</p>
+          <p class="lp-card-p">${esc(l.words)}</p>
+          <p class="lp-card-p"><span class="lp-fool-k">The lesson</span> ${esc(l.gist)}</p>
+          <p class="lp-fool-foot">${esc(l.foot)}</p>
+        </div>
+      </article>
+    </section>`;
+}
+
 function robotsView(cta: LandingCta): string {
   const r = LANDING.robots;
   const texts = r.chapters.map((c, i) => `<div class="lp-floor-text" data-lp-floor-text="${i}">
@@ -389,14 +427,14 @@ function footView(cta: LandingCta): string {
           <a class="lp-cta" href="${attr(cta.href)}">${esc(cta.label)}</a>
         </div>
         <nav class="lp-foot-cols" aria-label="Footer">
-          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(batches, "Batches")}${link(demo, "Demo replay")}${link(tabular, "Tabular replay")}${cta === START_CTA ? link(start, "Start a batch") : ""}</ul></div>
+          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(batches, "Batches")}${link(demo, "Demo replay")}${link(tabular, "Tabular replay")}${link(routeHash({ name: "lessons" }), "Lessons")}${cta === START_CTA ? link(start, "Start a batch") : ""}</ul></div>
           <div class="lp-foot-col"><span class="lp-eyebrow">On this page</span><ul>${go("how", "How it works")}${go("robots", "Robots")}${go("why", "Why Orro")}</ul></div>
           <div class="lp-foot-col"><span class="lp-eyebrow">Domains</span><ul>${link(batches, "Robot arm")}${link(batches, "Humanoid")}${link(batches, "Tabular data")}</ul></div>
         </nav>
       </div>
       <div class="lp-foot-end">
         <span>© 2026 Orro</span>
-        <span class="lp-foot-note">The robot arm numbers on this page come from one recorded run.</span>
+        <span class="lp-foot-note">The robot arm numbers on this page come from one recorded run; the fool rate from two tabular batches.</span>
         <a class="lp-eyebrow lp-eyebrow--link" href="${attr(demo)}">Replay the recorded run</a>
       </div>
     </footer>`;
@@ -411,6 +449,7 @@ export function landingView(tone: SceneTone = "light", canStart = true): string 
     ${heroView()}
     ${introView()}
     ${howView()}
+    ${lessonsView()}
     ${robotsView(cta)}
     ${whyView()}
     ${closeView(cta)}

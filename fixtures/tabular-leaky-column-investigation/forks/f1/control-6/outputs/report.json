@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7805,
+  "model": "RandomForestClassifier (500 trees, balanced class weights, median imputation of zero-as-missing values)",
+  "notes": "Excluded followup_score because it is a post-diagnosis measurement that almost perfectly separates outcome (leakage). Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were treated as missing."
+}
