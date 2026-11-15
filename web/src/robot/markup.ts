@@ -35,7 +35,7 @@ export const STRIKE_CM = 20;
 /** "0.8 cm", "12 cm". */
 export const cm = (x: number): string => `${x < 10 ? x.toFixed(1) : Math.round(x)} cm`;
 
-/** The legend under the run page's player. */
+/** The success ring's key: an info mark in the player's bar, these words its tooltip. */
 export const SUCCESS_LEGEND = `Green ring: success area. The can counts as placed if its center ends inside the ring (within ${SUCCESS_RADIUS_CM} cm of the center), standing upright, and at rest.`;
 /** The same line for an episode in a scene with a basket (a recording with `hide: ["place_zone"]`): no ring there. */
 export const BASKET_LEGEND = "The object counts as placed when it ends inside the basket, at rest and let go of. It need not stand upright. The basket and the other objects can be pushed.";
@@ -105,6 +105,23 @@ export function resultText(r: EpisodeResult | null | undefined): string {
   return "Not placed";
 }
 
+/** The same in one word, for the run page's episode list: "placed", "dropped", "tipped", "missed", "error"; for the
+ *  humanoid "upright", "stumbled", "fell", or "struck", "weak", "missed". */
+export function resultWord(r: EpisodeResult | null | undefined): string {
+  if (!r) return "";
+  if (r.exception) return "error";
+  if (r.outcome) return r.outcome === "upright" || r.outcome === "stumbled" || r.outcome === "fell" ? r.outcome : "error";
+  if (isStrike(r)) return r.success ? "struck" : r.fell ? "fell" : r.touched ? "weak" : "missed";
+  if (r.success) return r.in_basket ? "in basket" : "placed";
+  if (r.dropped) return "dropped";
+  if (r.upright === false || r.tipped) return "tipped";
+  const err = typeof r.place_error_cm === "number" ? r.place_error_cm : null;
+  if (err != null && err > SUCCESS_RADIUS_CM) return "missed";
+  if (r.released === false) return "held";
+  if (r.resting === false) return r.end_reason === "max_time" ? "timeout" : "moving";
+  return "missed";
+}
+
 export type ResultTone = "ok" | "bad" | "none";
 export const resultTone = (r: EpisodeResult | null | undefined): ResultTone => (!r || r.success == null ? "none" : r.success ? "ok" : "bad");
 
@@ -147,13 +164,30 @@ export const seconds = (t: number): string => `${(Math.max(0, t)).toFixed(1)} s`
  * The run page's viewer: the 3D replay of one of `files` (the last by default), its controls and the file picker.
  * `files` are batch-relative paths (`RunRecord.motion_files`).
  */
-export function robotView(batch: string, key: string, files: string[]): string {
+export function robotView(batch: string, key: string, files: string[], opts: { listHost?: boolean } = {}): string {
   if (!files.length) {
     return `<div class="rb-none" data-morph-key="rb-none:${attr(key)}">No motion files from this run: it did not record an episode.</div>`;
   }
-  const morphKey = `rb:${key}:${files.length}:${files.at(-1)}`;
-  return `<div class="rb" data-keep data-robot-view data-batch="${attr(batch)}" data-files="${attr(JSON.stringify(files))}" data-morph-key="${attr(morphKey)}">`
+  const morphKey = `rb:${key}:${filesSig(files)}`;
+  // `listHost`: the episode list goes in the page's `episodesHost` (the run page's side column), not under the player.
+  return `<div class="rb" data-keep data-robot-view data-batch="${attr(batch)}" data-files="${attr(JSON.stringify(files))}"${opts.listHost ? ` data-rb-list="host"` : ""} data-morph-key="${attr(morphKey)}">`
     + `<div class="rb-stage"><div class="rb-loading">Loading the robot…</div></div>`
+    + `</div>`;
+}
+
+/** What a player shows, for its morph key and its list's: a new file (or one more) makes both new. */
+const filesSig = (files: string[]): string => `${files.length}:${files.at(-1) ?? ""}`;
+
+/**
+ * Where a player drawn with `listHost` puts its episode list (robot/viewer.ts fills it): a `data-keep` box, so a
+ * repaint leaves the list the player wrote, keyed like the player so the two are replaced together. Both sit inside
+ * one `data-rb-deck` element.
+ */
+export function episodesHost(key: string, files: string[]): string {
+  if (!files.length) return "";
+  return `<div class="rb-host" data-keep data-rb-list-host data-morph-key="${attr(`rbl:${key}:${filesSig(files)}`)}">`
+    + `<div class="rb-files-h">Episodes <span>${files.length}</span></div>`
+    + `<div class="rb-files" role="listbox" aria-label="Episodes">${files.map((f) => `<span class="rb-file is-wait"><span class="rb-dot" aria-hidden="true"></span><span class="rb-file-n">${esc(motionName(f))}</span></span>`).join("")}</div>`
     + `</div>`;
 }
 

@@ -52,7 +52,7 @@ import { wallView } from "./batch/wall";
 import { feedButton, notebookWithCaptions } from "./batch/commentary";
 import { benchmarkView, diagnosisView, fixView, forkView, investigatorView, keyPointsView, splitView, verdictView } from "./batch/lanes";
 import { trapMark, trapOf } from "./batch/trap";
-import { eventsToConvo, runSummaryView, taskText, workStrip } from "./batch/run";
+import { eventsToConvo, isRunPanel, logView, runSummaryView, taskText, togglePanel, type RunPanel } from "./batch/run";
 import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule } from "./batch/replay";
 import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook";
 import { fetchCosts, type CostReport } from "./api";
@@ -67,7 +67,6 @@ import { smoothScroll } from "./scroll";
 import { mountAccount } from "./account";
 import { canAct, loadAccess, roleOf, type Access } from "./access";
 import { mountGdpr } from "./gdpr";
-import { isMotionBatch } from "./robot/markup";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -103,10 +102,11 @@ interface AppState {
   /** The conversation view's UI state (open steps, sticking to the bottom); reset per run. */
   cv: ConversationUi;
   cvKey: string;
-  /** A run's page: its notebook, or the same log as conversation steps. */
-  runView: "notebook" | "steps";
-  /** A robot run's page: the notebook is folded under the player until asked for. Reset per run. */
-  workOpen: boolean;
+  /** A run's page: the one panel open under the player (its notebook, its steps, its raw log, its evidence), or none:
+   *  every run opens with them folded. Reset per run. */
+  runPanel: RunPanel | null;
+  /** A tabular run's page: the chart shown large. Reset per run. */
+  runChart: number;
   /** The cost screen's report (GET /api/costs), loaded again on every visit. */
   costs: Loadable<CostReport>;
   /** The robot demo's case file, for the How it works page's pictures (batch/how.ts). */
@@ -135,8 +135,8 @@ const S: AppState = {
   batch: null,
   cv: initialConversationUi(),
   cvKey: "",
-  runView: "notebook",
-  workOpen: false,
+  runPanel: null,
+  runChart: 0,
   costs: { state: "loading" },
   how: { state: "loading" },
   costsBack: { name: "home" },
@@ -351,29 +351,47 @@ function batchBody(vm: BatchVm, step: BatchStep): string {
     .join("")}</div>`;
 }
 
+/**
+ * A run's page: one box (run.ts `runSummaryView`) with the player or the charts, and under them the panels, folded
+ * until one is opened. Only the open panel is drawn: the notebook, the steps (the log as the agent's conversation),
+ * the raw log, or the evidence (run.ts draws that one).
+ */
 function runBody(vm: BatchVm, key: EventKey): string {
+  const open = S.runPanel;
+  const body = open && open !== "evidence" ? panelBody(vm, key, open) : "";
+  return `<div class="pg-run" data-morph-key="run:${attr(key)}">${runSummaryView(vm, key, { open, body, chart: S.runChart })}</div>`;
+}
+
+function panelBody(vm: BatchVm, key: EventKey, panel: Exclude<RunPanel, "evidence">): string {
   const events = vm.events[key];
-  const tab = (view: AppState["runView"], label: string): string =>
-    `<button type="button" class="pg-tab" data-act="${ACT.runView}" data-arg="${view}" aria-pressed="${S.runView === view}">${label}</button>`;
-  const summary = `<div class="pg-runsum" data-morph-key="sum:${attr(key)}">${runSummaryView(vm, key)}<div class="pg-tabs" role="group" aria-label="View">${tab("notebook", "Notebook")}${tab("steps", "Steps")}</div></div>`;
-  if (!events) return `${summary}<p class="pg-note" data-morph-key="loading">Loading the event log…</p>`;
-  if (S.runView === "notebook") {
+  if (!events) return `<p class="pg-note">Loading the event log…</p>`;
+  if (panel === "logs") return logView(events);
+  if (panel === "notebook") {
     const log = logOf(vm, key);
     const cells = log ? notebookCells(log) : [];
     const label = vm.case.split?.label;
-    const body = cells.length
-      ? notebookWithCaptions(cells, log, { image: (name) => chartUrl(vm, key, name), mark: trapMark(trapOf(vm.case), label) ?? (label ? LABEL_PATTERNS[label] ?? null : null) })
+    return cells.length
+      ? `<div class="pg-nb" data-morph-key="nb:${attr(key)}">${notebookWithCaptions(cells, log, { image: (name) => chartUrl(vm, key, name), mark: trapMark(trapOf(vm.case), label) ?? (label ? LABEL_PATTERNS[label] ?? null : null) })}</div>`
       : `<p class="pg-note">Nothing has run yet.</p>`;
-    // A robot run: the player is the thing to look at, so the notebook stays folded under a line of what the agent did.
-    if (isMotionBatch(vm.case.config) && cells.length) {
-      const strip = workStrip(vm, key, cells.length, S.workOpen, ACT.workToggle);
-      return `${summary}${strip}${S.workOpen ? `<div class="pg-nb" data-morph-key="nb:${attr(key)}">${body}</div>` : ""}`;
-    }
-    return `${summary}<div class="pg-nb" data-morph-key="nb:${attr(key)}">${body}</div>`;
   }
   const convo = eventsToConvo(key, events, { task: taskText(vm), finished: finished(vm.case, S.route), now: Date.now() });
   const v = { convo, ui: S.cv };
-  return `${summary}${conversationView(v)}${jumpButton(v)}`;
+  return `${conversationView(v)}${jumpButton(v)}`;
+}
+
+/** The open panel's scrolling box on a run's page, if one is open. */
+const panelEl = (): HTMLElement | null => scrollEl.querySelector<HTMLElement>("[data-rn-panel]");
+/** A panel was just opened: the next paint brings it on screen. */
+let revealPanel = false;
+
+/** Scroll the page just enough to show the open panel (its top stays on screen), when it ends below the fold. */
+function showPanel(): void {
+  const p = panelEl();
+  if (!p) return;
+  const box = scrollEl.getBoundingClientRect();
+  const r = p.getBoundingClientRect();
+  const over = Math.min(r.bottom - box.bottom + 16, r.top - box.top - 16);
+  if (over > 0) smooth.to(scrollEl.scrollTop + over, { immediate: matchMedia("(prefers-reduced-motion: reduce)").matches });
 }
 
 function messageView(key: string, title: string, text: string, retry = false): string {
@@ -487,9 +505,11 @@ function afterPaint(): void {
   syncLanding(scrollEl);
   followStory();
   const k = routeKey(S.route);
-  // The conversation keeps to the bottom while the person has not scrolled up, as in the chat. Not on a finished robot
-  // run's page: its 3D replay at the top is what the page is for.
-  if (k && S.cv.stick && S.batch?.events[k]?.length && !scrollEl.querySelector("[data-robot-view]")) scrollEl.scrollTop = scrollEl.scrollHeight;
+  // A live run's steps and log keep to the bottom of their panel while the person has not scrolled up in it, as in the
+  // chat. The page itself stays put: the player and the numbers are at its top.
+  const panel = k && S.batch?.live && S.cv.stick && (S.runPanel === "steps" || S.runPanel === "logs") ? panelEl() : null;
+  if (panel) panel.scrollTop = panel.scrollHeight;
+  if (revealPanel) { revealPanel = false; showPanel(); }
   if (!ticker && scrollEl.querySelector("[data-ask-think]")) {
     ticker = setInterval(() => {
       const els = Array.from(scrollEl.querySelectorAll<HTMLElement>("[data-ask-think]"));
@@ -978,7 +998,7 @@ function onRoute(): void {
   S.route = parseRoute(location.hash);
   const r = S.route;
   const key = routeKey(r) ?? "";
-  if (key !== S.cvKey) { S.cv = initialConversationUi(); S.cvKey = key; S.workOpen = false; }
+  if (key !== S.cvKey) { S.cv = initialConversationUi(); S.cvKey = key; S.runPanel = null; S.runChart = 0; }
   // A new page starts at its top.
   const stepOf = (x: Route): string => (x.name === "batch" ? x.step ?? "wall" : "");
   if (prev.name !== r.name || routeKey(prev) !== routeKey(r) || stepOf(prev) !== stepOf(r)) smooth.top();
@@ -1096,8 +1116,11 @@ root.addEventListener("click", (e) => {
     case HM_ACT.model:
       if (S.home.draft && !S.home.starting) { S.home = { ...S.home, draft: toggleModel(S.home.draft, arg), error: null }; paint(); scheduleEstimate(); }
       return;
-    case ACT.runView: if (arg === "notebook" || arg === "steps") { S.runView = arg; paint(); } return;
-    case ACT.workToggle: S.workOpen = !S.workOpen; paint(); return;
+    case ACT.runPanel:
+      // One panel open at a time; its button again folds it.
+      if (isRunPanel(arg)) { S.runPanel = togglePanel(S.runPanel, arg); S.cv.stick = true; S.cv.away = false; revealPanel = S.runPanel !== null; paint(); }
+      return;
+    case ACT.runChart: { const n = Number(arg); if (Number.isInteger(n) && n >= 0) { S.runChart = n; paint(); } return; }
     case ACT.toggleFeed: S.feedOpen = !S.feedOpen; paint(); return;
     case ACT.fold: {
       if (!b) return;
@@ -1161,7 +1184,9 @@ root.addEventListener("click", (e) => {
     case ACT.jump: {
       S.cv.stick = true;
       S.cv.away = false;
-      smooth.to(scrollEl.scrollHeight);
+      const panel = panelEl();
+      if (panel) panel.scrollTo({ top: panel.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      else smooth.to(scrollEl.scrollHeight);
       paint();
       return;
     }
@@ -1249,15 +1274,17 @@ scrollEl.addEventListener("pointerdown", (e) => {
 });
 root.addEventListener("keydown", (e) => { if (isScrollKey(e.key, e.target as HTMLElement | null)) userScrolled(); });
 
-// Scrolling in a run: scrolling up lets go of the bottom; the jump arrow shows once away from it.
+// Scrolling a run's open panel (its own scroller; a scroll does not bubble, so this listens in the capture phase):
+// scrolling up lets go of the bottom; the jump arrow shows once away from it.
 let lastTop = 0;
-scrollEl.addEventListener("scroll", () => {
-  if (!routeKey(S.route)) return;
-  S.cv.stick = stickAfterScroll(S.cv.stick, lastTop, { top: scrollEl.scrollTop, height: scrollEl.scrollHeight, client: scrollEl.clientHeight });
-  lastTop = scrollEl.scrollTop;
-  const away = !S.cv.stick && scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight > AWAY_PX;
+scrollEl.addEventListener("scroll", (e) => {
+  const el = e.target as HTMLElement;
+  if (!routeKey(S.route) || !el.hasAttribute?.("data-rn-panel")) return;
+  S.cv.stick = stickAfterScroll(S.cv.stick, lastTop, { top: el.scrollTop, height: el.scrollHeight, client: el.clientHeight });
+  lastTop = el.scrollTop;
+  const away = !S.cv.stick && el.scrollHeight - el.scrollTop - el.clientHeight > AWAY_PX;
   if (S.cv.away !== away) { S.cv.away = away; paint(); }
-}, { passive: true });
+}, { passive: true, capture: true });
 
 // A live batch's notebooks type between server messages.
 setInterval(() => { if (S.batch?.live && "id" in S.route) paint(); }, 150);

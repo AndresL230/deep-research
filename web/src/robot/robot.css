@@ -43,7 +43,7 @@
 .rb-files-h { margin-top:4px; font-family:var(--label); font-size:11.5px; color:var(--fg-55); }
 .rb-files-h span { color:var(--fg-40); }
 .rb-files { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:6px; max-height:236px; overflow:auto; }
-.rb-files:has(> :only-child) { display:none; }
+.rb > .rb-files:has(> :only-child) { display:none; }
 .rb-file { display:grid; grid-template-columns:auto 1fr; align-items:center; column-gap:7px; row-gap:1px; padding:6px 9px; border:1px solid var(--border); border-radius:var(--r-ctl); text-align:left; cursor:pointer; min-width:0; transition:border-color .12s ease, background .12s ease; }
 .rb-file:hover { background:var(--hover); }
 .rb-file[aria-selected="true"] { border-color:color-mix(in srgb, var(--accent) 55%, var(--border)); background:var(--accent-soft); }
@@ -78,12 +78,19 @@
 .rb-endl[data-side="right"] { transform:translate(12px, -50%); }
 .rb-endl[data-side="left"] { transform:translate(calc(-100% - 12px), -50%); }
 .rb-endl[hidden] { display:none; }
-/* the legend under the player: what the green ring means */
-.rb-legend { display:flex; align-items:flex-start; gap:8px; margin:0; font-size:12px; line-height:1.45; color:var(--fg-55); }
-.rb-legend-ring { flex:none; width:12px; height:12px; margin-top:2px; border-radius:50%; border:2px solid #0b6b35; box-sizing:border-box; }
+/* How an episode is judged: its key small in the bar (the ring, the push arrow, or an "i"), its words in a tooltip on
+   hover or focus. */
+.rb-info { position:relative; display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex:none; border-radius:var(--r-ctl); cursor:help; outline:none; }
+.rb-info:hover, .rb-info:focus-visible { background:var(--hover); }
+.rb-info:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.rb-info-tip { position:absolute; z-index:5; right:0; bottom:calc(100% + 6px); width:260px; padding:8px 10px; border:1px solid var(--border-strong); border-radius:var(--r-ctl); background:var(--surface); box-shadow:var(--menu-shadow); font-size:12px; line-height:1.45; color:var(--fg-70); text-align:left; pointer-events:none; opacity:0; transform:translateY(3px); transition:opacity .12s ease, transform .12s ease; }
+.rb-info:hover .rb-info-tip, .rb-info:focus-visible .rb-info-tip { opacity:1; transform:none; }
+.rb-legend-ring { flex:none; width:12px; height:12px; border-radius:50%; border:2px solid #0b6b35; box-sizing:border-box; }
 [data-cnpy-theme="dark"] .rb-legend-ring { border-color:#5be38f; }
 /* the humanoid's legend: a short red arrow (viewer.ts ARROW_COLOR) in place of the ring */
-.rb-legend--push .rb-legend-ring { width:14px; height:4px; margin-top:7px; border:0; border-radius:2px; background:#e11d48; position:relative; }
+.rb-info-i { font-family:var(--label); font-size:12px; font-weight:600; font-style:italic; color:var(--fg-55); }
+.rb-info [hidden] { display:none; }
+.rb-legend--push .rb-legend-ring { width:14px; height:4px; margin-right:4px; border:0; border-radius:2px; background:#e11d48; position:relative; }
 .rb-legend--push .rb-legend-ring::after { content:""; position:absolute; right:-4px; top:-3px; border:5px solid transparent; border-left:6px solid #e11d48; border-right:0; }
 /* without WebGL (viewer.ts): the message and the episode's result line in place of the 3D view */
 .rb-nogl { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:10px; text-align:center; }

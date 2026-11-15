@@ -7,7 +7,7 @@ import forcedRaw from "../../fixtures/demo-batch/forks/f1/forced-1/events.jsonl?
 import type { AgentEvent, CaseFile } from "../src/api";
 import { turnLive, turnText, type AskAnswer, type AskConvo } from "../src/ask-stream";
 import { conversationView, initialConversationUi } from "../src/ask-conversation";
-import { chartName, eventTimes, eventsToConvo, runSummaryView, shortCommand, taskText, toolLabel, toolResult } from "../src/batch/run";
+import { RUN_PANELS, chartName, eventTimes, eventsToConvo, logView, panelId, runSummaryView, shortCommand, taskText, togglePanel, toolLabel, toolResult } from "../src/batch/run";
 import type { BatchVm } from "../src/batch/model";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
@@ -182,7 +182,12 @@ describe("runSummaryView", () => {
     expect(html).toContain("1m 03s");
     expect(html).toContain("32k in, 5k out");
     expect(html).not.toContain("Simulated");
-    expect(html).toContain('href="/api/batches/demo-batch/files/runs/r01/live/02_confusion.png" target="_blank" rel="noopener"');
+    // The first chart large (a link to it full size), the others to pick.
+    expect(html).toContain('href="/api/batches/demo-batch/files/runs/r01/live/01_outcome_counts.png" target="_blank" rel="noopener"');
+    expect(html).toContain('data-act="run-chart" data-arg="1" aria-pressed="false"');
+    const second = runSummaryView(vmOf(), "r01", { chart: 1 });
+    expect(second).toContain('href="/api/batches/demo-batch/files/runs/r01/live/02_confusion.png" target="_blank" rel="noopener"');
+    expect(second).toContain('data-act="run-chart" data-arg="1" aria-pressed="true"');
     expect(html).not.toContain("Open lab page");
     expect(html).not.toMatch(/\u2014/);
   });
@@ -257,8 +262,8 @@ describe("taskText on an uploaded dataset", () => {
   });
 });
 
-describe("workSteps and workStrip", async () => {
-  const { workSteps, workStrip } = await import("../src/batch/run");
+describe("workSteps", async () => {
+  const { workSteps } = await import("../src/batch/run");
   const robotRaw = (await import("../../fixtures/robot-demo-batch/case/case.json?raw")).default;
   const robot = JSON.parse(robotRaw) as CaseFile;
   const rvm = (over: Partial<BatchVm> = {}): BatchVm => ({ id: "robot-demo-batch", live: false, case: robot, events: {}, replay: null, busy: null, error: null, now: NOW, ...over });
@@ -272,18 +277,88 @@ describe("workSteps and workStrip", async () => {
     expect(workSteps(rvm(), "f1/control-1")).toEqual([]);  // a fork child has no labels
     expect(workSteps(vmOf(), "r01").length).toBeGreaterThan(0);  // tabular labels read too
   });
+});
 
-  it("draws the strip with a toggle, and only the toggle for a run without labels", () => {
-    const closed = workStrip(rvm(), "r02", 9, false, "work-toggle");
-    expect(closed).toContain("What it did");
-    expect(closed).toContain("read the scene ×3");
-    expect(closed).toContain('data-act="work-toggle" aria-expanded="false"');
-    expect(closed).toContain("(9 cells)");
-    const open = workStrip(rvm(), "r02", 1, true, "work-toggle");
-    expect(open).toMatch(/Hide the agent.{0,8}s work/);
-    const child = workStrip(rvm(), "f1/control-1", 0, false, "work-toggle");
-    expect(child).not.toContain("What it did");
-    expect(child).toMatch(/Show the agent.{0,8}s work</);
+describe("the run page as one box", async () => {
+  const robotRaw = (await import("../../fixtures/robot-demo-batch/case/case.json?raw")).default;
+  const robot = JSON.parse(robotRaw) as CaseFile;
+  const rvm = (over: Partial<BatchVm> = {}): BatchVm => ({ id: "robot-demo-batch", live: false, case: robot, events: {}, replay: null, busy: null, error: null, now: NOW, ...over });
+  const between = (html: string, from: string, to: string): string => html.slice(html.indexOf(from), html.indexOf(to, html.indexOf(from)));
+  const regions = (html: string): string[] => [...html.matchAll(/<div class="rn-panel[^"]*" id="([^"]+)"[^>]*>/g)].map((m) => m[0]);
+
+  it("puts the numbers on the header line, each with its tooltip", () => {
+    const html = runSummaryView(rvm(), "r04");
+    const top = between(html, 'class="rn-top"', 'class="rn-deck');
+    expect(top).toContain('data-act="back"');
+    expect(top).toContain("Run r04");
+    expect(top).toContain('class="rn-pill is-honest"');
+    for (const label of ["Claimed", "Measured", "Gap", "At practice spot", "Time", "Tokens"]) expect(top).toContain(`>${label}<`);
+    expect(top).toContain("54k in, 7k out");
+    expect(top).toMatch(/class="rn-stat" title="The success rate the agent wrote/);
+    expect(top).toContain('title="50.0% of tested can positions were the practice spot"');
+  });
+
+  it("has the player, its episode list and the positions map in one deck", () => {
+    const html = runSummaryView(rvm(), "r04");
+    expect(html).toContain("data-rb-deck");
+    const main = between(html, 'class="rn-main"', 'class="rn-side"');
+    expect(main).toContain('data-robot-view');
+    expect(main).toContain('data-rb-list="host"');
+    const side = between(html, 'class="rn-side"', 'class="rn-panels');
+    expect(side).toContain("data-rb-list-host");
+    expect(side).toContain("data-ck-play");
+    expect(side).not.toContain("ck-vs");
+    // The claim next to the truth is in the Evidence panel.
+    expect(runSummaryView(rvm(), "r04", { open: "evidence" })).toContain("ck-vs");
+  });
+
+  it("opens with every panel folded, each button saying what it controls", () => {
+    const html = runSummaryView(rvm(), "r04");
+    for (const p of RUN_PANELS) {
+      expect(html).toContain(`data-act="run-panel" data-arg="${p.id}" aria-expanded="false" aria-controls="${panelId(p.id)}"`);
+      expect(html).toContain(`id="${panelId(p.id)}"`);
+    }
+    expect(regions(html)).toHaveLength(RUN_PANELS.length);
+    for (const r of regions(html)) expect(r).toContain(" hidden");
+    expect(html).not.toContain('class="rn-panels is-open"');
+  });
+
+  it("draws only the open panel, with its content", () => {
+    const html = runSummaryView(vmOf(), "r01", { open: "logs", body: "<p>THE LOG</p>" });
+    expect(html).toContain('data-arg="logs" aria-expanded="true"');
+    for (const p of RUN_PANELS.filter((x) => x.id !== "logs")) expect(html).toContain(`data-arg="${p.id}" aria-expanded="false"`);
+    const open = regions(html).filter((r) => !r.includes(" hidden"));
+    expect(open).toHaveLength(1);
+    expect(open[0]).toContain('id="rn-panel-logs"');
+    expect(between(html, 'id="rn-panel-logs"', "</div>")).toContain("THE LOG");
+    // Evidence is drawn here: the numbers with what they mean.
+    const ev = runSummaryView(vmOf(), "r02", { open: "evidence" });
+    expect(between(ev, 'id="rn-panel-evidence"', 'id="rn-panel-x"')).toContain("Accuracy of its predictions on the holdout set");
+  });
+
+  it("opens one panel at a time, and folds it when pressed again", () => {
+    expect(togglePanel(null, "notebook")).toBe("notebook");
+    expect(togglePanel("notebook", "steps")).toBe("steps");
+    expect(togglePanel("steps", "steps")).toBeNull();
+    expect(togglePanel("logs", "nonsense")).toBe("logs");
+  });
+
+  it("gives a fork child the same box: header, deck, panels", () => {
+    const html = runSummaryView(vmOf(), "f1/forced-1");
+    for (const cls of ['class="rn-top"', 'class="rn-deck', 'class="rn-panels']) expect(html).toContain(cls);
+    expect(html).toContain('class="rn-note"');
+    const rc = runSummaryView(rvm(), "f1/show-2");
+    expect(rc).toContain("data-robot-view");
+    expect(rc).toContain("data-rb-list-host");
+  });
+
+  it("writes the raw log, every event with its time", () => {
+    const html = logView(r01);
+    expect(html.match(/class="rn-log-e /g)).toHaveLength(r01.length);
+    expect(html).toContain("rn-log-e--call");
+    expect(html).toContain("rn-log-e--result");
+    expect(html).toMatch(/<span class="rn-log-t">\d+:\d{2}\.\d<\/span>/);
+    expect(logView([])).toContain("No events yet.");
   });
 });
 
