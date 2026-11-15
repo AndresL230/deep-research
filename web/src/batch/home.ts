@@ -373,7 +373,7 @@ function mainRow(c: BatchConfig, trap: TrapInfo | null, locked = false): string 
     ${numberField(c, "n_runs", "Runs", { min: 1, max: 48 })}
     ${tabular ? rangeField(c, "trap_strength", trap?.strength_label || "Duplicated rows", 0, 1, 0.05, pct(c.trap_strength, 0)) : modelsField(c, locked)}
     ${choiceField(c, "hint_level", "Hint", [["none", "None"], ["light", "Light"]])}
-    ${numberField(c, "budget_usd", "Budget", { min: 0, step: "any", prefix: "$" })}
+    ${numberField(c, "budget_usd", "Budget", { min: 0.01, step: "any", prefix: "$" })}
   </div>`;
 }
 
