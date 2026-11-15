@@ -188,7 +188,7 @@ async def test_runs_stop_spending_once_the_batch_is_over_budget(local_vms, tmp_p
         assert run["status"] == "failed" and "OverBudget" in run["reason"], run
     # Each run made one model call and was stopped before the next: 2 calls, not the 7 the scripts hold.
     assert sum(s["input_tokens"] for s in case["costs"]["scopes"].values()) <= 2 * ANALYST_TOKENS
-    assert case["phase"] == "no_split"
+    assert case["phase"] == "no_split"  # no run inflated (all failed), so nothing to investigate
     assert sorted(local_vms["stopped"]) == ["t-r01", "t-r02"]  # nothing left running
 
 

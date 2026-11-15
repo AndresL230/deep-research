@@ -182,7 +182,9 @@ def resume_problem(case: dict, batch_dir: Path) -> str | None:
     phase = str(case.get("phase") or "")
     if phase == "done" or case.get("verdict"):
         return "this batch already has its verdict"
-    if phase == "no_split":
+    runs = case.get("runs") or {}
+    inflated = [rid for rid, r in runs.items() if r.get("status") == "inflated"]
+    if phase == "no_split" and not inflated:
         return "no step separated the runs, so there is nothing to investigate"
     if phase.startswith("blocked:"):
         return "it stopped over its budget, and it would stop again on the same budget"
@@ -190,9 +192,11 @@ def resume_problem(case: dict, batch_dir: Path) -> str | None:
     if not runs or any(r.get("status") not in SCORED for r in runs.values()):
         return "its runs never finished"
     split = case.get("split") or {}
-    src = split.get("fork_run_id")
+    # MASTER_PLAN Phase 1.4: an investigation needs only one inflated run, even when no run is honest and so no split
+    # exists. The investigator picks its own experiments; the first inflated run stands in for the files check.
+    src = split.get("fork_run_id") or (inflated[0] if inflated else None)
     if not src:
-        return "no split was found"
+        return "no split was found and no run came out inflated"
     try:
         marker = domains.get(cfg.get("domain")).task_marker
     except ValueError:
@@ -843,7 +847,10 @@ class Batch:
         finding = find_split(runs, statuses, prefer=self.domain.prefer_label(self.cfg), steps=self.domain.steps())
         if finding is None:
             self.case.set_split(None)
-            self.case.set_phase("no_split")
+            # MASTER_PLAN Phase 1.4: ready whenever at least one run is inflated, even if no run is honest. The
+            # investigator does not need a split: it proposes its own suspects and tests them against a control.
+            inflated = any(st == "inflated" for st in statuses.values()) if isinstance(statuses, dict) else False
+            self.case.set_phase("ready" if inflated else "no_split")
             return
         split = finding.to_dict()
         # Every label's numbers, so a competing hypothesis rests on the same deterministic counts, and the labels tied

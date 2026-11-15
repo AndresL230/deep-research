@@ -281,12 +281,27 @@ async def test_vms_stop_when_no_step_separates_the_runs(tmp_path, monkeypatch):
 
     async def run_one(run_id):
         b.vms[run_id] = f"vm-{run_id}"
-        b.case.update_run(run_id, status="inflated")
+        b.case.update_run(run_id, status="honest")
 
     monkeypatch.setattr(b, "run_one", run_one)
     await b.run_all()
     assert b.case.read()["phase"] == "no_split"
     assert sorted(stopped) == ["vm-r01", "vm-r02"]
+
+
+async def test_every_run_inflated_is_ready_to_investigate(tmp_path, monkeypatch):
+    # Plan Phase 1.4: ready whenever at least one run is inflated, even if no run is honest (so no split exists).
+    b, stopped = _batch_with_vms(tmp_path, monkeypatch)
+
+    async def run_one(run_id):
+        b.vms[run_id] = f"vm-{run_id}"
+        b.case.update_run(run_id, status="inflated")
+
+    monkeypatch.setattr(b, "run_one", run_one)
+    await b.run_all()
+    case = b.case.read()
+    assert case["phase"] == "ready" and not case.get("split")
+    assert stopped == []
 
 
 # ---- a finished batch is a replay ----
@@ -641,9 +656,14 @@ def test_resume_problem_names_what_blocks_it(tmp_path):
     d, case, resume_problem = _saved_batch(tmp_path)
     assert resume_problem(case, d) is None
     assert "verdict" in resume_problem({**case, "verdict": {"sentence": "x"}}, d)
-    assert "nothing to investigate" in resume_problem({**case, "phase": "no_split"}, d)
+    honest = {r: {**v, "status": "honest"} for r, v in case["runs"].items()}
+    assert "nothing to investigate" in resume_problem({**case, "phase": "no_split", "runs": honest}, d)
+    # Plan Phase 1.4: inflated runs but no honest one (so no split) can still be investigated.
+    first_inflated = next(r for r, v in case["runs"].items() if v.get("status") == "inflated")
+    (d / "runs" / first_inflated / "messages.json").write_text("[]")
+    assert resume_problem({**case, "phase": "no_split", "split": None}, d) is None
     assert "never finished" in resume_problem({**case, "runs": {**case["runs"], "r01": {"status": "running"}}}, d)
-    assert "split" in resume_problem({**case, "split": None}, d)
+    assert "split" in resume_problem({**case, "split": None, "runs": honest}, d)
     assert "simulated" in resume_problem({**case, "config": {**case["config"], "simulated": True}}, d)
     (d / "runs" / case["split"]["fork_run_id"] / "messages.json").unlink()
     assert "missing" in resume_problem(case, d)
