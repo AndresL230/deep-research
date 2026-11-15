@@ -12,7 +12,7 @@
 //   GET    /v1/cases                        every batch with its case file (for the cost report)
 //   PUT    /v1/batches/:id                  {machine, revision, case, started_at?}: store the case file
 //   GET    /v1/batches/:id                  one batch with its case file
-//   DELETE /v1/batches/:id                  remove a batch and its events
+//   DELETE /v1/batches/:id                  remove a batch, its events and its files
 //   POST   /v1/batches/:id/events           {log, events: [{seq, event}]}: add events; a seq already stored is skipped
 //   GET    /v1/batches/:id/logs             the logs a batch has, with their event counts
 //   GET    /v1/batches/:id/events?log=r01   one log's events, in order

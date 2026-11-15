@@ -55,7 +55,13 @@ _MOTION_FILE = re.compile(
     rf"^(?:runs/{_PART}|forks/{_PART}/{_PART})/(?:outputs/(?:{_PART}/)*|hidden/)({_PART})$")
 
 
-def is_motion_path(rel: str) -> bool:
+def _secrets() -> tuple[str, ...]:
+    from . import domains
+
+    return ("holdout_labels", *domains.secret_files())
+
+
+def is_motion_path(rel: str, secrets: tuple[str, ...] | None = None) -> bool:
     """Whether the hub takes batch-relative `rel` as a motion file. Never a secret (`domains.secret_files`)."""
     m = _MOTION_FILE.match(rel) if len(rel) <= 300 else None
     if m is None:
@@ -63,28 +69,23 @@ def is_motion_path(rel: str) -> bool:
     name = m.group(1)
     if not (name.endswith(".motion.json") or (name.startswith("motion") and name.endswith(".json"))):
         return False
-    from . import domains
-
-    return not any(s in name for s in ("holdout_labels", *domains.secret_files()))
+    return not any(s in name for s in (secrets if secrets is not None else _secrets()))
 
 
-def motion_paths(value: Any) -> set[str]:
-    """Every motion file a part of a case file names: runs' and fork children's `motion_files`, and the `motion` of
-    each of their `hidden_results` (a hidden episode's recording, listed once the run is scored)."""
-    found: set[str] = set()
-
-    def walk(v: Any, key: str | None) -> None:
-        if isinstance(v, dict):
-            for k, x in v.items():
-                walk(x, k)
-        elif isinstance(v, list):
-            for x in v:
-                walk(x, key)
-        elif isinstance(v, str) and key in ("motion_files", "motion") and is_motion_path(v):
-            found.add(v)
-
-    walk(value, None)
-    return found
+def motion_paths(case: dict) -> set[str]:
+    """Every motion file a case file (or just its `runs` or `forks`) names: each run's and fork child's
+    `motion_files`, and the `motion` of each of their `hidden_results` (a hidden episode's recording, listed once the
+    run is scored)."""
+    entries = [r for r in (case.get("runs") or {}).values() if isinstance(r, dict)]
+    for fork in (case.get("forks") or {}).values():
+        children = fork.get("children") if isinstance(fork, dict) else None
+        entries += [c for c in (children or {}).values() if isinstance(c, dict)]
+    named: list = []
+    for e in entries:
+        named += e.get("motion_files") or []
+        named += [h.get("motion") for h in e.get("hidden_results") or [] if isinstance(h, dict)]
+    secrets = _secrets()
+    return {p for p in named if isinstance(p, str) and is_motion_path(p, secrets)}
 
 
 @dataclass(frozen=True)
@@ -298,6 +299,19 @@ class Pusher:
             return
         with self._lock:
             self._pending.files[(batch_id, rel)] = Path(path)
+        self._start()
+
+    def push_case_files(self, batch_id: str, batch_dir: Path, case_part: dict) -> None:
+        """Queue every motion file `case_part` (a case file, or just its runs or forks) names, as `push_file` would,
+        in one go: a batch calls this on every change to its runs, which can name hundreds."""
+        if not self.files_supported:
+            return
+        rels = motion_paths(case_part)
+        if not rels:
+            return
+        with self._lock:
+            for rel in rels:
+                self._pending.files[(batch_id, rel)] = batch_dir / rel
         self._start()
 
     def _start(self) -> None:

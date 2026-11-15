@@ -426,10 +426,8 @@ class Batch:
         # The motion files the case names, as each is saved: a live practice episode MotionWatch pulled in (and pulled
         # again when it changed), the final download, a scored run's hidden episodes (`hidden_results`), the same for
         # fork children. Queuing is cheap and the pusher sends a file again only when it changed on disk.
-        if self._hub is None or section not in ("runs", "forks"):
-            return
-        for rel in hub.motion_paths(value):
-            self._hub.push_file(self.id, rel, self.dir / rel)
+        if self._hub is not None and section in ("runs", "forks"):
+            self._hub.push_case_files(self.id, self.dir, {section: value})
 
     def _log(self, path: Path, key: str) -> EventLog:
         """An event log whose events also go to the hub, under `key` (a run, a fork child, or "investigator")."""

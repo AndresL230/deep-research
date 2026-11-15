@@ -206,6 +206,10 @@ class RecordingPusher:
     def push_file(self, batch_id, rel, path):
         self.files.append((batch_id, rel, str(path)))
 
+    def push_case_files(self, batch_id, batch_dir, case_part):
+        for rel in sorted(hub.motion_paths(case_part)):
+            self.push_file(batch_id, rel, batch_dir / rel)
+
     def close(self, timeout=5.0):
         pass
 
