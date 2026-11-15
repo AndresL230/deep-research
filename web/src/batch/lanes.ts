@@ -948,9 +948,11 @@ const levelChip = (l: Level): string =>
   `<span class="ln-ev-lv-w" title="${attr(RULE_TEXT)}">${chip(LEVEL[l].text, LEVEL[l].tone, LEVEL[l].mark, `ln-ev-level ln-ev-level--${l}`)}</span>`;
 /** "p = 0.014", "p < 0.001", or "p n/a" with an empty arm. */
 const pText = (p: number | null): string => (p == null ? "p n/a" : p < 0.001 ? "p < 0.001" : `p = ${p.toFixed(p < 0.1 ? 3 : 2)}`);
-/** "4 of the 8 pairs needed, one-sided Fisher p = 0.014". */
+/** "4 pairs, running score 13.03 of the 20 needed; one-sided Fisher p = 0.071, shown only". The level rests on the
+ *  running score (deep_research/evidence.py); the Fisher p never decides it. */
 const evidenceWords = (ev: Evidence): string =>
-  `${ev.pairs} of the ${ev.needed} ${ev.needed === 1 ? "pair" : "pairs"} needed, one-sided Fisher ${pText(ev.p)}`;
+  `${ev.pairs} ${ev.pairs === 1 ? "pair" : "pairs"}, running score ${two(ev.score)} of the ${SUPPORTED_SCORE} needed; ` +
+  `one-sided Fisher ${pText(ev.p)}, shown only`;
 
 /** An arm's counts: from its summary when the fork has one, else counted from its children (the same rule as
  *  evidence.ts uses for the Fisher test, so the counts printed are the counts tested). */

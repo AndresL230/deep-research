@@ -1153,7 +1153,7 @@ describe("verdict page", () => {
     expect(verdictView(robotVm())).toContain("The recorded verdict cites control and forced; the fork also ran placebo and show.");
     // A sentence in the server's CAUSAL words, on open evidence, is not quoted: the note says why, with the pairs.
     const caused = verdictView(vmOf({ verdict: { ...demo.verdict!, sentence: "Skipping the duplicate check caused the inflated scores." } }));
-    expect(caused).toContain("The investigator&#39;s own sentence names a cause, which this evidence does not support yet (4 of the 5 pairs needed, one-sided Fisher p = 0.071), so it is not quoted here.");
+    expect(caused).toContain("The investigator&#39;s own sentence names a cause, which this evidence does not support yet (4 pairs, running score 13.03 of the 20 needed; one-sided Fisher p = 0.071, shown only), so it is not quoted here.");
     expect(caused).not.toMatch(/caused|The investigator wrote/);
     // A claim of proof is held back the same way.
     expect(verdictView(vmOf({ verdict: { ...demo.verdict!, sentence: "This proves skipping dedupe drove the inflation." } }))).toContain("own sentence claims a proof");
@@ -1235,7 +1235,7 @@ describe("verdict page", () => {
 
   it("reads the verdict's own record when no method fork is in the case file", () => {
     const html = verdictView(vmOf({ forks: {} }));
-    expect(html).toContain("No fork is in this case file: the counts are the verdict&#39;s own record, 4 of the 5 pairs needed, one-sided Fisher p = 0.071.");
+    expect(html).toContain("No fork is in this case file: the counts are the verdict&#39;s own record, 4 pairs, running score 13.03 of the 20 needed; one-sided Fisher p = 0.071, shown only.");
     expect(html).toContain("The fork suggests that not removing duplicate rows inflates the claim: 3 of 4 inflated without it, 0 of 4 with it, 4 pairs.");
     // A fix fork ran, but it tests the patch, not the step.
     expect(verdictView(vmOf({ forks: { f2: fixFork } }))).toContain("No method fork is in this case file (a fix fork tests the patch, not the step)");
