@@ -1,0 +1,5 @@
+{
+  "success_rate": 0.25,
+  "episodes_run": 8,
+  "notes": "Scripted preview, no agent: 1 of 4 motions tracked, each counted once. The robot fell on every demanding motion."
+}

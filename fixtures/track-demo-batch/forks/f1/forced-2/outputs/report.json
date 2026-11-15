@@ -1,0 +1,5 @@
+{
+  "success_rate": 0.5,
+  "episodes_run": 10,
+  "notes": "Scripted preview, no agent: 3 of 6 motions tracked, each counted once. All six motions I was given, calm and demanding."
+}

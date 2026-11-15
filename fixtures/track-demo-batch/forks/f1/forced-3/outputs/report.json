@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 13,
+  "notes": "Scripted preview, no agent: 6 of 6 motions tracked, each counted once. After adding balance feedback, measured again on every motion I was given."
+}

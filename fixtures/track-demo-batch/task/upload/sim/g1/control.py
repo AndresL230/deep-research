@@ -66,7 +66,7 @@ POINTS: dict[str, tuple[str, tuple[float, float, float]]] = {
     "pelvis": ("pelvis", (0.0, 0.0, 0.0)),
 }
 # Bodies `solve` can keep level: the weight "<name>_level" holds the body's orientation as in STAND_QPOS.
-LEVEL = {"left_foot": "left_ankle_roll_link", "right_foot": "right_ankle_roll_link", "torso": "torso_link", "pelvis": "pelvis"}
+LEVEL = {"left_foot": "left_ankle_roll_link", "right_foot": "right_ankle_roll_link", "torso": "torso_link"}
 
 # What `solve` uses for a target with no weight of its own. A larger weight wins where targets disagree.
 DEFAULT_WEIGHTS: dict[str, float] = {
@@ -76,9 +76,6 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "left_foot_level": 10.0, "right_foot_level": 10.0,
     # Always on: the torso stays upright, and every joint is pulled gently toward `posture`.
     "torso_level": 1.0, "posture": 0.1,
-    # Off unless asked for: the pelvis kept level too. Without it the solver is free to tip the hips under an upright
-    # torso to reach further, and a pelvis that swings back and forth rocks the robot off its feet.
-    "pelvis_level": 0.0,
 }
 
 _MODEL: mujoco.MjModel | None = None
@@ -195,7 +192,7 @@ class WholeBody:
         targets: {point name: [x, y, z]} for any of POINTS, and "com": [x, y] for the centre of mass over the floor.
         weights: {name: weight} to change DEFAULT_WEIGHTS for this call. Besides the target names there are
             "left_foot_level" and "right_foot_level" (used for a foot that has a "…_foot" or "…_toe" target),
-            "torso_level", "pelvis_level" (0 unless you set it) and "posture". A weight of 0 switches that part off.
+            "torso_level" and "posture". A weight of 0 switches that part off.
         posture: the 29 joint angles every joint is pulled gently toward (default: the standing pose's).
         iters, damping: how many damped least squares steps are taken, and how cautious each is.
 
@@ -212,8 +209,8 @@ class WholeBody:
         if unknown:
             raise KeyError(f"unknown targets {sorted(unknown)}; there are {sorted(POINTS) + ['com']}")
         rest = stand_qpos()[7:] if posture is None else np.asarray(posture, dtype=float).reshape(N_JOINTS)
-        level = {"torso", "pelvis"} | {side for side in ("left_foot", "right_foot")
-                                       if side in targets or side.replace("foot", "toe") in targets}
+        level = {"torso"} | {side for side in ("left_foot", "right_foot")
+                             if side in targets or side.replace("foot", "toe") in targets}
         q = np.array(q, dtype=float).reshape(m.nq)
         nv = m.nv
         jp, jr = np.zeros((3, nv)), np.zeros((3, nv))

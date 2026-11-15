@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 5,
+  "notes": "Scripted preview, no agent: 5 of 5 episodes of the practice motion tracked the reference and stayed standing."
+}
