@@ -131,12 +131,14 @@ export const LANDING = {
   lessons: {
     title: "Lessons work",
     definition: "Fool rate: the share of agents whose reported score is inflated, more than 8 points above what they really score on a hidden test.",
-    without: "12 of 12",
-    with: "0 of 12",
-    result: "12 of 12 fooled without the lesson → 0 of 12 with it",
+    // The headline is the share, not a count: how many agents a batch runs is the user's choice. The count this was
+    // measured on is said once, in the footnote.
+    without: "100%",
+    with: "0%",
+    result: "100% of agents fooled without the lesson → 0% with it",
     words: "Same task, same model, same trap. The only difference was one lesson, written by Orro's investigator and approved by a person.",
     gist: "Before the train/test split, remove near-duplicate rows, not only exact copies.",
-    foot: "12 runs per setting, one trap (near-duplicate rows). 95% intervals: 76–100% without the lesson, 0–24% with it. Batches f331 and b0a7.",
+    foot: "Measured on 12 agents each way (you choose how many a batch runs), one trap (near-duplicate rows): 12 of 12 fooled, then 0 of 12. 95% intervals: 76–100% without the lesson, 0–24% with it. Batches f331 and b0a7.",
     link: "See the fool rate",
   },
   close: { title: "Find the step. Then test it." },
@@ -345,7 +347,7 @@ function lessonsView(): string {
       <article class="lp-card lp-fool" data-lp-rev style="--i:0">
         <div class="lp-fool-n" aria-label="${attr(l.result)}">
           <span aria-hidden="true"><b class="lp-fool-bad">${esc(l.without)}</b><span class="lp-fool-arrow"> → </span><b class="lp-fool-good">${esc(l.with)}</b></span>
-          <span class="lp-fool-cap" aria-hidden="true">fooled without the lesson, then with it</span>
+          <span class="lp-fool-cap" aria-hidden="true">of agents fooled without the lesson, then with it</span>
         </div>
         <div class="lp-fool-t">
           <p class="lp-fool-def">${esc(l.definition)}</p>

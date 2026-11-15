@@ -979,7 +979,11 @@ describe("Lessons work", () => {
     expect(l.definition).toBe("Fool rate: the share of agents whose reported score is inflated, more than 8 points above what they really score on a hidden test.");
     expect(t).toContain(l.definition);
     // fixtures/_foolrate/1115-041350.json: 12 of 12 (batch 1115-041132-f331) and 0 of 12 (batch 1115-041219-b0a7).
-    expect(l.result).toBe("12 of 12 fooled without the lesson → 0 of 12 with it");
+    // The headline is the share (the number of agents is the user's choice); the footnote keeps the counts.
+    expect(l.result).toBe("100% of agents fooled without the lesson → 0% with it");
+    expect([l.without, l.with]).toEqual(["100%", "0%"]);
+    expect(t).toContain("Measured on 12 agents each way (you choose how many a batch runs)");
+    expect(t).toContain("12 of 12 fooled, then 0 of 12.");
     expect(html).toContain(`aria-label="${attr(l.result)}"`);
     expect(t).toContain("Same task, same model, same trap. The only difference was one lesson");
     expect(t).toContain("Before the train/test split, remove near-duplicate rows, not only exact copies.");

@@ -41,7 +41,9 @@ primary_region = "iad"
     timeout = "5s"
     grace_period = "20s"
 
-# 1 GB is enough for the demo and for scoring a robot batch; raise it with `fly scale memory 2048` for heavy use.
+# 2 GB. 1 GB was not enough: opening a humanoid run's page (the G1 model, its scene and several motion files) ran the
+# server out of memory twice on Nov 15 (Fly log: "Out of memory: Killed process (uvicorn)"). Keep this in step with
+# the machine: a deploy sets the machine to what this file says.
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "1gb"
+  memory = "2gb"

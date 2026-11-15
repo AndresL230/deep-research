@@ -39,6 +39,10 @@ MOTION_CACHE_SIZE = 64
 GEOM_TYPES = {0: "plane", 2: "sphere", 3: "capsule", 5: "cylinder", 6: "box", 7: "mesh"}
 
 _lock = threading.Lock()
+# One heavy build at a time: compiling a model with its meshes, packing a scene, or turning a motion file into poses.
+# A run's page asks for its scene and several motion files at once; done side by side on a small machine (1 GB) they
+# ran it out of memory and the server was killed. Re-entrant, because building poses may build the model first.
+_build_lock = threading.RLock()
 _models: dict[str, Any] = {}
 _scene_cache: dict[str, tuple[dict, bytes]] = {}
 _motion_cache: OrderedDict[tuple, bytes] = OrderedDict()
@@ -299,8 +303,10 @@ def scene(model_id: str | None = None) -> tuple[dict, bytes]:
     if mid not in VIEWS:
         raise MotionError(f"unknown model {mid!r}")
     if mid not in _scene_cache:
-        data = build_scene(mid)
-        _scene_cache[mid] = (data, _pack(data))
+        with _build_lock:
+            if mid not in _scene_cache:
+                data = build_scene(mid)
+                _scene_cache[mid] = (data, _pack(data))
     return _scene_cache[mid]
 
 
@@ -551,15 +557,22 @@ def motion_poses(path: Path) -> bytes:
         if hit is not None:
             _motion_cache.move_to_end(key)
             return hit
-    try:
-        motion = json.loads(path.read_text())
-    except (OSError, ValueError) as e:
-        raise MotionError("the file is not JSON") from e
-    packed = _pack(poses(motion))
-    with _lock:
-        _motion_cache[key] = packed
-        while len(_motion_cache) > MOTION_CACHE_SIZE:
-            _motion_cache.popitem(last=False)
+    with _build_lock:
+        # Another request may have built this file while this one waited its turn.
+        with _lock:
+            hit = _motion_cache.get(key)
+            if hit is not None:
+                return hit
+        try:
+            motion = json.loads(path.read_text())
+        except (OSError, ValueError) as e:
+            raise MotionError("the file is not JSON") from e
+        packed = _pack(poses(motion))
+        del motion
+        with _lock:
+            _motion_cache[key] = packed
+            while len(_motion_cache) > MOTION_CACHE_SIZE:
+                _motion_cache.popitem(last=False)
     return packed
 
 
