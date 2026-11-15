@@ -2544,11 +2544,19 @@ export function diagnosisLine(trace: readonly TraceEntry[], same?: string): stri
 const plainCode = (s: string): string =>
   s.replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
+/** The first sentence of a longer text, for the line under the headline; the whole of it when it is one sentence. */
+const firstSentence = (s: string): string => s.match(/^[\s\S]*?[.!?](?=\s+[A-Z]|\s*$)/)?.[0] ?? s;
+
+/** The fold key that says which traced run is in focus ("dx-run:r06"). One of a group: main.ts `ACT.pick`. */
+const dxRunKey = (id: string): string => `dx-run:${id}`;
+
 /**
- * The diagnosis. One line says how many runs were traced and whether they share a cause. Under it the failures, grouped
- * by run: for each, the line of the run's controller.py the tracer blames, then what it saw happen in the recording
- * (two lines of it, the whole sentence once the fold is open), and a link to the recording. Why each line causes the
- * failure is behind the fold.
+ * The diagnosis. One line says how many runs were traced and whether they share a cause. Under it the traced runs
+ * stand in a row, one of them in focus (the run the fix is for, until another is picked), and below the row are that
+ * one run's failures: what the tracer saw happen in the recording (two lines of it, the whole sentence once the fold
+ * is open), the line of the run's controller.py it blames, and a link to the recording. Why each line causes the
+ * failure is behind the fold. With every fold open (`open: "all"`) each run's failures are listed, one run after
+ * another, with no row to pick from.
  */
 export function diagnosisView(vm: BatchVm): string {
   const c = vm.case;
@@ -2556,36 +2564,60 @@ export function diagnosisView(vm: BatchVm): string {
   if (!trace.length) return "";
   const why = isOpen(vm, "dx-why");
   const sw = scoreWords(c.config);
-  const card = (t: (typeof trace)[number]): string => {
+  const card = (t: (typeof trace)[number], i: number): string => {
     const where = `line ${t.line}`;
     const link = t.motion_file
       ? `<a class="ln-dx-link" href="${attr(batchFileUrl(vm.id, t.motion_file))}" target="_blank" rel="noopener">recording</a>`
       : "";
     return `<div class="ln-card ln-dx-entry" data-io data-morph-key="trace-${attr(String(t.at))}">` +
-      `<pre class="ln-dx-code"><span class="ln-dx-ln">${esc(where)}</span>${esc(plainCode(t.excerpt))}</pre>` +
+      `<span class="ln-dx-n" aria-hidden="true">${i + 1}</span><div class="ln-dx-b">` +
       `<p class="ln-dx-symptom">${esc(t.symptom)}</p>` +
+      `<pre class="ln-dx-code"><span class="ln-dx-ln">${esc(where)}</span>${esc(plainCode(t.excerpt))}</pre>` +
       (why ? `<p class="ln-dx-why ln-muted">${esc(t.why)}</p>` : "") +
       (link ? `<div class="ln-dx-h">${link}</div>` : "") +
-      `</div>`;
+      `</div></div>`;
   };
-  // The runs in the order they were traced, each with its failures under it.
+  // The runs in the order they were traced.
   const ids = [...new Set(trace.map((t) => t.run_id))];
+  const all = vm.open === "all";
+  const chosen = all ? undefined : ids.find((id) => (vm.open as Readonly<Record<string, boolean>> | undefined)?.[dxRunKey(id)]);
+  const fixRun = c.fix?.run_id;
+  const picked = all ? null : chosen ?? (fixRun && ids.includes(fixRun) ? fixRun : ids[0]);
+  const failures = (n: number): string => `${n} failure${n === 1 ? "" : "s"}`;
+  const scoresOf = (id: string): string => {
+    const r = c.runs?.[id];
+    return r && (r.reported_accuracy != null || r.true_accuracy != null)
+      ? `${sw.reported} ${pct(r.reported_accuracy, 0)}, ${sw.true.toLowerCase()} ${pct(r.true_accuracy, 0)}` : "";
+  };
+  // The row of runs: each a button, the one in focus lit, a thin line from one to the next.
+  const pick = (id: string): string => {
+    const n = trace.filter((t) => t.run_id === id).length;
+    const on = id === picked;
+    return `<button type="button" class="ln-dx-pick${on ? " is-on" : ""}" data-morph-key="dxpick-${attr(id)}" data-act="${ACT.pick}" data-arg="${attr(dxRunKey(id))}" aria-pressed="${on}">` +
+      `<span class="ln-dx-pick-ic">${askIcon("read", 15)}</span>` +
+      `<span class="ln-dx-pick-t"><b>Run ${esc(id)}</b><span>${esc(scoresOf(id) || failures(n))}</span></span></button>`;
+  };
+  const rail = picked && ids.length > 1
+    ? `<div class="ln-dx-rail" data-morph-key="dx-rail" role="group" aria-label="The traced runs: pick one to read its failures">` +
+      ids.map(pick).join(`<i class="ln-dx-wire" aria-hidden="true"></i>`) + `</div>`
+    : "";
   const group = (id: string): string => {
     const own = trace.filter((t) => t.run_id === id);
-    const r = c.runs?.[id];
-    const scores = r && (r.reported_accuracy != null || r.true_accuracy != null)
-      ? `<span class="ln-muted">${esc(sw.reported.toLowerCase())} ${esc(pct(r.reported_accuracy))}, ${esc(sw.true.toLowerCase())} ${esc(pct(r.true_accuracy))}</span>` : "";
+    const scores = scoresOf(id);
     return `<div class="ln-dx-run" data-morph-key="dxrun-${attr(id)}">` +
-      `<div class="ln-dx-run-h"><span class="ln-tag">${esc(id)}</span><b>${own.length} failure${own.length === 1 ? "" : "s"} traced</b>${scores}</div>` +
+      // Under the row the run's card already says its scores; without the row, the heading does.
+      `<div class="ln-dx-run-h"><span class="ln-tag">${esc(id)}</span><b>${failures(own.length)} traced</b>` +
+      (scores && !rail ? `<span class="ln-muted">${esc(scores.toLowerCase())}</span>` : "") + `</div>` +
       `<div class="ln-dx-entries" data-morph-list>${own.map(card).join("")}</div></div>`;
   };
   const cmp = c.trace_comparison;
   return `<section class="ln-sec ln-dx ds-rise" data-io data-morph-key="ln-dx" aria-label="Diagnosis">` +
     head("Diagnosis") +
     `<p class="ln-headline">${reveal(diagnosisLine(trace, cmp?.same))}</p>` +
-    (cmp ? `<p class="ln-sub ln-dx-cmp">${esc(cmp.sentence)}</p>`
+    (cmp ? `<p class="ln-sub ln-dx-cmp">${esc(why ? cmp.sentence : firstSentence(cmp.sentence))}</p>`
       : `<p class="ln-sub">Each failure the code tracer saw in a recording, with the line of code behind it.</p>`) +
-    `<div class="ln-stack ln-dx-runs${why ? " is-full" : ""}" data-morph-list>${ids.map(group).join("")}</div>` +
+    rail +
+    `<div class="ln-stack ln-dx-runs${why ? " is-full" : ""}" data-morph-list>${(picked ? [picked] : ids).map(group).join("")}</div>` +
     foldButton("dx-why", why, "why each line causes it") +
     `</section>`;
 }

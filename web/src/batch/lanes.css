@@ -584,18 +584,44 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-dx-code { display:flex; align-items:baseline; gap:12px; margin:0; padding:8px 10px; border:1px solid var(--border); border-left:2px solid var(--accent); border-radius:var(--r-ctl); background:var(--surface); font-family:var(--code); font-size:12px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; overflow-x:auto; color:var(--fg); }
 .ln-dx-ln { flex:none; color:var(--fg-40); font-variant-numeric:tabular-nums; user-select:none; }
 .ln-dx-why { margin:0; font-size:13px; }
-/* The failures, grouped by run. In each: the blamed line of code first, then what was seen happen, in grey and two
-   lines long until the fold is open, then the link to the recording. */
-.ln-dx-runs { gap:22px; }
-.ln-dx-run { display:flex; flex-direction:column; gap:10px; min-width:0; }
+/* The traced runs in a row on a soft band, a thin line from one to the next. The one in focus is a lit card; the
+   others stay readable, a step back. Under the band, that run's failures. */
+.ln-dx-rail { display:flex; align-items:center; justify-content:safe center; min-width:0; padding:30px 24px; border-radius:var(--r-card); background:linear-gradient(115deg, color-mix(in srgb, var(--pu-wash) 45%, var(--bg)), var(--pu-wash)); overflow-x:auto; scrollbar-width:none; }
+.ln-dx-rail::-webkit-scrollbar { display:none; }
+.ln-dx-wire { flex:0 0 36px; height:1px; background:var(--border-strong); }
+.ln-dx-pick { flex:1 1 0; max-width:310px; min-width:230px; display:flex; align-items:center; gap:13px; padding:14px 16px; border:1px solid transparent; border-radius:10px; background:color-mix(in srgb, var(--surface) 62%, transparent); color:var(--fg); font:inherit; text-align:left; cursor:pointer; opacity:.78; transition:opacity var(--t-hover) ease, background var(--t-hover) ease, box-shadow var(--t-hover) ease, border-color var(--t-hover) ease; }
+.ln-dx-pick:hover { opacity:1; }
+.ln-dx-pick:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.ln-dx-pick.is-on { opacity:1; background:var(--surface); border-color:var(--border); box-shadow:var(--menu-shadow); }
+.ln-dx-pick-ic { flex:none; display:grid; place-items:center; width:38px; height:38px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--fg-55); }
+.ln-dx-pick.is-on .ln-dx-pick-ic { color:var(--accent); border-color:color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.ln-dx-pick-t { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.ln-dx-pick-t > b { font-size:15px; font-weight:500; letter-spacing:-0.01em; }
+.ln-dx-pick-t > span { font-size:13px; color:var(--fg-55); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* One run's failures: plain rows with a hairline between them, not boxes. In each, what was seen happen (two lines
+   until the fold is open), then the blamed line of code, then the link to the recording. */
+.ln-dx-runs { gap:26px; }
+.ln-dx-run { display:flex; flex-direction:column; gap:2px; min-width:0; }
 .ln-dx-run-h { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; font-size:13px; }
 .ln-dx-run-h > b { font-size:15px; font-weight:500; letter-spacing:-0.01em; color:var(--fg); }
-.ln-dx-entries { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap:10px; }
-.ln-dx-runs .ln-dx-entry { gap:10px; padding:14px; }
-.ln-dx-runs .ln-dx-code { font-size:12.5px; color:var(--fg); white-space:pre-wrap; overflow-wrap:anywhere; }
-.ln-dx-runs .ln-dx-symptom { font-size:13.5px; line-height:1.45; letter-spacing:0; color:var(--fg-70); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.ln-dx-entries { display:flex; flex-direction:column; min-width:0; }
+.ln-dx-runs .ln-dx-entry { flex-direction:row; align-items:flex-start; gap:14px; padding:18px 0; border:0; border-radius:0; background:none; }
+.ln-dx-runs .ln-dx-entry + .ln-dx-entry { border-top:1px solid var(--border); }
+.ln-dx-n { flex:none; display:grid; place-items:center; width:24px; height:24px; border-radius:50%; background:var(--hover); color:var(--fg-55); font-size:12px; font-weight:500; font-variant-numeric:tabular-nums; }
+.ln-dx-b { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:10px; }
+.ln-dx-runs .ln-dx-symptom { max-width:78ch; font-size:15px; line-height:1.5; letter-spacing:0; color:var(--fg); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .ln-dx-runs.is-full .ln-dx-symptom { display:block; overflow:visible; }
-.ln-dx-runs .ln-dx-h { margin-top:auto; }
+.ln-dx-runs .ln-dx-code { align-self:flex-start; max-width:100%; box-sizing:border-box; font-size:12.5px; color:var(--fg); white-space:pre-wrap; overflow-wrap:anywhere; }
+.ln-dx-runs .ln-dx-why { max-width:78ch; font-size:13.5px; line-height:1.5; }
+.ln-dx-runs .ln-dx-link { margin-left:0; font-size:12.5px; }
+@media (max-width: 760px) {
+  /* A narrow screen has no room for the row: the runs stand one under another, every one of them in sight. */
+  .ln-dx-rail { flex-direction:column; align-items:stretch; gap:8px; padding:12px; overflow:visible; }
+  .ln-dx-pick { flex:none; max-width:none; min-width:0; min-height:44px; padding:10px 12px; }
+  .ln-dx-wire { display:none; }
+  .ln-dx-runs .ln-dx-entry { gap:10px; padding:16px 0; }
+}
 @media (prefers-reduced-motion: no-preference) {
   /* Each symptom rises as it comes on screen. */
   .ln-dx-entry { animation:ds-rise var(--t-card) var(--ease-out) var(--io-d, 0ms) both; }

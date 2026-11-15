@@ -38,6 +38,7 @@ export const ACT = {
   stop: "stop",                 // live only: stop the batch and its VMs
   toggleFeed: "toggle-feed",    // open or close the live feed under its header button (touch; hover opens it too)
   fold: "fold",                 // arg: a fold's key ("split", "exp:f1"): show or hide a section's detail
+  pick: "pick",                 // arg: "<group>:<value>" ("dx-run:r06"): put one of a group in focus, the rest out of it
   // replay
   replayToggle: "replay-toggle",   // play / pause
   replaySpeed: "replay-speed",     // arg: speed multiplier ("1", "4", "16")
