@@ -22,14 +22,12 @@ export interface ResearchSource {
   url: string;
   /** What is taken from the paper and where it runs, in one sentence. */
   text: string;
-  /** The paper itself, for its card: full title, authors' surnames and year. */
+  /** The paper itself, for its page: full title, authors and year. */
   title: string;
   authors: string;
   year: number;
-  /** What the batch takes from the paper: [what, in the paper's terms]. */
-  taken: [string, string][];
-  /** How this batch runs it: [what, how]. */
-  here: [string, string][];
+  /** The batch's setup, one table: [what, how]. `E_vel` is set as the symbol it is in the paper. */
+  setup: [string, string][];
 }
 
 /**
@@ -44,18 +42,15 @@ export function researchSource(config: unknown): ResearchSource | null {
       text: "Built on the ExBody2 research paper: its task (whole-body motion tracking on the Unitree G1) and its three tracking errors, "
         + "run in Orro's own simulator with controllers written by AI agents.",
       title: "ExBody2: Advanced Expressive Humanoid Whole-Body Control",
-      authors: "Ji, Peng, Liu, Li, Yang, Cheng, Wang", year: 2024,
-      taken: [
+      authors: "Mazeyu Ji, Xuanbin Peng, Fangchen Liu, Jialong Li, Ge Yang, Xuxin Cheng, Xiaolong Wang", year: 2024,
+      setup: [
         ["Robot", "Unitree G1 humanoid"],
         ["Task", "Follow a reference motion with the whole body"],
-        ["Measure", "Three tracking errors: root velocity, key body positions, joint angles"],
-        ["Test", "Motions that were practised against motions that were not"],
-        ["Motion data", "CMU motion capture clips"],
-      ],
-      here: [
+        ["Measures", "E_vel, E_mpkpe and E_mpjpe: the error in root velocity, key body positions and joint angles"],
+        ["Test", "Practice on one motion, then 20 held-out motions"],
+        ["Motion data", "CMU motion capture clips, fitted to the robot with the feet planted"],
         ["Controller", "Code written by an AI agent"],
         ["Simulator", "Orro's own MuJoCo scene"],
-        ["Reference motions", "34 clips fitted to the robot, with the feet planted"],
       ],
     };
   }
@@ -65,17 +60,16 @@ export function researchSource(config: unknown): ResearchSource | null {
       text: "Built on the LIBERO-PRO research paper: LIBERO's objects and layouts and LIBERO-PRO's position changes, "
         + "run in Orro's own simulator.",
       title: "LIBERO-PRO: Towards Robust and Fair Evaluation of Vision-Language-Action Models Beyond Memorization",
-      authors: "Zhou, Xu, Tie, Chen, Zhang, Chu, Zhou, Sun", year: 2025,
-      taken: [
+      authors: "Xueyang Zhou, Yangming Xu, Guiyao Tie, Yongchao Chen, Guowen Zhang, Duanfeng Chu, Pan Zhou, Lichao Sun", year: 2025,
+      setup: [
+        ["Robot", "Franka Panda arm"],
+        ["Task", "Pick a grocery object up and put it in the basket"],
         ["Objects", "The basket and ten grocery objects of LIBERO"],
-        ["Layouts", "Where each of the ten LIBERO-Object tasks puts every object"],
-        ["Test", "LIBERO-PRO's position changes: objects swapped and shifted"],
-        ["Pass rule", "The object ends at rest inside the basket"],
-      ],
-      here: [
+        ["Layouts", "The ten tasks of the LIBERO-Object suite"],
+        ["Test", "LIBERO-PRO's position changes, objects swapped and shifted: 30 episodes"],
+        ["Success", "The object ends at rest inside the basket"],
         ["Controller", "Code written by an AI agent"],
         ["Simulator", "Orro's own MuJoCo scene"],
-        ["Episodes", "30, over all ten tasks"],
       ],
     };
   }
@@ -101,34 +95,34 @@ export function researchNote(config: unknown, compact = false): string {
   return `<p class="rs" data-morph-key="research">${tag}<span class="rs-t">${esc(r.text)}</span>${researchLink(config)}</p>`;
 }
 
+/** A table cell's text with the paper's symbols set as symbols: `E_vel` is an italic E with "vel" below the line. */
+const symbols = (text: string): string => esc(text).replace(/\bE_([a-z]+)\b/g, "<i>E</i><sub>$1</sub>");
+
 /**
- * A batch's paper, drawn as one: a sheet with the arXiv number, the title and the authors, then what the batch takes
- * from it, a row at a time, and how this batch runs it. The rows come in one after another when the card first
- * shows (robot.css; still when the reader asked for less motion). Empty for a batch that builds on no paper.
+ * A batch's paper, set as the top of a paper's first page: the arXiv number up its left margin, the title and the
+ * authors centred, then one table of this batch's setup, ruled and captioned as a paper's table is, and the paper's
+ * address. The table's rows show one after another when the page first appears (robot.css; at once for a reader who
+ * asked for less motion). Empty for a batch that builds on no paper.
  *
- * The rows are fixed text, written when the domain was built: nothing reads the paper while the page loads, and
- * the card does not say that anything does.
+ * The table is the batch's setup, as its caption says, and its rows are fixed text written when the domain was
+ * built: nothing reads the paper while the page loads, and the page does not say that anything does.
  */
 export function researchCard(config: unknown): string {
   const r = researchSource(config);
   if (!r) return "";
-  const row = (i: number, cells: string): string => `<li class="rp-row" style="--i:${i}">${cells}</li>`;
-  const taken = r.taken.map(([what, text], i) => row(i, `<span class="rp-k">${esc(what)}</span><span class="rp-v">${esc(text)}</span>`)).join("");
-  const here = r.here.map(([what, how], i) => row(r.taken.length + 1 + i, `<span class="rp-k">${esc(what)}</span><span class="rp-v">${esc(how)}</span>`)).join("");
+  const address = r.url.replace(/^https?:\/\//, "");
+  const rows = r.setup.map(([what, how], i) => `<tr class="rp-row" style="--i:${i}"><th scope="row">${esc(what)}</th><td>${symbols(how)}</td></tr>`).join("");
   return `<section class="rp" data-morph-key="research" aria-label="${attr(`Research paper: ${r.name}`)}">`
-    + `<a class="rp-sheet" href="${attr(r.url)}" target="_blank" rel="noopener" title="Open the paper on arXiv">`
-    + `<span class="rp-stamp">${esc(r.paper)}</span>`
-    + `<span class="rp-kind">Research paper</span>`
-    + `<span class="rp-title">${esc(r.title)}</span>`
-    + `<span class="rp-authors">${esc(`${r.authors} · ${r.year}`)}</span>`
-    + `<span class="rp-lines" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`
-    + `<span class="rp-open">Read on arXiv${EXTERNAL}</span>`
-    + `</a>`
-    + `<div class="rp-map">`
-    + `<h3 class="rp-h"><span class="rp-dot rp-dot--paper"></span>From the paper</h3>`
-    + `<ul class="rp-list rp-list--taken">${taken}</ul>`
-    + `<h3 class="rp-h rp-row" style="--i:${r.taken.length}"><span class="rp-dot rp-dot--ours"></span>In this batch</h3>`
-    + `<ul class="rp-list rp-list--ours">${here}</ul>`
+    + `<p class="rp-eyebrow">The research paper this batch builds on</p>`
+    + `<div class="rp-page">`
+    + `<span class="rp-arxiv" aria-hidden="true">${esc(`${r.paper} · ${r.year}`)}</span>`
+    + `<h3 class="rp-title"><a href="${attr(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a></h3>`
+    + `<p class="rp-authors">${esc(r.authors)}</p>`
+    + `<table class="rp-table">`
+    + `<caption><span class="rp-cap-n">Table I</span><span class="rp-cap-t">Setup of this batch</span></caption>`
+    + `<tbody>${rows}</tbody>`
+    + `</table>`
+    + `<p class="rp-ref">${esc(`${r.name}, ${r.paper}.`)} <a href="${attr(r.url)}" target="_blank" rel="noopener">${esc(address)}</a></p>`
     + `</div>`
     + `</section>`;
 }

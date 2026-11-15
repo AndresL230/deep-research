@@ -116,35 +116,29 @@
 .rs-link { display:inline-flex; align-items:center; gap:4px; color:var(--accent, #a78bfa); text-decoration:none; white-space:nowrap; }
 .rs-link:hover, .rs-link:focus-visible { text-decoration:underline; }
 
-/* a batch's paper as a card: the sheet on the left, what is taken from it and how the batch runs it on the right */
-.rp { display:grid; grid-template-columns:minmax(200px, 250px) 1fr; gap:22px; margin:18px 0 6px; padding:16px; border:1px solid var(--border); border-radius:var(--r-card, 12px); background:var(--surface); }
-.rp-sheet { position:relative; align-self:start; display:flex; flex-direction:column; gap:7px; padding:16px 14px 12px; border-radius:6px; overflow:hidden; text-decoration:none; color:#1c1b22; background:#f7f5ef; box-shadow:0 1px 0 rgb(0 0 0 / 25%), 0 10px 24px rgb(0 0 0 / 22%); transform:rotate(-1.2deg); transition:transform .2s ease; }
-.rp-sheet:hover, .rp-sheet:focus-visible { transform:rotate(0deg) translateY(-2px); }
-/* the corner of a page */
-.rp-sheet::before { content:""; position:absolute; top:0; right:0; border-style:solid; border-width:0 22px 22px 0; border-color:transparent var(--surface) #d9d5c8 transparent; }
-/* one pass of light down the sheet when the card first shows */
-.rp-sheet::after { content:""; position:absolute; left:0; right:0; top:-30%; height:30%; pointer-events:none; background:linear-gradient(to bottom, transparent, rgb(124 92 255 / 22%), transparent); animation:rp-read 1.5s ease-in-out .2s 1 both; }
-.rp-stamp { align-self:flex-start; padding:1px 6px; border:1px solid #b31b1b; border-radius:3px; font-family:var(--mono, ui-monospace, monospace); font-size:11px; color:#b31b1b; }
-.rp-kind { font-family:var(--label); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:#6b6875; }
-.rp-title { font-family:Georgia, "Times New Roman", serif; font-size:15px; line-height:1.3; font-weight:600; }
-.rp-authors { font-family:Georgia, "Times New Roman", serif; font-size:11.5px; font-style:italic; color:#4b4855; }
-.rp-lines { display:grid; gap:5px; margin-top:4px; }
-.rp-lines i { height:3px; border-radius:2px; background:#dcd8cc; }
-.rp-lines i:nth-child(2) { width:92%; } .rp-lines i:nth-child(3) { width:97%; } .rp-lines i:nth-child(4) { width:60%; }
-.rp-open { display:inline-flex; align-items:center; gap:4px; margin-top:6px; font-family:var(--label); font-size:12px; font-weight:500; color:#5b3fd6; }
-.rp-map { min-width:0; }
-.rp-h { display:flex; align-items:center; gap:7px; margin:0 0 6px; font-family:var(--label); font-size:12px; font-weight:500; color:var(--fg-55); }
-.rp-list + .rp-h { margin-top:12px; }
-.rp-dot { width:8px; height:8px; border-radius:50%; }
-.rp-dot--paper { background:#b31b1b; } .rp-dot--ours { background:var(--accent, #a78bfa); }
-.rp-list { display:grid; gap:4px; margin:0; padding:0; list-style:none; }
-.rp-list .rp-row { display:grid; grid-template-columns:118px 1fr; gap:10px; padding:5px 9px; border-radius:6px; font-size:13px; line-height:1.4; border-left:2px solid transparent; background:color-mix(in srgb, var(--fg) 4%, transparent); }
-.rp-list--taken .rp-row { border-left-color:#b31b1b; } .rp-list--ours .rp-row { border-left-color:var(--accent, #a78bfa); }
-.rp-k { font-family:var(--label); font-size:12px; color:var(--fg-55); }
-.rp-v { color:var(--fg); }
-/* each row comes in from the sheet's side, one after another */
-.rp-row { opacity:0; animation:rp-in .45s cubic-bezier(.2, .7, .2, 1) calc(.9s + var(--i) * .16s) 1 both; }
-@keyframes rp-in { from { opacity:0; transform:translateX(-18px); } to { opacity:1; transform:none; } }
-@keyframes rp-read { from { top:-30%; } to { top:100%; } }
-@media (prefers-reduced-motion: reduce) { .rp-row { opacity:1; animation:none; } .rp-sheet::after { display:none; } }
-@media (max-width: 720px) { .rp { grid-template-columns:1fr; } .rp-sheet { transform:none; max-width:280px; } .rp-list .rp-row { grid-template-columns:1fr; gap:0; } }
+/* a batch's paper, set as the top of a paper's first page: black serif type on a white sheet in either theme */
+.rp { margin:20px 0 4px; }
+.rp-eyebrow { margin:0 0 8px; font-family:var(--label); font-size:12px; color:var(--fg-55); }
+.rp-page { position:relative; padding:34px 64px 26px; border-radius:2px; color:#111; background:#fff; font-family:"Times New Roman", Times, "Nimbus Roman", serif; box-shadow:0 0 0 1px rgb(0 0 0 / 12%); }
+/* the paper's number up the left margin, as arXiv prints it on a first page */
+.rp-arxiv { position:absolute; left:22px; top:50%; transform:translate(-50%, -50%) rotate(-90deg); white-space:nowrap; font-size:13px; letter-spacing:.02em; color:#8a8a8a; }
+.rp-title { margin:0 auto; max-width:30em; text-align:center; font-size:23px; line-height:1.22; font-weight:400; text-wrap:balance; }
+.rp-title a { color:inherit; text-decoration:none; }
+.rp-title a:hover, .rp-title a:focus-visible { text-decoration:underline; }
+.rp-authors { margin:10px auto 0; max-width:46em; text-align:center; font-size:14px; line-height:1.4; text-wrap:balance; }
+/* a paper's table: a heavy rule above and below, a hairline between rows, no boxes */
+.rp-table { margin:20px auto 0; width:100%; max-width:660px; border-collapse:collapse; font-size:14.5px; line-height:1.35; }
+.rp-table caption { caption-side:top; padding-bottom:7px; text-align:center; font-size:12px; letter-spacing:.06em; text-transform:uppercase; }
+.rp-cap-n, .rp-cap-t { display:block; }
+.rp-table tbody { border-top:1.5px solid #111; border-bottom:1.5px solid #111; }
+.rp-table tr + tr th, .rp-table tr + tr td { border-top:.5px solid #c9c9c9; }
+.rp-table th, .rp-table td { padding:5px 10px; text-align:left; vertical-align:top; }
+.rp-table th { width:8.5em; font-weight:400; font-style:italic; white-space:nowrap; }
+.rp-table sub { font-size:.72em; }
+.rp-ref { margin:14px auto 0; max-width:660px; font-size:12.5px; color:#333; }
+.rp-ref a { color:#111; font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:11.5px; text-underline-offset:2px; }
+/* the table's rows show one after another */
+.rp-row { animation:rp-in .35s ease-out calc(.25s + var(--i) * .09s) 1 both; }
+@keyframes rp-in { from { opacity:0; } to { opacity:1; } }
+@media (prefers-reduced-motion: reduce) { .rp-row { animation:none; } }
+@media (max-width: 720px) { .rp-page { padding:22px 18px 18px 34px; } .rp-arxiv { left:14px; font-size:11px; } .rp-title { font-size:19px; } .rp-table th { width:auto; white-space:normal; } }
