@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (scikit-learn, 500 trees, random_state=42, default hyperparameters) on 8 raw medical features",
+  "notes": "Exact duplicate rows were removed (864 unique of 921) before a stratified 80/20 split (train 691, test 173). Zero values in insulin/skin_thickness were kept as-is; the model was not tuned on the test set."
+}

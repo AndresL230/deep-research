@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9191,
+  "model": "RandomForestClassifier (n_estimators=300, random_state=0) with zero-as-missing median imputation",
+  "notes": "Dropped 57 exact duplicate rows (864 remain) and split 80/20 stratified (random_state=42). Glucose, blood pressure, skin thickness, insulin and BMI zeros were treated as missing and median-imputed; repeated 5x5 CV on all data gave 0.863 +/- 0.022, so the single test score is at the high end of the expected range."
+}

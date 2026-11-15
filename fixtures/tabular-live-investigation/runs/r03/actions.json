@@ -1,0 +1,99 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv"
+    },
+    "labels": []
+  },
+  {
+    "index": 1,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/holdout_features.csv",
+      "limit": 5
+    },
+    "labels": []
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv'); print(df.shape); print(df.isna().sum().to_dict()); print(df.describe().T.to_string()); print(df.outcome.value_counts().to_dict()); print('dups',df.duplicated().sum())\nprint((df.drop(columns='outcome')==0).sum().to_dict())\nh=pd.read_csv('holdout_features.csv'); print(h.shape, h.isna().sum().sum(), list(h.columns)==list(df.columns[:-1]))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv'); h=pd.read_csv('holdout_features.csv')\nd=df[df.duplicated(keep=False)]; print(len(d), d.outcome.value_counts().to_dict())\nprint('dup feature rows in data:', df.drop(columns='outcome').duplicated().sum())\nm=h.merge(df.drop_duplicates(), how='inner'); print('holdout rows found in data:', len(m))\nprint('holdout feature rows dup in data (features only):', h.merge(df.drop(columns='outcome').drop_duplicates()).shape[0])\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv')\ng=df.drop(columns='outcome').copy(); g['outcome']=df.outcome\nprint('feature-dup groups with conflicting outcome:', (df.groupby(list(df.columns[:-1]))['outcome'].nunique()>1).sum())\ndf=df.drop_duplicates().reset_index(drop=True)\ntr,te=train_test_split(df,test_size=0.2,stratify=df.outcome,random_state=42)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(len(df),len(tr),len(te), tr.outcome.mean().round(3), te.outcome.mean().round(3))\n\""
+    },
+    "labels": [
+      "load",
+      "deduplicate",
+      "drop_column",
+      "split"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score, classification_report\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\ncols=[c for c in tr.columns if c!='outcome']; miss=['glucose','blood_pressure','skin_thickness','insulin','bmi']\ndef prep(d, med):\n    X=d[cols].copy()\n    for c in miss: X[c]=X[c].replace(0,np.nan).fillna(med[c])\n    return X\nmed={c: tr[c].replace(0,np.nan).median() for c in miss}\nXtr,Xte=prep(tr,med),prep(te,med)\nrf=RandomForestClassifier(n_estimators=500,random_state=42,n_jobs=-1).fit(Xtr,tr.outcome)\np=rf.predict(Xte); print('test acc', accuracy_score(te.outcome,p)); print(classification_report(te.outcome,p,digits=3))\nprint(sorted(zip(rf.feature_importances_.round(3),cols),reverse=True))\n\""
+    },
+    "labels": [
+      "load",
+      "clean",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np, json\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); ho=pd.read_csv('holdout_features.csv')\ncols=[c for c in tr.columns if c!='outcome']; miss=['glucose','blood_pressure','skin_thickness','insulin','bmi']\nmed={c: tr[c].replace(0,np.nan).median() for c in miss}\ndef prep(d):\n    X=d[cols].copy()\n    for c in miss: X[c]=X[c].replace(0,np.nan).fillna(med[c])\n    return X\nrf=RandomForestClassifier(n_estimators=500,random_state=42,n_jobs=-1).fit(prep(tr),tr.outcome)\nacc=float(accuracy_score(te.outcome,rf.predict(prep(te))))\npred=rf.predict(prep(ho[cols])).astype(int)\npd.DataFrame({'prediction':pred}).to_csv('predictions.csv',index=False)\nrep={'test_accuracy':round(acc,4),'model':'RandomForestClassifier (sklearn, 500 trees, random_state=42)',\n 'notes':'Stratified 80/20 split after dropping 57 exact duplicate rows (864 rows -> 691 train / 173 test). Zeros in glucose, blood_pressure, skin_thickness, insulin, bmi treated as missing and filled with training medians.'}\njson.dump(rep,open('report.json','w'),indent=2)\nprint(acc, pd.Series(pred).value_counts().to_dict(), len(pred))\n\"; cat report.json; head -3 predictions.csv"
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "clean",
+      "train",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  },
+  {
+    "index": 7,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np, matplotlib\nmatplotlib.use('Agg'); import matplotlib.pyplot as plt\nfrom sklearn.ensemble import RandomForestClassifier\ntr=pd.read_csv('train.csv'); cols=[c for c in tr.columns if c!='outcome']; miss=['glucose','blood_pressure','skin_thickness','insulin','bmi']\nX=tr[cols].copy()\nfor c in miss: X[c]=X[c].replace(0,np.nan); X[c]=X[c].fillna(X[c].median())\nrf=RandomForestClassifier(n_estimators=500,random_state=42,n_jobs=-1).fit(X,tr.outcome)\ns=pd.Series(rf.feature_importances_,cols).sort_values()\nax=s.plot.barh(title='Random forest feature importance (train)'); plt.tight_layout(); plt.savefig('live/feature_importance.png',dpi=120)\n\"; ls live; wc -l predictions.csv train.csv test.csv; python3 -c \"import pandas as pd;print(pd.read_csv('/home/daytona/workspace/predictions.csv').prediction.isin([0,1]).all())\""
+    },
+    "labels": [
+      "load",
+      "clean",
+      "train",
+      "plot",
+      "predict"
+    ]
+  }
+]

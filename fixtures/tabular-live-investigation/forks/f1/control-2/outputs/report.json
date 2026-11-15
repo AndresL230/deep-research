@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9075,
+  "model": "RandomForestClassifier (500 trees, random_state=42) with zeros-as-missing median imputation",
+  "notes": "Dropped 57 exact duplicate rows before an 80/20 stratified split (seed 42). Physiologically impossible zeros in glucose, blood_pressure, skin_thickness, insulin, bmi were treated as missing and median-imputed; 5-fold CV on train was 0.82, so the single test split (0.91) is likely optimistic."
+}

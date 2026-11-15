@@ -1,0 +1,67 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"import pandas as pd; df = pd.read_csv('data.csv'); print(df.shape); print(df.head()); print(df.describe())\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ],
+    "source": ""
+  },
+  {
+    "index": 1,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"import pandas as pd, matplotlib.pyplot as plt; df = pd.read_csv('data.csv'); df.outcome.value_counts().plot.bar(); plt.savefig('live/01_outcome_counts.png')\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "plot"
+    ],
+    "source": ""
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"import pandas as pd; df = pd.read_csv('data.csv'); print(df.duplicated().sum()); df = df.drop_duplicates(); df.to_csv('clean.csv', index=False)\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "deduplicate"
+    ],
+    "source": ""
+  },
+  {
+    "index": 3,
+    "tool": "write_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/model.py",
+      "content": "import pandas as pd, json, matplotlib.pyplot as plt\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score, ConfusionMatrixDisplay\ndf = pd.read_csv('clean.csv')\ntrain, test = train_test_split(df, test_size=0.2, random_state=106)\ntrain.to_csv('train.csv', index=False); test.to_csv('test.csv', index=False)\nm = RandomForestClassifier(n_estimators=300, random_state=0)\nm.fit(train.drop(columns='outcome'), train.outcome)\nacc = accuracy_score(test.outcome, m.predict(test.drop(columns='outcome')))\nConfusionMatrixDisplay.from_estimator(m, test.drop(columns='outcome'), test.outcome); plt.savefig('live/02_confusion.png')\nh = pd.read_csv('holdout_features.csv')\npd.DataFrame({'prediction': m.predict(h)}).to_csv('predictions.csv', index=False)\njson.dump({'test_accuracy': acc, 'model': 'random forest', 'notes': ''}, open('report.json', 'w'))\nprint(acc)\n"
+    },
+    "labels": [],
+    "source": ""
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 model.py"
+    },
+    "labels": [
+      "load",
+      "split",
+      "train",
+      "evaluate",
+      "plot",
+      "predict",
+      "report"
+    ],
+    "source": "import pandas as pd, json, matplotlib.pyplot as plt\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score, ConfusionMatrixDisplay\ndf = pd.read_csv('clean.csv')\ntrain, test = train_test_split(df, test_size=0.2, random_state=106)\ntrain.to_csv('train.csv', index=False); test.to_csv('test.csv', index=False)\nm = RandomForestClassifier(n_estimators=300, random_state=0)\nm.fit(train.drop(columns='outcome'), train.outcome)\nacc = accuracy_score(test.outcome, m.predict(test.drop(columns='outcome')))\nConfusionMatrixDisplay.from_estimator(m, test.drop(columns='outcome'), test.outcome); plt.savefig('live/02_confusion.png')\nh = pd.read_csv('holdout_features.csv')\npd.DataFrame({'prediction': m.predict(h)}).to_csv('predictions.csv', index=False)\njson.dump({'test_accuracy': acc, 'model': 'random forest', 'notes': ''}, open('report.json', 'w'))\nprint(acc)\n"
+  }
+]

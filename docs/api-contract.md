@@ -29,9 +29,11 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | GET | `/api/batches/{id}/motion?path=<motion file>` | One motion file as body poses: `{"t", "bodies", "frames": [[x, y, z, qw, qx, qy, qz per body], ...], "static", "result", "can_start", "place_target"}`, from `mj_kinematics` on each frame's qpos. `path` must be under `runs/<run>/outputs/` or `forks/<fork>/<child>/outputs/`, or be a scored run's hidden episode listed in its `hidden_results` (`400` otherwise, never `task/`; `404` for a hidden episode of a run not scored yet); `422` when the file is not a motion file. A team hub batch's file comes from the hub (see [Motion files on the hub](#motion-files-on-the-hub)) |
 | GET | `/api/batches/{id}/motion-summaries?path=...&path=...` | For the viewer's file picker: per path, `{"can_start", "place_target", "duration", "n", "result"}` or `{"error"}`. Same paths, checks and hub fallback as `/motion` |
 | POST | `/api/batches/{id}/investigate` | Live only. Starts the investigator (phase `ready`) |
-| POST | `/api/batches/{id}/decision` | Live only. `{"approve": bool}` answers `forks.pending` (phase `awaiting_approval`) |
+| POST | `/api/batches/{id}/decision` | Live only. `{"approve": bool}` answers `forks.pending` (phase `awaiting_approval`); `{"approve": true, "pairs": n}` (1 to 6) approves a paired experiment with `n` pairs (the edit decision) |
+| POST | `/api/batches/{id}/lessons/{lesson_id}` | Live only. `{"approve": bool}` answers a lesson the investigator proposed (`forks.pending.lesson_id`) |
 | POST | `/api/batches/{id}/stop` | Live only. Cancels the work and stops every VM |
 | POST | `/api/batches/{id}/resume?investigate=<bool>` | Bring a saved batch of ours back live, in phase `ready`, so the investigator and the fork experiment can run on it after a server restart. With `investigate=true` the investigator starts in the same call. Only a batch whose runs are all scored, with a split and no verdict yet; `409 {"detail"}` says why otherwise. The list and the websocket snapshot flag such a batch with `resumable: true` |
+| POST | `/api/batches/{id}/suspects/{suspect_id}/test` | For a finished, real saved batch: resume its investigator on its own saved thread (`checkpoints.sqlite`), asking it to test a suspect its verdict left untested. Loads the batch back as more pairs do and claims it (phase `investigating`); the experiment it asks for waits on the usual approval, under the budget. Returns `{"id", "phase", "suspect_id"}`. `409 {"detail"}` says why it cannot (simulated, a fixture, running, already tested, no saved thread, files missing) |
 | GET | `/api/batches/{id}/more-pairs?n=<copies per arm>` | For a saved batch whose verdict is `open`: what running `n` more copies per arm of the verdict's fork experiment would add and cost, for the confirmation (`MorePairsQuote`, see More pairs below). Starts and loads nothing. `409 {"detail"}` says why more pairs cannot run; `422` for `n` below 1 |
 | POST | `/api/batches/{id}/more-pairs?n=<copies per arm>` | Run them: loads the saved batch back into this server (as `resume` does), claims it (phase `forking`) and starts the copies, then updates the fork and the verdict. Returns the quote plus `id`, `phase` and the new `children`. `409 {"detail"}` when it cannot run, an over-budget estimate included |
 | WS | `/api/batches/{id}/ws` | See below |
@@ -176,12 +178,24 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   changed) or `stopped` (stopped, or the server stopped: its scored copies count, the others are failed children).
   The fork's `children` gain the round's copies, `arms` counts every copy of every round, and `n_per_arm` becomes
   the copies per arm over all rounds.
+  A finished method fork also has (MASTER_PLAN 6.1, added with the running score) `evidence` (the same shape as the
+  verdict's below), `pairs` (`[{i, control_gap, changed_gap, agree}]`: control copy i and forced copy i, both
+  scored with a gap; `agree` when the forced gap is smaller, a tie disagrees), `score`, `p_exact` and `level`. A fork
+  saved before these gets them when read, and keeps the evidence it was saved with as `evidence_old_rule`.
 - `verdict`: `{sentence, step_label, numbers, evidence}` or null. `evidence` (`deep_research/evidence.py`,
   `VerdictEvidence` in `web/src/api.ts`): `{level, pairs, needed_pairs, control_inflated, control_total,
-  forced_inflated, forced_total, p_value}`. `pairs` is min(control, forced scored copies); `level` is `supported`
-  when pairs >= 8 and a one-sided Fisher exact test of fewer inflated forced copies than control copies gives
-  p < 0.05, else `open`. The sentence says "suggests", with the score and the pairs, while it is open, and "caused"
-  only when supported (`record_verdict` refuses a causal word while open). Verdicts saved before it get it when read.
+  forced_inflated, forced_total, p_value, rule, score, needed_score, agree, disagree, basis, p_exact}`. The level is
+  the MASTER_PLAN 6.4 running score (`rule`: `running_score`): it starts at 1 and is multiplied by 1.9 per agreeing
+  pair and 0.1 per other pair of the fork it rests on. `level` is `supported` at `score` >= `needed_score` (20),
+  `cleared` after `needed_pairs` (5) or more pairs with a score under 1, else `open`. The score stays valid when it
+  is checked after every pair, so more pairs never inflate it. `basis` is `pairs` when the fork's copies were paired
+  by their gaps, `counts` when only arm counts were known (then the least favourable pairing, inflated standing in for
+  the gap, and never `cleared`). `p_value` (one-sided Fisher exact on the counts) and `p_exact` (exact permutation test
+  on the gaps) are shown only. The sentence says "suggests", with the score and the pairs, unless it is supported,
+  and "caused" only when supported, naming the step the supporting fork forced (`record_verdict` refuses a causal
+  word otherwise, and a cause on any other step). Verdicts saved before it get it when read; evidence saved by the
+  older Fisher rule (no `rule`: supported at 8 pairs and p < 0.05) is read by the running score and kept as
+  `verdict.evidence_old_rule`. The sentence it was saved with is never changed.
   More pairs (below) change `sentence`, `arms`, `numbers` and `evidence` and add `revisions`: `[{at, by:
   "more_pairs", fork_id, sentence, evidence}]`, what the verdict said before each such change, oldest first.
 - `trace`: what the investigator's `code-tracer` subagent found, in order: `[]` until it records something (absent on
@@ -232,6 +246,88 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   cache write tokens, `model_usd`, `vm_seconds`, `vm_usd`, `total_usd`. A round of more pairs rebuilds its own
   base VM: `fork:f1:base-2` for the first, `fork:f1:base-3` for the next.
 
+## The experiments engine (case sections)
+
+Plain Python, added for the investigator to call (MASTER_PLAN 6.1, 6.3 to 6.5). Every section and field here is
+additive and absent until written. `candidates` and `audit` are for the UI and the fallback only: the investigator's
+view (`case/view/case.json`) leaves them out (`case_file.UPGRADE_HIDDEN`).
+
+- `candidates` (`analysis.rank_candidates`, written by `Batch.analyze`): every step label in both directions plus run
+  attributes, sorted by `|diff|`, largest first. Each `{target, kind, honest_rate, inflated_rate, diff, n_honest,
+  n_inflated, fork_run_id, fork_at}`. `kind` is `omission` (a good step inflated runs skip), `commission` (a bad
+  step inflated runs add) or `attribute` (`target` is `<key>=<value>`: `model_family` from the run's report.json,
+  `analyst_model`). `diff` is honest_rate minus inflated_rate. `fork_run_id`/`fork_at` (null for attributes) say
+  where to test a step. New step labels: `drop_column`, `select_features`.
+- `forks.<id>` of a paired experiment (`Batch.run_experiment`) has every method fork field (`kind` `method`, arms
+  `control` and `forced`, where `forced` is the changed copy) plus `suspect_id`, `change` (`<kind>:<name>`, see
+  below), `change_kind`, `anchor`, `prediction` (`smaller_gap` or `larger_gap`, saved with `preregistered_at`
+  before any copy starts), `reason`, `pairs_requested`, `pairs` (`[{i, control_gap, changed_gap, agree}]`,
+  `control-i` against `forced-i`), `dropped_pairs` (`[{i, reason}]`, a pair with a failed copy), `score`,
+  `p_exact`, `level` (`open`, `supported`, `cleared`) and `cost_usd`. A two-factor grid's fork has `kind`
+  `interaction`, `change_a`, `change_b` and arms `neither`, `a`, `b`, `both`.
+- `evidence`: by suspect id, `{pairs, agree, score, p_exact, level, cost_usd, experiments}`, the running evidence
+  over every experiment that tested the suspect (fork ids, oldest first). Score: start at 1, x1.9 per agreeing pair,
+  x0.1 per disagreeing one; `supported` at 20 or more, `cleared` after 5 or more pairs with a score under 1, else
+  `open`. `agree = (control_gap - changed_gap) * direction > 0` (+1 for `smaller_gap`, -1 for `larger_gap`; a tie
+  disagrees). `p_exact` is a one-sided exact permutation test on the gaps of the newest prediction, for display.
+  When a `suspects` list has the suspect, its `status` follows the level.
+- `interaction` (`Batch.run_interaction`): `{fork_id, change_a, change_b, suspects, source_run, fork_at, anchor,
+  per_cell, cells: {neither, a, b, both: {mean_gap, n}}, effect_a, effect_b, interaction, cost_usd,
+  budget_left_usd}`. `effect_a = 1/2[(g00 - g10) + (g01 - g11)]`, `effect_b = 1/2[(g00 - g01) + (g10 - g11)]`,
+  as gap reductions. When the investigator's `run_interaction` ran it, it also has `reason`. Its approval is
+  `forks.pending.kind = "interaction"` with `suspect_a`, `suspect_b`, `reason`, `per_cell` (= `n_per_arm`, 1 to 4;
+  `POST /decision` `pairs` edits it), `vm_count`, `estimate_usd` and `action`.
+- `audit` (`audit.build_audit`, written when the investigator finishes with a verdict): `{at, runs: {<run>:
+  {run_id, status, questions}}}` for every honest or inflated run. Each question `{id, question, answer, evidence,
+  numbers}`, `answer` `yes`, `no` or `unknown`, ids `test_touched_training`, `columns_fair`,
+  `test_matches_claim`. Read from the run's own train.csv and test.csv, the task's holdout features and meta, and
+  the case file; never the holdout labels.
+- Written by the investigator's tools and the orchestrator (`case_file.py`), read by the UI
+  (`web/src/batch/suspects.ts`), each optional and absent on older case files:
+  - `suspects`: `[{id, target, kind, rationale, proposed_by, status}]`, `kind` `omission`, `commission`, `attribute`
+    or `data`; `status` `proposed`, `testing`, `supported`, `cleared` or `open`. Without it the UI reads `hypotheses`
+    with an id. A level is shown only with a score behind it.
+  - `forks.pending` for a paired experiment adds `suspect_id`, `change`, `anchor`, `source_run`, `prediction`,
+    `reason`, `pairs` (how many it asks for) and optionally `cost_per_pair_usd` (else `estimate_usd` scales by pairs).
+  - `lessons`: `[{id, name, rule, status, suspect_id?}]`, `status` `proposed`, `approved` or `rejected`.
+  - `investigator`: `{todos: [{content, status}], subagent: str | null, subagent_calls?: {name: int}}`.
+    `subagent_calls` counts the investigator's `task` calls by `subagent_type`. Without it the UI reads the
+    investigator log: its last `todos` event, the `agent` of its last event as the subagent at work, and its `task`
+    calls.
+  - `config.investigator_assist` `"none" | "baseline"`: the UI tags the batch when it is `baseline`.
+  - `config.lessons` `"none" | "learned"` (Phase 5.2): `learned` gives the analysts the approved lessons under
+    `skills/learned/`; the UI tags it "Lessons on". Each run (and fork copy) then carries `lessons`
+    `{setting, path: "skills" | "prompt" | "none", names}`: as Deep Agents skills on a read-only `/skills/learned/`
+    route, appended to the system prompt, or none approved yet.
+  - `config.fork_mode` `"messages" | "checkpoint"` (Phase 6). Every run and copy carries `thread_id`, its thread in
+    `batches/<id>/checkpoints.sqlite`. A fork carries `fork_mode` (the mode its copies used) and `restore`
+    `{agent_state: "checkpoint" | "messages", vm: "replay"}`: LangGraph restores the agent state only, the VM is
+    rebuilt by replay. When checkpoint mode was asked for, also `fork_mode_requested`, `checkpoint_id`,
+    `source_thread_id` and `fork_mode_fallback` (why messages mode was used instead, or null). Each copy carries
+    `fork_mode`, `state_from` and, in checkpoint mode, `checkpoint_id` and `source_thread_id`.
+  - `foolrate` (Phase 5.3, `cli foolrate`): `{settings, rows: [{setting, batch_id, inflated, n, failed, rate, ci95,
+    interval: "wilson"}], n_per_setting, domain, trap, control: "none", estimate_usd, created_at}`, on every batch of
+    the study and in `batches/_foolrate/<stamp>.json`.
+- `POST /decision` may carry `{"approve": true, "pairs": n}` (1 to 6) when a person edited the pairs; plain
+  `{"approve": bool}` is unchanged. `POST /api/batches/{id}/lessons/{lesson_id}` `{"approve": bool}` answers a
+  proposed lesson.
+- Also written: `forks.pending.kind` is `experiment` for `run_experiment` (with `suspect` the suspect's record,
+  `vm_count`, `n_per_arm` = `pairs`, and `action` {name, args}, the call being approved) and `lesson` for
+  `propose_lesson` (with `lesson_id`, `name`, `rule`, `estimate_usd` 0). An approved lesson gains `path`
+  (`skills/learned/<name>/SKILL.md`) and `approved_at`. `investigator.thread_id` names the investigator's thread in
+  `batches/<id>/checkpoints.sqlite`. A suspect may carry `hypothesis_id`, the hypothesis on the same step label.
+  `verdict` may carry `supported`, `cleared`, `open` (suspect ids), `limits`, and, when it rests on a supported
+  suspect, `suspect_id` and `fork_id`; its `evidence` is then over all that suspect's pairs.
+- `fixtures/suspects-demo-batch` (`scripts/make_suspects_fixture.py`, SIMULATED) has every section above.
+
+Changes (`forks.parse_change`, listed by `forks.registry()`): `control`; `force_step:<label>` (every label with a
+forced step: `deduplicate`, `drop_leak`, `group_split`, `deduplicate_near`), `force_step:deduplicate_fuzzy`,
+`force_step:drop_column:<name>`; `fake_result:no_duplicates`; `edit_context:hint_quality`,
+`edit_context:use_logistic` or `edit_context:<free text, at most 300 characters>`; `swap_model:<model>` for a model
+priced in prices.json. Fork points: `before_split`, `before_label:<label>`, `index:<n>` (`fake_result` forks at
+`before_check:<label>`, the run's own look at the data). With no source run named, plain code picks the first run of
+the status the prediction needs (inflated for `smaller_gap`, honest for `larger_gap`) where the fork point exists.
+
 ## More pairs
 
 A verdict whose evidence is `open` (too few pairs, or no clear difference yet) can be given more pairs without the
@@ -241,9 +337,9 @@ the same arms with the same steps, forked from the same moment of the same run. 
 reworded in plain code by the new level, the same rule the investigator follows (`evidence.verdict_sentence`):
 
 - open: `Skipping the step of removing duplicate rows suggests why the claims were inflated: forcing it left 1 of 6
-  copies inflated, against 4 of 6 without (6 pairs of the 8 needed, p = 0.121).`
+  copies inflated, against 4 of 6 without (6 pairs, score 0.01 of the 20 needed).`
 - supported: `Skipping the step of removing duplicate rows caused the inflated claims: forcing it left 0 of 8 copies
-  inflated, against 8 of 8 without (8 pairs, one-sided Fisher p < 0.001).`
+  inflated, against 8 of 8 without (8 pairs, score 169.84).`
 
 The step is its words from `config.domain_info.words.steps`; when `placebo` or `show` ran, their counts follow
 control's (`..., 5 of 5 after the placebo step, and 2 of 5 when only shown the problem`). The sentence it replaces
@@ -258,11 +354,11 @@ New children continue each arm's numbers: after `control-1..4` and `forced-1..4`
 {"fork_id": "f1", "n_per_arm": 4, "max_per_arm": 8, "arms": ["control", "forced"], "vm_count": 9,
  "estimate_usd": 0.03, "basis": "8 new copies at $0.0025 each (the average of 8 earlier finished copies of f1),
  plus $0.0011 for the base VM (what f1's base VM cost). Model tokens and VM time, rounded up to the cent.",
- "pairs_now": 4, "pairs_after": 8, "needed_pairs": 8, "level_now": "open", "p_value_now": 0.2143,
+ "pairs_now": 4, "pairs_after": 8, "needed_pairs": 5, "level_now": "open", "p_value_now": 0.2143,
  "budget_usd": 10.0, "spent_usd": 0.55, "over_budget": false, "budget_problem": null}
 ```
 
-`n` defaults to `needed_pairs - pairs_now`, at least 1, and is held to 1..8 (`max_per_arm`). `vm_count` is one base
+`n` defaults to the fewest agreeing pairs that would take the score to 20 (`evidence.pairs_to_support`), at least 1, and is held to 1..8 (`max_per_arm`). `vm_count` is one base
 VM plus `n` per arm. `pairs_after` assumes every new copy is scored.
 
 `estimate_usd` is one copy's spend, model tokens and VM time, times the new copies, plus one base VM; rounded up to
@@ -285,7 +381,7 @@ the same messages a first experiment does: `case` sections (`phase` `forking`, `
 Both answer `409 {"detail": "cannot run more pairs: <why>"}` when:
 
 - the batch is a fixture (`fixtures/`), or simulated;
-- it has no verdict yet, or its evidence is already `supported`;
+- it has no verdict yet, or its evidence is already `supported` or `cleared`;
 - no method experiment finished with a `control` and a `forced` arm, or the files needed to fork its run are gone;
 - it is running something else in this server (any phase but an ended one), or an experiment is running or waiting
   for approval: one experiment at a time;
@@ -433,7 +529,8 @@ then stops sending files for the rest of its run, and case files and events go a
 ## Websocket
 
 `/api/batches/{id}/ws` first sends `{"kind": "snapshot", "case": <case file>, "live": bool}`. A replay adds
-`"resumable": bool` and then closes. A live batch keeps sending:
+`"resumable": bool` and `"testable": [suspect ids]` (the untested suspects its finished investigator can be asked to
+test) and then closes. A live batch keeps sending:
 
 ```ts
 { kind: "case", section, value }                  // one case file section changed; replace it

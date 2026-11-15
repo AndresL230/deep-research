@@ -1,0 +1,76 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv && head -3 holdout_features.csv && wc -l holdout_features.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 1,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/data.csv",
+      "limit": 3
+    },
+    "labels": []
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv'); print(df.shape); print(df.isna().sum().to_dict()); print(df.describe().T.to_string()); print(df.outcome.value_counts().to_dict()); print('dups',df.duplicated().sum())\nh=pd.read_csv('holdout_features.csv'); print(h.shape, h.isna().sum().to_dict())\nfor c in ['glucose','blood_pressure','skin_thickness','insulin','bmi']: print(c,(df[c]==0).sum())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && mkdir -p live && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv').drop_duplicates().reset_index(drop=True)\nprint(len(df))\ntr,te=train_test_split(df,test_size=0.2,random_state=42,stratify=df.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(len(tr),len(te),tr.outcome.mean().round(3),te.outcome.mean().round(3))\n\""
+    },
+    "labels": [
+      "load",
+      "deduplicate",
+      "split"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.pipeline import make_pipeline\nfrom sklearn.impute import SimpleImputer\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX=tr.drop(columns='outcome'); y=tr.outcome\nzero_cols=['glucose','blood_pressure','skin_thickness','insulin','bmi']\nfrom sklearn.compose import ColumnTransformer\n# treat zeros as missing for the impute step\nimport numpy as np\ndef prep(d):\n    d=d.copy()\n    for c in zero_cols: d[c]=d[c].replace(0,np.nan)\n    return d\nm=make_pipeline(SimpleImputer(strategy='median'),RandomForestClassifier(n_estimators=500,random_state=42))\nm.fit(prep(X),y)\nprint('train acc',accuracy_score(y,m.predict(prep(X))))\nacc=accuracy_score(te.outcome,m.predict(prep(te.drop(columns='outcome'))))\nprint('test acc',acc)\nfrom sklearn.model_selection import cross_val_score\nprint('cv',cross_val_score(make_pipeline(SimpleImputer(strategy='median'),RandomForestClassifier(n_estimators=500,random_state=42)),prep(X),y,cv=5).mean())\nimport joblib\n\""
+    },
+    "labels": [
+      "load",
+      "clean",
+      "drop_column",
+      "preprocess",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np, json\nfrom sklearn.pipeline import make_pipeline\nfrom sklearn.impute import SimpleImputer\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nzero_cols=['glucose','blood_pressure','skin_thickness','insulin','bmi']\ndef prep(d):\n    d=d[h.columns].copy()\n    for c in zero_cols: d[c]=d[c].replace(0,np.nan)\n    return d\nm=make_pipeline(SimpleImputer(strategy='median'),RandomForestClassifier(n_estimators=500,random_state=42))\nm.fit(prep(tr),tr.outcome)\nacc=float(accuracy_score(te.outcome,m.predict(prep(te))))\npred=m.predict(prep(h)).astype(int)\npd.DataFrame({'prediction':pred}).to_csv('predictions.csv',index=False)\njson.dump({'test_accuracy':round(acc,4),'model':'RandomForestClassifier (500 trees, random_state=42) with median imputation of zero-valued measurements',\n 'notes':'Dropped 57 exact duplicate rows before an 80/20 stratified split (691 train / 173 test). 5-fold CV on training set gave ~0.82, so the test score may be optimistic.'},open('report.json','w'),indent=2)\nprint(acc, pred.mean(), len(pred))\n\"; cat report.json; head -3 predictions.csv; wc -l predictions.csv"
+    },
+    "labels": [
+      "load",
+      "clean",
+      "preprocess",
+      "train",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  }
+]

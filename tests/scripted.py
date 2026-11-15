@@ -53,7 +53,9 @@ def script_investigator(monkeypatch, messages: list[AIMessage], grader_model=Non
     `grader_model`, by default one that is always satisfied."""
     model = ScriptedModel(messages=iter(messages))
     monkeypatch.setattr(inv_mod, "GRADER_MODEL", grader_model if grader_model is not None else grader())
-    real = inv_mod.create_deep_agent
+    # Scripting it again (a restarted server) replaces the first script instead of wrapping it.
+    real = getattr(inv_mod, "_unscripted", None) or inv_mod.create_deep_agent
+    monkeypatch.setattr(inv_mod, "_unscripted", real, raising=False)
 
     def with_model(*args, **kwargs):
         kwargs["model"] = model
@@ -85,3 +87,15 @@ def seed_hypotheses(case, label: str = "deduplicate") -> None:
     assert case.record_competing_hypothesis(
         "code", "The code is wrong where it was never tried.", "the measured rate is low in every run",
         "a patch raises the measured rate", "the patched code does no better", "low") == "h2"
+
+
+async def saved_messages(batch) -> list:
+    """The investigator's messages as its durable checkpointer saved them (`batches/<id>/checkpoints.sqlite`), read
+    back through a freshly built investigator, the way a restarted server would."""
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    async with AsyncSqliteSaver.from_conn_string(str(batch.checkpoints_path)) as saver:
+        agent = inv_mod.build_investigator(batch, ScriptedModel(messages=iter([])), checkpointer=saver)
+        thread = (batch.case.data.get("investigator") or {}).get("thread_id") or f"{batch.id}-investigator"
+        state = await agent.aget_state({"configurable": {"thread_id": thread}})
+    return list(state.values.get("messages") or [])

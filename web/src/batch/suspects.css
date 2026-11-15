@@ -1,0 +1,157 @@
+/* The suspect board, the experiment approval, the verdict by suspect, the investigator's plan and the lessons
+   (suspects.ts). Every class is prefixed `sx-`; the sections wear lanes.css's `ln-sec`, `ln-card` and `ln-h`, and the
+   colours are system.css's tokens: supported is the honest green, open the amber, cleared the idle grey. */
+
+.sx-sec { gap:14px; }
+.sx-sec + .sx-sec, .sx-sec + .ln-sec, .ln-sec + .sx-sec { margin-top:16px; }
+.sx-sp { flex:1 1 auto; }
+.sx-id { font-family:var(--code); font-size:11.5px; color:var(--fg-55); }
+.sx-target { font-family:var(--code); font-size:13.5px; font-weight:500; color:var(--fg); overflow-wrap:anywhere; }
+.sx-tag { text-transform:lowercase; }
+.sx-tag--sim { border-color:color-mix(in srgb, var(--warn) 70%, transparent); color:var(--amber); }
+.sx-agent { display:inline-flex; align-items:center; padding:0 7px; border-radius:var(--r-ctl); background:var(--accent-soft); color:var(--accent); font-family:var(--code); font-size:11.5px; line-height:20px; }
+.sx-agent--now { background:var(--accent); color:var(--accent-fg); }
+.sx-why { margin:0; font-size:13.5px; color:var(--fg-70); text-wrap:pretty; }
+.sx-rule { margin:-6px 0 0; font-size:12px; color:var(--fg-55); }
+
+/* The page's tags: a simulated batch, the investigator shown the baseline ranking. */
+.sx-flags { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.sx-flag { display:inline-flex; align-items:center; gap:7px; height:26px; padding:0 10px; border-radius:var(--r-ctl); font-size:12.5px; font-weight:500; }
+.sx-flag::before { content:""; width:7px; height:7px; border-radius:2px; background:currentColor; }
+.sx-flag--sim { background:var(--warn-bg); color:var(--amber); }
+.sx-flag--assist { background:var(--accent-soft); color:var(--accent); }
+
+/* ── the board ── */
+.sx-board { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap:12px; }
+.sx-sus { gap:10px; }
+.sx-sus--supported { border-color:color-mix(in srgb, var(--ok) 55%, var(--border)); }
+.sx-sus--cleared { opacity:.82; }
+.sx-sus-h { display:flex; align-items:center; flex-wrap:wrap; gap:6px 8px; }
+.sx-facts { display:grid; grid-template-columns:auto minmax(0, 1fr); gap:4px 12px; margin:0; font-size:12.5px; }
+.sx-facts > div { display:contents; }
+.sx-facts dt { color:var(--fg-55); }
+.sx-facts dd { margin:0; min-width:0; color:var(--fg); overflow-wrap:anywhere; }
+.sx-facts code, .sx-eff code { font-family:var(--code); font-size:11.5px; }
+
+.sx-ev { display:flex; align-items:center; gap:14px; padding-top:4px; }
+.sx-score { display:flex; flex-direction:column; flex:none; min-width:64px; line-height:1.15; }
+.sx-score-k { font-size:11px; color:var(--fg-55); }
+.sx-score-n { font-size:24px; font-weight:400; letter-spacing:-0.03em; font-variant-numeric:tabular-nums; }
+.sx-score-n--supported { color:var(--green); }
+.sx-score-n--open { color:var(--amber); }
+.sx-score-n--cleared { color:var(--fg-55); }
+.sx-score-n--none { font-size:14px; color:var(--fg-40); }
+
+/* A log bar, 0.001 to 1000: a faint line where the score starts (1), a strong one at the bar (20). */
+.sx-bar { position:relative; flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.sx-bar-track { position:relative; display:block; height:12px; border-radius:2px; background:color-mix(in srgb, var(--fg) 8%, transparent); }
+.sx-bar-fill { position:absolute; left:0; top:0; bottom:0; border-radius:2px; transition:width .6s var(--ease-out); }
+.sx-bar-fill--supported { background:var(--ok); }
+.sx-bar-fill--open { background:var(--warn); }
+.sx-bar-fill--cleared { background:var(--fg-40); }
+.sx-bar-one { position:absolute; top:-2px; bottom:-2px; width:1px; background:var(--fg-40); }
+.sx-bar-bar { position:absolute; top:-4px; bottom:-4px; width:2px; margin-left:-1px; background:var(--fg); border-radius:1px; }
+.sx-bar-ax { position:relative; height:13px; font-size:10.5px; color:var(--fg-55); font-variant-numeric:tabular-nums; }
+.sx-bar-ax span { position:absolute; transform:translateX(-50%); white-space:nowrap; }
+.sx-bar-ax span:first-child { transform:none; }
+.sx-bar-ax span:last-child { transform:translateX(-100%); }
+.sx-bar-ax-20 { color:var(--fg); font-weight:500; }
+
+.sx-ev-foot { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 12px; }
+.sx-dots { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px; font-size:12px; color:var(--fg-55); }
+.sx-dots--none { color:var(--fg-40); }
+.sx-dot { display:inline-block; width:10px; height:10px; border-radius:50%; }
+.sx-dot--agree { background:var(--ok); }
+.sx-dot--disagree { background:transparent; box-shadow:inset 0 0 0 2px var(--bad); }
+.sx-dots-n { margin-left:4px; font-variant-numeric:tabular-nums; }
+.sx-exps { font-family:var(--code); font-size:11px; color:var(--fg-40); }
+
+/* ── the approval card ── */
+.sx-ask { gap:12px; border-color:color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.sx-ask-t { display:flex; align-items:center; flex-wrap:wrap; gap:6px 8px; margin:0; font-size:15px; }
+.sx-facts--ask { font-size:13px; gap:8px 16px; }
+.sx-facts--ask dd { display:flex; align-items:center; flex-wrap:wrap; gap:4px 10px; }
+.sx-pairs { display:inline-flex; align-items:center; border:1px solid var(--border-strong); border-radius:var(--r-ctl); overflow:hidden; }
+.sx-step { width:30px; height:28px; border:0; background:transparent; font:inherit; font-size:15px; color:var(--fg); cursor:pointer; transition:background var(--t-hover) ease; }
+.sx-step:hover:not(:disabled) { background:var(--hover); }
+.sx-step:disabled { color:var(--fg-40); cursor:default; }
+.sx-step:focus-visible { outline:2px solid var(--focus); outline-offset:-2px; }
+.sx-pairs-n { min-width:30px; text-align:center; font-size:14px; font-weight:500; font-variant-numeric:tabular-nums; }
+
+/* ── the verdict by suspect ── */
+.sx-vgrps { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; }
+.sx-vgrp { display:flex; flex-direction:column; gap:8px; min-width:0; padding:14px; border:1px solid var(--border); border-radius:var(--r-card); background:var(--bg); }
+.sx-vgrp--supported { border-color:color-mix(in srgb, var(--ok) 55%, var(--border)); }
+.sx-vgrp-h { display:flex; align-items:center; gap:8px; margin:0; font-size:13px; font-weight:500; color:var(--fg-70); }
+.sx-vgrp-h .ds-chip-t { display:none; }
+.sx-vlist { display:flex; flex-direction:column; gap:6px; margin:0; padding:0; list-style:none; }
+.sx-vrow { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px 8px; }
+.sx-vscore { font-size:12.5px; color:var(--fg-55); font-variant-numeric:tabular-nums; }
+.sx-vscore b { color:var(--fg); font-weight:500; }
+.sx-vrow--supported .sx-vscore b { color:var(--green); }
+.sx-vnone { margin:0; font-size:12.5px; }
+
+.sx-grid-w, .sx-au-w { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.sx-grid { border-collapse:separate; border-spacing:4px; font-size:12.5px; max-width:520px; }
+.sx-grid caption { caption-side:bottom; text-align:left; padding-top:4px; font-size:11.5px; }
+.sx-grid th { padding:4px 8px; font-weight:400; color:var(--fg-55); text-align:left; font-family:var(--code); font-size:11.5px; }
+.sx-cell { padding:10px 12px; border-radius:var(--r-ctl); background:var(--ok-bg); vertical-align:top; }
+.sx-cell b { display:block; font-size:16px; font-weight:500; font-variant-numeric:tabular-nums; color:var(--green); }
+.sx-cell span { font-size:11px; }
+.sx-cell--hi { background:var(--bad-bg); }
+.sx-cell--hi b { color:var(--red); }
+.sx-eff { display:flex; flex-wrap:wrap; gap:4px 18px; margin:0; font-size:12.5px; color:var(--fg-70); }
+.sx-eff b { color:var(--fg); font-weight:500; font-variant-numeric:tabular-nums; }
+
+.sx-au-scroll { overflow-x:auto; }
+.sx-au { width:100%; border-collapse:collapse; font-size:12.5px; }
+.sx-au th, .sx-au td { padding:5px 8px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; }
+.sx-au thead th { font-weight:400; color:var(--fg-55); font-size:12px; }
+.sx-au tbody th { font-weight:400; }
+.sx-au-dot { margin:0 4px 0 6px; }
+.sx-au-dot--honest { --ln-tone:var(--ok); }
+.sx-au-dot--inflated { --ln-tone:var(--bad); }
+.sx-au-ev { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap:10px; }
+.sx-au-run { padding:10px 12px; border:1px solid var(--border); border-radius:var(--r-ctl); background:var(--bg); font-size:12px; }
+.sx-au-run ul { margin:4px 0 0; padding-left:16px; color:var(--fg-70); }
+.sx-au-q { color:var(--fg-55); }
+.sx-au-w .ln-fold { align-self:flex-start; }
+
+/* ── the investigator's plan ── */
+.sx-inv { display:grid; grid-template-columns:minmax(0, 1.4fr) minmax(0, 1fr); gap:16px; align-items:start; }
+.sx-todos { display:flex; flex-direction:column; gap:2px; margin:0; padding:0; list-style:none; }
+.sx-todo { display:flex; align-items:center; gap:10px; padding:6px 8px; border-radius:var(--r-ctl); font-size:13px; }
+.sx-todo-m { display:inline-flex; align-items:center; justify-content:center; flex:none; width:14px; height:14px; border-radius:4px; border:1.5px solid var(--border-strong); }
+.sx-todo--done .sx-todo-m { border-color:var(--ok); background:var(--ok); }
+.sx-todo--done .sx-todo-t { color:var(--fg-55); }
+.sx-todo--now { background:var(--accent-soft); }
+.sx-todo--now .sx-todo-m { border:0; }
+.sx-todo--now .sx-todo-t { font-weight:500; }
+.sx-todo-now { margin-left:auto; font-size:11px; color:var(--accent); }
+.sx-inv-side { display:flex; flex-direction:column; gap:10px; }
+.sx-who, .sx-seen { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:0; font-size:13px; }
+.sx-who-k { width:100%; font-size:11.5px; color:var(--fg-55); }
+.sx-inv--one { grid-template-columns:minmax(0, 1fr); }
+.sx-agent-n { font-weight:500; color:var(--fg-70); }
+/* The finished investigation, in a few facts. */
+.sx-sum { display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
+.sx-sum-v { display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:14px; }
+.sx-sum-score { font-variant-numeric:tabular-nums; color:var(--fg-70); }
+.sx-sum-go { margin-left:auto; min-height:36px; }
+.sx-sum-facts { font-size:13px; gap:6px 16px; }
+.sx-inv-plan .ln-h3 { margin:0 0 6px; }
+/* A suspect nobody tested: said in words, and (on a real batch) the way to ask for it. */
+.sx-untested { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:0; font-size:13px; color:var(--fg-70); }
+.sx-untested .ask-ghostbtn { min-height:36px; }
+
+/* ── lessons ── */
+.sx-lessons { display:flex; flex-direction:column; gap:10px; }
+.sx-lesson { gap:8px; }
+.sx-lesson--rejected { opacity:.6; }
+.sx-lname { font-family:var(--code); font-size:13px; font-weight:500; }
+.sx-rule-t { margin:0; font-size:14px; line-height:1.5; text-wrap:pretty; }
+
+@media (max-width: 760px) {
+  .sx-vgrps, .sx-inv { grid-template-columns:minmax(0, 1fr); }
+  .sx-ev { flex-direction:column; align-items:stretch; gap:6px; }
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42) on all 8 raw features",
+  "notes": "Stratified 80/20 split (random_state=42) after dropping 57 exact duplicate rows (921 -> 864 rows); zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is. The original data.csv was overwritten by the deduplication and could not be restored."
+}

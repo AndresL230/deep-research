@@ -75,6 +75,9 @@ class Trap:
     # `print(df.drop_duplicates().shape)` only looks at them. The web app's highlight does not make
     # this difference.
     top_level: bool = False
+    # The columns the trap itself adds or keys on (`followup_score`, `subject_id`). Plain code uses them to keep the
+    # investigator's view generic: no change it is offered names one (forks.blind_changes).
+    columns: tuple[str, ...] = ()
 
     def public(self) -> dict:
         """Everything but the callables, as JSON, for the API and the case file."""

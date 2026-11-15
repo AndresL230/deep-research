@@ -141,6 +141,8 @@ export interface BatchVm {
   live: boolean;
   /** A saved batch that stopped at its split: Investigate brings it back live first (`resumeBatch`). */
   resumable?: boolean;
+  /** Untested suspects the finished investigator can be asked to test (`POST .../suspects/{id}/test`). */
+  testable?: string[];
   /** The case file. During a replay it is the case AT `replay.t` (replay.ts `caseAt`), not the final one. */
   case: CaseFile;
   /** Event logs loaded so far, keyed by EventKey. During a replay, cut to `replay.t`. Missing key = not loaded. */
@@ -160,6 +162,8 @@ export interface BatchVm {
   open?: Readonly<Record<string, boolean>> | "all";
   /** Who is looking (access.ts): only "admin" gets the actions (investigate, approve, decline, stop). Absent: admin. */
   role?: Role;
+  /** The pairs a person set on the pending experiment's approval card (suspects.ts), or null/absent for as asked. */
+  pairs?: number | null;
 }
 
 export type Loadable<T> = { state: "loading" } | { state: "ready"; value: T } | { state: "error"; message: string };

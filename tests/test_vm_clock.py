@@ -50,9 +50,16 @@ def daytona(monkeypatch, clock):
     monkeypatch.setattr(batch_mod.vms, "download_outputs", lambda vm, dest: None)
     monkeypatch.setattr(batch_mod.vms, "download_charts", lambda vm, dest: [])
     monkeypatch.setattr(batch_mod.vms, "delete_vm", delete_vm)
-    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt: object())
+    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt, **kw: object())
     monkeypatch.setattr(batch_mod, "DaytonaSandbox", lambda sandbox: SimpleNamespace(execute=lambda cmd: SimpleNamespace(output="ok")))
     monkeypatch.setattr(batch_mod.Batch, "_drive", drive)
+
+    async def no_nudge(self, *args, **kwargs):
+        return False
+
+    # These fake agents never write a report; the one report nudge (tested in test_dedup_near.py) would be a second
+    # agent turn on the clock.
+    monkeypatch.setattr(batch_mod.Batch, "_nudge_for_report", no_nudge)
     # One VM at a time, so each one's time on the shared fake clock is its own.
     monkeypatch.setattr(batch_mod, "MAX_PARALLEL_VMS", 1)
     return SimpleNamespace(made=made, deleted=deleted)

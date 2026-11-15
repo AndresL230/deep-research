@@ -9,6 +9,12 @@
 /** The case file's sections, in order. */
 export const CASE_SECTIONS = [
   "config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "trace_comparison", "rubric", "feed", "baseline", "costs",
+  // The experiments engine (MASTER_PLAN 6.1). Absent until written; `candidates` and `audit` are never in the
+  // investigator's view.
+  "candidates", "evidence", "interaction", "audit",
+  // The investigator's science (MASTER_PLAN 6.1, Phase 8): its suspects, the lessons it proposes, and its plan and the
+  // subagent at work. Read by batch/suspects.ts, each optional.
+  "suspects", "lessons", "investigator",
 ] as const;
 export type CaseSection = (typeof CASE_SECTIONS)[number];
 
@@ -23,8 +29,8 @@ export type Phase = KnownPhase | (string & {});
  *  step (`deduplicate`, `drop_leak`, `group_split`). A trap added later brings a label that is not listed here, so
  *  `StepLabel` is open; the batch's `config.trap_info` says what its step is. */
 export const STEP_LABELS = [
-  "load", "inspect", "deduplicate", "drop_leak", "group_split", "deduplicate_near", "clean", "split", "preprocess",
-  "train", "evaluate", "plot", "predict", "report",
+  "load", "inspect", "deduplicate", "drop_leak", "group_split", "deduplicate_near", "clean", "drop_column",
+  "select_features", "split", "preprocess", "train", "evaluate", "plot", "predict", "report",
 ] as const;
 export type KnownStepLabel = (typeof STEP_LABELS)[number];
 export type StepLabel = KnownStepLabel | (string & {});
@@ -196,6 +202,12 @@ export interface BatchConfig {
   commentary_budget_usd?: number;
   /** Only on fixtures made by scripts/make_fixture.py: the agents' choices are scripted. */
   simulated?: boolean;
+  /** MASTER_PLAN 6.2: "baseline" puts `candidates` in the investigator's view, a demo safety net the UI must show. */
+  investigator_assist?: "none" | "baseline";
+  /** MASTER_PLAN Phase 5.2: "learned" gives the analysts the approved lessons (skills/learned/); the UI tags it. */
+  lessons?: "none" | "learned";
+  /** MASTER_PLAN Phase 6: how fork copies get the source run's agent state. The VM is rebuilt by replay either way. */
+  fork_mode?: ForkMode;
 }
 
 /** A run's score (deep_research/scoring.py RunScore). */
@@ -288,7 +300,7 @@ export type ForkArm = "control" | "placebo" | "show" | "forced" | "fixed";
 
 /** What a fork experiment tests: `method`, which step caused the inflation (the default), or `fix`, whether the
  *  investigator's proposed patch makes the code better. */
-export type ForkKind = "method" | "fix";
+export type ForkKind = "method" | "fix" | "interaction";
 
 export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   arm: ForkArm;
@@ -303,7 +315,17 @@ export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   how?: "fork" | "replay";
   /** The analyst model the copy continues on: its source run's. */
   model?: string;
+  /** How the copy got the source run's agent state (MASTER_PLAN Phase 6). Absent on older batches: messages. */
+  fork_mode?: ForkMode;
+  state_from?: ForkMode;
+  /** Checkpoint mode: the LangGraph checkpoint the copy resumed from, and the source run's thread it is in. */
+  checkpoint_id?: string;
+  source_thread_id?: string;
 }
+
+/** "checkpoint": LangGraph time travel, the copy resumes the analyst's saved state. "messages": a fresh analyst
+ *  is given a copy of the source run's messages. The VM is rebuilt by replay either way. */
+export type ForkMode = "checkpoint" | "messages";
 
 export interface ArmSummary {
   total: number;
@@ -360,10 +382,105 @@ export interface ForkExperiment {
   measures?: "reporting_accuracy" | "controller_performance";
   /** Control and changed copies matched before the run, with whether each pair went the predicted way. */
   pairs?: { i: number; control_gap: number; changed_gap: number; agree: boolean }[];
-  /** The paired score: x1.9 per agreeing pair, x0.1 per disagreeing one. */
+  /** The paired score: x1.9 per agreeing pair, x0.1 per disagreeing one. Recorded by the server since the running
+   *  score decides the level (evidence.py); read through `with_evidence` on older forks. */
   score?: number;
-  p_exact?: number;
+  p_exact?: number | null;
   level?: "open" | "supported" | "cleared";
+  /** The fork's evidence by the running score (the same shape as a verdict's), and, on a fork saved before it, the
+   *  evidence the older Fisher rule gave. */
+  evidence?: VerdictEvidence;
+  evidence_old_rule?: VerdictEvidence;
+  // -- a paired experiment (`Batch.run_experiment`, MASTER_PLAN 6.5) --
+  /** The suspect this experiment tests (`evidence.<suspect_id>`). */
+  suspect_id?: string;
+  /** The registry change, `<kind>:<name>`: `force_step:deduplicate`, `fake_result:no_duplicates`, `control`, ... */
+  change?: string;
+  change_kind?: ChangeKind;
+  /** The fork point: `before_split`, `before_label:<label>`, `index:<n>` (`before_check:<label>` for a made-up result). */
+  anchor?: string;
+  reason?: string;
+  pairs_requested?: number;
+  /** Pairs left out because a copy failed, with why. */
+  dropped_pairs?: { i: number; reason: string }[];
+  cost_usd?: number | null;
+  /** A two-factor grid's changes (kind "interaction"); its arms are `neither`, `a`, `b` and `both`. */
+  change_a?: string;
+  change_b?: string;
+  // -- how the copies were rewound (MASTER_PLAN Phase 6, docs/api-contract.md) --
+  /** The mode the copies used. Absent on batches saved before Phase 6: messages. */
+  fork_mode?: ForkMode;
+  /** Only when checkpoint mode was asked for: what was asked, and why messages mode was used instead (or null). */
+  fork_mode_requested?: ForkMode;
+  fork_mode_fallback?: string | null;
+  /** LangGraph restores the agent state only; the VM is rebuilt by replay, then copied or forked. */
+  restore?: { agent_state: ForkMode; vm: "replay" | "fork" };
+  checkpoint_id?: string | null;
+  source_thread_id?: string | null;
+}
+
+/** The five kinds of change an experiment can make (deep_research/forks.py `CHANGE_KINDS`). */
+export type ChangeKind = "control" | "force_step" | "fake_result" | "edit_context" | "swap_model";
+
+/** One plain-Python suspect (`candidates`, deep_research/analysis.py `rank_candidates`). UI and fallback only. */
+export interface Candidate {
+  /** A step label, or an attribute as `<key>=<value>` (`model_family=random forest`). */
+  target: string;
+  kind: "omission" | "commission" | "attribute";
+  honest_rate: number;
+  inflated_rate: number;
+  /** honest_rate - inflated_rate; the list is sorted by its absolute value, largest first. */
+  diff: number;
+  n_honest: number;
+  n_inflated: number;
+  fork_run_id: string | null;
+  fork_at: number | null;
+}
+
+/** A suspect's running evidence over its experiments (`evidence.<suspect_id>`). */
+export interface SuspectEvidence {
+  pairs: number;
+  agree: number;
+  score: number;
+  p_exact: number | null;
+  level: "open" | "supported" | "cleared";
+  cost_usd: number | null;
+  /** Fork ids, oldest first. */
+  experiments: string[];
+}
+
+/** The two-factor grid (`interaction`, deep_research/interaction.py). Gaps are reported minus true. */
+export interface Interaction {
+  fork_id: string;
+  change_a: string;
+  change_b: string;
+  suspects: string[];
+  source_run: string;
+  fork_at: number;
+  anchor: string;
+  per_cell: number;
+  cells: Record<"neither" | "a" | "b" | "both", { mean_gap: number | null; n: number }>;
+  /** Gap reductions: positive means the change shrinks the gap. Null when a cell has no scored copy. */
+  effect_a: number | null;
+  effect_b: number | null;
+  interaction: number | null;
+  cost_usd: number | null;
+  budget_left_usd: number | null;
+}
+
+/** One answer of an audit sheet (deep_research/audit.py). */
+export interface AuditAnswer {
+  id: "test_touched_training" | "columns_fair" | "test_matches_claim";
+  question: string;
+  answer: "yes" | "no" | "unknown";
+  evidence: string[];
+  numbers: Record<string, unknown>;
+}
+
+/** The audit (`audit`): one sheet per scored run, written after the verdict. Never in the investigator's view. */
+export interface Audit {
+  at: number;
+  runs: Record<string, { run_id: string; status: string; questions: AuditAnswer[] }>;
 }
 
 /** One round of more pairs on a fork (`ForkExperiment.more_pairs`). */
@@ -493,6 +610,8 @@ export interface Verdict extends SplitFields {
   /** How strong the fork evidence is (deep_research/evidence.py). The words follow it: "suggests" while open,
    *  "caused" only when supported. Absent on verdicts saved before it: read it as open. */
   evidence?: VerdictEvidence;
+  /** The evidence as it was saved by the older Fisher rule, kept when the server read it by the new one. */
+  evidence_old_rule?: VerdictEvidence;
   /** What the verdict said before each change that did not come from the investigator, oldest first: more pairs
    *  reword `sentence` by the new evidence level and update `arms`, `numbers` and `evidence`. Absent until then. */
   revisions?: VerdictRevision[];
@@ -508,18 +627,32 @@ export interface VerdictRevision {
   evidence: VerdictEvidence;
 }
 
-/** "supported": at least `needed_pairs` control and forced pairs, and the forced arm's inflated count is lower than
- *  the control arm's by a one-sided Fisher exact test at p < 0.05. Anything else is "open". */
+/** The level follows MASTER_PLAN 6.4's running score of the control/forced pairs, matched by copy number (`rule`:
+ *  "running_score"): "supported" at a score of `needed_score` (20) or more, "cleared" after `needed_pairs` (5) or
+ *  more pairs with a score under 1, else "open". Evidence without `rule` was saved by the older Fisher rule
+ *  (supported at 8 pairs and p < 0.05); the server now reads it by the new rule and keeps it as
+ *  `Verdict.evidence_old_rule`. `p_value` (one-sided Fisher on the counts) and `p_exact` (exact test on the gaps)
+ *  are shown only. */
 export interface VerdictEvidence {
-  level: "open" | "supported";
-  /** Scored control and forced copies, paired: min(control_total, forced_total). */
+  level: "open" | "supported" | "cleared";
+  /** Complete control/forced pairs; from counts alone, min(control_total, forced_total). */
   pairs: number;
+  /** The fewest agreeing pairs a supported score takes (5); 8 on evidence saved by the old rule. */
   needed_pairs: number;
   control_inflated: number;
   control_total: number;
   forced_inflated: number;
   forced_total: number;
   p_value: number | null;
+  /** Added with the running score; absent on evidence saved by the old rule. */
+  rule?: "running_score";
+  score?: number;
+  needed_score?: number;
+  agree?: number;
+  disagree?: number;
+  /** "pairs" when the fork's copies were paired by their gaps, "counts" when only the arm counts were known. */
+  basis?: "pairs" | "counts";
+  p_exact?: number | null;
 }
 
 /** Whether the runs the code-tracer traced fail at the same line with the same symptom. */
@@ -725,6 +858,15 @@ export interface CaseFile {
    *  saved before it existed. */
   baseline?: Baseline | null;
   costs: Costs;
+  /** The experiments engine (MASTER_PLAN 6.1), each absent until written. */
+  candidates?: Candidate[];
+  evidence?: Record<string, SuspectEvidence>;
+  interaction?: Interaction | null;
+  audit?: Audit;
+  /** The investigator's science (batch/suspects.ts has the field-by-field shapes). */
+  suspects?: { id: string; target: string; kind: string; rationale: string; proposed_by: string; status: string; simulated?: boolean }[];
+  lessons?: { id: string; name: string; rule: string; status: string; suspect_id?: string; simulated?: boolean }[];
+  investigator?: { todos?: AgentTodo[]; subagent?: string | null } | null;
 }
 
 /** One item of the commentary feed (deep_research/commentary.py). */
@@ -764,7 +906,7 @@ export type AgentEvent = { t: number; /** Investigator only: which agent or suba
 /** Messages on `/api/batches/{id}/ws`. A replay sends one snapshot and closes; a live batch keeps streaming. */
 export type BatchMessage =
   /** `resumable`: a saved batch of ours that stopped at a split; `POST .../resume` brings it back live. */
-  | { kind: "snapshot"; case: CaseFile; live: boolean; resumable?: boolean }
+  | { kind: "snapshot"; case: CaseFile; live: boolean; resumable?: boolean; testable?: string[] }
   | { [S in CaseSection]: { kind: "case"; section: S; value: CaseFile[S] } }[CaseSection]
   | { kind: "event"; run: string; event: AgentEvent }
   | { kind: "fork_event"; fork: string; child: string; event: AgentEvent }
@@ -817,7 +959,7 @@ export interface BatchListItem {
 
 /** Where the fork experiment and the verdict are. `open` and `supported` are the verdict's evidence level
  *  (deep_research/evidence.py); `fork_stopped` is a fork the batch stopped before it finished. */
-export type VerdictState = "none" | "awaiting_approval" | "fork_running" | "fork_stopped" | "forked" | "open" | "supported";
+export type VerdictState = "none" | "awaiting_approval" | "fork_running" | "fork_stopped" | "forked" | "open" | "supported" | "cleared";
 
 export interface BatchSummary {
   /** The domain's name (`config.domain`, "tabular" for batches saved before domains) and title. */
@@ -1091,7 +1233,15 @@ export const fetchMorePairs = (id: string, n?: number, o: Opts = {}) => call<Mor
  *  409 with the reason when they cannot run, an over-budget estimate included. */
 export const startMorePairs = (id: string, n?: number, o: Opts = {}) =>
   call<MorePairsStarted>(morePairsPath(id, n), { ...o, method: "POST" });
+/** A finished, saved batch: resume its investigator on its own thread, asking it to test `suspect` (untested). The
+ *  experiment it asks for waits for approval as usual. 409 with the reason when it cannot. */
+export const testSuspect = (id: string, suspect: string, o: Opts = {}) =>
+  call<{ id: string; phase: string; suspect_id: string }>(`${batchPath(id)}/suspects/${encodeURIComponent(suspect)}/test`, { ...o, method: "POST" });
 /** Live batches only: answer `forks.pending` while the phase is `awaiting_approval`. */
-export const postDecision = (id: string, approve: boolean, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/decision`, { ...o, json: { approve } });
+export const postDecision = (id: string, approve: boolean, o: Opts = {}, pairs?: number) =>
+  call<{ ok: true }>(`${batchPath(id)}/decision`, { ...o, json: pairs === undefined ? { approve } : { approve, pairs } });
+/** Live batches only: approve or reject a lesson the investigator proposed (`lessons[].id`). */
+export const postLesson = (id: string, lesson: string, approve: boolean, o: Opts = {}) =>
+  call<{ ok: true }>(`${batchPath(id)}/lessons/${encodeURIComponent(lesson)}`, { ...o, json: { approve } });
 /** Live batches only: cancel the work and stop every VM. */
 export const stopBatch = (id: string, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/stop`, { ...o, method: "POST" });

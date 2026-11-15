@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7398,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), raw features, 80/20 stratified split",
+  "notes": "Trained on 491 rows and tested on 123 rows from data.csv. The original data.csv (921 rows) was accidentally over-deduplicated to 614 rows before splitting and the original was not recoverable, so these results reflect the reduced dataset."
+}

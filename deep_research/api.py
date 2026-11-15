@@ -24,20 +24,21 @@ from dotenv import dotenv_values, load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
 from . import controllers, datasets, domains, hub, notebook, robot_view, traps, user_scripts  # noqa: E402
-from .batch import Batch, Refused, more_pairs_problem, more_pairs_quote, resume_problem  # noqa: E402 - needs the environment loaded first
+from .batch import Batch, Refused, more_pairs_problem, more_pairs_quote, resume_problem, testable_suspects  # noqa: E402 - needs the environment loaded first
 from .batch_summary import summarize  # noqa: E402
 from .case_file import current_domain, with_evidence  # noqa: E402
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
 from .costs import CostTracker, OverBudget, estimate_batch_usd, run_rate  # noqa: E402
 from .events import read_events  # noqa: E402
+from .experiments import MAX_PAIRS_PER_CALL as MAX_EXPERIMENT_PAIRS  # noqa: E402
 from .gateway_guard import GatewayGuard  # noqa: E402
 
 log = logging.getLogger("deep_research.api")
@@ -554,6 +555,12 @@ async def _resume(batch_id: str, investigate: bool) -> dict:
         except ValueError as e:
             raise HTTPException(409, f"this batch cannot be resumed: {e}") from e
         BATCHES[b.id] = b
+        # The checkpoint, not the case file, says whether an approval is still waiting (plan Phase 6: a pending
+        # approval survives a restart, even one interrupted mid-answer).
+        try:
+            await b.restore_pending()
+        except Exception as e:  # noqa: BLE001 - a resume never fails on this repair
+            log.warning("could not restore the pending approval of %s: %s", b.id, e)
     # Only when nothing is already running for it: a second click must not start a second investigator.
     task = TASKS.get(b.id)
     if investigate and b.case.data.get("phase") == "ready" and (task is None or task.done()):
@@ -625,6 +632,35 @@ async def more_pairs(batch_id: str, n: int | None = None):
         BATCHES[b.id] = b
         _spawn(b.id, b.run_more_pairs(reserved=job))
         return {"id": b.id, "phase": b.case.data.get("phase"), **job}
+
+
+# ---- asking the finished investigator to test a suspect it left untested ----
+
+
+@app.post("/api/batches/{batch_id}/suspects/{suspect_id}/test")
+async def test_suspect(batch_id: str, suspect_id: str):
+    """Resume a finished batch's investigator on its own thread, asking it to test `suspect_id`.
+
+    Loads the saved batch back the way more pairs do (`Batch.reopen`) and claims it (phase `investigating`). The
+    experiment the investigator asks for then waits on the usual approval card, under the budget guard. 409 with the
+    reason when it cannot run: a simulated batch, a fixture, one still running, a suspect already tested, a missing
+    saved thread."""
+    async with _RESUME_LOCKS.setdefault(batch_id, asyncio.Lock()):
+        if not (BATCHES_DIR / batch_id / "case" / "case.json").is_file():
+            if (FIXTURES_DIR / batch_id / "case" / "case.json").is_file():
+                raise HTTPException(409, "cannot test it: this is a fixture, a saved example that cannot be resumed")
+            raise HTTPException(404, f"no batch {batch_id}")
+        task = TASKS.get(batch_id)
+        if _running(batch_id) is not None or (task is not None and not task.done()):
+            raise HTTPException(409, "cannot test it: this batch is running something else; one experiment at a time")
+        try:
+            b = await asyncio.to_thread(Batch.reopen, batch_id, BATCHES_DIR, suspect_id)
+            b.claim_test(suspect_id)
+        except Refused as e:
+            raise HTTPException(409, f"cannot test it: {e}") from e
+        BATCHES[b.id] = b
+        _spawn(b.id, b.test_suspect(suspect_id))
+        return {"id": b.id, "phase": b.case.data.get("phase"), "suspect_id": suspect_id}
 
 
 @app.post("/api/batches")
@@ -1007,6 +1043,8 @@ async def investigate(batch_id: str):
 
 class Decision(BaseModel):
     approve: bool
+    # The edit path (plan 6.5): approve a paired experiment with another number of pairs. Plain {"approve"} still works.
+    pairs: int | None = Field(default=None, ge=1, le=MAX_EXPERIMENT_PAIRS)
 
 
 @app.post("/api/batches/{batch_id}/decision")
@@ -1014,6 +1052,24 @@ async def decision(batch_id: str, d: Decision):
     b = _live(batch_id)
     if b.case.data.get("phase") != "awaiting_approval":
         raise HTTPException(409, "nothing is waiting for approval")
+    pending = b.case.data["forks"].get("pending") or {}
+    if d.pairs is not None and pending.get("kind") not in ("experiment", "method"):
+        raise HTTPException(409, "only an experiment's number of pairs can be changed")
+    _spawn(batch_id, b.decide(d.approve, d.pairs if d.approve else None))
+    return {"ok": True}
+
+
+class LessonDecision(BaseModel):
+    approve: bool
+
+
+@app.post("/api/batches/{batch_id}/lessons/{lesson_id}")
+async def lesson_decision(batch_id: str, lesson_id: str, d: LessonDecision):
+    """Approve or reject the lesson the investigator proposed (`propose_lesson`): it answers that approval."""
+    b = _live(batch_id)
+    pending = b.case.data["forks"].get("pending") or {}
+    if b.case.data.get("phase") != "awaiting_approval" or pending.get("lesson_id") != lesson_id:
+        raise HTTPException(409, f"lesson {lesson_id} is not waiting for approval")
     _spawn(batch_id, b.decide(d.approve))
     return {"ok": True}
 
@@ -1040,7 +1096,11 @@ async def ws(websocket: WebSocket, batch_id: str):
             await websocket.send_json({"kind": "error", "message": e.detail})
             await websocket.close(code=4404)
             return
-        await websocket.send_json({"kind": "snapshot", "case": case, "live": False, "resumable": _resumable(batch_id)})
+        # The suspects its investigator can be asked to test (a saved batch of ours only, never a fixture).
+        d = BATCHES_DIR / batch_id
+        testable = testable_suspects(case, d) if (d / "case" / "case.json").is_file() else []
+        await websocket.send_json({"kind": "snapshot", "case": case, "live": False, "resumable": _resumable(batch_id),
+                                   "testable": testable})
         await websocket.close()
         return
     q = b.subscribe()

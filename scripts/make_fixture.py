@@ -29,11 +29,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from deep_research import domains  # noqa: E402
-from deep_research.analysis import actions_from_events, find_split  # noqa: E402
+from deep_research.analysis import actions_from_events, find_split, rank_candidates, run_attributes  # noqa: E402
+from deep_research.audit import build_audit  # noqa: E402
 from deep_research.batch import _arm_summary  # noqa: E402
 from deep_research.case_file import CaseFile  # noqa: E402
 from deep_research.config import BatchConfig  # noqa: E402
-from deep_research.evidence import verdict_evidence  # noqa: E402
+from deep_research.evidence import fork_pairs, verdict_evidence  # noqa: E402
 from deep_research.forks import intervention_for  # noqa: E402
 from deep_research.scoring import score_run  # noqa: E402
 from deep_research.task import TARGET, build_task, task_prompt  # noqa: E402
@@ -49,7 +50,7 @@ HYPOTHESIS_AT = 1794637981.6498184
 # verdict's evidence.
 LEGACY_CONFIG = ("dataset", "trap", "trap_strength", "trap_noise", "hint_level", "model_hint", "holdout_fraction", "n_runs",
                  "forks_per_choice", "analyst_model", "investigator_model", "budget_usd", "inflation_threshold", "mode", "seed")
-LEGACY_DROPPED = ("trace", "fix", "trace_comparison", "rubric", "feed")
+LEGACY_DROPPED = ("trace", "fix", "trace_comparison", "rubric", "feed", "baseline")
 
 
 def todos(items: list[str], active: int) -> list[dict]:
@@ -232,8 +233,12 @@ def main() -> None:
     )
     c, f = arms["control"], arms["forced"]
     numbers = {"control_inflated": c["inflated"], "control_total": c["scored"], "forced_inflated": f["inflated"], "forced_total": f["scored"]}
-    # The words follow the evidence level (deep_research/evidence.py), which record_verdict saves next to them.
-    evidence = verdict_evidence(numbers=numbers)
+    # The words follow the evidence level (deep_research/evidence.py), which record_verdict saves next to them: the
+    # running score of the fork's pairs (MASTER_PLAN 6.4), saved on the fork too.
+    pairs = fork_pairs(case.data["forks"]["f1"])
+    evidence = verdict_evidence(numbers=numbers, pairs=pairs)
+    case.update_fork("f1", evidence=evidence, pairs=pairs or [], score=evidence["score"], p_exact=evidence["p_exact"],
+                     level=evidence["level"])
     verb = "caused the inflated scores" if evidence["level"] == "supported" else "suggests why the scores were inflated"
     case.record_verdict(
         f"Skipping the duplicate check {verb}: forcing it left {f['inflated']} of {f['scored']} copies inflated, "
@@ -250,6 +255,11 @@ def main() -> None:
     case.data["hypotheses"][0]["at"] = HYPOTHESIS_AT
     for section in LEGACY_DROPPED:
         case.data.pop(section, None)
+    # ---- the experiments engine's UI-only sections (MASTER_PLAN 6.1), from the same plain code a live batch runs ----
+    attrs = {rid: run_attributes(json.loads((OUT / "runs" / rid / "outputs" / "report.json").read_text()),
+                                 cfg.analyst_model) for rid in runs}
+    case.set_candidates([c.to_dict() for c in rank_candidates(runs, statuses, attributes=attrs)])
+    case.set_audit({**build_audit(case.data, OUT, cfg.inflation_threshold), "at": HYPOTHESIS_AT})
     case.set_phase("done")  # saves the file as it is now
 
     n_inf = sum(s == "inflated" for s in statuses.values())

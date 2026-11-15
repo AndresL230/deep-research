@@ -1,8 +1,9 @@
 // How it works (src/batch/how.ts, how-diagrams.ts): its route and nav link, the once-only first-visit redirect, and the
-// page with a hand-made case, with the real robot demo, and with no case at all.
+// page with a hand-made case, with the recorded robot run it links to (HOW_BATCH), and with no case at all.
 
 import { describe, expect, it } from "vitest";
 import demoRaw from "../../fixtures/robot-demo-batch/case/case.json?raw";
+import liveRaw from "../../fixtures/robot-live-investigation/case/case.json?raw";
 import type { CaseFile } from "../src/api";
 import { HOW_BATCH, HOW_SEEN_KEY, HOW_STOPS, firstVisitRedirect, howSeen, howStop, howView, type SeenStorage } from "../src/batch/how";
 import { forkDiagram, harnessDiagram, loopDiagram } from "../src/batch/how-diagrams";
@@ -11,6 +12,8 @@ import { navBar, navCurrent, navMenu } from "../src/batch/nav";
 
 const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 const DEMO = JSON.parse(demoRaw) as CaseFile;
+/** The recorded robot run the page loads and links to (HOW_BATCH). */
+const LIVE = JSON.parse(liveRaw) as CaseFile;
 
 /** What main.ts does on every route: send someone new to How it works once, then remember it. */
 function enter(hash: string, seen: ReturnType<typeof howSeen>): string {
@@ -184,7 +187,7 @@ describe("the page", () => {
     // 5: the verdict and its pairs.
     expect(t[4]).toContain("The fork suggests that not testing other can positions inflates the claim");
     expect(stops[4].match(/<p class="hw-quote">([^<]*)<\/p>/)![1]).not.toMatch(/\bcaused\b/);
-    expect(t[4]).toContain("2 of 8 pairs so far, so the verdict stays open.");
+    expect(t[4]).toContain("2 of 5 pairs so far, so the verdict stays open.");
     expect(t[4]).toContain("Run more pairs");
   });
 
@@ -214,20 +217,21 @@ describe("the page", () => {
   });
 
   it("shows the real robot demo's numbers", () => {
-    const t = tour({ state: "ready", value: DEMO }).map(text);
-    expect(t[0]).toContain("r02 claims 100%. Nobody has checked that yet.");
-    expect(t[1]).toContain("6 of 12 agents claimed 99%. Measured at 20 positions they never tested: 59%.");
-    expect(t[1]).toContain("r02 claimed 100%. On 20 cases it never saw, it scored 55%.");
-    expect(t[2]).toContain("4 of 4");
-    expect(t[2]).toContain("0 of 6");
-    expect(t[2]).toContain("0 of 6 inflated runs took this step. 4 of 4 honest runs did.");
-    expect(t[3]).toMatch(/The claim moved -40\.\d pts, the robot moved \+5\.0 pts\./);
+    expect(HOW_BATCH).toBe("robot-live-investigation");
+    const t = tour({ state: "ready", value: LIVE }).map(text);
+    expect(t[0]).toContain("r06 claims 100%. Nobody has checked that yet.");
+    expect(t[1]).toContain("5 of 12 agents claimed 100%. Measured at positions they never tested: 69%.");
+    expect(t[1]).toContain("r06 claimed 100%. On cases it never saw, it scored 65%.");
+    expect(t[2]).toContain("3 of 3");
+    expect(t[2]).toContain("2 of 5");
+    expect(t[2]).toContain("2 of 5 inflated runs took this step. 3 of 3 honest runs did.");
+    expect(t[3]).toMatch(/The claim moved -0\.\d pts, the robot moved \+30\.0 pts\./);
     expect(t[3]).toContain("Made to do it, 0 of 4 copies came out inflated.");
-    expect(t[4]).toContain("4 of 8 pairs so far, so the verdict stays open.");
+    expect(t[4]).toContain("4 of 5 pairs so far, so the verdict stays open.");
   });
 
   it("says it in plain words: no em dashes, no snake_case", () => {
-    for (const demo of [{ state: "ready", value: DEMO }, { state: "ready", value: HAND }, { state: "loading" }] as const) {
+    for (const demo of [{ state: "ready", value: LIVE }, { state: "ready", value: DEMO }, { state: "ready", value: HAND }, { state: "loading" }] as const) {
       for (const html of tour(demo)) {
         const t = text(html.replace(/<svg[\s\S]*?<\/svg>/g, ""));
         expect(t).not.toContain("—");

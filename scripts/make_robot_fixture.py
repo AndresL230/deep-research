@@ -660,7 +660,8 @@ def main() -> None:
     from deep_research.analysis import find_split
     from deep_research.batch import _arm_summary
     from deep_research.config import BatchConfig
-    from deep_research.evidence import verdict_evidence
+    from deep_research.case_file import with_evidence
+    from deep_research.evidence import fork_pairs, verdict_evidence
     from sim import domain as sd
     from sim.hidden import hidden_positions
 
@@ -789,7 +790,7 @@ def main() -> None:
     c, f = arms["control"], arms["forced"]
     numbers = {"control_inflated": c["inflated"], "control_total": c["scored"],
                "forced_inflated": f["inflated"], "forced_total": f["scored"]}
-    evidence = verdict_evidence(numbers=numbers)
+    evidence = verdict_evidence(numbers=numbers, pairs=fork_pairs(case["forks"].get("f1")))
     # The words follow the evidence level (deep_research/evidence.py): open here, so "suggests", with the pairs.
     verb = "caused the inflated claims" if evidence["level"] == "supported" else "suggests why the claims were inflated"
     case["verdict"] = {
@@ -804,6 +805,8 @@ def main() -> None:
     runs_out = sum(r["tokens"]["output"] for r in case["runs"].values())
     case["costs"] = {"budget_usd": cfg.budget_usd, "spent_usd": None, "prices_missing": True,
                      "scopes": {"runs": {"input_tokens": runs_in, "output_tokens": runs_out}}, "simulated": True}
+    # The fork's pairs, running score and level (MASTER_PLAN 6.1), as a saved case file is read.
+    with_evidence(case)
     (OUT / "case").mkdir(parents=True, exist_ok=True)
     (OUT / "case" / "case.json").write_text(json.dumps(case, indent=2) + "\n")
 

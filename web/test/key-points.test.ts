@@ -55,7 +55,7 @@ const verdictOf = (level: "open" | "supported" | null): Verdict => ({
   sentence: "Testing other positions brought the claim down.",
   step_label: "vary_positions",
   numbers: { control_inflated: 8, control_total: 8, forced_inflated: 0, forced_total: 8 },
-  ...(level ? { evidence: { level, pairs: 8, needed_pairs: 8, control_inflated: 8, control_total: 8, forced_inflated: 0, forced_total: 8, p_value: 0.0001 } } : {}),
+  ...(level ? { evidence: { level, pairs: 8, needed_pairs: 5, control_inflated: 8, control_total: 8, forced_inflated: 0, forced_total: 8, p_value: 0.0001, rule: "running_score" as const, score: level === "supported" ? 169.84 : 13.03 } } : {}),
 });
 
 const traceEntry: TraceEntry = {
@@ -192,10 +192,10 @@ describe("keyPoints: the step", () => {
   });
 
   it("judges a verdict saved without evidence by its counts, with the server's rule", () => {
-    // 8 of 8 inflated without the step, 0 of 8 with it: 8 pairs and a Fisher p under 0.05 (evidence.ts evidenceFrom).
+    // 8 of 8 inflated without the step, 0 of 8 with it: 8 agreeing pairs at worst, a running score of 169.8 (evidence.ts evidenceFrom).
     const enough = caseOf(ROBOT_CONFIG, sixRuns(), { split: robotSplit, verdict: verdictOf(null) });
     expect(point(enough, "step")!.text).toBe(`${STEP_LINE} The fork experiment supports this as the cause.`);
-    // 4 of 4 against 0 of 4: too few pairs, whatever the investigator's sentence says.
+    // 4 of 4 against 0 of 4: a score of 13.03, under 20, whatever the investigator's sentence says.
     const few = { ...verdictOf(null), sentence: "Skipping the step caused the inflated claims.", numbers: { control_inflated: 4, control_total: 4, forced_inflated: 0, forced_total: 4 } };
     expect(point(caseOf(ROBOT_CONFIG, sixRuns(), { split: robotSplit, verdict: few }), "step")!.text)
       .toBe(`${STEP_LINE} The fork experiment does not settle whether this is the cause.`);
@@ -573,8 +573,11 @@ describe("a fork experiment's fold", () => {
     // More: the source run and the pages either side.
     expect(html).toContain('data-act="open-run" data-arg="r02"');
     expect(html).toContain('data-act="goto" data-arg="split"');
-    expect(html).toContain('<span class="ln-meter-t">4 of 8 pairs</span><span class="ln-meter-w">4 more to confirm it</span>');
-    expect(html).toContain("A pair is one copy left alone and one made to take the step.");
+    expect(html).toContain('<span class="ln-meter-t">4 of 5 pairs</span><span class="ln-meter-w">1 more to confirm it</span>');
+    // How a pair is read, and the score beside the level, said once for the page and kept while the detail is folded.
+    expect(html).toContain("A pair is one copy left alone and one made to take the step, cut from the same run");
+    expect(count(html, 'data-morph-key="pair-key"')).toBe(1);
+    expect(html).toContain('<span class="ln-meter-sc">Score <b>13.03</b> of 20</span>');
     // Each arm's card with its bars, the question as asked, the statistics and the provenance are the detail.
     expect(html).not.toContain('data-morph-key="arm-');
     expect(html).not.toContain('class="ln-bars"');

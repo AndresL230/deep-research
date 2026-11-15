@@ -1,5 +1,5 @@
 // "How it works" (`#/how`): a short guided tour of the loop. One stop is on screen at a time: a heading, two plain
-// sentences, and a small picture drawn from a real batch, the robot demo (`robot-demo-batch`), loaded with the same
+// sentences, and a small picture drawn from a real batch, the recorded robot run (`robot-live-investigation`), loaded with the same
 // case file fetch the batch pages use. On each picture one part is ringed and a bubble says the one thing to read there
 // (tour.ts places the ring and the bubble). Five stops are the loop's steps; the sixth hands over: open the demo batch,
 // or start one. How Orro is built is folded at the foot. Without the case file (still loading, or the server could not
@@ -24,7 +24,7 @@ import { claimHeadline } from "./wall";
 import { capital, domainWords, stepText } from "./words";
 
 /** The batch the page draws its numbers from. */
-export const HOW_BATCH = "robot-demo-batch";
+export const HOW_BATCH = "robot-live-investigation";
 
 // ── the first visit ──────────────────────────────────────────────────────────
 
@@ -163,7 +163,10 @@ function forkPicture(c: CaseFile): string {
   const o = f ? forkOutcome(f) : null;
   if (!f || !o) return "";
   const words = domainWords(c.config);
-  const name = c.split ? stepText(c.split.label, words, trapOf(c)).name : "the step";
+  // The step the fork tested, which need not be the split's (in the recorded robot run the split is tune_params, which
+  // no fork can force, and the fork tested test_table_edges).
+  const label = f.label ?? c.split?.label;
+  const name = label ? stepText(label, words, trapOf(c)).name : "the step";
   return `<p class="hw-head hw-head--sm">${esc(forkOutcomeText(o, words.subject))}</p>`
     + `<ul class="hw-keys" aria-hidden="true"><li><i class="hw-sw hw-sw--bad"></i>Copy came out inflated</li><li><i class="hw-sw hw-sw--ok"></i>Copy came out honest</li></ul>`
     + `<div class="hw-fork">${forkDiagram(name, f.source_run ?? c.split?.fork_run_id ?? null, f)}</div>`;

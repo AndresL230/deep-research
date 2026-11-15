@@ -205,25 +205,32 @@ def test_costs_endpoint_reads_live_batches_from_memory_and_saved_ones_from_disk(
     report = res.json()
     rows = {b["id"]: b for b in report["batches"]}
     assert [b["id"] for b in report["batches"]] == [
-        "1114-093012-a1b2", "1113-080000-ffff", "robot-live-investigation", "demo-batch", "humanoid-demo-batch", "robot-demo-batch", "track-demo-batch"]
+        "1114-093012-a1b2", "1113-080000-ffff", "robot-live-investigation", "tabular-live-investigation", "demo-batch",
+        "humanoid-demo-batch", "robot-demo-batch", "suspects-demo-batch", "track-demo-batch"]
     assert rows["1114-093012-a1b2"]["kind"] == "live" and rows["1114-093012-a1b2"]["usd"]["total"] == 0.25
     assert rows["1113-080000-ffff"]["kind"] == "replay" and rows["1113-080000-ffff"]["started_at"].endswith("-11-13T08:00:00")
     assert rows["demo-batch"]["simulated"] is True and rows["demo-batch"]["usd"] is None and rows["demo-batch"]["started_at"] is None
     t = report["totals"]
-    # The real recording (fixtures/robot-live-investigation) is real spend, counted like any saved batch.
+    # The real recordings (fixtures/robot-live-investigation, fixtures/tabular-live-investigation) are real spend,
+    # counted like any saved batch.
     recorded = rows["robot-live-investigation"]
-    assert recorded["kind"] == "replay" and not recorded.get("simulated") and recorded["usd"]["total"] > 0
-    assert t["usd"]["total"] == pytest.approx(0.815 + 0.25 + recorded["usd"]["total"])
-    assert t["batches"] == 3 and t["excludes_simulated"] is True
-    assert report["simulated"]["batches"] == 4
+    tabular = rows["tabular-live-investigation"]
+    for r in (recorded, tabular):
+        assert r["kind"] == "replay" and not r.get("simulated") and r["usd"]["total"] > 0
+    assert t["usd"]["total"] == pytest.approx(0.815 + 0.25 + recorded["usd"]["total"] + tabular["usd"]["total"])
+    assert t["batches"] == 4 and t["excludes_simulated"] is True
+    assert report["simulated"]["batches"] == 5
 
 
 def test_costs_endpoint_with_only_the_demo_batch(client):  # noqa: F811
     report = client.get("/api/costs").json()
-    assert [b["id"] for b in report["batches"]] == ["robot-live-investigation", "demo-batch", "humanoid-demo-batch", "robot-demo-batch", "track-demo-batch"]
-    # Only the real recording counts: the simulated fixtures are tokens only.
-    live = report["batches"][0]
-    assert report["totals"]["batches"] == 1 and report["totals"]["usd"]["total"] == pytest.approx(live["usd"]["total"])
+    assert [b["id"] for b in report["batches"]] == ["robot-live-investigation", "tabular-live-investigation", "demo-batch",
+                                                    "humanoid-demo-batch", "robot-demo-batch", "suspects-demo-batch",
+                                                    "track-demo-batch"]
+    # Only the real recordings count: the simulated fixtures are tokens only.
+    live = report["batches"][:2]
+    assert report["totals"]["batches"] == 2
+    assert report["totals"]["usd"]["total"] == pytest.approx(sum(b["usd"]["total"] for b in live))
 
 
 def test_commentary_is_its_own_group_on_its_own_model():

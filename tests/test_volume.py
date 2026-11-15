@@ -132,7 +132,7 @@ def fleet(monkeypatch):
             state.alive -= 1
             state.deleted.append(vm.id)
 
-    def build_analyst(backend, model, prompt):
+    def build_analyst(backend, model, prompt, **kw):
         state.prompts.append(prompt)
         return FakeAgent(backend, model, state.agents, state.hold_s)
 
@@ -247,7 +247,7 @@ async def test_fork_copies_use_their_source_runs_model(tmp_path, monkeypatch):
     monkeypatch.setattr(batch_mod.vms, "download_outputs", lambda vm, dest, **kw: [])
     monkeypatch.setattr(batch_mod.vms, "download_charts", lambda vm, dest: [])
     monkeypatch.setattr(batch_mod.vms, "delete_vm", lambda vm: None)
-    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt: models.append(("build", model)) or prompts.append(prompt) or object())
+    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt, **kw: models.append(("build", model)) or prompts.append(prompt) or object())
     monkeypatch.setattr(batch_mod, "DaytonaSandbox", lambda sandbox: SimpleNamespace(execute=lambda cmd: SimpleNamespace(output="ok")))
     monkeypatch.setattr(batch_mod.Batch, "_drive", drive)
     monkeypatch.setattr(batch_mod, "intervention_for", lambda *a, **k: {"description": "Remove the copies", "command": "true"})

@@ -281,12 +281,27 @@ async def test_vms_stop_when_no_step_separates_the_runs(tmp_path, monkeypatch):
 
     async def run_one(run_id):
         b.vms[run_id] = f"vm-{run_id}"
-        b.case.update_run(run_id, status="inflated")
+        b.case.update_run(run_id, status="honest")
 
     monkeypatch.setattr(b, "run_one", run_one)
     await b.run_all()
     assert b.case.read()["phase"] == "no_split"
     assert sorted(stopped) == ["vm-r01", "vm-r02"]
+
+
+async def test_every_run_inflated_is_ready_to_investigate(tmp_path, monkeypatch):
+    # Plan Phase 1.4: ready whenever at least one run is inflated, even if no run is honest (so no split exists).
+    b, stopped = _batch_with_vms(tmp_path, monkeypatch)
+
+    async def run_one(run_id):
+        b.vms[run_id] = f"vm-{run_id}"
+        b.case.update_run(run_id, status="inflated")
+
+    monkeypatch.setattr(b, "run_one", run_one)
+    await b.run_all()
+    case = b.case.read()
+    assert case["phase"] == "ready" and not case.get("split")
+    assert stopped == []
 
 
 # ---- a finished batch is a replay ----
@@ -356,7 +371,7 @@ def test_the_list_summarises_each_batch_from_its_case_file(client):
     assert robot["claim"]["of"] == "inflated" and robot["claim"]["n"] == 6 and robot["claim"]["n_hidden"] == 20
     assert round(robot["claim"]["claimed"], 2) == 0.99 and round(robot["claim"]["measured"], 2) == 0.59
     assert robot["step"] == {"label": "vary_positions", "name": "testing other can positions"}
-    assert robot["verdict"] == {"state": "open", "pairs": 4, "needed_pairs": 8}
+    assert robot["verdict"] == {"state": "open", "pairs": 4, "needed_pairs": 5}
     assert robot["spend"] == {"usd": None, "usd_partial": False, "tokens": 769893 + 79665}
     assert robot["analyst_models"] == ["anthropic:claude-haiku-5-5"]
     demo = listed[DEMO]["summary"]
@@ -446,7 +461,7 @@ def _fake_vms(monkeypatch, batch_mod, deleted, load_task=lambda sb, task: None):
     monkeypatch.setattr(batch_mod.vms, "download_outputs", lambda sb, dest: None)
     monkeypatch.setattr(batch_mod.vms, "download_charts", lambda sb, dest: ["01_counts.png"])
     monkeypatch.setattr(batch_mod.vms, "delete_vm", deleted.append)
-    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt: object())
+    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt, **kw: object())
     monkeypatch.setattr(batch_mod, "DaytonaSandbox", lambda sandbox: object())
 
 
@@ -641,9 +656,14 @@ def test_resume_problem_names_what_blocks_it(tmp_path):
     d, case, resume_problem = _saved_batch(tmp_path)
     assert resume_problem(case, d) is None
     assert "verdict" in resume_problem({**case, "verdict": {"sentence": "x"}}, d)
-    assert "nothing to investigate" in resume_problem({**case, "phase": "no_split"}, d)
+    honest = {r: {**v, "status": "honest"} for r, v in case["runs"].items()}
+    assert "nothing to investigate" in resume_problem({**case, "phase": "no_split", "runs": honest}, d)
+    # Plan Phase 1.4: inflated runs but no honest one (so no split) can still be investigated.
+    first_inflated = next(r for r, v in case["runs"].items() if v.get("status") == "inflated")
+    (d / "runs" / first_inflated / "messages.json").write_text("[]")
+    assert resume_problem({**case, "phase": "no_split", "split": None}, d) is None
     assert "never finished" in resume_problem({**case, "runs": {**case["runs"], "r01": {"status": "running"}}}, d)
-    assert "split" in resume_problem({**case, "split": None}, d)
+    assert "split" in resume_problem({**case, "split": None, "runs": honest}, d)
     assert "simulated" in resume_problem({**case, "config": {**case["config"], "simulated": True}}, d)
     (d / "runs" / case["split"]["fork_run_id"] / "messages.json").unlink()
     assert "missing" in resume_problem(case, d)
@@ -782,6 +802,7 @@ class Controller:
 '''
 
 
+@pytest.mark.needs_panda
 def test_upload_a_controller_and_start_checks_it(client, tmp_path, monkeypatch):
     from deep_research import controllers
     from deep_research import config as cfg_mod

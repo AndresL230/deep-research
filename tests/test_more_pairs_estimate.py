@@ -66,7 +66,7 @@ def test_the_c05a_quote_is_its_copies_and_base_rounded_up_and_leaves_the_investi
     scopes["fork:f1:base"] = _scope(0.0, 0.0011)
     scopes |= {f"run:r{i:02d}": _scope(0.0028, 0.0004) for i in range(1, 13)}
     scopes["investigator"] = _scope(0.486, 0.0)
-    q = more_pairs_quote(_case(dict.fromkeys(C05A_COPIES, "honest")), _tracker(scopes))
+    q = more_pairs_quote(_case(dict.fromkeys(C05A_COPIES, "honest")), _tracker(scopes), 4)
     per_copy = sum(m + v for m, v in C05A_COPIES.values()) / 8
     assert q["vm_count"] == 9 and per_copy * 8 + 0.0011 == pytest.approx(0.0214, abs=1e-4)
     # Rounded to the nearest cent this was $0.02, below what the 8 copies and the base of f1 really cost.
@@ -135,11 +135,11 @@ def test_the_budget_check_uses_the_rounded_up_estimate():
     scopes = {f"fork:f1:{cid}": _scope(0.05, 0.01) for cid in FOUR_EACH}
     scopes["fork:f1:base"] = _scope(0.0, 0.01)
     scopes["investigator"] = _scope(9.015, 0.0)
-    q = more_pairs_quote(_case(FOUR_EACH), _tracker(scopes))
+    q = more_pairs_quote(_case(FOUR_EACH), _tracker(scopes), 4)
     assert q["estimate_usd"] == 0.49 and q["over_budget"] is False
     # A $0.011 base makes $0.491, quoted $0.50: $9.506 plus that is over, though $0.491 alone would have fit.
     scopes["fork:f1:base"] = _scope(0.0, 0.011)
-    q = more_pairs_quote(_case(FOUR_EACH), _tracker(scopes))
+    q = more_pairs_quote(_case(FOUR_EACH), _tracker(scopes), 4)
     assert q["estimate_usd"] == 0.5 and q["over_budget"] is True and "about $0.50" in q["budget_problem"]
 
 
@@ -160,7 +160,7 @@ def test_the_endpoint_answers_the_estimate_and_its_basis_from_the_saved_spend(cl
     scopes["investigator"] = _scope(0.486, 0.0)
     b.tracker.restore({"scopes": scopes})
     b.case.set_costs(b.tracker.snapshot())
-    q = client.get("/api/batches/saved/more-pairs").json()
+    q = client.get("/api/batches/saved/more-pairs?n=4").json()
     assert q["vm_count"] == 9 and q["estimate_usd"] == 0.03
     assert q["basis"].startswith("8 new copies at $0.0025 each (the average of 8 earlier finished copies of f1)")
     assert "saved" not in api.BATCHES  # nothing loaded or started

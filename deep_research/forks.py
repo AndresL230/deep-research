@@ -4,23 +4,47 @@ from __future__ import annotations
 
 import uuid
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+import re
+from dataclasses import dataclass, field
+from typing import Callable
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from . import traps
+from .evidence import UNDID_CHANGE  # noqa: F401 - the reason a pair is dropped, named here with its check
+
+# An older near-duplicate step kept the file as it was under this name. The step no longer writes it (batch
+# 1115-025003-ef94 f3: every forced copy restored it at once), but a copy that reaches for it undid the change (`held`).
+DEDUP_BACKUP = "data_before_dedup.csv"
+# How far apart (relative) a non-integer value of a near-duplicate may be from the row it copies.
+NEAR_RTOL = 0.05
 
 # One forced action per label. "control" arms get nothing forced. Each trap brings the fix for its own
 # step (`deduplicate` comes from the duplicates trap); a step that is no trap's own is listed here.
 # `SHOW` holds the weaker version of a step for the `show` arm: tell the agent what the fix would fix, change nothing.
 INTERVENTIONS: dict[str, dict] = {
-    # Jittered copies differ only in their non-integer columns, so match rows on every other column.
+    # A jittered copy (traps/duplicates.py) equals its original exactly in every integer or text column and is
+    # within a small relative distance in each non-integer column (`trap_noise` scales a value by 1 + N(0, noise/20),
+    # so at most 2.5% at the largest noise). Rows are sorted on every column, and a row that matches the one before
+    # it that way is dropped: exact copies too (`near_duplicates` is the same rule in Python, for `held`). No backup
+    # is kept, and the output says only what was done, in neutral words.
     "deduplicate_near": {
-        "description": "Remove near-duplicate rows from data.csv before the split, matching on the exact columns",
+        "description": "Remove near-duplicate rows from data.csv before the split",
+        "todo": "Remove near-duplicate rows from data.csv",
         "command": traps.in_workspace(
-            "import pandas as pd; d = pd.read_csv('data.csv'); n = len(d); "
+            "import pandas as pd, numpy as np; d = pd.read_csv('data.csv'); n = len(d); "
+            "d = d.drop_duplicates(); "
             "num = d.select_dtypes('number'); "
-            "exact = [c for c in d.columns if c not in num.columns or (num[c].dropna() % 1 == 0).all()]; "
-            "d = d.drop_duplicates(subset=exact or None); d.to_csv('data.csv', index=False); "
-            "print(f'Removed {n - len(d)} near-duplicate rows, matching on {len(exact)} exact columns. {len(d)} rows remain.')"
+            "fz = [c for c in num.columns if not (num[c].dropna() % 1 == 0).all()]; "
+            "ex = [c for c in d.columns if c not in fz]; "
+            "s = d.sort_values(ex + fz, kind='stable'); p = s.shift(); "
+            "same = s[ex].astype(object).fillna('<NA>').eq(p[ex].astype(object).fillna('<NA>')).all(axis=1).to_numpy(); "
+            f"close = np.isclose(s[fz].to_numpy(float), p[fz].to_numpy(float), rtol={NEAR_RTOL}, atol=1e-9, "
+            "equal_nan=True).all(axis=1); "
+            "dup = same & close; dup[:1] = False; "
+            "d = d.drop(index=s.index[dup]); d.to_csv('data.csv', index=False); "
+            "print(f'Removed {n - len(d)} near-duplicate rows (rows that match another row up to small numeric '"
+            "f'differences). {len(d)} rows remain in data.csv.')"
         ),
     },
 }
@@ -183,3 +207,550 @@ def forced_turn(step: dict | str, output: str) -> list[BaseMessage]:
         AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": call_id}]),
         ToolMessage(content=output, tool_call_id=call_id, name=name),
     ]
+
+
+# ---- the change registry (plan 6.3): what one experiment changes in its changed copies ----
+#
+# A change is named `<kind>:<name>`, for example `force_step:deduplicate`, `force_step:drop_column:followup_score`,
+# `fake_result:no_duplicates`, `edit_context:hint_quality`, `edit_context:<free text>` or
+# `swap_model:anthropic:claude-sonnet-5-5`. `control` changes nothing: it is the other half of every pair.
+# `INTERVENTIONS` above stays as it was: it is the tabular domain's `force_step` table, read through `parse_change`.
+
+CHANGE_KINDS = ("control", "force_step", "fake_result", "edit_context", "swap_model")
+MAX_CONTEXT_CHARS = 300
+# A column name a `drop_column` change may name: it goes into a shell command, so no quotes or shell characters.
+_COLUMN_NAME = re.compile(r"^[A-Za-z0-9_. -]{1,64}$")
+
+FAKE_RESULTS: dict[str, dict] = {
+    # The duplicate check, answered "none found" without running it. Its fork point is the run's own look at the data
+    # before it deduplicated: the copy then decides what to do on a made-up all-clear.
+    "no_duplicates": {
+        "description": "Answer the duplicate check with a made-up '0 duplicate rows' without running it",
+        "command": traps.in_workspace(
+            "import pandas as pd; d = pd.read_csv('data.csv'); print('duplicates:', int(d.duplicated().sum()))"),
+        "output": "duplicates: 0",
+        # The step the made-up result is about, and the fork point it needs.
+        "about": "deduplicate",
+        "anchor": "before_check:deduplicate",
+    },
+}
+
+CONTEXT_EDITS: dict[str, str] = {
+    "hint_quality": ("Before you go on: check the data for problems that would make a test score look better than "
+                     "it is, such as rows that appear in both train and test, columns that would not exist when "
+                     "predicting, and rows that belong to the same subject."),
+    "use_logistic": "Use a logistic regression model for the rest of this task.",
+}
+
+
+def swap_models() -> tuple[str, ...]:
+    """The models a `swap_model` change may name: every model with a price in prices.json, so its spend is counted."""
+    from .config import load_prices
+
+    return tuple(sorted((load_prices().get("models") or {}).keys()))
+
+
+@dataclass(frozen=True)
+class Change:
+    """One parsed change. `step` is what `change_messages` applies to a changed copy; None for `control`."""
+
+    kind: str
+    name: str
+    description: str
+    step: dict | None = None
+    # The step label this change is about (the fix it forces, the check it fakes), or None.
+    about: str | None = None
+    # The fork point the change needs when none is given (`fake_result` forks at the run's own check).
+    default_anchor: str | None = None
+    extra: dict = field(default_factory=dict)
+
+    @property
+    def spec(self) -> str:
+        return self.kind if self.kind == "control" else f"{self.kind}:{self.name}"
+
+    def to_dict(self) -> dict:
+        return {"kind": self.kind, "name": self.name, "spec": self.spec, "description": self.description,
+                "about": self.about}
+
+    def held(self, copy_dir, task=None) -> bool | None:
+        """Whether this change still held at the end of a changed copy (`step_held`). None: it cannot be checked."""
+        return step_held(self.step, copy_dir, task)
+
+
+class ChangeError(ValueError):
+    """A change that cannot be built, with the reason in words for the caller."""
+
+
+def drop_column_step(column: str) -> dict:
+    """The forced step that drops `column` from data.csv and holdout_features.csv, before the split."""
+    if not _COLUMN_NAME.match(column or ""):
+        raise ChangeError(f"'{column}' is not a column name a change can drop (letters, digits, _ . - and spaces)")
+    return {
+        "description": f"Drop the {column} column from data.csv and holdout_features.csv before the split",
+        "check": {"rule": "no_column", "column": column},
+        "command": traps.in_workspace(
+            "import pandas as pd; "
+            "[pd.read_csv(f, dtype=str, keep_default_na=False)"
+            f".drop(columns=['{column}'], errors='ignore').to_csv(f, index=False) "
+            "for f in ('data.csv', 'holdout_features.csv')]; "
+            f"print('Dropped the {column} column from data.csv and holdout_features.csv.')"
+        ),
+    }
+
+
+def group_split_step(column: str) -> dict:
+    """The forced step of a group-aware split: keep one row per value of `column` in data.csv, before the split, so no
+    group ends up in both train and test."""
+    if not _COLUMN_NAME.match(column or ""):
+        raise ChangeError(f"'{column}' is not a column name a change can group by (letters, digits, _ . - and spaces)")
+    return {
+        "description": f"Keep one row per {column} value in data.csv before the split, so no group is in both train "
+                       "and test",
+        "check": {"rule": "group_split", "column": column},
+        "command": traps.in_workspace(
+            "import pandas as pd; d = pd.read_csv('data.csv', dtype=str, keep_default_na=False); n = len(d); "
+            f"d = d.drop_duplicates(subset=['{column}']); d.to_csv('data.csv', index=False); "
+            f"print(f'Kept one row per {column} value: removed {{n - len(d)}} rows. {{len(d)}} rows remain.')"
+        ),
+    }
+
+
+# The parametrised force_step changes: the investigator names the column (`drop_column:<column>`), checked against
+# the batch's data.csv when the batch has one.
+COLUMN_STEPS: dict[str, Callable[[str], dict]] = {"drop_column": drop_column_step, "group_split": group_split_step}
+
+
+def _trap_column(t) -> str | None:
+    m = re.search(r"drop\(columns=\['([^']+)'\]", t.intervention.get("command", ""))
+    return m.group(1) if m else None
+
+
+def _label_of_column(column: str) -> str:
+    """The step label a dropped column counts as: a trap's own (`drop_leak` for its leak column) or `drop_column`."""
+    for t in traps.registered():
+        if _trap_column(t) == column:
+            return t.label
+    return "drop_column"
+
+
+def parse_change(spec: str, force: Callable[[str], dict | None] | None = None,
+                 models: tuple[str, ...] | None = None, columns: list[str] | None = None) -> Change:
+    """The change named by `spec`. Raises ChangeError with the reason and the choices.
+
+    `force(label)` gives the domain's forced step for a label (`Domain.intervention_for`); None: this module's
+    tabular table. `models` is the `swap_model` allowlist; None: `swap_models()`. `columns`: the batch's real data
+    columns, which a `drop_column:<column>` or `group_split:<column>` change must name; None: not checked.
+    """
+    spec = (spec or "").strip()
+    kind, _, name = spec.partition(":")
+    name = name.strip()
+    if kind not in CHANGE_KINDS:
+        raise ChangeError(f"unknown change kind '{kind}'; use one of {list(CHANGE_KINDS)} as '<kind>:<name>'")
+    if kind == "control":
+        return Change("control", "", "Nothing: the copy continues unchanged")
+    if not name:
+        raise ChangeError(f"name the change: '{kind}:<name>'")
+    if kind == "force_step":
+        step_name, _, column = name.partition(":")
+        if step_name in COLUMN_STEPS and column:
+            column = column.strip()
+            step = COLUMN_STEPS[step_name](column)
+            # The error never lists the columns: the investigator reads them from the data itself.
+            if columns is not None and column not in columns:
+                raise ChangeError(f"'{column}' is not a column of this batch's data.csv")
+            if step_name == "group_split":
+                return Change(kind, name, step["description"], step, about="group_split")
+            return Change(kind, name, f"Drop the {column} column", step, about=_label_of_column(column))
+        label = "deduplicate_near" if name == "deduplicate_fuzzy" else name
+        iv = force(label) if force is not None else intervention_for(label)
+        if iv is None:
+            raise ChangeError(f"no forced step exists for '{name}'; choose one of {force_steps(force)} "
+                              "or 'drop_column:<name>'")
+        step = {"description": iv["description"], "command": iv["command"],
+                **({"todo": iv["todo"]} if iv.get("todo") else {})}
+        check = check_for(label, iv)
+        if check:
+            step["check"] = check
+        return Change(kind, name, iv["description"], step, about=label)
+    if kind == "fake_result":
+        fake = FAKE_RESULTS.get(name)
+        if fake is None:
+            raise ChangeError(f"no made-up result is defined for '{name}'; choose one of {sorted(FAKE_RESULTS)}")
+        step = {"kind": "fake", "description": fake["description"], "command": fake["command"],
+                "output": fake["output"]}
+        return Change(kind, name, fake["description"], step, about=fake["about"], default_anchor=fake["anchor"])
+    if kind == "edit_context":
+        preset = name in CONTEXT_EDITS
+        text = (CONTEXT_EDITS[name] if preset else name).strip()
+        if len(text) > MAX_CONTEXT_CHARS:
+            raise ChangeError(f"the message is {len(text)} characters; at most {MAX_CONTEXT_CHARS}")
+        return Change(kind, name, f"Tell the agent: {text}",
+                      {"kind": "message", "description": f"Message to the agent: {text}", "text": text},
+                      extra={"preset": name if preset else None})
+    # swap_model
+    allowed = swap_models() if models is None else models
+    if name not in allowed:
+        raise ChangeError(f"'{name}' is not on the swap_model allowlist {list(allowed)}")
+    return Change(kind, name, f"Continue with the model {name}",
+                  {"kind": "model", "description": f"Continue with the model {name}", "model": name})
+
+
+def force_steps(force: Callable[[str], dict | None] | None = None, labels: list[str] | None = None) -> list[str]:
+    """The `force_step` names that exist: every label with a forced step, and `deduplicate_fuzzy` with its near twin."""
+    from .analysis import LABELS
+
+    names = [lb for lb in (labels or LABELS) if (force(lb) if force is not None else intervention_for(lb)) is not None]
+    if "deduplicate_near" in names:
+        names.append("deduplicate_fuzzy")
+    return names
+
+
+def registry(force: Callable[[str], dict | None] | None = None, labels: list[str] | None = None) -> dict[str, list[str]]:
+    """Every change by kind, as the names an experiment takes (`<kind>:<name>`), for the investigator and the UI."""
+    return {
+        "control": ["control"],
+        "force_step": [f"force_step:{n}" for n in force_steps(force, labels)] + ["force_step:drop_column:<name>"],
+        "fake_result": [f"fake_result:{n}" for n in FAKE_RESULTS],
+        "edit_context": [f"edit_context:{n}" for n in CONTEXT_EDITS]
+        + [f"edit_context:<text, at most {MAX_CONTEXT_CHARS} characters>"],
+        "swap_model": [f"swap_model:{m}" for m in swap_models()],
+    }
+
+
+def trap_columns() -> set[str]:
+    """Every column a registered trap adds or keys on. The orchestrator knows them; the investigator is never told."""
+    return {c for t in traps.registered() for c in t.columns}
+
+
+def trap_words() -> set[str]:
+    """The registered traps' names and their columns: what nothing the investigator is offered may name."""
+    return {*traps.names(), *trap_columns()}
+
+
+def names_a_trap(text: str) -> bool:
+    """Whether `text` names a registered trap or one of its columns, as a whole word."""
+    low = (text or "").lower()
+    return any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(w.lower())}(?![A-Za-z0-9_])", low) for w in trap_words())
+
+
+def _trap_specific(step: dict | None) -> bool:
+    return step is not None and names_a_trap(f"{step.get('description', '')} {step.get('command', '')}")
+
+
+# What each parametrised step does, in the investigator's words. Neither names a trap or a trap's column.
+GENERIC_STEPS = {
+    "drop_column:<column>": "Drop the named column (any column of data.csv) from data.csv and holdout_features.csv "
+                            "before the split",
+    "group_split:<column>": "Group-aware split: keep one row per value of the named column (any column of data.csv) "
+                            "before the split, so no group is in both train and test",
+}
+
+
+def blind_changes(force: Callable[[str], dict | None] | None = None, labels: list[str] | None = None,
+                  tabular: bool = True) -> dict[str, list[dict]]:
+    """The changes as the investigator sees them (`list_changes`): generic ones only, each with what it does.
+
+    A fixed step whose forced command names a trap's column (the leak column, the subject id) is left out; the
+    parametrised `drop_column:<column>` and `group_split:<column>` take its place, so the investigator has to name
+    the column it suspects. Nothing here says which trap a change would fix (`trap_fixes` stays with the orchestrator).
+    `tabular`: the batch works on data.csv, so the column steps and `fake_result` apply.
+    """
+    force_rows = []
+    for name in force_steps(force, labels):
+        if name == "deduplicate_fuzzy":
+            continue  # the same step as deduplicate_near, under its other name
+        iv = force(name) if force is not None else intervention_for(name)
+        if _trap_specific(iv):
+            continue
+        force_rows.append({"change": f"force_step:{name}", "does": iv["description"]})
+    if tabular:
+        force_rows += [{"change": f"force_step:{n}", "does": d} for n, d in GENERIC_STEPS.items()]
+    return {
+        "control": [{"change": "control", "does": "Nothing: the copy continues unchanged"}],
+        "force_step": force_rows,
+        "fake_result": [{"change": f"fake_result:{n}", "does": f["description"]} for n, f in FAKE_RESULTS.items()]
+        if tabular else [],
+        "edit_context": [{"change": f"edit_context:{n}", "does": f"Tell the agent: {t}"} for n, t in CONTEXT_EDITS.items()]
+        + [{"change": f"edit_context:<text, at most {MAX_CONTEXT_CHARS} characters>",
+            "does": "Tell the agent your own short message"}],
+        "swap_model": [{"change": f"swap_model:{m}", "does": f"Continue with the model {m}"} for m in swap_models()],
+    }
+
+
+def blind_change_error(change: Change) -> str | None:
+    """Why the investigator may not ask for `change` by that name, or None: a fixed step whose forced command names a
+    trap's column (one trap's own fix, by its step label). The same step is open to it as a generic change."""
+    step_name, _, column = change.name.partition(":")
+    named_by_it = step_name in COLUMN_STEPS and bool(column)
+    if change.kind == "force_step" and not named_by_it and _trap_specific(change.step):
+        return (f"'{change.spec}' is not one of the generic changes in list_changes; name the column you mean with "
+                "force_step:drop_column:<column> or force_step:group_split:<column>")
+    return None
+
+
+def scrub(text: str) -> str:
+    """`text` with every trap name and trap column replaced by `<column>`: for tool output the orchestrator writes from
+    the full registry (the older `list_interventions` and `request_forks`)."""
+    for w in sorted(trap_words(), key=len, reverse=True):
+        text = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(w)}(?![A-Za-z0-9_])", "<column>", text)
+    return text
+
+
+def trap_fixes() -> dict[str, list[str]]:
+    """For each registered trap, the changes in the registry that fix it (a test checks every trap has one)."""
+    out: dict[str, list[str]] = {}
+    for t in traps.registered():
+        fixes = [f"force_step:{t.label}"]
+        if _trap_column(t):
+            fixes.append(f"force_step:drop_column:{_trap_column(t)}")
+        if t.label == "deduplicate":
+            fixes.append("force_step:deduplicate_fuzzy")
+        out[t.name] = fixes
+    return out
+
+
+def _steps_of(step: dict | list | None) -> list[dict]:
+    if step is None:
+        return []
+    return list(step) if isinstance(step, list) else [step]
+
+
+def step_model(step: dict | list | None, default: str) -> str:
+    """The model a changed copy runs on: a `swap_model` step's, else `default`."""
+    for s in _steps_of(step):
+        if step_kind(s) == "model":
+            return s["model"]
+    return default
+
+
+def change_messages(backend, step: dict | list | None) -> tuple[list[BaseMessage], list[dict]]:
+    """What a copy's history gains from its arm's step (or list of steps, for a two-factor cell), and its log events.
+
+    - a command or an edit (`force_step`): run in the copy's VM and appended as a tool call with its real output
+      (`apply_step`, `forced_turn`). Raises RuntimeError when it did not take.
+    - `fake` (`fake_result`): appended as a tool call with the made-up output. Nothing runs.
+    - `message` (`edit_context`): appended as a message to the agent.
+    - `model` (`swap_model`): nothing appended; `step_model` picks the copy's model.
+    """
+    msgs: list[BaseMessage] = []
+    events: list[dict] = []
+    for s in _steps_of(step):
+        kind = step_kind(s)
+        if kind == "model":
+            events.append({"type": "forced", "command": f"swap_model {s['model']}", "output": "", "change": "swap_model"})
+        elif kind == "message":
+            msgs.append(HumanMessage(content=s["text"]))
+            events.append({"type": "forced", "command": f"message: {s['text']}", "output": "", "change": "edit_context"})
+        elif kind == "fake":
+            msgs += forced_turn({"command": s["command"]}, s["output"])
+            events.append({"type": "forced", "command": s["command"], "output": s["output"], "change": "fake_result"})
+        else:
+            output = apply_step(backend, s)
+            msgs += forced_turn(s, output)
+            events.append({"type": "forced", "command": step_text(s), "output": output[:2000]})
+    return msgs, events
+
+
+# ---- the adherence check: did the change hold? (plan 3: no false evidence) ----
+#
+# A changed copy's agent can undo what was forced on it (batch 1115-025003-ef94 f3: every forced copy restored the
+# data the near-duplicate step had cleaned). Scored, such a copy is a second control and the pair says the change did
+# nothing. After each changed copy finishes, plain code reads its final files and its log; a pair whose changed copy
+# undid the change is dropped (`evidence.UNDID_CHANGE`), never scored. Each `force_step` names its rule in
+# `step["check"]`; a step without one (a made-up result, a message, a model swap, a fix) cannot be checked: None.
+
+
+
+def check_for(label: str, iv: dict) -> dict | None:
+    """The adherence rule of a fixed `force_step` (`label`, its step `iv`), or None when there is none."""
+    if label == "deduplicate_near":
+        return {"rule": "near_duplicates"}
+    command = iv.get("command", "")
+    if label == "deduplicate" or re.search(r"drop_duplicates\(\)", command) and "subset" not in command:
+        return {"rule": "exact_duplicates"}
+    if m := re.search(r"drop\(columns=\['([^']+)'\]", command):
+        return {"rule": "no_column", "column": m.group(1)}
+    if m := re.search(r"drop_duplicates\(subset=\[?'([^']+)'\]?\)", command):
+        return {"rule": "group_split", "column": m.group(1)}
+    return None
+
+
+def near_duplicates(d) -> int:
+    """How many rows of the table `d` the near-duplicate step would remove: exact copies, then rows that match the one
+    before them (sorted on every column) exactly in each integer or text column and within NEAR_RTOL in each other
+    numeric column. The same rule as the step's command, in Python."""
+    import numpy as np
+
+    n = len(d)
+    d = d.drop_duplicates()
+    num = d.select_dtypes("number")
+    fz = [c for c in num.columns if not (num[c].dropna() % 1 == 0).all()]
+    ex = [c for c in d.columns if c not in fz]
+    s = d.sort_values(ex + fz, kind="stable")
+    p = s.shift()
+    same = s[ex].astype(object).fillna("<NA>").eq(p[ex].astype(object).fillna("<NA>")).all(axis=1).to_numpy()
+    close = np.isclose(s[fz].to_numpy(float), p[fz].to_numpy(float), rtol=NEAR_RTOL, atol=1e-9,
+                       equal_nan=True).all(axis=1)
+    dup = same & close
+    dup[:1] = False
+    return (n - len(d)) + int(dup.sum())
+
+
+# A later command that puts another file in data.csv's place: `cp <src> data.csv`, `mv <src> data.csv`, a shutil copy,
+# or a git checkout of the file.
+_RESTORES = (
+    re.compile(r"\b(?:cp|mv|rsync|install)\b(?:\s+-\S+)*\s+(?P<src>\S+)\s+(?:\S*/)?data\.csv(?![\w.])"),
+    re.compile(r"shutil\.(?:copy\w*|move)\(\s*(?P<src>[^,]+),\s*['\"](?:[^'\"]*/)?data\.csv['\"]"),
+    re.compile(r"\bgit\s+(?:checkout|restore)\b[^\n;&|]*\bdata\.csv\b"),
+)
+
+
+def _later_commands(copy_dir) -> list[str]:
+    """The shell commands a copy ran after its forced step, from its `events.jsonl`."""
+    import json
+    from pathlib import Path
+
+    path = Path(copy_dir) / "events.jsonl"
+    if not path.is_file():
+        return []
+    out, after = [], False
+    for line in path.read_text().splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("type") == "forced":
+            after = True
+        elif after and ev.get("type") == "tool_call":
+            cmd = (ev.get("args") or {}).get("command")
+            if isinstance(cmd, str):
+                out.append(cmd)
+    return out
+
+
+def restored_data(copy_dir) -> bool:
+    """Whether a copy's later commands put back the data the forced step changed: one names the old backup, or copies
+    another file onto data.csv."""
+    for cmd in _later_commands(copy_dir):
+        if DEDUP_BACKUP in cmd:
+            return True
+        for rx in _RESTORES:
+            m = rx.search(cmd)
+            if m and (m.groupdict().get("src") or "").strip("'\" ").rsplit("/", 1)[-1] != "data.csv":
+                return True
+    return False
+
+
+def _read(copy_dir, name: str):
+    import pandas as pd
+    from pathlib import Path
+
+    path = Path(copy_dir) / "outputs" / name
+    if not path.is_file():
+        return None
+    try:
+        return pd.read_csv(path)
+    except Exception:  # noqa: BLE001 - an unreadable file cannot be checked
+        return None
+
+
+def _held_duplicates(copy_dir, near: bool) -> bool | None:
+    if restored_data(copy_dir):
+        return False
+    train = _read(copy_dir, "train.csv")
+    if train is None:
+        return None
+    return (near_duplicates(train) if near else int(train.duplicated().sum())) == 0
+
+
+def _held_no_column(copy_dir, column: str) -> bool | None:
+    train = _read(copy_dir, "train.csv")
+    return None if train is None else column not in train.columns
+
+
+def _held_group_split(copy_dir, column: str) -> bool | None:
+    train, test = _read(copy_dir, "train.csv"), _read(copy_dir, "test.csv")
+    if train is None or test is None or column not in train.columns or column not in test.columns:
+        return None
+    seen = set(train[column].dropna().astype(str))
+    return not any(v in seen for v in test[column].dropna().astype(str))
+
+
+# One hook per rule: (copy folder, the rule's own fields) -> held, or None when it cannot be checked. The copy folder
+# holds `events.jsonl` and `outputs/` (train.csv and test.csv, the rows the run trained and tested on).
+HELD_CHECKS: dict[str, Callable[..., bool | None]] = {
+    "near_duplicates": lambda d, c: _held_duplicates(d, near=True),
+    "exact_duplicates": lambda d, c: _held_duplicates(d, near=False),
+    "no_column": lambda d, c: _held_no_column(d, c["column"]),
+    "group_split": lambda d, c: _held_group_split(d, c["column"]),
+}
+
+
+def step_held(step: dict | list | None, copy_dir, task=None) -> bool | None:
+    """Whether a changed copy's change still held when it finished: True, False (the copy undid it) or None (this
+    kind of change cannot be checked; counted as held, marked unverified). `task` is unused by today's rules: the
+    copy's own files say it all."""
+    if not isinstance(step, dict) or not isinstance(step.get("check"), dict):
+        return None
+    hook = HELD_CHECKS.get(step["check"].get("rule"))
+    return None if hook is None else hook(copy_dir, step["check"])
+
+
+def held_fields(step: dict | list | None, copy_dir, task=None) -> dict:
+    """The fields a changed copy gets: `held` (False only when it undid the change) and `held_verified`."""
+    h = step_held(step, copy_dir, task)
+    return {"held": h is not False, "held_verified": h is not None}
+
+
+def forced_todo(step: dict | list | None) -> dict | None:
+    """The forced step as a completed item of the agent's todo list (checkpoint mode), so its plan agrees with its
+    history: the step is in its history as a call it made. Only a shell-command step (`force_step`); nothing else is
+    a step the agent would have planned."""
+    if not isinstance(step, dict) or step_kind(step) != "command" or not step.get("command"):
+        return None
+    return {"content": step.get("todo") or step["description"], "status": "completed"}
+
+
+# ---- fork points (plan 6.3) ----
+
+ANCHOR_FORMS = ("before_split", "before_label:<label>", "index:<n>")
+
+
+def anchor_error(anchor: str) -> str | None:
+    """Why `anchor` is not a fork point, or None."""
+    anchor = (anchor or "").strip()
+    form, _, arg = anchor.partition(":")
+    if anchor == "before_split" or (form in ("before_label", "before_check") and arg):
+        return None
+    if form == "index" and arg.isdigit():
+        return None
+    return f"unknown fork point '{anchor}'; use one of {list(ANCHOR_FORMS)}"
+
+
+def resolve_anchor(actions: list, anchor: str, split_label: str = "split") -> int | None:
+    """The action index a fork point names in one run's labelled actions, or None when the run has no such moment.
+
+    `before_split`: the run's first action that splits (its domain's anchor label). `before_label:<label>`: its first
+    action with that label. `index:<n>`: action n. `before_check:<label>` (what `fake_result` needs): the run's last
+    look at the data (`inspect`) before its first `label` action, in its own action, not the split's.
+    """
+    anchor = (anchor or "before_split").strip()
+    if anchor == "before_split":
+        return next((a.index for a in actions if split_label in a.labels), None)
+    form, _, arg = anchor.partition(":")
+    if form == "before_label" and arg:
+        return next((a.index for a in actions if arg in a.labels), None)
+    if form == "index":
+        try:
+            n = int(arg)
+        except ValueError:
+            return None
+        return n if 0 <= n < len(actions) else None
+    if form == "before_check" and arg:
+        did = next((a.index for a in actions if arg in a.labels), None)
+        if did is None:
+            return None
+        looks = [a.index for a in actions[:did]
+                 if "inspect" in a.labels and split_label not in a.labels and arg not in a.labels]
+        return looks[-1] if looks else None
+    return None

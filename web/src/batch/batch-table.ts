@@ -203,6 +203,7 @@ function verdictCell(s: BatchSummary): string {
   switch (v.state) {
     case "supported": return `<span class="bt-chip" data-v="supported">Supported</span>${v.pairs != null ? `<span class="bt-sub">${v.pairs} pairs</span>` : ""}`;
     case "open": return `<span class="bt-chip" data-v="open">Open</span>${pairs ? `<span class="bt-sub">${esc(pairs)}</span>` : ""}`;
+    case "cleared": return `<span class="bt-chip" data-v="quiet">Cleared</span>${v.pairs != null ? `<span class="bt-sub">${v.pairs} pairs</span>` : ""}`;
     case "fork_running": return `<span class="bt-chip" data-v="running"><i class="bt-pulse" aria-hidden="true"></i>Fork running</span>`;
     case "awaiting_approval": return `<span class="bt-chip" data-v="wait">Fork to approve</span>`;
     case "forked": return `<span class="bt-chip" data-v="quiet">Fork done</span><span class="bt-sub">no verdict yet</span>`;

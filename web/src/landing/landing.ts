@@ -69,6 +69,9 @@ export const LANDING = {
   lede: "Orro gives one task to as many AI agents as you like, checks every claim against tests the agent never saw, and runs an experiment to find out why a claim came out too high.",
   /** The saved batch the page replays: the recorded robot arm run (fixtures/robot-live-investigation). */
   demo: "robot-live-investigation",
+  /** The footer's second replay: the recording of a real tabular run (fixtures/tabular-live-investigation, batch
+   *  1115-012104-800f), the one real batch whose experiment reached supported. None of the page's numbers come from it. */
+  tabular: "tabular-live-investigation",
   /** The folder card's tabs, in the order of their scenes: the humanoid video, the split finder, the terminal. */
   tabs: [
     { tab: "On a robot", num: "3 of 3", note: "motions tracked with balance feedback. Plain playback fell at 3.9 s on two of them.", chip: "Unitree G1 · MuJoCo" },
@@ -372,6 +375,7 @@ function footView(cta: LandingCta): string {
   const start = routeHash({ name: "home" });
   const batches = routeHash({ name: "home", at: "batches" });
   const demo = routeHash({ name: "batch", id: LANDING.demo });
+  const tabular = routeHash({ name: "batch", id: LANDING.tabular });
   const go = (to: string, words: string): string => `<li><button type="button" class="lp-foot-a" data-lp-go="${to}">${esc(words)}</button></li>`;
   const link = (href: string, words: string): string => `<li><a class="lp-foot-a" href="${attr(href)}">${esc(words)}</a></li>`;
   return `<footer class="lp-foot" data-keep>
@@ -381,7 +385,7 @@ function footView(cta: LandingCta): string {
           <a class="lp-cta" href="${attr(cta.href)}">${esc(cta.label)}</a>
         </div>
         <nav class="lp-foot-cols" aria-label="Footer">
-          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(batches, "Batches")}${link(demo, "Demo replay")}${cta === START_CTA ? link(start, "Start a batch") : ""}</ul></div>
+          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(batches, "Batches")}${link(demo, "Demo replay")}${link(tabular, "Tabular replay")}${cta === START_CTA ? link(start, "Start a batch") : ""}</ul></div>
           <div class="lp-foot-col"><span class="lp-eyebrow">On this page</span><ul>${go("how", "How it works")}${go("robots", "Robots")}${go("why", "Why Orro")}</ul></div>
           <div class="lp-foot-col"><span class="lp-eyebrow">Domains</span><ul>${link(batches, "Robot arm")}${link(batches, "Humanoid")}${link(batches, "Tabular data")}</ul></div>
         </nav>

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42), raw features",
+  "notes": "Deduplicated 57 exact duplicate rows, then stratified 80/20 split (seed 42). Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were kept as-is since the forest handles them without imputation."
+}

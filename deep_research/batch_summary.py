@@ -13,7 +13,7 @@ from typing import Any
 from . import domains
 from .case_file import current_domain
 from .cost_report import _batch, started_at
-from .evidence import verdict_evidence
+from .evidence import LEVELS, RULE, current_verdict_evidence
 
 # A run that has finished, scored or not (the wall's SCORED set).
 FINISHED = ("honest", "inflated", "unclear", "failed")
@@ -111,10 +111,11 @@ def _verdict(case: dict, over: bool) -> dict:
     verdict = case.get("verdict")
     if isinstance(verdict, dict):
         ev = verdict.get("evidence")
-        if not isinstance(ev, dict):
-            # Saved before verdicts had evidence (case_file.with_evidence), worked out here without touching the case.
-            ev = verdict_evidence(verdict.get("arms"), verdict.get("numbers"))
-        level = ev.get("level") if ev.get("level") in ("open", "supported") else "open"
+        if not isinstance(ev, dict) or ev.get("rule") != RULE:
+            # Saved before verdicts had evidence, or by the older Fisher rule (case_file.with_evidence): worked out
+            # here by today's rule without touching the case.
+            ev = current_verdict_evidence(case) or {}
+        level = ev.get("level") if ev.get("level") in LEVELS else "open"
         return {"state": level, "pairs": ev.get("pairs"), "needed_pairs": ev.get("needed_pairs")}
     forks = _dict(case.get("forks"))
     method = [f for k, f in forks.items() if k != "pending" and isinstance(f, dict) and f.get("kind", "method") != "fix"]

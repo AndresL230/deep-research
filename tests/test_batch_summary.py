@@ -80,13 +80,21 @@ def test_the_fork_and_verdict_states():
     assert state(phase="investigating", forks={"f1": {"status": "done"}}) == {"state": "forked"}
     # A fix test is not the method experiment.
     assert state(phase="investigating", forks={"f2": {"status": "running", "kind": "fix"}}) == {"state": "none"}
-    supported = {"sentence": "x", "evidence": {"level": "supported", "pairs": 9, "needed_pairs": 8}}
-    assert state(verdict=supported) == {"state": "supported", "pairs": 9, "needed_pairs": 8}
+    supported = {"sentence": "x", "evidence": {"level": "supported", "pairs": 9, "needed_pairs": 5, "rule": "running_score"}}
+    assert state(verdict=supported) == {"state": "supported", "pairs": 9, "needed_pairs": 5}
     # A verdict saved before evidence: worked out from its numbers, and the case is left as it was.
     old = {"sentence": "x", "numbers": {"control_inflated": 4, "control_total": 4, "forced_inflated": 0, "forced_total": 4}}
     case = _case(verdict=old)
-    assert summarize("b", case)["verdict"] == {"state": "open", "pairs": 4, "needed_pairs": 8}
+    assert summarize("b", case)["verdict"] == {"state": "open", "pairs": 4, "needed_pairs": 5}
     assert "evidence" not in case["verdict"]
+    # A verdict the old Fisher rule called supported (8 pairs, p < 0.05) is read by today's rule: 0 of 8 against 4 of
+    # 8 is at least 4 agreeing pairs of 8, so open, and the stored evidence is left as it was.
+    fisher = {"sentence": "x caused it", "numbers": {"control_inflated": 4, "control_total": 8, "forced_inflated": 0,
+                                                     "forced_total": 8},
+              "evidence": {"level": "supported", "pairs": 8, "needed_pairs": 8, "p_value": 0.0385}}
+    case = _case(verdict=fisher)
+    assert summarize("b", case)["verdict"] == {"state": "open", "pairs": 8, "needed_pairs": 5}
+    assert case["verdict"]["evidence"]["level"] == "supported"
 
 
 def test_the_robot_fixture():

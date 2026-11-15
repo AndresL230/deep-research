@@ -10,7 +10,7 @@ import robotCaseRaw from "../../fixtures/robot-demo-batch/case/case.json?raw";
 import type { AgentEvent, CaseFile, ForkExperiment, PendingForks, ProposedFix, RunRecord, SplitFinding, StepLabel, TraceEntry } from "../src/api";
 import {
   armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, diagnosisView, eventLine, fixSummaryText, fixTestedText, fixMeasuredText, fixView,
-  forkView, investigatorView, isProblemPhase, lineWindows,
+  forkMode, forkView, investigatorView, isProblemPhase, lineWindows, rewindText, timeTravelTag,
   phaseText, pickRuns, planCells, scoreStats, selfCheckText, shortArgs, sortedChildren, splitCounts, splitHeadline,
   splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictLine, verdictSplit, verdictView, stepRows,
 } from "../src/batch/lanes";
@@ -496,6 +496,38 @@ describe("forkView", () => {
     expect(html).toContain(`More pairs confirmed: ${n} arms x 3 + 1 base = ${n * 3 + 1} VMs, 4 pairs before, 7 pairs after`);
   });
 
+  it("says the method once and sets the experiments side by side: a row each, its pairs, its score against 20 and its level", () => {
+    const f1 = demo.forks.f1 as ForkExperiment;
+    const f2 = { ...structuredClone(f1), id: "f2", change: "force_step:deduplicate", prediction: "smaller_gap" } as ForkExperiment;
+    const two = forkView(vmOf({ forks: { f1, f2 } }, { open: "all" }));
+    expect(count(two, '<tr data-morph-key="cmp-')).toBe(2);
+    expect(two).toContain("Run a step: deduplicate");
+    expect(two).toContain("the change shrinks the gap");
+    // Never a level without its score: each row has both, and so does each picture's meter.
+    expect(count(two, 'class="ln-xt-sc"><b>')).toBe(2);
+    expect(count(two, '<span class="ln-meter-sc">Score <b>')).toBe(2);
+    // How a pair is read, the score's rule and the marks' key: once for the page, not once per experiment.
+    expect(count(two, 'data-morph-key="pair-key"')).toBe(1);
+    expect(count(two, "It sets the level: supported at 20 or more.")).toBe(1);
+    expect(count(two, '<p class="ln-key" data-morph-key="key">')).toBe(1);
+    // A single experiment is its own picture: no table, the method still said once.
+    const one = forkView(vmOf({ forks: { f1 } }));
+    expect(one).not.toContain('class="ln-xt"');
+    expect(count(one, 'data-morph-key="pair-key"')).toBe(1);
+  });
+
+  it("lays the copies out as one grid: a row per copy number, the pair those copies make beside them", () => {
+    const html = forkView(vmOf({}, { open: "all" }));
+    expect(html).toContain('class="ln-arms ln-pg" data-arms="2" data-pairs="1"');
+    // control-2 and forced-2 sit on the same row as pair 2, under the heads in row 1.
+    expect(html).toMatch(/data-arg="f1\/control-2"[^>]*style="--r:3"/);
+    expect(html).toMatch(/data-arg="f1\/forced-2"[^>]*style="--r:3"/);
+    expect(html).toMatch(/data-morph-key="pair-2:done" style="--i:1;--r:3"/);
+    // The statistics and the provenance fold, still on the page.
+    expect(html).toContain('<details class="ln-exact ln-ev-more"');
+    expect(html).toContain('<details class="ln-exact ln-prov-w"');
+  });
+
   it("is empty without forks", () => {
     expect(forkView(vmOf({ forks: {} }))).toBe("");
   });
@@ -585,7 +617,7 @@ describe("verdictView", () => {
     // One that says "caused" on the same open evidence is not shown at all.
     const caused = verdictView(vmOf({ verdict: { ...demo.verdict!, sentence: "Skipping the duplicate check caused the inflated scores." } }));
     expect(caused).not.toMatch(/caused|The investigator wrote/);
-    expect(html).toContain("The fork suggests that not removing duplicate rows inflates the claim: 3 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 8 pairs.");
+    expect(html).toContain("The fork suggests that not removing duplicate rows inflates the claim: 3 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 5 pairs.");
     expect(html).not.toMatch(/caused/);
     expect(html).toContain(">Open<");
     expect(count(html, "ln-dot ln-dot--inflated\" title")).toBe(3);
@@ -932,12 +964,12 @@ describe("fork page", () => {
     const html = forkView(vmOf({ forks: { pending } }));
     expect(count(html, '<p class="ln-ask-more">')).toBe(3);
     expect(html).toContain("Forced arm runs first: Remove duplicate rows from data.csv before the split. Arms: control, forced.");
-    // The ceiling is the server's bar: pairs against the 8 needed, never a score of 20.
-    expect(html).toContain("With 4 copies per arm this experiment can reach at most 4 pairs, under the 8 needed, so it cannot be supported; 8 or more copies per arm can.");
+    // The ceiling: pairs against the 5 needed (five agreeing pairs reach a score of 20).
+    expect(html).toContain("With 4 copies per arm this experiment can reach at most 4 pairs, under the 5 needed, so it cannot be supported; 5 or more copies per arm can.");
     expect(html).not.toContain("13.03");
     expect(html).toContain("Asked with request_forks.");
     expect(count(html, " disabled")).toBe(2);
-    expect(forkView(vmOf({ forks: { pending: { ...pending, n_per_arm: 8, vm_count: 17 } } }))).toContain("Supported needs at least 8 pairs and a one-sided Fisher exact p under 0.05.");
+    expect(forkView(vmOf({ forks: { pending: { ...pending, n_per_arm: 8, vm_count: 17 } } }))).toContain("Supported needs a running score of 20 or more");
     // A robot request with every arm turned on names all four.
     const robot = forkView(robotVm({ forks: { pending: { ...pending, vm_count: 17 } } }));
     expect(robot).toContain("Arms: control, placebo, show, forced.");
@@ -945,30 +977,30 @@ describe("fork page", () => {
     const fix = forkView(vmOf({ forks: { pending: { ...pending, kind: "fix", vm_count: 13 } }, fix: proposedFix }));
     expect(fix).toContain("Fixed arm applies: Scale the carry time with the carry distance at /home/daytona/workspace/controller.py:25.");
     expect(fix).toContain("Asked with request_fix_test.");
-    expect(fix).not.toContain("8 needed");
+    expect(fix).not.toContain("5 needed");
     expect(count(fix, '<p class="ln-ask-more">')).toBe(2);
   });
 
-  it("reads the demo fork as open by the server's rule, 4 of 8 pairs, with both p values, the ceiling and the plan's score as a measure", () => {
+  it("reads the demo fork as open by the server's rule, 4 of 5 pairs, with both p values, the ceiling and the running score that sets the level", () => {
     const html = forkView(vmOf({}, { events: demoLogs }));
     expect(html).toContain("Fork f1 · method experiment");
     expect(html).toContain("does the gap between what it claims and what is measured shrink?");
     expect(html).toContain("hypothesis subagent · LLM agent");
     expect(html).toContain("no prediction was saved before the copies ran");
-    // The level is the case file's verdict.evidence: open, 4 of the 8 pairs needed.
+    // The level is the case file's verdict.evidence: open, 4 of the 5 pairs needed, score 13.03.
     expect(html).toMatch(/ln-ev-level--open[^>]*><span class="ds-ic">.*?<span class="mo-sr">Open<\/span>/);
-    expect(html).toContain('data-text="4"><span data-keep>4</span></span></b><span class="ln-muted"> of 8 pairs</span>');
+    expect(html).toContain('data-text="4"><span data-keep>4</span></span></b><span class="ln-muted"> of 5 pairs</span>');
     expect(html).toContain("The level is the server&#39;s (verdict.evidence).");
     expect(html).toContain("one-sided Fisher p = 5/70 (0.071)");
-    expect(html).toContain("exact permutation p = 1/70 (0.014)");
-    expect(html).toContain("With 4 copies per arm this experiment can reach at most 4 pairs, under the 8 needed, so it cannot be supported.");
+    expect(html).toContain("Gaps: exact p = 0.014, from the case file.");
+    expect(html).toContain("With 4 copies per arm this experiment can reach at most 4 pairs, under the 5 needed, so it cannot be supported.");
     expect(html).toContain("pair 2: control +22.2 pts, forced +3.4 pts, agrees x1.9");
-    expect(html).not.toContain("Supported needs 20");
-    expect(html).not.toContain("of 20");
+    // 20 is the bar for supported now: the running score sets the level.
+    expect(html).toContain("Supported needs a running score of 20 or more");
     expect(html).not.toContain("ln-conf");
-    // The plan's sequential score stays, as a measure: its chart has the rule at 20, its label the score.
+    // The plan's running score sets the level: its chart has the rule at 20, its label the score.
     expect(html).toContain("The plan's sequential score:");
-    expect(html).toContain("it does not set the level.");
+    expect(html).toContain("It sets the level: supported at 20 or more.");
     expect(html).toMatch(/aria-label="Sequential score after 4 pairs: 13\.03, against the line at 20 in MASTER_PLAN 6\.4/);
     // The fork as two outcomes, once, over the arms.
     expect(count(html, 'class="ln-outcome"')).toBe(1);
@@ -1003,7 +1035,7 @@ describe("fork page", () => {
     expect(html).toContain("before writing the report");
     expect(html).not.toContain("write_report");
     expect(html).toContain("The copies start after controller.py was written");
-    expect(html).toContain("> of 8 pairs</span>");
+    expect(html).toContain("> of 5 pairs</span>");
     expect(html).toContain("one-sided Fisher p = 1/70");
     expect(html).toContain('<p class="ln-arm-plain">The robot didn&#39;t get worse. Its claim got honest.</p>');
     const forced = armCard(html, "forced");
@@ -1037,6 +1069,8 @@ describe("fork page", () => {
 
   it("drops a pair whose copy failed, and keeps the beam on the pair it waits for", () => {
     const f = structuredClone(demo.forks.f1) as ForkExperiment;
+    // The copies changed after the server recorded the pairs: drop what it recorded, as it would recompute them.
+    for (const k of ["pairs", "score", "p_exact", "level", "evidence"] as const) delete f[k];
     f.children["forced-2"] = { arm: "forced", status: "failed", reason: "VM died", how: "fork" };
     delete f.arms;
     expect(forkView(vmOf({ forks: { f1: f } }))).toContain("pair 2 dropped: forced-2 failed");
@@ -1069,13 +1103,14 @@ describe("fork page", () => {
 
   it("counts no pairs still to come once a fork has stopped", () => {
     const f = structuredClone(demo.forks.f1) as ForkExperiment;
+    for (const k of ["pairs", "score", "p_exact", "level", "evidence"] as const) delete f[k];
     f.status = "stopped";
     delete f.children["control-4"];
     delete f.children["forced-4"];
     delete f.arms;
     const html = forkView(vmOf({ forks: { f1: f } }));
     expect(html).toContain("stopped, 3 of 4 pairs complete");
-    expect(html).toContain("The fork stopped with 3 pairs, under the 8 needed, so it cannot be supported.");
+    expect(html).toContain("The fork stopped with 3 pairs, under the 5 needed, so it cannot be supported.");
     expect(html).toContain("pair 4 not run: the fork was stopped");
     expect(html).not.toContain("waiting:");
     expect(html).not.toContain("still to come");
@@ -1127,15 +1162,16 @@ describe("verdict page", () => {
   it("leads with where the evidence stands: the server's level, the verdict it supports, the effect and the ceiling", () => {
     const robot = verdictView(robotVm());
     expect(robot).toMatch(/ln-ev-level--open[^>]*><span class="ds-ic">.*?<span class="mo-sr">Open<\/span>/);
-    expect(robot).toContain("The fork suggests that not testing other can positions inflates the claim: 4 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 8 pairs.");
+    expect(robot).toContain("The fork suggests that not testing other can positions inflates the claim: 4 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 5 pairs.");
     expect(robot).toContain("lowered the gap between claimed and measured by 45.1 pts (control +43.8 pts, forced -1.4 pts) in 4 of 4 pairs.");
-    expect(robot).toContain("4 of the 8 pairs needed · Fisher p 1/70 (0.014) · permutation p 1/70 (0.014) · sequential score 13.03 · pairs ranged 40.0 to 50.0 pts");
-    expect(robot).toContain("With 4 copies per arm this experiment can reach at most 4 pairs, under the 8 needed, so it cannot be supported.");
-    // 20 is never the bar for supported.
+    expect(robot).toContain("4 of the 5 pairs needed · Fisher p 1/70 (0.014) · exact p 0.014 · sequential score 13.03 · pairs ranged 40.0 to 50.0 pts");
+    expect(robot).toContain("With 4 copies per arm this experiment can reach at most 4 pairs, under the 5 needed, so it cannot be supported.");
+    // The bar for supported is the running score of 20, said as such, not as a count of pairs.
     expect(robot).not.toMatch(/20 needed|of 20 needed|score &gt;= 20/);
+    expect(robot).toContain("running score of 20 or more");
     const demoHtml = verdictView(vmOf());
     expect(demoHtml).toContain("by 13.1 pts");
-    expect(demoHtml).toContain("4 of the 8 pairs needed · Fisher p 5/70 (0.071) · permutation p 1/70 (0.014) · sequential score 13.03 · pairs ranged 8.1 to 18.8 pts");
+    expect(demoHtml).toContain("4 of the 5 pairs needed · Fisher p 5/70 (0.071) · exact p 0.014 · sequential score 13.03 · pairs ranged 8.1 to 18.8 pts");
     expect(robot.indexOf("ln-v-stand")).toBeLessThan(robot.indexOf("ln-claim"));
   });
 
@@ -1149,7 +1185,7 @@ describe("verdict page", () => {
     expect(verdictView(robotVm())).toContain("The recorded verdict cites control and forced; the fork also ran placebo and show.");
     // A sentence in the server's CAUSAL words, on open evidence, is not quoted: the note says why, with the pairs.
     const caused = verdictView(vmOf({ verdict: { ...demo.verdict!, sentence: "Skipping the duplicate check caused the inflated scores." } }));
-    expect(caused).toContain("The investigator&#39;s own sentence names a cause, which this evidence does not support yet (4 of the 8 pairs needed, one-sided Fisher p = 0.071), so it is not quoted here.");
+    expect(caused).toContain("The investigator&#39;s own sentence names a cause, which this evidence does not support yet (4 pairs, running score 13.03 of the 20 needed; one-sided Fisher p = 0.071, shown only), so it is not quoted here.");
     expect(caused).not.toMatch(/caused|The investigator wrote/);
     // A claim of proof is held back the same way.
     expect(verdictView(vmOf({ verdict: { ...demo.verdict!, sentence: "This proves skipping dedupe drove the inflation." } }))).toContain("own sentence claims a proof");
@@ -1162,7 +1198,8 @@ describe("verdict page", () => {
     expect(scored).toContain("<span class=\"mo-sr\">Open</span>");
     expect(scored).not.toContain("<span class=\"mo-sr\">Supported</span>");
     const supported = { ...demo.verdict!, sentence: "Skipping the duplicate check caused the inflated scores.", evidence: {
-      level: "supported" as const, pairs: 10, needed_pairs: 8, control_inflated: 9, control_total: 10, forced_inflated: 1, forced_total: 10, p_value: 0.0005,
+      level: "supported" as const, pairs: 10, needed_pairs: 5, control_inflated: 9, control_total: 10, forced_inflated: 1, forced_total: 10, p_value: 0.0005,
+      rule: "running_score" as const, score: 32.3,
     } };
     const html = verdictView(vmOf({ verdict: supported }));
     expect(html).toContain("<span class=\"mo-sr\">Supported</span>");
@@ -1205,9 +1242,10 @@ describe("verdict page", () => {
     const demoHtml = verdictView(vmOf());
     expect(demoHtml).not.toContain("ln-recorded");
     expect(demoHtml).not.toContain("Control inflated");
+    // The server recorded the pairs, matched by copy number, so that caveat is gone, and the score sets the level.
+    expect(demoHtml).not.toContain("Pairs matched by copy number after the run, not assigned before it.");
+    expect(demoHtml).not.toContain("does not set the level");
     expect(demoHtml).toContain("Matches fork f1");
-    expect(demoHtml).toContain("Pairs matched by copy number after the run, not assigned before it.");
-    expect(demoHtml).toContain("they do not set the level.");
     expect(demoHtml).toContain("The level is the server&#39;s (verdict.evidence).");
     expect(demoHtml).not.toContain("Simulated");
     const robot = verdictView(robotVm());
@@ -1223,13 +1261,13 @@ describe("verdict page", () => {
     expect(bare).not.toContain("for ;");
     // A verdict saved before the server judged its evidence: the same rule, applied in the browser.
     const old = verdictView(vmOf({ verdict: { ...demo.verdict!, evidence: undefined } }));
-    expect(old).toContain("The server saved no evidence level with this verdict: its rule (at least 8 pairs and a one-sided Fisher exact p under 0.05) was applied in the browser.");
+    expect(old).toContain("The server saved no evidence level by today&#39;s rule with this verdict: that rule (Supported needs a running score of 20 or more");
     expect(old).toContain("<span class=\"mo-sr\">Open</span>");
   });
 
   it("reads the verdict's own record when no method fork is in the case file", () => {
     const html = verdictView(vmOf({ forks: {} }));
-    expect(html).toContain("No fork is in this case file: the counts are the verdict&#39;s own record, 4 of the 8 pairs needed, one-sided Fisher p = 0.071.");
+    expect(html).toContain("No fork is in this case file: the counts are the verdict&#39;s own record, 4 pairs, running score 13.03 of the 20 needed; one-sided Fisher p = 0.071, shown only.");
     expect(html).toContain("The fork suggests that not removing duplicate rows inflates the claim: 3 of 4 inflated without it, 0 of 4 with it, 4 pairs.");
     // A fix fork ran, but it tests the patch, not the step.
     expect(verdictView(vmOf({ forks: { f2: fixFork } }))).toContain("No method fork is in this case file (a fix fork tests the patch, not the step)");
@@ -1248,7 +1286,7 @@ describe("verdict page", () => {
     expect(count(rows, '<i class="is-bad"></i>')).toBe(4);
     expect(count(rows, '<i class="is-ok"></i>')).toBe(4);
     expect(pic).toMatch(/<dt>Claim moved<\/dt><dd>-40\.\d pts<\/dd>.*<dt>Robot moved<\/dt><dd>\+5\.0 pts<\/dd>/);
-    expect(pic).toContain("4 of 8 pairs");
+    expect(pic).toContain("4 of 5 pairs");
     // No mark is left to guess at: the key names the two kinds drawn, and only those.
     expect(pic).toContain('<p class="ln-key" data-morph-key="key">');
     expect(pic).toContain("A copy that inflated its claim");
@@ -1288,5 +1326,92 @@ describe("copy", () => {
       fixView(vmOf({ forks: { f2: fixFork }, fix: { ...proposedFix, fork_id: "f2", status: "tested" } })),
     ].join("");
     expect(all).not.toContain(String.fromCharCode(0x2014));
+  });
+});
+
+// ── how the copies were rewound: LangGraph time travel from a checkpoint, or a fresh analyst on the run's messages ──
+
+describe("the fork's rewind line", () => {
+  const CP = "1f1e0c93-0e8b-6046-8007-4da8a18e0cd7";
+  const real = { config: { ...demo.config, simulated: false } as CaseFile["config"], costs: { ...demo.costs, simulated: false } };
+  const base = (over: Partial<ForkExperiment> = {}): ForkExperiment => {
+    const f = structuredClone(demo.forks.f1) as ForkExperiment;
+    for (const k of Object.values(f.children)) k.how = "replay";
+    return { ...f, ...over };
+  };
+  const checkpoint = base({
+    fork_mode: "checkpoint", fork_mode_requested: "checkpoint", fork_mode_fallback: null,
+    restore: { agent_state: "checkpoint", vm: "replay" }, checkpoint_id: CP, source_thread_id: "demo-r02",
+  });
+  const fallback = base({
+    fork_mode: "messages", fork_mode_requested: "checkpoint", fork_mode_fallback: "the source run saved no checkpoint at action 3",
+    restore: { agent_state: "messages", vm: "replay" }, checkpoint_id: null, source_thread_id: "demo-r02",
+  });
+  const messagesText = "Each copy starts a fresh analyst from a copy of r02's message history, on a machine rebuilt by replaying its first 3 actions.";
+  /** The experiments table, alone. */
+  const table = (html: string): string => html.slice(html.indexOf('class="ln-xt"'), html.indexOf("</table>"));
+
+  it("checkpoint mode: the copies resume the analyst's saved state by LangGraph time travel, and say so with a tag", () => {
+    expect(forkMode(checkpoint)).toBe("checkpoint");
+    expect(rewindText(checkpoint)).toBe(
+      "Rewound with LangGraph time travel: each copy resumes the analyst's saved state (its messages and plan) from checkpoint " +
+      `<code title="${CP}">1f1e0c93…</code> of run r02, and its machine is rebuilt by replaying the run's first 3 actions.`,
+    );
+    const html = forkView(vmOf({ ...real, forks: { f1: checkpoint } }, { events: demoLogs }));
+    expect(html).toContain(`<p class="ln-src-how ln-rewind">${timeTravelTag(checkpoint)}<span>Rewound with LangGraph time travel`);
+    expect(timeTravelTag(checkpoint)).toContain(">Time travel</span>");
+    // The provenance says the analyst resumed, never that a fresh one continued.
+    expect(html).toContain("resumed from its LangGraph checkpoint.");
+    expect(html).toContain("analyst Deep Agents resumed from LangGraph checkpoint 1f1e0c93… of r02;");
+    expect(html).toContain("forks.f1.checkpoint_id");
+    expect(html).not.toContain("a fresh analyst Deep Agent");
+    expect(html).not.toContain("fresh analyst Deep Agents continued");
+  });
+
+  it("messages mode: a fresh analyst on a copy of the run's messages, and a fork with no mode reads as messages", () => {
+    const old = base();
+    expect(old.fork_mode).toBeUndefined();
+    expect(forkMode(old)).toBe("messages");
+    expect(rewindText(old)).toBe(messagesText);
+    expect(rewindText(base({ fork_mode: "messages", restore: { agent_state: "messages", vm: "replay" } }))).toBe(messagesText);
+    // Copies that were copy-on-write forks of the replayed base say so.
+    expect(rewindText(structuredClone(demo.forks.f1) as ForkExperiment)).toBe(
+      "Each copy starts a fresh analyst from a copy of r02's message history, on a copy-on-write fork of a machine that replayed its first 3 actions.",
+    );
+    expect(timeTravelTag(old)).toBe("");
+    const html = forkView(vmOf({ ...real, forks: { f1: old } }, { events: demoLogs }));
+    expect(html).toContain(messagesText);
+    expect(html).not.toContain("Time travel");
+    expect(html).toContain("continued from a copy of the run's messages.");
+    expect(html).toContain("fresh analyst Deep Agents continued from copies of r02&#39;s messages;");
+  });
+
+  it("a fallback: checkpoint mode was asked for, messages mode was used, and the page gives the reason", () => {
+    expect(forkMode(fallback)).toBe("messages");
+    expect(rewindText(fallback)).toBe(`${messagesText} LangGraph time travel was asked for but not used: the source run saved no checkpoint at action 3.`);
+    expect(rewindText({ ...fallback, fork_mode_fallback: null })).toContain("asked for but not used: no reason was recorded.");
+    const html = forkView(vmOf({ ...real, forks: { f1: fallback } }, { events: demoLogs }));
+    expect(html).toContain("LangGraph time travel was asked for but not used: the source run saved no checkpoint at action 3.");
+    expect(html).not.toContain(">Time travel<");
+  });
+
+  it("tags only the checkpoint-mode experiments in the experiments table", () => {
+    const html = forkView(vmOf({ ...real, forks: { f1: checkpoint, f2: { ...fallback, id: "f2" }, f3: { ...base(), id: "f3" } } }));
+    const t = table(html);
+    expect(count(t, '<tr data-morph-key="cmp-')).toBe(3);
+    expect(count(t, ">Time travel<")).toBe(1);
+    expect(t).toMatch(/<span class="ln-xt-id">f1<\/span><span class="ln-tag ln-tt"/);
+  });
+
+  it("renders a same-against-same control fork, which tests no step and so has no label", () => {
+    const control = { ...checkpoint, id: "f2", change: "control", change_kind: "control" } as ForkExperiment;
+    delete (control as Partial<ForkExperiment>).label;
+    const html = forkView(vmOf({ ...real, forks: { f1: checkpoint, f2: control } }, { events: demoLogs }));
+    expect(html).toContain("Step under test: <b class=\"ln-lit-word\" title=\"\">no change</b>.");
+  });
+
+  it("a fix fork has no rewind line", () => {
+    const html = forkView(vmOf({ forks: { f2: { ...fixFork, fork_mode: "checkpoint", checkpoint_id: CP } }, fix: proposedFix }));
+    expect(html).not.toContain("ln-rewind");
   });
 });

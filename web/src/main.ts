@@ -37,7 +37,7 @@ import { scheduleOrbs } from "./thinking-orb";
 import { PAGE_BACKGROUND, readStoredTheme, resolveTheme, storeTheme, themeChoice, themeSwitch, type Theme, type ThemeChoice } from "./theme";
 import {
   applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
-  fetchMorePairs, fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, resumeBatch, startBatch, startMorePairs, uploadController, uploadDataset, uploadScript, startInvestigation, stopBatch,
+  fetchMorePairs, fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, postLesson, resumeBatch, startBatch, startMorePairs, testSuspect, uploadController, uploadDataset, uploadScript, startInvestigation, stopBatch,
   type AgentEvent, type HubStatus, type BatchConfig, type BatchListItem, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, BATCH_STEPS, STEP_LABEL, childKey, parseRoute, routeHash, type BatchStep, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
@@ -47,10 +47,13 @@ import { NY_ACT, moreFailedUi, needKey, needsCount, pruneNeeds, quoteUi, type Ne
 import { navBar, navMenu, newBatchButton, refreshDue } from "./batch/nav";
 import { newBatchDialog } from "./batch/new-batch-dialog";
 import { DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
-import { notYetView, overviewView, pageHeadView, pagerView } from "./batch/overview";
+import { notYetView, overviewView, pageHeadView, pagerView, skippedView } from "./batch/overview";
 import { wallView } from "./batch/wall";
 import { feedButton, notebookWithCaptions } from "./batch/commentary";
 import { benchmarkView, diagnosisView, fixView, forkView, investigatorView, keyPointsView, splitView, verdictView } from "./batch/lanes";
+import {
+  SX_ACT, approvalView, askedPairs, clampPairs, investigatorPanelView, lessonsView, suspectBoardView, suspectPending, suspectVerdictView, sxTagsView,
+} from "./batch/suspects";
 import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, isRunPanel, logView, runSummaryView, taskText, togglePanel, type RunPanel } from "./batch/run";
 import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule } from "./batch/replay";
@@ -78,6 +81,8 @@ interface BatchState {
   live: boolean;
   /** A saved batch the server can bring back live (the snapshot said so). */
   resumable: boolean;
+  /** The untested suspects its finished investigator can be asked to test (the snapshot said so). */
+  testable: string[];
   events: Record<EventKey, AgentEvent[]>;
   /** Live only: per log, the last event's time and when it arrived, to run that log's clock between events. */
   ticks: Record<EventKey, { t: number; at: number }>;
@@ -127,6 +132,9 @@ interface AppState {
   foldsFor: string;
   /** Who is looking (access.ts, from /auth/me): on the hosted site only admins start or change batches. */
   access: Access;
+  /** The pairs set on a paired experiment's approval card, and the request they belong to (`pendingKey`). */
+  pairs: number | null;
+  pairsFor: string;
 }
 
 const S: AppState = {
@@ -150,7 +158,19 @@ const S: AppState = {
   folds: {},
   foldsFor: "",
   access: { kind: "unknown" },
+  pairs: null,
+  pairsFor: "",
 };
+
+/** One pending request: an edit to its pairs never carries over to the next one. */
+function pendingKey(id: string, c: CaseFile): string {
+  const p = suspectPending(c);
+  return p ? `${id}:${p.suspect_id ?? ""}:${p.change ?? ""}:${p.preregistered_at ?? ""}` : "";
+}
+
+/** The case the page shows: during a replay, the case at its time. */
+const shownCase = (b: BatchState): CaseFile | null =>
+  !b.full ? null : b.replay ? caseAt(b.full, b.events, b.replay.t) : b.full;
 
 /** The visitor may start and change batches (access.ts): an admin behind the gateway, or local development. */
 const admin = (): boolean => canAct(S.access);
@@ -272,6 +292,7 @@ function batchVm(b: BatchState, full: CaseFile): BatchVm {
     id: b.id,
     live: b.live,
     resumable: b.resumable,
+    testable: b.testable,
     case: c,
     events: r ? eventsAt(full, b.events, r.t) : b.events,
     logs: logViews(b, full, c),
@@ -281,6 +302,7 @@ function batchVm(b: BatchState, full: CaseFile): BatchVm {
     now: Date.now(),
     open: S.foldsFor === b.id ? S.folds : {},
     role: roleOf(S.access),
+    pairs: S.pairsFor === pendingKey(b.id, c) ? S.pairs : null,
   };
 }
 
@@ -317,7 +339,7 @@ function headerView(vm: BatchVm | null): string {
   if (r.name === "run") crumbs.push(`<span class="pg-crumb is-cur">${esc(r.run)}</span>`);
   if (r.name === "child") crumbs.push(`<span class="pg-crumb is-cur">${esc(`${r.fork} ${r.child}`)}</span>`);
   const count = needsCount(S.home.batches);
-  // The logo, the links (nav.ts), then on a batch's pages its breadcrumb: the batch and the page in it.
+  // The logo (back to the landing page, the Orro site), the links (nav.ts), then on a batch's pages its breadcrumb.
   const left = `<div class="ask-hdr-l pg-hdr-l">
     <button type="button" class="pg-home" data-act="${ACT.landing}" aria-label="Orro, front page">${mark(11.8)}<span class="ask-h1 ask-h1-t">${wordmark(11.5)}</span></button>
     ${navBar(r, count, admin())}
@@ -333,8 +355,18 @@ function headerView(vm: BatchVm | null): string {
 
 /** Each later page's one section. */
 const STEP_VIEW: Record<Exclude<BatchStep, "wall">, (vm: BatchVm) => string> = {
-  split: splitView, phase: investigatorView, fork: forkView, verdict: verdictView, diagnosis: diagnosisView, fix: fixView,
+  split: splitView, diagnosis: diagnosisView, fix: fixView,
+  // The investigator's science (suspects.ts) sits on the pages it belongs to; each part is "" when its section is absent.
+  phase: (vm) => stack(vm, investigatorView, investigatorPanelView, suspectBoardView),
+  fork: (vm) => stack(vm, approvalView, forkView),
+  verdict: (vm) => stack(vm, suspectVerdictView, verdictView, lessonsView),
 };
+
+/** Views on one page, the page's tags first when there is anything to tag. */
+function stack(vm: BatchVm, ...views: ((vm: BatchVm) => string)[]): string {
+  const body = views.map((v) => v(vm)).join("");
+  return body ? sxTagsView(vm) + body : "";
+}
 
 /**
  * A batch, a page at a time instead of one long scroll. The first page is where the batch stands and its agents, the
@@ -346,7 +378,7 @@ function batchBody(vm: BatchVm, step: BatchStep): string {
   const sections: [string, string][] = step === "wall"
     // The first page ends in the key points: what the batch found so far, one line each (lanes.ts keyPointsView).
     ? [["overview", overviewView(vm)], ["wall", wallView(vm)], ["points", keyPointsView(vm)], ["bench", benchmarkView(vm)]]
-    : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || notYetView(vm, step)]];
+    : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || skippedView(vm, step) || notYetView(vm, step)]];
   // The bar is a new element on every page, so it arrives with the page.
   sections.push([`pager:${step}`, pagerView(vm, step)]);
   return `<div class="pg-batch" data-morph-key="batch:${attr(vm.id)}" data-morph-list>${sections
@@ -572,7 +604,7 @@ function closeBatch(): void {
 function openBatch(id: string, reopen = false): void {
   if (S.batch?.id === id && !reopen) return;
   closeBatch();
-  const b: BatchState = { id, full: null, live: false, resumable: false, events: {}, ticks: {}, replay: null, busy: null, error: null, loadError: null, socket: null };
+  const b: BatchState = { id, full: null, live: false, resumable: false, testable: [], events: {}, ticks: {}, replay: null, busy: null, error: null, loadError: null, socket: null };
   S.batch = b;
   let snapshotSeen = false;
   b.socket = openBatchSocket(id, {
@@ -583,6 +615,7 @@ function openBatch(id: string, reopen = false): void {
         snapshotSeen = true;
         b.live = m.live;
         b.resumable = !m.live && m.resumable === true;
+        b.testable = !m.live && Array.isArray(m.testable) ? m.testable : [];
         if (m.live) { b.full = m.case; void loadLiveLogs(b); }
         else void loadReplay(b, m.case);
         paint();
@@ -916,6 +949,25 @@ async function resumeAndInvestigate(b: BatchState): Promise<void> {
   }
 }
 
+/** A finished batch's untested suspect: ask the server to resume the investigator on it, then follow it live (its
+ *  request for an experiment arrives as the usual approval card). */
+async function testAndFollow(b: BatchState, suspect: string): Promise<void> {
+  if (b.busy || !b.testable.includes(suspect)) return;
+  b.busy = `test:${suspect}`;
+  b.error = null;
+  paint();
+  try {
+    await testSuspect(b.id, suspect);
+    if (S.batch !== b) return;
+    stopClock();
+    openBatch(b.id, true);
+  } catch (e) {
+    b.error = message(e, "Couldn't ask the investigator.");
+    b.busy = null;
+    paint();
+  }
+}
+
 // ── "Needs you" (batch/needs-you.ts) ─────────────────────────────────────────
 
 const needUi = (kind: NeedKind, id: string): NeedUi | undefined => S.home.needs?.[needKey(kind, id)];
@@ -1190,7 +1242,28 @@ root.addEventListener("click", (e) => {
       if (b && !b.live && b.resumable) void resumeAndInvestigate(b);
       else void liveAction("investigate", (id) => startInvestigation(id));
       return;
-    case ACT.approve: void liveAction("approve", (id) => postDecision(id, true)); return;
+    case ACT.approve: {
+      // A paired experiment whose pairs a person changed sends them; otherwise the body stays `{approve}`.
+      const c = b ? shownCase(b) : null;
+      const p = c ? suspectPending(c) : null;
+      const n = b && c && p && S.pairsFor === pendingKey(b.id, c) && S.pairs != null && S.pairs !== askedPairs(p) ? S.pairs : undefined;
+      void liveAction("approve", (id) => postDecision(id, true, {}, n));
+      return;
+    }
+    case SX_ACT.pairs: {
+      const c = b ? shownCase(b) : null;
+      const p = c ? suspectPending(c) : null;
+      if (!b || !c || !p) return;
+      const key = pendingKey(b.id, c);
+      const now = S.pairsFor === key && S.pairs != null ? S.pairs : askedPairs(p);
+      S.pairs = clampPairs(now + (Number(arg) < 0 ? -1 : 1));
+      S.pairsFor = key;
+      paint();
+      return;
+    }
+    case SX_ACT.testSuspect: if (b && !b.live) void testAndFollow(b, arg); return;
+    case SX_ACT.lessonApprove: void liveAction(`lesson:${arg}`, (id) => postLesson(id, arg, true)); return;
+    case SX_ACT.lessonReject: void liveAction(`lesson:${arg}`, (id) => postLesson(id, arg, false)); return;
     case ACT.decline: void liveAction("decline", (id) => postDecision(id, false)); return;
     case ACT.stop: void liveAction("stop", (id) => stopBatch(id)); return;
     case ACT.replayToggle: {

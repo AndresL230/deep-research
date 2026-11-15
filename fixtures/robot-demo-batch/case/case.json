@@ -5917,7 +5917,53 @@
           "mean_reported": 0.5864,
           "mean_true": 0.6
         }
-      }
+      },
+      "evidence": {
+        "level": "open",
+        "pairs": 4,
+        "needed_pairs": 5,
+        "control_inflated": 4,
+        "control_total": 4,
+        "forced_inflated": 0,
+        "forced_total": 4,
+        "p_value": 0.0143,
+        "rule": "running_score",
+        "score": 13.0321,
+        "needed_score": 20.0,
+        "agree": 4,
+        "disagree": 0,
+        "basis": "pairs",
+        "p_exact": 0.0143
+      },
+      "pairs": [
+        {
+          "i": 1,
+          "control_gap": 0.45,
+          "changed_gap": -0.05,
+          "agree": true
+        },
+        {
+          "i": 2,
+          "control_gap": 0.45,
+          "changed_gap": -0.0045,
+          "agree": true
+        },
+        {
+          "i": 3,
+          "control_gap": 0.45,
+          "changed_gap": 0.05,
+          "agree": true
+        },
+        {
+          "i": 4,
+          "control_gap": 0.4,
+          "changed_gap": -0.05,
+          "agree": true
+        }
+      ],
+      "score": 13.0321,
+      "p_exact": 0.0143,
+      "level": "open"
     }
   },
   "verdict": {
@@ -5932,12 +5978,19 @@
     "evidence": {
       "level": "open",
       "pairs": 4,
-      "needed_pairs": 8,
+      "needed_pairs": 5,
       "control_inflated": 4,
       "control_total": 4,
       "forced_inflated": 0,
       "forced_total": 4,
-      "p_value": 0.0143
+      "p_value": 0.0143,
+      "rule": "running_score",
+      "score": 13.0321,
+      "needed_score": 20.0,
+      "agree": 4,
+      "disagree": 0,
+      "basis": "pairs",
+      "p_exact": 0.0143
     }
   },
   "costs": {

@@ -43,7 +43,7 @@ def _batch(tmp_path, monkeypatch, evaluate=lambda *a, **k: {"success_rate": 0.5}
     monkeypatch.setattr(batch_mod.vms, "start_lab_page", lambda sb: None)
     monkeypatch.setattr(batch_mod.vms, "download_charts", lambda sb, dest: [])
     monkeypatch.setattr(batch_mod.vms, "delete_vm", lambda sb: None)
-    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt: object())
+    monkeypatch.setattr(batch_mod, "build_analyst", lambda backend, model, prompt, **kw: object())
     monkeypatch.setattr(batch_mod, "DaytonaSandbox", lambda sandbox: object())
     if evaluate is not None:
         monkeypatch.setattr(track, "_evaluate_fn", lambda: evaluate)

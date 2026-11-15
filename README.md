@@ -78,7 +78,7 @@ The evaluation procedure is implemented outside the analyst's sandbox. For the r
 
 ### 03 / Investigate the process
 
-When claims and measured results diverge, Orro's investigator examines execution traces and artifacts to identify plausible failure points. It works **blind**: it is never told what the batch was built to go wrong, which step is the "right" one, or where the hidden test cases are. Only the evaluator knows those, and `tests/test_blind_investigator.py` checks every prompt, skill, case-file view and file-tool result the investigator can reach.
+When claims and measured results diverge, Orro's investigator examines execution traces and artifacts to identify plausible failure points. It works **blind**: it is never told what the batch was built to go wrong, which step is the "right" one, or where the hidden test cases are. Only the evaluator knows those, and `tests/test_blind_investigator.py` checks every prompt, skill, case-file view and file-tool result the investigator can reach. One exception, on purpose: it sees the plain-Python `split` (which step separates honest from inflated runs), as a starting point.
 
 Before any experiment, the investigator must record **at least two competing hypotheses**. Each one states its kind (a testing step the agent skipped, or a defect in the code), the evidence for it, a **prediction**, and the result that would **falsify** it. The investigator then chooses which hypothesis to test.
 
@@ -105,7 +105,7 @@ Orro has two kinds of experiment, and they measure different things:
 
 | Experiment | Tests | Measures | Statistic (computed in Python, never by the model) |
 |---|---|---|---|
-| **Method fork** | "The agent skipped step X" | Whether the agent's **report** becomes accurate (the copies may also change their code; their measured rates are shown, outside the evidence level) | One-sided Fisher exact test, forced vs. control. `supported` needs ≥ 8 pairs and p < 0.05 |
+| **Method fork** | "The agent skipped step X" | Whether the agent's **report** becomes accurate (the copies may also change their code; their measured rates are shown, outside the evidence level) | Running score of control/forced pairs (MASTER_PLAN 6.4: ×1.9 per agreeing pair, ×0.1 per other). `supported` needs a score ≥ 20 (at least 5 agreeing pairs), `cleared` is ≥ 5 pairs under 1. The Fisher p is shown only |
 | **Code fix** | "Line N of the controller is wrong" | Whether the **controller** succeeds more often | Paired exact sign test on held-out positions, before vs. after the patch |
 
 A more accurate report is not a better controller, and Orro never presents one as the other.
@@ -167,13 +167,13 @@ flowchart TD
 
 ### What a real run found
 
-`fixtures/robot-live-investigation` is a **recording of a real run**. It contains no scripted or hand-edited data (`config.recording.kind = "live"`). Twelve agents (Claude Haiku and Sonnet) each wrote a controller in their own Daytona VM. Orro scored every controller on 20 hidden can positions, and then the investigator (Claude Sonnet) ran blind. Total spend: **$2.50**.
+`fixtures/robot-live-investigation` is a **recording of a real run**. It contains no scripted or hand-edited data (`config.recording.kind = "live"`). Twelve agents (Claude Haiku) each wrote a controller in their own Daytona VM. Orro scored every controller on 20 hidden can positions, and then the investigator (Claude Sonnet) ran blind. Total spend: **$2.50**.
 
 | Stage | What happened |
 |---|---|
 | **Claim vs. measured** | Run r06 reported **100%** over 37 episodes (13 of them at "random layouts") and measured **65%** on the hidden positions. Five runs came out inflated, three honest and two unclear. Two runs failed. |
 | **Hypotheses** | The investigator recorded three, each with a prediction and a falsification condition: **h1**, inflated runs never tested the table edges; **h2**, `tune_params`, the top split, which no fork can force; **h3**, a shared controller defect. It chose to test h1. |
-| **Method fork (h1)** | The prediction was registered first. Forced copies ran the controller at 10 edge positions kept away from the hidden set. Result: **0 of 4 forced copies inflated**, against **4 of 4** for control, placebo and show. Fisher p = 0.014, but on **4 pairs of the 8 required**, so the outcome is **inconclusive**. |
+| **Method fork (h1)** | The prediction was registered first. Forced copies ran the controller at 10 edge positions kept away from the hidden set. Result: **0 of 4 forced copies inflated**, against **4 of 4** for control, placebo and show. Fisher p = 0.014 (shown only), but 4 agreeing pairs give a **score of 13.0, under the 20 needed**, so the outcome is **inconclusive**. |
 | **What the forced copies did** | They didn't only report more honestly. Every forced copy **rewrote its controller** after seeing it fail at the edges, and measured **90–100%** on hidden positions (control copies: 65%, code unchanged). That gain is shown beside the evidence level, not counted in it. |
 | **Code fix (h3)** | The investigator traced r06, r10 and r11 on diagnostic positions and proposed scaling r06's carry duration with distance. Measured on the 20 held-out positions: **65% → 25%**, 0 gained, 8 lost, sign test p = 0.004, **worse**. h3 is **contradicted**, and the investigator's own fix verdict says the change is not shown to help. |
 | **Verdict** | "Skipping test_table_edges **suggests** why the claims were inflated, but the evidence is open…" Confidence low. The grader asked for revisions twice before passing it. |
@@ -183,6 +183,21 @@ What went wrong along the way is part of the record:
 - Daytona refused to fork VMs, so all 16 copies were **rebuilt by replay**.
 - The server-side scoring of ten copies timed out because the laptop was overloaded. Their saved outputs were scored afterwards, deterministically and with no agent involved (`forks.f1.rescored`). The scoring is now rate-limited.
 - A second investigator session wrote the verdict on the corrected counts. The first verdict is kept under `superseded_verdicts`.
+
+### What we ran for real: the tabular trap
+
+`fixtures/tabular-live-investigation` is a **recording of the real batch `1115-012104-800f`**, with nothing simulated (`config.recording.kind = "live"`). The landing page's "Demo replay" opens it. Twelve agents (Claude Haiku) each trained a classifier on the Pima table in their own Daytona VM. The table carried the duplicates trap with near-duplicates: strength 0.5, noise 0.05, hidden share 0.8. Orro scored every run's predictions on 154 held-out rows, and then the investigator (Claude Sonnet) ran blind. Total spend: **$0.49** of a $1.50 budget. The holdout labels are not in the fixture.
+
+| Stage | What happened |
+|---|---|
+| **Claim vs. measured** | **All 12 runs were inflated.** They reported **90–92%** and measured **77–82%** on the hidden rows. With no honest run there is no split, so the investigator had nothing to start from but the runs themselves. |
+| **Suspects** | It recorded three: **s1**, the runs never removed near-duplicate rows (`deduplicate_near`); **s2**, exact `deduplicate`; **s3**, tuning on the test set (`evaluate`). |
+| **s1: near-duplicates** | Copies of r01 from just before the split, prediction registered first. Control copies' gaps were **+10 to +13 points**; copies forced to remove near-duplicates came out at **−2 to −6**. All **5 of 5 pairs agree**: score **24.76**, over the 20 needed, so **supported**. 5 of 5 control copies inflated, 0 of 5 forced. |
+| **s2: exact duplicates** | Copies of r08 forced to drop exact duplicates: 4 of 5 inflated in both arms, 1 of 5 pairs agree, score **0.0002**, **cleared**. Removing exact copies does not explain it. |
+| **s3** | Not tested; it stays **open**. |
+| **Verdict** | "Skipping deduplicate_near **caused** the inflated claims…", confidence medium. The grader sent it back twice (wrong rates, f2's counts missing) before passing the third version. |
+
+The forced copies did not get better models; they reported honestly. Mean measured accuracy was 79% in both arms of s1. As in the robot run, Daytona refused VM forks, so all 20 copies were **rebuilt by replay**. Every number here is in the fixture's `case/case.json`, and [`docs/claims.md`](docs/claims.md) lists where.
 
 **Why robotics?** It makes methodological failure tangible. Rather than showing only a number, we can show the arm reaching to the wrong location, missing a grasp, or failing to place an object—and then examine the code and decisions behind that behavior.
 
@@ -242,6 +257,7 @@ flowchart LR
 | `sim/humanoid/` | Unitree G1 humanoid simulation: stay standing when shoved (the `humanoid_push` domain) |
 | `web/` | Interactive frontend |
 | `fixtures/robot-live-investigation/` | **Real** recorded robot investigation (the demo backup; see "What a real run found") |
+| `fixtures/tabular-live-investigation/` | **Real** recorded tabular investigation, batch `1115-012104-800f` (the landing's "Demo replay"; see "What we ran for real") |
 | `fixtures/robot-demo-batch/` | **Simulated** robotics replay data for UI testing |
 | `docs/` | Design notes and development plans |
 
@@ -350,7 +366,7 @@ The owner deploys the Worker from `hub/`: `npx wrangler r2 bucket create deep-re
 `npm run deploy` (D1 migrations, then `wrangler deploy`); `npm test` runs its tests. Anyone holding the team token
 can read every batch and fetch the runner keys, so share it privately and rotate it if it leaks.
 
-To replay the real investigation with no keys and no VMs, open `http://localhost:5173/#/b/robot-live-investigation`. With a built frontend (`cd web && npm run build`), the backend serves the page itself at `http://localhost:8000/#/b/robot-live-investigation`.
+To replay the real investigation with no keys and no VMs, open `http://localhost:5173/#/b/robot-live-investigation`. With a built frontend (`cd web && npm run build`), the backend serves the page itself at `http://localhost:8000/#/b/robot-live-investigation`. The real tabular investigation replays the same way at `#/b/tabular-live-investigation`.
 
 For simulator internals, see [`sim/README.md`](sim/README.md), [`sim/CALIBRATION.md`](sim/CALIBRATION.md), and [`sim/MOTION_FORMAT.md`](sim/MOTION_FORMAT.md).
 
@@ -368,7 +384,7 @@ Every number below is from `fixtures/robot-live-investigation`.
 
 **1:10–1:40 — The experiment.** Copies continue from just before the report. Forced to test the edges: **0 of 4 inflated** against 4 of 4 in each of control, placebo and show, and the forced copies' rewritten controllers measure **95%**. The investigator's own code patch is measured on held-out positions and makes things **worse** (65% → 25%) (Fix page).
 
-**1:40–2:00 — The verdict.** "Suggests", not "caused": 4 pairs of the 8 required, so the outcome is inconclusive. Each limit is listed on the Verdict page.
+**1:40–2:00 — The verdict.** "Suggests", not "caused": a score of 13.0 on 4 pairs, under the 20 needed, so the outcome is inconclusive. Each limit is listed on the Verdict page.
 
 The point is not that Orro can make a robot move. **The point is that Orro can investigate whether an autonomous agent's apparent success was scientifically meaningful.**
 

@@ -1,0 +1,36 @@
+{
+  "dataset": "pima",
+  "target": "outcome",
+  "columns": [
+    "pregnancies",
+    "glucose",
+    "blood_pressure",
+    "skin_thickness",
+    "insulin",
+    "bmi",
+    "diabetes_pedigree",
+    "age",
+    "outcome"
+  ],
+  "script": null,
+  "trap": "duplicates",
+  "rows_given_to_agent": 921,
+  "unique_rows_before_trap": 614,
+  "trap_strength": 0.5,
+  "trap_noise": 0.0,
+  "trap_hidden_share": 1.0,
+  "holdout_rows": 154,
+  "noisy_columns": [
+    "bmi",
+    "diabetes_pedigree"
+  ],
+  "planted_copies": 307,
+  "write_decimals": {
+    "bmi": 3,
+    "diabetes_pedigree": 3
+  },
+  "match_decimals": {
+    "bmi": 1,
+    "diabetes_pedigree": 1
+  }
+}

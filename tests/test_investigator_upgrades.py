@@ -19,7 +19,7 @@ from deep_research.agents import analyst as analyst_mod
 from deep_research.agents import investigator as inv_mod
 from deep_research.batch import Batch
 from deep_research.config import BatchConfig
-from tests.scripted import ScriptedModel, call, grade, grader, say, script_investigator
+from tests.scripted import ScriptedModel, call, grade, grader, saved_messages, say, script_investigator
 
 
 @pytest.fixture
@@ -92,8 +92,11 @@ def test_the_analyst_has_no_summarization_and_keeps_prompt_caching(batch, monkey
     assert any(isinstance(m, analyst_mod.NoCompaction) for m in stack)
     names = [m.name for m in stack]
     assert "AnthropicPromptCachingMiddleware" in names and "TodoListMiddleware" in names
-    # Flat: no `task` tool, so no subagent stacks either.
-    assert "SubAgentMiddleware" not in names
+    # Flat: no `task` tool, so no subagent stacks either. `NoSubagents` holds the subagent middleware's place.
+    from deepagents.middleware.subagents import SubAgentMiddleware
+
+    assert not any(isinstance(m, SubAgentMiddleware) for m in stack)
+    assert any(isinstance(m, analyst_mod.NoSubagents) for m in stack)
 
     stacks.clear()
     inv_mod.build_investigator(batch, "anthropic:claude-sonnet-5-5")
@@ -245,9 +248,11 @@ async def test_the_rubric_grades_the_verdict_and_stops_after_two_revisions(batch
     assert case["phase"] == "done" and case["verdict"]["sentence"].endswith("Only 1 honest run.")
     # The grader sees the rubric, and the case file's evidence and the recorded verdict next to the transcript.
     assert "fork arm" in g.shown[0] and "Case file evidence" in g.shown[0] and "Recorded verdict" in g.shown[0]
-    assert '"n_inflated": 3' in g.shown[0]
+    assert '"n_inflated":3' in g.shown[0]
+    # The verdict comes before the evidence, so the grader's per-message cut never drops it.
+    assert g.shown[0].index("Recorded verdict") < g.shown[0].index("Case file evidence")
     # Each revision reached the investigator as a message from the grader.
-    msgs = batch._investigator.get_state(batch._inv_config).values["messages"]
+    msgs = await saved_messages(batch)
     revisions = [m for m in msgs if isinstance(m, HumanMessage) and m.name == "rubric_grader"]
     assert len(revisions) == 2 and "cite the placebo arm's counts" in revisions[0].content
 

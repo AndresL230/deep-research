@@ -5,7 +5,9 @@ runs the fork experiment, drives the investigator, and tracks cost.
 from __future__ import annotations
 
 import ast
+import csv
 import asyncio
+import contextlib
 import contextvars
 import json
 import logging
@@ -14,34 +16,49 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import messages_from_dict, messages_to_dict
+import aiosqlite
+from langchain_core.messages import HumanMessage, messages_from_dict, messages_to_dict
 from langchain_daytona import DaytonaSandbox
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 from . import domains, hub
+from . import lessons as lessons_mod
 from . import sandboxes as vms
 from .agents.analyst import build_analyst
 from .agents.investigator import RUBRIC, build_investigator
-from .analysis import find_split, fork_point, label_table
+from .analysis import find_split, fork_point, label_table, rank_candidates, run_attributes
+from .audit import build_audit
 from .case_file import CaseFile, with_evidence
 from .commentary import for_batch as commentary_for
-from .config import BATCHES_DIR, BatchConfig
+from .config import BATCHES_DIR, VM_WORKSPACE, BatchConfig
 from .costs import CostTracker, OverBudget, ScopeCost, UsageCallback, usd_up
 from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, prefix_events, read_events
-from .evidence import verdict_evidence, verdict_sentence
+from .evidence import (current_verdict_evidence, fork_pairs, pairs_to_support, verdict_evidence, verdict_fork,
+                       verdict_sentence)
 from .evidence import describe as describe_evidence
-from .evidence import fix_evidence, fix_outcome, method_outcome
+from .evidence import direction_of, fix_evidence, fix_outcome, method_outcome, pair_up
 from .domains import actions_from_events, build_task, intervention_for, score_run
 from .domains.robot_arm import BENCH_DIR
-from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
+from . import experiments as xp
+from . import interaction as ixn
+from .forks import (COLUMN_STEPS, ChangeError, anchor_error, change_messages, cut_history, fix_plan,
+                    forced_todo, held_fields, parse_change,
+                    step_model)
 
 logger = logging.getLogger(__name__)
 
 RUN_TIMEOUT_S = 900
+# A fork copy that stops without its report is asked once to write it, then scored whatever it did. The rule is the
+# same for every arm (a control copy that stops early gets the same message as a changed one), so it never separates
+# the arms; without it, a copy that stopped one step short would count as failed and fall out of its arm.
+REPORT_FILE = "report.json"
+REPORT_NUDGE = f"Write {VM_WORKSPACE}/{REPORT_FILE} now with your result."
+NUDGE_TIMEOUT_S = 180
 # One investigator turn is four graph steps, and reading the case file a hundred lines at a time is a
 # turn per read, so the analysts' limit would end an investigation after about 48 turns, with the fork
 # money already spent. The budget check is what limits the investigator's spend.
@@ -176,7 +193,9 @@ def resume_problem(case: dict, batch_dir: Path) -> str | None:
     phase = str(case.get("phase") or "")
     if phase == "done" or case.get("verdict"):
         return "this batch already has its verdict"
-    if phase == "no_split":
+    runs = case.get("runs") or {}
+    inflated = [rid for rid, r in runs.items() if r.get("status") == "inflated"]
+    if phase == "no_split" and not inflated:
         return "no step separated the runs, so there is nothing to investigate"
     if phase.startswith("blocked:"):
         return "it stopped over its budget, and it would stop again on the same budget"
@@ -184,9 +203,11 @@ def resume_problem(case: dict, batch_dir: Path) -> str | None:
     if not runs or any(r.get("status") not in SCORED for r in runs.values()):
         return "its runs never finished"
     split = case.get("split") or {}
-    src = split.get("fork_run_id")
+    # MASTER_PLAN Phase 1.4: an investigation needs only one inflated run, even when no run is honest and so no split
+    # exists. The investigator picks its own experiments; the first inflated run stands in for the files check.
+    src = split.get("fork_run_id") or (inflated[0] if inflated else None)
     if not src:
-        return "no split was found"
+        return "no split was found and no run came out inflated"
     try:
         marker = domains.get(cfg.get("domain")).task_marker
     except ValueError:
@@ -208,24 +229,50 @@ class Refused(ValueError):
     """Why more pairs cannot run on a batch now. The API answers it with 409 and this message."""
 
 
-def verdict_fork(case: dict) -> tuple[str, dict] | None:
-    """The fork experiment a verdict rests on, as (fork id, fork): the newest method experiment (not a fix test) whose
-    first round finished, so it has `control` and `forced` arm summaries. None when there is none."""
-    found = None
-    for fork_id, fork in (case.get("forks") or {}).items():
-        if fork_id == "pending" or not isinstance(fork, dict) or fork.get("kind", "method") == "fix":
-            continue
-        arms = fork.get("arms") or {}
-        if "control" in arms and "forced" in arms:
-            found = (fork_id, fork)
-    return found
-
-
 def _fork_evidence(fork: dict) -> dict:
-    """`verdict_evidence` of a fork's own arm summaries (scored copies, as a verdict counts them)."""
+    """`verdict_evidence` of a fork's own arm summaries (scored copies, as a verdict counts them) and its pairs."""
     arms = fork.get("arms") or {}
     return verdict_evidence({a: {"inflated": int(arms[a].get("inflated") or 0), "total": int(arms[a].get("scored") or 0)}
-                             for a in ("control", "forced") if isinstance(arms.get(a), dict)})
+                             for a in ("control", "forced") if isinstance(arms.get(a), dict)}, pairs=fork_pairs(fork))
+
+
+def test_suspect_problem(case: dict, batch_dir: Path, suspect_id: str) -> str | None:
+    """Why the investigator cannot be asked to test `suspect_id` on a finished batch, or None when it can.
+
+    It can when the batch is real (not simulated), its investigation is done, the suspect exists and no experiment
+    has tested it yet, the investigator's thread is saved (`checkpoints.sqlite`, so it resumes with its memory), and
+    the files needed to fork a run are on disk. The request then goes through the normal approval and budget guard.
+    """
+    cfg = case.get("config") or {}
+    if cfg.get("simulated"):
+        return "a simulated batch has no real runs to fork"
+    if str(case.get("phase") or "") != "done":
+        return "the investigation has not finished"
+    suspect = next((s for s in case.get("suspects") or [] if s.get("id") == suspect_id), None)
+    if suspect is None:
+        return f"there is no suspect {suspect_id}"
+    tested = suspect_id in (case.get("evidence") or {}) or any(
+        isinstance(f, dict) and fid != "pending" and f.get("suspect_id") == suspect_id
+        for fid, f in (case.get("forks") or {}).items())
+    if tested:
+        return f"{suspect_id} has been tested already"
+    if not (case.get("investigator") or {}).get("thread_id") or not (batch_dir / "checkpoints.sqlite").is_file():
+        return "the investigator's saved thread is missing, so it cannot pick up where it stopped"
+    try:
+        marker = domains.get(cfg.get("domain")).task_marker
+    except ValueError:
+        return f"its domain '{cfg.get('domain')}' is not available here"
+    runs = case.get("runs") or {}
+    if not (batch_dir / "task" / marker).is_file() or not any(
+            (batch_dir / "runs" / rid / "messages.json").is_file() for rid in runs):
+        return "the files needed to fork a run are missing"
+    return None
+
+
+def testable_suspects(case: dict, batch_dir: Path) -> list[str]:
+    """The suspects the investigator could be asked to test now (`test_suspect_problem` is None for each)."""
+    return [s["id"] for s in case.get("suspects") or [] if isinstance(s, dict) and s.get("id")
+            and test_suspect_problem(case, batch_dir, s["id"]) is None]
 
 
 def more_pairs_problem(case: dict, batch_dir: Path) -> str | None:
@@ -244,13 +291,16 @@ def more_pairs_problem(case: dict, batch_dir: Path) -> str | None:
     found = verdict_fork(case)
     if found is None:
         return "no fork experiment finished with a control and a forced arm, so there are no pairs to add to"
-    evidence = verdict.get("evidence") or verdict_evidence(verdict.get("arms"), verdict.get("numbers"))
-    if evidence.get("level") == "supported":
-        return "the verdict's evidence is already supported"
+    evidence = current_verdict_evidence(case)
+    if evidence.get("level") != "open":
+        return f"the verdict's evidence is already {evidence.get('level')}"
     try:
         marker = domains.get(cfg.get("domain")).task_marker
     except ValueError:
         return f"its domain '{cfg.get('domain')}' is not available here"
+    if found[1].get("change"):
+        # A paired experiment (`Batch.run_experiment`) is continued by running it again: the suspect's score runs on.
+        return f"{found[0]} is a paired experiment; run it again with run_experiment to add pairs"
     src = found[1].get("source_run")
     if not src or not (batch_dir / "runs" / src / "messages.json").is_file() or not (batch_dir / "task" / marker).is_file():
         return "the files needed to fork are missing"
@@ -315,7 +365,7 @@ def more_pairs_quote(case: dict, tracker: CostTracker, n_per_arm: int | None = N
     fork_id, fork = found
     arms = list(fork.get("arm_steps") or fork.get("arms") or {})
     ev = _fork_evidence(fork)
-    n = max(ev["needed_pairs"] - ev["pairs"], 1) if n_per_arm is None else n_per_arm
+    n = pairs_to_support(ev) if n_per_arm is None else n_per_arm
     n = max(1, min(int(n), MAX_MORE_PAIRS))
     copies = len(arms) * n
 
@@ -416,6 +466,10 @@ class Batch:
         self._last_cost_push = 0.0
         self._investigator = None
         self._inv_config: dict | None = None
+        self._checkpoint_conn = None
+        self._checkpoint_saver: AsyncSqliteSaver | None = None
+        # Analysts holding the saver right now (`_analyst_checkpoints`).
+        self._saver_users = 0
         self._pending_requests = 1
         # VM creations cancelled midway (a stop): their VMs are deleted once they exist (`_create_vm`).
         self._orphans: set[asyncio.Future] = set()
@@ -469,27 +523,32 @@ class Batch:
         if problem:
             raise ValueError(problem)
         b = cls(BatchConfig(**case["config"]), batch_id=batch_id, root=root, resume=True)
-        if "pending" in b.case.data["forks"]:
+        # The investigator's checkpoints are on disk (checkpoints.sqlite): a request waiting for approval survives a
+        # restart, and answering it (`decide`) continues the same investigator thread.
+        waiting = "pending" in b.case.data["forks"] and b.checkpoints_path.is_file()
+        if "pending" in b.case.data["forks"] and not waiting:
             b.case.remove_fork("pending")
         b._close_unfinished_forks()
         b._forget_lab_pages()  # the VMs behind them are long gone
-        b.case.set_phase("ready")
+        b.case.set_phase("awaiting_approval" if waiting else "ready")
         return b
 
     @classmethod
-    def reopen(cls, batch_id: str, root: Path = BATCHES_DIR) -> "Batch":
-        """Load a finished batch back so more pairs can be added to its fork experiment (`reserve_more_pairs`).
+    def reopen(cls, batch_id: str, root: Path = BATCHES_DIR, suspect_id: str | None = None) -> "Batch":
+        """Load a finished batch back so more pairs can be added to its fork experiment (`reserve_more_pairs`), or,
+        with `suspect_id`, so its investigator can be asked to test that suspect (`test_suspect`).
 
-        Raises Refused with the reason when it cannot (`more_pairs_problem`). Unlike `resume`, the batch keeps its
-        verdict and its phase: nothing runs until more pairs are reserved. Work the old server left unfinished is
-        closed first: a round of more pairs is ended as stopped (its scored copies count), any other experiment is
-        marked stopped, and a pending approval is dropped.
+        Raises Refused with the reason when it cannot (`more_pairs_problem`, `test_suspect_problem`). Unlike `resume`,
+        the batch keeps its verdict and its phase: nothing runs until more pairs are reserved. Work the old server
+        left unfinished is closed first: a round of more pairs is ended as stopped (its scored copies count), any
+        other experiment is marked stopped, and a pending approval is dropped.
         """
         case_path = root / batch_id / "case" / "case.json"
         if not case_path.is_file():
             raise Refused(f"no batch {batch_id}")
         case = with_evidence(json.loads(case_path.read_text()))
-        problem = more_pairs_problem(case, root / batch_id)
+        problem = (more_pairs_problem(case, root / batch_id) if suspect_id is None
+                   else test_suspect_problem(case, root / batch_id, suspect_id))
         if problem:
             raise Refused(problem)
         b = cls(BatchConfig(**case["config"]), batch_id=batch_id, root=root, resume=True)
@@ -649,7 +708,9 @@ class Batch:
         # The code the runs start from is scored on this server while they work in their VMs.
         baseline = asyncio.create_task(self.score_baseline())
         try:
-            await asyncio.gather(*(guarded(r) for r in run_ids))
+            # The checkpoint file stays open for the whole batch of runs, not reopened run by run.
+            async with self._analyst_checkpoints():
+                await asyncio.gather(*(guarded(r) for r in run_ids))
             await baseline
         finally:
             if not baseline.done():
@@ -713,12 +774,18 @@ class Batch:
                 self.commentary.attach(run_id, log, on_event)
             watch = _watch_motion(self.domain, sb, rdir / "outputs", f"runs/{run_id}/outputs", log, on_event,
                                   lambda files: self.case.update_run(run_id, motion_files=files))
-            agent = build_analyst(DaytonaSandbox(sandbox=sb), model, self.domain.analyst_system_prompt)
             inp = {"messages": [{"role": "user", "content": self.domain.task_prompt(self.cfg)}]}
-            msgs = await asyncio.wait_for(
-                self._drive(agent, inp, f"{self.id}-{run_id}", scope, model, log, on_event),
-                RUN_TIMEOUT_S,
-            )
+            # The run's whole graph state is checkpointed in the batch's checkpoints.sqlite on a stable thread, so a
+            # checkpoint-mode fork can read its state history later (plan Phase 6). messages.json is still saved:
+            # messages-mode forks, and batches whose checkpoints are gone, are cut from it.
+            thread_id = f"{self.id}-{run_id}"
+            async with self._analyst_checkpoints() as saver:
+                agent, lessons = await self._new_analyst(DaytonaSandbox(sandbox=sb), model, f"run {run_id}", saver)
+                self.case.update_run(run_id, thread_id=thread_id, **({"lessons": lessons} if lessons else {}))
+                msgs = await asyncio.wait_for(
+                    self._drive(agent, inp, thread_id, scope, model, log, on_event),
+                    RUN_TIMEOUT_S,
+                )
             (rdir / "messages.json").write_text(json.dumps(messages_to_dict(msgs)))
             if watch is not None:
                 await watch.stop()
@@ -809,13 +876,44 @@ class Batch:
                 runs[r] = actions_from_events(read_events(p), self.task)
         return runs, statuses
 
+    def write_candidates(self, runs: dict[str, list] | None = None, statuses: dict[str, str] | None = None) -> list[dict]:
+        """The plain-Python ranking of suspects (`analysis.rank_candidates`), both directions plus run attributes, to
+        the case file's `candidates`. For the UI and the fallback only: the investigator's view leaves it out."""
+        if runs is None or statuses is None:
+            runs, statuses = self._labelled_runs()
+        attrs = {}
+        for r in runs:
+            try:
+                report = json.loads((self.runs_dir / r / "outputs" / "report.json").read_text())
+            except (OSError, ValueError):
+                report = None
+            attrs[r] = run_attributes(report, (self.case.data["runs"].get(r) or {}).get("model") or self.run_model(r))
+        ranked = [c.to_dict() for c in rank_candidates(runs, statuses, self.domain.steps(), attrs)]
+        self.case.set_candidates(ranked)
+        return ranked
+
+    def write_audit(self) -> dict | None:
+        """The audit sheet of every scored run (audit.py) to the case file's `audit`, once there is a verdict."""
+        if not self.case.data.get("verdict"):
+            return None
+        sheet = build_audit(self.case.data, self.dir, self.cfg.inflation_threshold)
+        self.case.set_audit(sheet)
+        return sheet
+
     def analyze(self) -> None:
         self.case.set_phase("analyzing")
         runs, statuses = self._labelled_runs()
+        try:
+            self.write_candidates(runs, statuses)
+        except Exception as e:  # noqa: BLE001 - the ranking is for the screens; it never stops the batch
+            logger.warning("could not rank the candidates: %s: %s", type(e).__name__, e)
         finding = find_split(runs, statuses, prefer=self.domain.prefer_label(self.cfg), steps=self.domain.steps())
         if finding is None:
             self.case.set_split(None)
-            self.case.set_phase("no_split")
+            # MASTER_PLAN Phase 1.4: ready whenever at least one run is inflated, even if no run is honest. The
+            # investigator does not need a split: it proposes its own suspects and tests them against a control.
+            inflated = any(st == "inflated" for st in statuses.values()) if isinstance(statuses, dict) else False
+            self.case.set_phase("ready" if inflated else "no_split")
             return
         split = finding.to_dict()
         # Every label's numbers, so a competing hypothesis rests on the same deterministic counts, and the labels tied
@@ -934,6 +1032,180 @@ class Batch:
         h = self.case.hypothesis(hypothesis_id) or {}
         return {"hypothesis_id": hypothesis_id, "prediction": h.get("prediction"), "falsified_if": h.get("falsified_if"),
                 "preregistered_at": time.time()}
+
+    # ---- paired experiments (plan 6.5): one change, a control arm, pairs scored as they come ----
+    def parse_change(self, change: str):
+        """The change `change` names (forks.parse_change), with this batch's domain's forced steps. Raises ChangeError."""
+        c = parse_change(change, force=lambda label: self.domain.intervention_for(label, self.cfg),
+                         columns=self.data_columns())
+        tabular_only = c.kind == "fake_result" or (c.kind == "force_step" and c.name.partition(":")[0] in COLUMN_STEPS)
+        if tabular_only and self.domain.name != "tabular":
+            raise ChangeError(f"{c.spec} works on data.csv, so only in a tabular batch")
+        return c
+
+    def data_columns(self) -> list[str] | None:
+        """The columns of this batch's data.csv, which a `drop_column:<column>` change must name. None when the batch
+        has no data.csv (another domain, or a task not built)."""
+        path = getattr(getattr(self, "task", None), "data", None)
+        try:
+            with open(path, newline="") as fh:
+                return next(csv.reader(fh), [])
+        except (OSError, TypeError):
+            return None
+
+    def _forkable_runs(self) -> tuple[dict[str, list], dict[str, str]]:
+        """The labelled runs that have a saved history to cut, and every run's status."""
+        runs, statuses = self._labelled_runs()
+        return {r: a for r, a in runs.items() if (self.runs_dir / r / "messages.json").exists()}, statuses
+
+    def _scope_usd(self, prefix: str) -> float | None:
+        scopes = self.tracker.snapshot()["scopes"]
+        vals = [s.get("total_usd") for k, s in scopes.items() if k.startswith(prefix)]
+        return None if any(v is None for v in vals) else round(sum(vals), 4)
+
+    def _budget_left(self) -> float | None:
+        spent = self.tracker.total_usd()
+        return None if spent is None else round(self.cfg.budget_usd - spent, 4)
+
+    async def run_experiment(self, suspect_id: str, change: str, prediction: str, pairs: int = 3,
+                             source_run: str | None = None, anchor: str = "before_split", reason: str = "",
+                             fork_mode: str | None = None) -> dict:
+        """Test one suspect with one change (plan 6.5): `pairs` control and changed copies, paired by index, forked
+        from the same moment of one run, with the prediction saved before any copy starts.
+
+        `change` is a registry name (`forks.registry`): `force_step:deduplicate`, `fake_result:no_duplicates`,
+        `edit_context:hint_quality`, `swap_model:<model>`, or `control` for a same-vs-same check. `prediction` is
+        `smaller_gap` or `larger_gap`. `anchor` is `before_split`, `before_label:<label>` or `index:<n>`; with no
+        `source_run`, plain code picks the first eligible run (`experiments.pick_source`). `pairs` is capped at 6.
+
+        Returns `{"error": ...}` when it cannot run (bad input, over budget, no eligible run, the base VM could not be
+        built). Otherwise `{fork_id, suspect_id, change, anchor, source_run, fork_at, prediction, pairs, dropped,
+        score, p_exact, level, evidence, cost_usd, budget_left_usd}`: this experiment's pairs and score, and the
+        suspect's running evidence over all its experiments (`evidence.<suspect_id>`).
+
+        `fork_mode` ("messages" or "checkpoint"; default the batch's `fork_mode`) is how each copy gets the source
+        run's agent state (`_seed_copy`). The copies' VMs come from replay either way.
+        """
+        self._loop = asyncio.get_running_loop()
+        if fork_mode not in (None, "messages", "checkpoint"):
+            return {"error": "fork_mode must be 'messages' or 'checkpoint'"}
+        if not (suspect_id or "").strip():
+            return {"error": "name the suspect this experiment tests (`suspect_id`)"}
+        if prediction not in xp.PREDICTIONS:
+            return {"error": f"prediction must be one of {list(xp.PREDICTIONS)}, stated before the experiment"}
+        if anchor_error(anchor or "before_split"):
+            return {"error": anchor_error(anchor or "before_split")}
+        try:
+            ch = self.parse_change(change)
+        except ChangeError as e:
+            return {"error": str(e)}
+        try:
+            asked = int(pairs)
+        except (TypeError, ValueError):
+            return {"error": f"pairs must be a whole number from 1 to {xp.MAX_PAIRS_PER_CALL}"}
+        n = max(1, min(asked, xp.MAX_PAIRS_PER_CALL))
+        spent = self._budget_spent()
+        if spent:
+            return {"error": spent}
+        try:
+            self.tracker.check(self.estimate_forks_usd(n, 2), f"{2 * n} experiment copies")
+        except OverBudget as e:
+            return {"error": str(e)}
+        runs, statuses = self._forkable_runs()
+        try:
+            src = xp.pick_source(ch, anchor, prediction, runs, statuses, self.domain.steps().anchor, source_run)
+        except xp.ExperimentError as e:
+            return {"error": str(e)}
+
+        fork_id = self._next_fork_id()
+        if self.case.suspect(suspect_id) is not None:
+            self.case.set_suspect_status(suspect_id, "testing")
+        plan = {xp.CONTROL_ARM: None, xp.CHANGED_ARM: ch.step}
+        # Saved on the fork before the base VM exists, so before any copy starts: what was predicted, fixed in time.
+        record = {"suspect_id": suspect_id, "change": ch.spec, "change_kind": ch.kind,
+                  "intervention": ch.description, "anchor": src.anchor, "prediction": prediction,
+                  "preregistered_at": time.time(), "reason": (reason or "")[:500], "pairs_requested": asked,
+                  "pairs": [], "score": None, "p_exact": None, "level": None,
+                  **({"label": ch.about} if ch.about else {})}
+        ran = await self._fork_copies(fork_id, plan, xp.pair_jobs(n), kind="method", src=src.run_id,
+                                      fork_at=src.fork_at, n_per_arm=n, record=record,
+                                      **({"fork_mode": fork_mode} if fork_mode else {}))
+        if isinstance(ran, str):
+            return {"error": ran.removeprefix("error: ")}
+        results, n_prefix = ran
+
+        arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in plan}
+        kept, dropped = xp.pair_outcomes(self.case.data["forks"][fork_id].get("children") or {}, n, prediction)
+        for d in dropped:
+            logger.info("experiment %s: pair %s dropped: %s", fork_id, d["i"], d["reason"])
+        scored = xp.score_pairs(kept, prediction)
+        cost = self._scope_usd(f"fork:{fork_id}:")
+        held = xp.adherence(self.case.data["forks"][fork_id].get("children") or {}, dropped)
+        self.case.update_fork(fork_id, status="done", arms=arms, pairs=kept, dropped_pairs=dropped,
+                              score=scored["score"], p_exact=scored["p_exact"], level=scored["level"], cost_usd=cost,
+                              adherence=held)
+        # The same `evidence` record a fork from the old path carries (`_fork_evidence`): one rule, one shape.
+        self.case.update_fork(fork_id, evidence=_fork_evidence(self.case.data["forks"][fork_id]))
+        self._fork_findings(fork_id, arms)
+        mine = [{"id": fid, **f} for fid, f in self.case.data["forks"].items()
+                if fid != "pending" and isinstance(f, dict) and f.get("suspect_id") == suspect_id
+                and f.get("status") == "done" and f.get("pairs") is not None]
+        ev = xp.suspect_evidence(mine)
+        self.case.set_suspect_evidence(suspect_id, ev)
+        self.case.set_phase("forked")
+        self.push_costs(force=True)
+        return {"fork_id": fork_id, "suspect_id": suspect_id, "change": ch.spec, "anchor": src.anchor,
+                "source_run": src.run_id, "fork_at": n_prefix, "prediction": prediction, "pairs_requested": asked,
+                "pairs": kept, "dropped": dropped, "adherence": held, "score": scored["score"],
+                "p_exact": scored["p_exact"], "level": scored["level"], "evidence": ev, "cost_usd": cost,
+                "budget_left_usd": self._budget_left()}
+
+    async def run_interaction(self, change_a: str, change_b: str, per_cell: int = 2, source_run: str | None = None,
+                              anchor: str = "before_split", suspects: tuple[str, str] | None = None) -> dict:
+        """The two-factor grid (plan 6.4) from one fork point: neither change, A only, B only, both, `per_cell` copies
+        each (at most 4). Written to the case file's `interaction`. Returns it, or `{"error": ...}`."""
+        self._loop = asyncio.get_running_loop()
+        try:
+            a, b = self.parse_change(change_a), self.parse_change(change_b)
+        except ChangeError as e:
+            return {"error": str(e)}
+        if a.kind == "control" or b.kind == "control" or a.spec == b.spec:
+            return {"error": "the grid needs two different changes"}
+        if anchor_error(anchor or "before_split"):
+            return {"error": anchor_error(anchor or "before_split")}
+        n = max(1, min(int(per_cell), ixn.MAX_PER_CELL))
+        spent = self._budget_spent()
+        if spent:
+            return {"error": spent}
+        try:
+            self.tracker.check(self.estimate_forks_usd(n, 4), f"{4 * n} grid copies")
+        except OverBudget as e:
+            return {"error": str(e)}
+        runs, statuses = self._forkable_runs()
+        try:
+            # Both changes are fixes tested on an inflated run; A decides which run is eligible.
+            src = xp.pick_source(a, anchor, "smaller_gap", runs, statuses, self.domain.steps().anchor, source_run)
+        except xp.ExperimentError as e:
+            return {"error": str(e)}
+        fork_id = self._next_fork_id()
+        plan = ixn.cell_plan(a.step, b.step)
+        record = {"change_a": a.spec, "change_b": b.spec, "anchor": src.anchor, "preregistered_at": time.time(),
+                  "intervention": f"A: {a.description}. B: {b.description}"}
+        ran = await self._fork_copies(fork_id, plan, [(cell, i + 1) for cell in plan for i in range(n)],
+                                      kind="interaction", src=src.run_id, fork_at=src.fork_at, n_per_arm=n, record=record)
+        if isinstance(ran, str):
+            return {"error": ran.removeprefix("error: ")}
+        results, n_prefix = ran
+        arms = {cell: _arm_summary([r for r in results.values() if r["arm"] == cell]) for cell in plan}
+        grid = ixn.grid_result(self.case.data["forks"][fork_id].get("children") or {})
+        self.case.update_fork(fork_id, status="done", arms=arms, cost_usd=self._scope_usd(f"fork:{fork_id}:"))
+        out = {"fork_id": fork_id, "change_a": a.spec, "change_b": b.spec, "suspects": list(suspects or []),
+               "source_run": src.run_id, "fork_at": n_prefix, "anchor": src.anchor, "per_cell": n, **grid,
+               "cost_usd": self._scope_usd(f"fork:{fork_id}:"), "budget_left_usd": self._budget_left()}
+        self.case.set_interaction(out)
+        self.case.set_phase("forked")
+        self.push_costs(force=True)
+        return out
 
     # ---- the diagnosis: traceback and fix ----
     async def trace_failures(self, run_id: str, max_episodes: int = 3) -> dict:
@@ -1138,15 +1410,54 @@ class Batch:
         except OverBudget as e:
             return f"error: {e}"
 
-        fork_id = f"f{sum(k.startswith('f') for k in self.case.data['forks']) + 1}"
+        fork_id = self._next_fork_id()
+        ran = await self._fork_copies(fork_id, plan, [(arm, i + 1) for arm in plan for i in range(n_per_arm)],
+                                      kind=kind, src=src, fork_at=fork_at, n_per_arm=n_per_arm, record=record)
+        if isinstance(ran, str):
+            return ran
+        results, n_prefix = ran
+
+        arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in plan}
+        self.case.update_fork(fork_id, status="done", arms=arms)
+        found = self._fork_findings(fork_id, arms)
+        self.case.set_phase("forked")
+        lines = [
+            f"Fork {fork_id} from run {src} before action {n_prefix} {headline}. "
+            f"Every arm starts from the same moment of the same run. Failed copies are not counted."
+        ]
+        lines += _arm_lines(plan, arms, kind, found.get("evidence"))
+        lines += _findings_lines(record, found)
+        if (found.get("adherence") or {}).get("note"):
+            lines.append(f"{found['adherence']['note']}.")
+        if kind == "fix":
+            self.case.update_fix(status="tested", fork_id=fork_id,
+                                 result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
+        return " ".join(lines)
+
+    def _next_fork_id(self) -> str:
+        return f"f{sum(k.startswith('f') for k in self.case.data['forks']) + 1}"
+
+    async def _fork_copies(self, fork_id: str, plan: dict[str, Any], jobs: list[tuple[str, int]], *, kind: str,
+                           src: str, fork_at: int, n_per_arm: int, record: dict,
+                           fork_mode: str | None = None) -> tuple[dict[str, dict], int] | str:
+        """The fork-running core every experiment shares (`_experiment`, `run_experiment`, `run_interaction`): record
+        the fork with `record` before anything runs, rebuild the base VM by replay to the fork point, continue one copy
+        per `(arm, number)` of `jobs` and release the base. Returns ({child id: result}, actions before the cut), or
+        an error string when the base could not be built (the fork is then removed and the phase restored).
+
+        `fork_mode` (default: the batch's `fork_mode`) is how the copies get the source run's agent state; the VM
+        state comes from the base VM either way (`_seed_copy`)."""
+        self._loop = asyncio.get_running_loop()
         phase_before = self.case.data.get("phase")
         base_key, base_scope = f"{fork_id}-base", f"fork:{fork_id}:base"
         try:
             point = self._fork_point(src, fork_at)
+            point.fork_mode = fork_mode or self.cfg.fork_mode
             self.case.set_phase("forking")
             self.case.update_fork(
                 fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=point.n_prefix, n_per_arm=n_per_arm,
-                children={}, arm_steps={a: (step or {}).get("description") for a, step in plan.items()}, **record,
+                children={}, arm_steps={a: _step_description(step) for a, step in plan.items()},
+                fork_mode=point.fork_mode, **record,
             )
             base = await self._build_base(base_key, f"{self.id}-{fork_id}-base", base_scope, point.actions)
         except Exception as e:  # noqa: BLE001 - returned, so an agent calling this as a tool reads it instead of dying
@@ -1160,30 +1471,27 @@ class Batch:
             await self._release(base_key, base_scope)
             raise
         self.case.update_fork(fork_id, status="running")
-        n_prefix = point.n_prefix
 
         # Each copy is its own run, so each starts in an empty context (`_run_children`).
         try:
-            results = await self._run_children(
-                fork_id, plan, [(arm, i + 1) for arm in plan for i in range(n_per_arm)], base, point, self.run_model(src),
-                kind=kind)
+            async with self._analyst_checkpoints():  # open for every copy of the fork, not reopened copy by copy
+                results = await self._run_children(fork_id, plan, jobs, base, point, self.run_model(src), kind=kind)
         finally:
             await self._release(base_key, base_scope)
+            self._record_restore(fork_id, point)
+        return results, point.n_prefix
 
-        arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in plan}
-        self.case.update_fork(fork_id, status="done", arms=arms)
-        found = self._fork_findings(fork_id, arms)
-        self.case.set_phase("forked")
-        lines = [
-            f"Fork {fork_id} from run {src} before action {n_prefix} {headline}. "
-            f"Every arm starts from the same moment of the same run. Failed copies are not counted."
-        ]
-        lines += _arm_lines(plan, arms, kind)
-        lines += _findings_lines(record, found)
-        if kind == "fix":
-            self.case.update_fix(status="tested", fork_id=fork_id,
-                                 result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
-        return " ".join(lines)
+    def _record_restore(self, fork_id: str, point: "_ForkPoint") -> None:
+        """On the fork: how its copies' agent state and VM state were restored, side by side. The agent state comes
+        from a LangGraph checkpoint (checkpoint mode) or the cut messages; the VM always from the base VM, rebuilt by
+        replaying the source run's actions (Daytona refuses VM forks, and a checkpoint holds no disk)."""
+        used = "checkpoint" if point.seed is not None else "messages"
+        fields: dict[str, Any] = {"fork_mode": used, "restore": {"agent_state": used, "vm": "replay"}}
+        if point.fork_mode == "checkpoint":
+            fields.update(fork_mode_requested="checkpoint", checkpoint_id=point.checkpoint_id,
+                          source_thread_id=point.source_thread, fork_mode_fallback=point.fallback)
+        if fork_id in self.case.data["forks"]:
+            self.case.update_fork(fork_id, **fields)
 
     def _fork_findings(self, fork_id: str, arms: dict[str, dict]) -> dict:
         """What a fork's stored copies say, recomputed from every child and the arm summaries `arms`: how the copies
@@ -1199,9 +1507,15 @@ class Batch:
         found: dict[str, Any] = {"built": built,
                                  "measures": "controller_performance" if kind == "fix" else "reporting_accuracy"}
         if kind != "fix" and "control" in arms and "forced" in arms:
+            pairs = fork_pairs(fork)
             ev = verdict_evidence({a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]}
-                                   for a in ("control", "forced")})
-            found.update(evidence=ev, outcome=method_outcome(ev))
+                                   for a in ("control", "forced")}, pairs=pairs)
+            # MASTER_PLAN 6.1: the pairs, the running score, the display-only exact test and the level on the fork.
+            found.update(evidence=ev, outcome=method_outcome(ev), pairs=pairs or [], score=ev["score"],
+                         p_exact=ev["p_exact"], level=ev["level"])
+            # The adherence check over every copy so far (more pairs included): pairs whose changed copy undid it.
+            gone = pair_up(fork.get("children"), direction_of(fork.get("prediction")))[1]
+            found["adherence"] = xp.adherence(fork.get("children") or {}, [{"reason": d["why"]} for d in gone])
         self.case.update_fork(fork_id, **found)
         if fork.get("hypothesis_id") and "outcome" in found:
             self.case.set_hypothesis_status(fork["hypothesis_id"], found["outcome"], tested_by=fork_id)
@@ -1216,7 +1530,39 @@ class Batch:
         prefix_msgs, n_prefix = cut_history(msgs, fork_at)
         # Each copy keeps these next to its own log: the episodes the source ran before the cut are the copy's too.
         prefix_log = "".join(json.dumps(e) + "\n" for e in prefix_events(src_events, n_prefix))
-        return _ForkPoint(prefix_msgs, n_prefix, actions[:n_prefix], prefix_log)
+        return _ForkPoint(prefix_msgs, n_prefix, actions[:n_prefix], prefix_log, source_run=src)
+
+    async def _checkpoint_seed(self, point: "_ForkPoint", src: str, agent) -> None:
+        """Checkpoint mode (plan Phase 6): find, once per fork point, the source run's LangGraph snapshot just before
+        the model turn that made the fork-point action, in `checkpoints.sqlite`, through `agent.aget_state_history`
+        on the source run's thread. That snapshot is the one whose next node is `model` and whose messages are the
+        cut history (`forks.cut_history`): the state the model was about to answer from. Sets `point.seed`, or
+        `point.fallback` with the reason messages mode is used instead. `agent` is any analyst graph on the batch's
+        saver (a copy's own: reading a thread does not call the model)."""
+        async with point.lock:
+            if point.looked_up:
+                return
+            point.looked_up = True
+            run = self.case.data["runs"].get(src) or {}
+            if not self.checkpoints_path.is_file() or not run.get("thread_id"):
+                point.fallback = (f"run {src} has no checkpoints in checkpoints.sqlite (it ran before analysts were "
+                                  "checkpointed, or the file is gone), so the copies start from its saved messages")
+            else:
+                point.source_thread = run["thread_id"]
+                want = [_msg_key(m) for m in point.messages]
+                found = None
+                async for snap in agent.aget_state_history({"configurable": {"thread_id": point.source_thread}}):
+                    msgs = list((snap.values or {}).get("messages") or [])
+                    if "model" in (snap.next or ()) and len(msgs) == len(want) and [_msg_key(m) for m in msgs] == want:
+                        found = snap  # newest first: keep going, so the earliest such snapshot wins
+                if found is None:
+                    point.fallback = (f"no checkpoint of run {src} sits just before action {point.n_prefix} (thread "
+                                      f"{point.source_thread}), so the copies start from its saved messages")
+                else:
+                    point.seed = dict(found.values)
+                    point.checkpoint_id = found.config["configurable"].get("checkpoint_id")
+            if point.fallback:
+                logger.info("checkpoint mode falls back to messages mode: %s", point.fallback)
 
     async def _build_base(self, key: str, label: str, scope: str, actions: list) -> Any:
         """A VM at the fork point: a fresh VM with the task loaded and the source run's actions replayed. Kept under
@@ -1227,6 +1573,36 @@ class Batch:
         await asyncio.to_thread(vms.load_task, base, self.task)
         await asyncio.to_thread(vms.replay_actions, base, actions)
         return base
+
+    async def _seed_copy(self, agent, point: "_ForkPoint", history: list, thread_id: str,
+                         todo: dict | None = None) -> tuple[Any, dict]:
+        """What a copy's agent starts from, and the fields that say so on the copy. `history` is the cut history
+        (`point.messages`) plus the arm's change (`change_messages`).
+
+        Messages mode: `history` is the input of a fresh thread. Checkpoint mode: the source run's snapshot just before
+        the cut (`_checkpoint_seed`) is written into the copy's new thread with `aupdate_state(..., as_node="tools")`,
+        its messages replaced by the snapshot's own plus the change, so the copy keeps the rest of the source run's
+        state (its todo list); the input is then None and the graph goes on from there, at its `model` node. With no
+        snapshot it falls back to messages mode, and says why.
+
+        Either way only the agent's state is restored. The copy's VM is the base VM (rebuilt by replaying the source
+        run's actions, `_build_base`) or a fork of it: LangGraph has no hold on what is on the VM's disk.
+        """
+        if point.fork_mode != "checkpoint":
+            return {"messages": history}, {"fork_mode": "messages", "state_from": "messages"}
+        await self._checkpoint_seed(point, point.source_run, agent)
+        if point.seed is None:
+            return {"messages": history}, {"fork_mode": "messages", "state_from": "messages",
+                                           "fork_mode_requested": "checkpoint", "fork_mode_fallback": point.fallback}
+        change = history[len(point.messages):]
+        values = {**point.seed, "messages": list(point.seed.get("messages") or []) + change}
+        if todo is not None:
+            # The changed copy's forced step is in its history as a call it made, so its plan lists it as done
+            # (`forks.forced_todo`). The control's state is the snapshot as it was.
+            values["todos"] = list(point.seed.get("todos") or []) + [todo]
+        await agent.aupdate_state({"configurable": {"thread_id": thread_id}}, values, as_node="tools")
+        return None, {"fork_mode": "checkpoint", "state_from": "checkpoint", "checkpoint_id": point.checkpoint_id,
+                      "source_thread_id": point.source_thread}
 
     async def _run_children(self, fork_id: str, plan: dict[str, dict | None], jobs: list[tuple[str, int]], base: Any,
                             point: "_ForkPoint", model: str, *, kind: str = "method") -> dict[str, dict]:
@@ -1258,34 +1634,51 @@ class Batch:
                         await asyncio.to_thread(vms.load_task, vm, self.task)
                         await asyncio.to_thread(vms.replay_actions, vm, prefix_actions)
                         how = "replay"
+                    step = plan[arm]
+                    # A `swap_model` change runs this copy on another model (forks.step_model); every other arm keeps
+                    # the source run's.
+                    copy_model = step_model(step, model)
                     url = await _try(asyncio.to_thread(vms.start_lab_page, vm))
-                    self._set_child(fork_id, cid, arm=arm, status="running", lab_url=url, how=how, model=model)
-                    (cdir / "meta.json").write_text(json.dumps({"model": model}))
+                    self._set_child(fork_id, cid, arm=arm, status="running", lab_url=url, how=how, model=copy_model)
+                    (cdir / "meta.json").write_text(json.dumps({"model": copy_model}))
 
                     history = list(prefix_msgs)
-                    step = plan[arm]
                     if step is not None:
                         backend = DaytonaSandbox(sandbox=vm)
                         try:
-                            output = await asyncio.to_thread(apply_step, backend, step)
+                            # A forced step runs in the VM; a made-up result, a message or a model swap does not
+                            # (forks.change_messages).
+                            turn, forced_events = await asyncio.to_thread(change_messages, backend, step)
                         except RuntimeError as e:
                             # Nothing was forced here, so this copy must not be scored as a result of its arm.
                             raise RuntimeError(f"the {arm} step failed: {e}") from e
-                        history += forced_turn(step, output)
-                        log.write({"type": "forced", "command": step_text(step), "output": output[:2000]})
-
-                    agent = build_analyst(DaytonaSandbox(sandbox=vm), model, self.domain.analyst_system_prompt)
+                        history += turn
+                        for ev in forced_events:
+                            log.write(ev)
 
                     def on_event(ev: dict) -> None:
                         self._emit({"kind": "fork_event", "fork": fork_id, "child": cid, "event": ev})
 
-                    watch = _watch_motion(self.domain, vm, cdir / "outputs", f"forks/{fork_id}/{cid}/outputs", log,
-                                          on_event, lambda files: self._set_child(fork_id, cid, motion_files=files))
-                    await asyncio.wait_for(
-                        self._drive(agent, {"messages": history}, f"{self.id}-{fork_id}-{cid}", scope,
-                                    model, log, on_event),
-                        RUN_TIMEOUT_S,
-                    )
+                    # A new thread for every copy: the source run's thread is only read, never continued.
+                    thread_id = f"{self.id}-{fork_id}-{cid}"
+                    async with self._analyst_checkpoints() as saver:
+                        agent, lessons = await self._new_analyst(DaytonaSandbox(sandbox=vm), copy_model,
+                                                                 f"fork {fork_id} {cid}", saver)
+                        inp, state = await self._seed_copy(
+                            agent, point, history, thread_id,
+                            todo=forced_todo(step) if arm == xp.CHANGED_ARM else None)
+                        self._set_child(fork_id, cid, thread_id=thread_id, **state,
+                                        **({"lessons": lessons} if lessons else {}))
+                        watch = _watch_motion(self.domain, vm, cdir / "outputs", f"forks/{fork_id}/{cid}/outputs",
+                                              log, on_event,
+                                              lambda files: self._set_child(fork_id, cid, motion_files=files))
+                        await asyncio.wait_for(
+                            self._drive(agent, inp, thread_id, scope, copy_model, log, on_event),
+                            RUN_TIMEOUT_S,
+                        )
+                        if await self._nudge_for_report(agent, vm, cdir / "outputs", thread_id, scope, copy_model,
+                                                        log, on_event):
+                            self._set_child(fork_id, cid, nudged=True)
                     if watch is not None:
                         await watch.stop()
                     motion = await asyncio.to_thread(vms.download_outputs, vm, cdir / "outputs", **self._vm_domain)
@@ -1301,6 +1694,10 @@ class Batch:
                     )
                     (cdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
                     results[cid] = {"arm": arm, **score.to_dict()}
+                    if step is not None and kind != "fix":
+                        # The adherence check (forks.step_held): a changed copy that undid its change is still scored,
+                        # but its pair is dropped (evidence.pair_up). A control has no change to check.
+                        results[cid].update(await asyncio.to_thread(held_fields, step, cdir, self.task))
                     extra = {"charts": [f"forks/{fork_id}/{cid}/live/{name}" for name in charts]} if charts else {}
                     if watch is None and motion:
                         extra["motion_files"] = [f"forks/{fork_id}/{cid}/outputs/{path}" for path in motion]
@@ -1324,6 +1721,26 @@ class Batch:
             asyncio.create_task(child(arm, number), context=contextvars.Context()) for arm, number in jobs
         ))
         return results
+
+    async def _nudge_for_report(self, agent, vm, outputs: Path, thread_id: str, scope: str, model: str,
+                                log: EventLog, on_event) -> bool:
+        """The one nudge a fork copy gets (`REPORT_NUDGE`): when its agent stopped and the VM has no report, one more
+        user message on the copy's own thread asks for it. True when it was sent. Arm-blind on purpose: it looks only
+        at the copy's files, never at its arm, so every arm is held to the same rule."""
+        await asyncio.to_thread(vms.download_outputs, vm, outputs, **self._vm_domain)
+        if (outputs / REPORT_FILE).is_file():
+            return False
+        on_event(log.write({"type": "nudge", "text": REPORT_NUDGE}))
+        try:
+            await asyncio.wait_for(
+                self._drive(agent, {"messages": [HumanMessage(content=REPORT_NUDGE)]}, thread_id, scope, model, log,
+                            on_event),
+                NUDGE_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            # Scored as it is: the scoring says what is missing.
+            logger.warning("%s: no answer to the report nudge within %ss", thread_id, NUDGE_TIMEOUT_S)
+        return True
 
     def _set_child(self, fork_id: str, cid: str, **fields: Any) -> None:
         children = dict(self.case.data["forks"][fork_id].get("children", {}))
@@ -1413,6 +1830,7 @@ class Batch:
         jobs = [(c.rsplit("-", 1)[0], _child_number(c)) for c in job["children"]]
         try:
             point = self._fork_point(src, int(fork.get("fork_at") or 0))
+            point.fork_mode = fork.get("fork_mode") or "messages"
             base = await self._build_base(base_key, f"{self.id}-{fid}-base-{k + 1}", base_scope, point.actions)
         except Exception as e:  # noqa: BLE001 - recorded on the round; nothing ran, so nothing else changes
             logger.warning("fork %s: could not build the base VM for more pairs: %s: %s", fid, type(e).__name__, e)
@@ -1444,7 +1862,7 @@ class Batch:
         lines = [f"Fork {fid}: {len(jobs) // max(1, len(plan))} more copies per arm from run {src} before action "
                  f"{point.n_prefix}, the same arms with the same steps. Counts are over every copy of {fid}; failed "
                  f"copies are not counted."]
-        lines += _arm_lines(plan, arms, "method")
+        lines += _arm_lines(plan, arms, "method", self.case.data["forks"][fid].get("evidence"))
         verdict = self.case.data.get("verdict") or {}
         lines.append(f"The verdict now reads: {verdict.get('sentence')}")
         return " ".join(lines)
@@ -1467,7 +1885,7 @@ class Batch:
         ran = list(fork.get("arm_steps") or fork.get("arms") or {})
         children = fork.get("children") or {}
         arms = {arm: _arm_summary([c for cid, c in children.items() if _child_arm(cid, c) == arm]) for arm in ran}
-        ev = _fork_evidence({"arms": arms})
+        ev = _fork_evidence({"arms": arms, "children": children, "prediction": fork.get("prediction")})
         self._update_round(fork_id, status=status, pairs_after=ev["pairs"], level_after=ev["level"],
                            **({"reason": reason} if reason else {}))
         self.case.update_fork(fork_id, status="done", arms=arms,
@@ -1508,8 +1926,9 @@ class Batch:
         if given == verdict.get("arms"):
             return False
         numbers = {f"{a}_{key}": v for a, c in given.items() for key, v in c.items()}
-        ev = verdict_evidence(given, numbers)
-        label = verdict.get("step_label") or self.case.data["forks"][fork_id].get("label") or ""
+        ev = verdict_evidence(given, numbers, pairs=fork_pairs(self.case.data["forks"][fork_id]))
+        # The sentence names the step this fork tested: a cause can only be the step the experiment changed.
+        label = self.case.data["forks"][fork_id].get("label") or verdict.get("step_label") or ""
         words = self.domain.words.steps.get(label)
         sentence = verdict_sentence(words.name if words else label.replace("_", " "), ev, given)
         before = {"at": time.time(), "by": "more_pairs", "fork_id": fork_id, "sentence": verdict.get("sentence"),
@@ -1518,46 +1937,215 @@ class Batch:
                                  revisions=[*(verdict.get("revisions") or []), before])
         return True
 
+    # ---- the durable checkpointer (plan Phase 6) ----
+    @property
+    def checkpoints_path(self) -> Path:
+        """The batch's durable checkpoints (plan Phase 6): one SQLite file per batch, shared by the investigator and
+        every analyst (runs and fork copies), each on its own thread."""
+        return self.dir / "checkpoints.sqlite"
+
+    async def _saver(self) -> AsyncSqliteSaver:
+        """The batch's one AsyncSqliteSaver on `checkpoints.sqlite`, opened on first use. Every agent of the batch
+        writes through it (one connection, so the saver's own lock orders the writes). `close` closes it."""
+        if self._checkpoint_saver is None:
+            # A generous busy timeout: a run, a copy and the investigator may write in the same moment.
+            self._checkpoint_conn = await aiosqlite.connect(str(self.checkpoints_path), timeout=30)
+            self._checkpoint_saver = AsyncSqliteSaver(self._checkpoint_conn)
+        return self._checkpoint_saver
+
+    @contextlib.asynccontextmanager
+    async def _analyst_checkpoints(self):
+        """The saver, held for one analyst's life. When the last analyst lets go and no investigator holds it, the
+        file is closed, so a batch that is only running analysts leaves no connection open behind it."""
+        saver = await self._saver()
+        self._saver_users += 1
+        try:
+            yield saver
+        finally:
+            self._saver_users -= 1
+            if self._saver_users == 0 and self._investigator is None:
+                await self._close_checkpointer()
+
+    def run_thread_id(self, run_id: str) -> str:
+        """A run's analyst thread in `checkpoints.sqlite`. Stable: a checkpoint-mode fork reads the run's history here."""
+        return (self.case.data["runs"].get(run_id) or {}).get("thread_id") or f"{self.id}-{run_id}"
+
+    async def _new_analyst(self, backend, model: str, who: str, saver) -> tuple[Any, dict | None]:
+        """An analyst for a run or a fork copy on `backend`, on the batch's saver, with the lessons the batch's
+        `lessons` setting gives it (lessons.for_analyst). Returns (agent, how the lessons reached it, or None)."""
+        prompt, folder, record = lessons_mod.for_analyst(self.cfg.lessons, backend, self.domain.analyst_system_prompt,
+                                                         f"batch {self.id} {who}")
+        agent = build_analyst(backend, model, prompt, checkpointer=saver, learned_dir=folder)
+        return agent, record
+
     # ---- the investigator ----
-    async def investigate(self, opening: str = "Investigate this batch.") -> None:
+    async def _ensure_investigator(self, thread_id: str | None = None) -> None:
+        """Build the investigator on this batch's SQLite checkpointer, once per process. Its thread id is saved in the
+        case file (`investigator.thread_id`), so a new process (a server restart) picks the same thread up where it
+        stopped, a pending approval included. `thread_id` starts a new thread (a new investigation)."""
         self._loop = asyncio.get_running_loop()
-        self._investigator = build_investigator(self, self.cfg.investigator_model)
+        saved = (self.case.data.get("investigator") or {}).get("thread_id")
+        if thread_id is not None and thread_id != saved:
+            # The old thread stays in the file; the investigator is rebuilt on the new one.
+            self._investigator = None
+            self.case.set_investigator(thread_id=thread_id)
+        elif saved is None:
+            self.case.set_investigator(thread_id=f"{self.id}-investigator")
+        if self._investigator is not None:
+            return
+        saver = await self._saver()
+        self._investigator = build_investigator(self, self.cfg.investigator_model, checkpointer=saver)
         self._inv_config = {
-            "configurable": {"thread_id": f"{self.id}-investigator"},
+            "configurable": {"thread_id": self.case.data["investigator"]["thread_id"]},
             "callbacks": [UsageCallback(self.tracker, "investigator", self.cfg.investigator_model)],
             "recursion_limit": INVESTIGATOR_RECURSION_LIMIT,
         }
+
+    async def _close_checkpointer(self) -> None:
+        conn, self._checkpoint_conn = getattr(self, "_checkpoint_conn", None), None
+        self._checkpoint_saver = None
+        self._investigator = None
+        if conn is not None:
+            try:
+                await conn.close()
+            except Exception as e:  # noqa: BLE001 - closing a file never stops the batch
+                logger.warning("could not close the checkpoint file: %s", e)
+
+    async def investigate(self, opening: str = "Investigate this batch.") -> None:
+        # A new investigation of a batch investigated before starts a new thread: the old one stays in the file.
+        before = (self.case.data.get("investigator") or {}).get("thread_id")
+        await self._ensure_investigator(None if before is None else f"{self.id}-investigator-{int(time.time())}")
         self.case.set_phase("investigating")
         # The rubric turns on the grader (RubricMiddleware) that checks the verdict before the investigator finishes.
         await self._stream_investigator(
             {"messages": [{"role": "user", "content": opening}], "rubric": RUBRIC}
         )
 
-    async def decide(self, approve: bool) -> None:
-        """Answer the investigator's pending request_forks approval."""
+    def claim_test(self, suspect_id: str) -> None:
+        """Check that `suspect_id` can be tested now and claim the batch for it (phase `investigating`), without
+        starting anything. Synchronous, so two requests can never both claim it. Raises Refused with the reason."""
+        problem = test_suspect_problem(self.case.data, self.dir, suspect_id)
+        if problem:
+            raise Refused(problem)
+        try:
+            self._check_budget()
+        except OverBudget as e:
+            raise Refused(f"the budget is spent ({e})") from e
+        self.case.set_phase("investigating")
+
+    async def test_suspect(self, suspect_id: str) -> None:
+        """Ask the finished investigator to test one suspect it left untested. It resumes its own thread (the SQLite
+        checkpointer keeps its memory), so the experiment it asks for waits for a person's approval like any other,
+        and the budget guard stops it as it would the first time. Load the batch with `reopen(suspect_id=...)` and
+        `claim_test` first: those check that it can run."""
+        s = self.case.suspect(suspect_id) or {}
+        await self._ensure_investigator()
+        self.case.set_phase("investigating")
+        ask = (f"A person asks you to test suspect {suspect_id} ({s.get('target')}), which your verdict left untested. "
+               f"Update your plan, ask the skeptic for its cheapest disproof, and request one experiment on it with "
+               f"`run_experiment`; it waits for their approval. Then update the verdict with what it shows.")
+        await self._stream_investigator({"messages": [{"role": "user", "content": ask}], "rubric": RUBRIC})
+
+    async def decide(self, approve: bool, pairs: int | None = None) -> None:
+        """Answer the investigator's pending approval. `pairs` (approve only) edits the experiment's size first: the
+        `edit` decision, with the tool call's other arguments unchanged."""
+        await self._ensure_investigator()
         decision = {"type": "approve"} if approve else {"type": "reject", "message": "The person declined the cost."}
+        action = (self.case.data["forks"].get("pending") or {}).get("action") or {}
+        size_key = {"run_experiment": "pairs", "run_interaction": "per_cell", "request_forks": "n_per_arm"}.get(action.get("name"))
+        if approve and pairs is not None and size_key:
+            args = {**(action.get("args") or {}), size_key: int(pairs)}
+            decision = {"type": "edit", "edited_action": {"name": action["name"], "args": args}}
+        pending_lesson = (self.case.data["forks"].get("pending") or {}).get("lesson_id")
+        if pending_lesson and not approve:
+            self.case.update_lesson(pending_lesson, status="rejected")
         # One answer covers one experiment. If the investigator asked for several in one turn, the rest are declined.
+        # The count comes from the saved checkpoint, not this process's memory: after a server restart the in-memory
+        # count is gone, and LangGraph refuses a resume whose decisions do not match the hanging tool calls.
+        hanging = await self._hanging_interrupts()
+        count = sum(len((i.value or {}).get("action_requests") or []) for i in hanging) or self._pending_requests
         rest = {"type": "reject", "message": "Only one experiment is approved at a time. Ask again if you still need it."}
-        decisions = [decision] + [rest] * (self._pending_requests - 1)
+        decisions = [decision] + [rest] * (count - 1)
         self._pending_requests = 1
         self.case.remove_fork("pending")
         self.case.set_phase("investigating")
         await self._stream_investigator(Command(resume={"decisions": decisions}))
 
+    async def _hanging_interrupts(self) -> list:
+        """The interrupts waiting on the investigator's saved thread (LangGraph state), or [] when none or unreadable."""
+        if getattr(self, "_investigator", None) is None:
+            return []
+        try:
+            state = await self._investigator.aget_state(self._inv_config)
+        except Exception as e:  # noqa: BLE001 - a missing thread is simply nothing waiting
+            logger.warning("could not read the investigator's state: %s", e)
+            return []
+        found = list(getattr(state, "interrupts", ()) or ())
+        if not found:
+            for task in getattr(state, "tasks", ()) or ():
+                found.extend(getattr(task, "interrupts", ()) or ())
+        return [i for i in found if isinstance(getattr(i, "value", None), dict) and i.value.get("action_requests")]
+
+    async def restore_pending(self) -> bool:
+        """After a restart, make the case file follow the checkpoint: when the investigator's saved thread is waiting
+        on an approval but `forks.pending` is gone (it is removed before a resume is sent), rebuild it and set the
+        phase back to `awaiting_approval`. Returns True when it did."""
+        if "pending" in self.case.data["forks"] or not (self.case.data.get("investigator") or {}).get("thread_id"):
+            return False
+        if not self.checkpoints_path.is_file():
+            return False
+        await self._ensure_investigator()
+        hanging = await self._hanging_interrupts()
+        if not hanging:
+            return False
+        self._on_interrupt(hanging)
+        self.case.set_phase("awaiting_approval")
+        return True
+
     async def _stream_investigator(self, inp) -> None:
         log = self._log(self.dir / "investigator" / "events.jsonl", "investigator")
         try:
             self._check_budget()
-            async for chunk in self._investigator.astream(inp, self._inv_config, stream_mode="updates", subgraphs=True):
+            interrupted = None
+            # The stream is read to its end, even after an interrupt: the checkpoint that holds the pending approval
+            # is written to SQLite as the run winds down, and leaving the loop early could cut that write off.
+            # `durability="sync"` saves each step before the next one starts, so a restart loses nothing.
+            async for chunk in self._investigator.astream(inp, self._inv_config, stream_mode="updates", subgraphs=True,
+                                                          durability="sync"):
                 ns, update = chunk if isinstance(chunk, tuple) else ((), chunk)
                 if "__interrupt__" in update:
-                    self._on_interrupt(update["__interrupt__"])
-                    return
+                    interrupted = update["__interrupt__"] if interrupted is None else interrupted
+                    continue
+                if interrupted is not None:
+                    continue
+                agent = self._agent_name(ns, update)
                 for ev in events_from_update(update):
-                    ev = log.write({**ev, "agent": ns[-1].split(":")[0] if ns else "investigator"})
+                    ev = log.write({**ev, "agent": agent})
                     self._emit({"kind": "investigator", "event": ev})
+                    if ev.get("type") == "todos" and agent == "investigator":
+                        self.case.set_investigator(todos=ev["todos"])
+                    if ev.get("type") == "tool_call" and ev.get("name") == "task" and agent == "investigator":
+                        # Which subagents ran and how often: the finished panel lists them.
+                        kind = str((ev.get("args") or {}).get("subagent_type") or "subagent")
+                        calls = dict((self.case.data.get("investigator") or {}).get("subagent_calls") or {})
+                        calls[kind] = calls.get(kind, 0) + 1
+                        self.case.set_investigator(subagent_calls=calls)
+                self.case.set_investigator(subagent=None if agent == "investigator" else agent)
                 self.push_costs()
                 self._check_budget()
+            if interrupted is not None:
+                gated = self._method_gate_answer(interrupted)
+                if gated is not None:  # refused before a person is asked: nothing to approve
+                    log.close()
+                    await self._stream_investigator(gated)
+                    return
+                self._on_interrupt(interrupted)
+                return
+            try:
+                self.write_audit()
+            except Exception as e:  # noqa: BLE001 - the audit sheet is for the screens; it never stops the batch
+                logger.warning("could not write the audit sheet: %s: %s", type(e).__name__, e)
+            self.case.set_investigator(subagent=None)
             self.case.set_phase("done")
             # The investigator has finished and the verdict is in: the batch is over, so stop paying for its VMs.
             await self.close()
@@ -1573,7 +2161,52 @@ class Batch:
             log.close()
             self.push_costs(force=True)
 
+    def _agent_name(self, ns: tuple, update: dict) -> str:
+        """Who an update comes from: the investigator, or the subagent by its name (a subgraph's namespace is
+        `tools:<uuid>`; its model's AIMessage carries the subagent's name), remembered per namespace."""
+        if not ns:
+            return "investigator"
+        key = ns[-1]
+        names = self.__dict__.setdefault("_ns_names", {})
+        if key not in names:
+            for delta in (update or {}).values():
+                for m in (delta.get("messages") or []) if isinstance(delta, dict) else []:
+                    if getattr(m, "type", None) == "ai" and getattr(m, "name", None):
+                        names[key] = m.name
+                        break
+        return names.get(key, "subagent")
+
+    def _method_gate_answer(self, interrupts):
+        """The answer to a `run_experiment` approval request the method gate refuses (agents/method_gate.py): a
+        reject carrying the gate's refusal, given at once, so no person approves a cost that would then not be spent.
+        None when the gate lets it through and a person is asked as usual."""
+        from .agents import method_gate
+
+        try:
+            requests = interrupts[0].value["action_requests"]
+            first = requests[0]
+        except Exception:  # noqa: BLE001
+            return None
+        if first.get("name") != "run_experiment":
+            return None
+        sid = str((first.get("args") or {}).get("suspect_id") or "")
+        if self.case.suspect(sid) is None:
+            return None  # the tool itself says the suspect is unknown
+        refusal = method_gate.experiment_refusal(self.case, sid, bool(getattr(self.cfg, "investigator_strict", True)))
+        if refusal is None:
+            return None
+        rest = {"type": "reject", "message": "Only one experiment is asked for at a time. Ask again if you still need it."}
+        return Command(resume={"decisions": [{"type": "reject", "message": refusal}] + [rest] * (len(requests) - 1)})
+
     def _on_interrupt(self, interrupts) -> None:
+        try:
+            first = interrupts[0].value["action_requests"][0]
+            action = {"name": first.get("name"), "args": dict(first.get("args") or {})}
+        except Exception:  # noqa: BLE001
+            action = {}
+        if action.get("name") in ("run_experiment", "run_interaction", "propose_lesson"):
+            self._pending_requests = max(1, len(interrupts[0].value.get("action_requests") or []))
+            return self._on_new_interrupt(action)
         n, kind = 4, "method"
         self._pending_requests = 1
         try:
@@ -1610,12 +2243,54 @@ class Batch:
         est = self.estimate_forks_usd(n, n_arms)
         self.case.update_fork(
             "pending", status="awaiting_approval", kind=kind, n_per_arm=n, vm_count=n_arms * n + 1,
-            estimate_usd=usd_up(est), **about,
+            estimate_usd=usd_up(est), **about, action=action,
+        )
+        self.case.set_phase("awaiting_approval")
+
+    def _on_new_interrupt(self, action: dict) -> None:
+        """`forks.pending` for a paired experiment (`run_experiment`) or a lesson (`propose_lesson`): what the person
+        is asked to approve, and what it costs. The estimate is per pair, so an edited `pairs` is priced the same way."""
+        args = action["args"]
+        if action["name"] == "run_interaction":
+            # The two-factor grid: four cells of `per_cell` copies from one fork point, plus the base VM.
+            try:
+                n = max(1, min(int(args.get("per_cell", 2)), ixn.MAX_PER_CELL))
+            except (TypeError, ValueError):
+                n = 2
+            self.case.update_fork(
+                "pending", status="awaiting_approval", kind="interaction", suspect_a=args.get("suspect_a"),
+                suspect_b=args.get("suspect_b"), reason=args.get("reason") or "", per_cell=n, n_per_arm=n,
+                vm_count=4 * n + 1, estimate_usd=usd_up(self.estimate_forks_usd(n, 4)), action=action,
+            )
+            self.case.set_phase("awaiting_approval")
+            return
+        if action["name"] == "propose_lesson":
+            lid = self.case.add_lesson(str(args.get("name") or "")[:60], str(args.get("rule") or "")[:1000],
+                                       args.get("suspect_id"))
+            self.case.update_fork("pending", status="awaiting_approval", kind="lesson", lesson_id=lid,
+                                  name=args.get("name"), rule=args.get("rule"), n_per_arm=0, pairs=0, vm_count=0,
+                                  estimate_usd=0.0, action=action)
+            self.case.set_phase("awaiting_approval")
+            return
+        try:
+            n = max(1, min(int(args.get("pairs", 3)), xp.MAX_PAIRS_PER_CALL))
+        except (TypeError, ValueError):
+            n = 3
+        sid = args.get("suspect_id")
+        per_pair = self.estimate_forks_usd(1, 2)
+        self.case.update_fork(
+            "pending", status="awaiting_approval", kind="experiment", suspect_id=sid,
+            suspect=self.case.suspect(sid) if sid else None, change=args.get("change"),
+            anchor=args.get("anchor") or "before_split", source_run=args.get("source_run"),
+            prediction=args.get("prediction"), reason=args.get("reason") or "", pairs=n, n_per_arm=n,
+            vm_count=2 * n + 1, estimate_usd=usd_up(self.estimate_forks_usd(n, 2)),
+            cost_per_pair_usd=None if per_pair is None else round(per_pair, 4), action=action,
         )
         self.case.set_phase("awaiting_approval")
 
     async def close(self) -> None:
         """Delete every VM this batch still has: runs, fork bases and fork children. Safe to call again."""
+        await self._close_checkpointer()
         left, self.vms = self.vms, {}
         if left:
             await asyncio.gather(*(asyncio.to_thread(vms.delete_vm, sb) for sb in left.values()))
@@ -1670,7 +2345,7 @@ def _findings_lines(record: dict, found: dict) -> list[str]:
     return lines
 
 
-def _arm_lines(plan: dict[str, dict | None], arms: dict[str, dict], kind: str) -> list[str]:
+def _arm_lines(plan: dict[str, dict | None], arms: dict[str, dict], kind: str, ev: dict | None = None) -> list[str]:
     """An experiment's result per arm in words, then, for a method experiment, how strong its evidence is."""
     lines = []
     for arm, step in plan.items():
@@ -1684,12 +2359,12 @@ def _arm_lines(plan: dict[str, dict | None], arms: dict[str, dict], kind: str) -
             lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
     if kind != "fix" and "control" in arms and "forced" in arms:
         # How strong this is, so the verdict's words can follow it (evidence.py).
-        lines.append(describe_evidence(verdict_evidence(
+        lines.append(describe_evidence(ev or verdict_evidence(
             {a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]} for a in ("control", "forced")})))
     return lines
 
 
-@dataclass(frozen=True)
+@dataclass
 class _ForkPoint:
     """Where the copies of a fork start (`Batch._fork_point`)."""
 
@@ -1697,6 +2372,33 @@ class _ForkPoint:
     n_prefix: int
     actions: list
     log: str
+    # How the copies get the source run's agent state (BatchConfig.fork_mode): "messages" (the cut history above) or
+    # "checkpoint" (the LangGraph snapshot below, looked up once by the first copy, `Batch._checkpoint_seed`).
+    fork_mode: str = "messages"
+    source_run: str = ""
+    # Checkpoint mode, once looked up: the snapshot's values, its checkpoint id and the source run's thread. `fallback`
+    # says why the copies use messages mode instead (no checkpoints, no snapshot at the cut).
+    seed: dict | None = None
+    checkpoint_id: str | None = None
+    source_thread: str | None = None
+    fallback: str | None = None
+    looked_up: bool = False
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+def _msg_key(m) -> tuple:
+    """One message as a checkpoint snapshot is matched against the cut history: its id when it has one (the ids
+    survive messages.json), else its type and content."""
+    return (getattr(m, "type", None), m.id) if getattr(m, "id", None) else (getattr(m, "type", None), str(m.content))
+
+
+def _step_description(step: dict | list | None) -> str | None:
+    """An arm's step in words for `arm_steps`: None for no step, the steps joined for a two-factor cell."""
+    if step is None:
+        return None
+    if isinstance(step, list):
+        return "; then ".join(s.get("description") or "" for s in step) or None
+    return step.get("description")
 
 
 def _put(q: asyncio.Queue, msg: dict) -> None:

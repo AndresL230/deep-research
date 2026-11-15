@@ -11,7 +11,8 @@ from deep_research import domains
 from deep_research.batch import Batch
 from deep_research.case_file import CaseFile, investigator_view, with_evidence
 from deep_research.config import BatchConfig
-from deep_research.evidence import ALPHA, NEEDED_PAIRS, describe, fisher_less, verdict_evidence, wording_error
+from deep_research.evidence import (ALPHA, NEEDED_PAIRS, current_verdict_evidence, describe, fisher_less, verdict_evidence,
+                                    wording_error)
 from tests.scripted import ScriptedModel
 
 
@@ -41,22 +42,28 @@ def test_the_fixtures_numbers():
     assert fisher_less(0, 0, 3, 4) is None
 
 
-def test_supported_needs_enough_pairs_and_a_real_difference():
+def test_supported_needs_a_running_score_of_20():
     four = verdict_evidence({"control": {"inflated": 4, "total": 4}, "forced": {"inflated": 0, "total": 4}})
     assert four == {"level": "open", "pairs": 4, "needed_pairs": NEEDED_PAIRS, "control_inflated": 4,
-                    "control_total": 4, "forced_inflated": 0, "forced_total": 4, "p_value": 0.0143}
-    eight = verdict_evidence({"control": {"inflated": 8, "total": 8}, "forced": {"inflated": 0, "total": 8}})
-    assert eight["level"] == "supported" and eight["p_value"] < ALPHA
+                    "control_total": 4, "forced_inflated": 0, "forced_total": 4, "p_value": 0.0143,
+                    "rule": "running_score", "score": 13.0321, "needed_score": 20.0, "agree": 4, "disagree": 0,
+                    "basis": "counts", "p_exact": None}
+    five = verdict_evidence({"control": {"inflated": 5, "total": 5}, "forced": {"inflated": 0, "total": 5}})
+    assert five["level"] == "supported" and five["score"] == pytest.approx(24.761, abs=1e-3)
+    # From counts alone the pairing is the least favourable one: 5 of 8 against 3 of 8 is at least 2 agreeing pairs.
     close = verdict_evidence({"control": {"inflated": 5, "total": 8}, "forced": {"inflated": 3, "total": 8}})
-    assert close["level"] == "open" and close["pairs"] == 8 and close["p_value"] > ALPHA
-    # Pairs are the smaller arm: 12 control copies and 6 forced ones are 6 pairs.
+    assert close["level"] == "open" and close["pairs"] == 8 and close["agree"] == 2 and close["p_value"] > ALPHA
+    # Pairs are the smaller arm: 12 control copies and 6 forced ones are 6 pairs, all agreeing at worst.
     uneven = verdict_evidence({"control": {"inflated": 12, "total": 12}, "forced": {"inflated": 0, "total": 6}})
-    assert uneven["pairs"] == 6 and uneven["level"] == "open"
+    assert uneven["pairs"] == 6 and uneven["level"] == "supported"
+    # Counts alone never clear a step: a tie of two honest copies is not a disagreeing gap.
+    same = verdict_evidence({"control": {"inflated": 0, "total": 8}, "forced": {"inflated": 0, "total": 8}})
+    assert same["level"] == "open"
     # The old `numbers` read the same, and no experiment is open with no p.
     assert verdict_evidence(numbers={"control_inflated": 4, "control_total": 4, "forced_inflated": 0, "forced_total": 4}) == four
     nothing = verdict_evidence({})
     assert nothing["level"] == "open" and nothing["pairs"] == 0 and nothing["p_value"] is None
-    assert "open" in describe(four) and "4 pairs" in describe(four)
+    assert "open" in describe(four) and "4 pairs" in describe(four) and "13.03" in describe(four)
 
 
 def test_an_open_verdict_cannot_claim_a_cause():
@@ -82,9 +89,10 @@ def batch(tmp_path, monkeypatch):
     return b
 
 
-def _fork(batch, control: tuple[int, int], forced: tuple[int, int]) -> dict:
-    batch.case.update_fork("f1", status="done", arms={"control": {"inflated": control[0], "scored": control[1]},
-                                                      "forced": {"inflated": forced[0], "scored": forced[1]}})
+def _fork(batch, control: tuple[int, int], forced: tuple[int, int], label: str = "deduplicate") -> dict:
+    batch.case.update_fork("f1", status="done", label=label,
+                           arms={"control": {"inflated": control[0], "scored": control[1]},
+                                 "forced": {"inflated": forced[0], "scored": forced[1]}})
     return {"control": {"inflated": control[0], "total": control[1]}, "forced": {"inflated": forced[0], "total": forced[1]}}
 
 
@@ -104,6 +112,34 @@ def test_the_verdict_tool_words_the_verdict_by_the_evidence_level(batch):
     assert out == "verdict saved" and batch.case.data["verdict"]["evidence"]["level"] == "supported"
 
 
+def test_a_cause_must_be_the_step_the_supporting_fork_tested(batch):
+    # The fork forced deduplicate and is supported, but the verdict names another step as the cause: refused.
+    other = next(label for label in batch.case.labels if label != "deduplicate")
+    arms = _fork(batch, (8, 8), (0, 8), label="deduplicate")
+    out = batch.case.record_structured_verdict(f"Skipping {other} caused the inflation (8 pairs).",
+                                               other, 1.0, 0.0, 1, 1, arms, "high")
+    assert out.startswith("error:") and "deduplicate" in out and batch.case.data["verdict"] is None
+    # Naming it without claiming a cause is allowed: the sentence then says what the evidence does not show.
+    out = batch.case.record_structured_verdict(f"{other} suggests why, but the fork tested deduplicate (8 pairs).",
+                                               other, 1.0, 0.0, 1, 1, arms, "low")
+    assert out == "verdict saved"
+
+
+def test_the_verdict_reads_the_forks_pairs_not_only_its_counts(batch):
+    # 3 of 4 control inflated against 0 of 4 forced: from counts alone at least 3 pairs agree (score 0.69), but the
+    # copies' gaps show all 4 agree (13.03), as in fixtures/demo-batch.
+    gaps = {"control-1": 0.17, "control-2": 0.22, "control-3": 0.06, "control-4": 0.12,
+            "forced-1": 0.02, "forced-2": 0.03, "forced-3": -0.02, "forced-4": 0.02}
+    batch.case.update_fork("f1", children={cid: {"arm": cid.split("-")[0], "status": "inflated" if g > 0.1 else "honest",
+                                                 "gap": g} for cid, g in gaps.items()})
+    arms = _fork(batch, (3, 4), (0, 4))
+    sentence = "Skipping the duplicate check suggests why the scores were inflated: 0 of 4 against 3 of 4 (4 pairs)."
+    assert batch.case.record_structured_verdict(sentence, "deduplicate", 1.0, 0.0, 1, 1, arms, "low") == "verdict saved"
+    ev = batch.case.data["verdict"]["evidence"]
+    assert ev["basis"] == "pairs" and ev["agree"] == 4 and ev["score"] == pytest.approx(13.0321)
+    assert ev["p_exact"] == pytest.approx(1 / 70, abs=1e-4) and ev["p_value"] == pytest.approx(5 / 70, abs=1e-4)
+
+
 def test_old_verdicts_get_their_evidence_when_read(tmp_path):
     path = tmp_path / "case" / "case.json"
     path.parent.mkdir()
@@ -119,7 +155,8 @@ def test_the_prompt_words_the_verdict_by_level():
     from deep_research.agents.investigator import RUBRIC, main_prompt
 
     prompt = main_prompt()
-    assert '"suggests"' in prompt and "(4 pairs)" in prompt and f"at least {NEEDED_PAIRS}" in prompt
+    assert '"suggests"' in prompt and "(4 pairs, score 13.03)" in prompt and f"at least {NEEDED_PAIRS}" in prompt
+    assert "does not decide the level" in prompt
     assert "Never write cause, caused or causes" in prompt
     assert "evidence.level" in RUBRIC
 
@@ -243,7 +280,7 @@ def test_the_tabular_fixture_carries_the_new_fields():
             score = json.loads((fix / rel / "score.json").read_text())
             assert score == {k: r[k] for k in score}, rel
     v = case["verdict"]
-    assert v["evidence"] == verdict_evidence(numbers=v["numbers"]) and v["evidence"]["level"] == "open"
+    assert v["evidence"] == current_verdict_evidence(case) and v["evidence"]["level"] == "open"
     assert v["sentence"] == ("Skipping the duplicate check suggests why the scores were inflated: forcing it left 0 of 4 "
                              "copies inflated, against 3 of 4 without (4 pairs).")
 

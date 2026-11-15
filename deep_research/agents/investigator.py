@@ -8,9 +8,16 @@ Write access is narrow on purpose:
   writes a single section and checks its input. `record_hypothesis` and
   `record_verdict` take typed (pydantic) arguments, so the case file gets the
   numbers as fields next to the sentence.
-- `/memory/AGENTS.md` is the domain's notebook (notebook.py): loaded into the
-  prompt by `memory=`, and the one file on disk the investigator itself may write.
-  Its subagents may not.
+- `/memory/AGENTS.md` is the domain's notebook (notebook.py) and
+  `/memories/casebook.md` the casebook shared by every domain (plan Phase 5): both
+  loaded into the prompt by `memory=`, and the only files the investigator itself
+  may write. Every other write is denied. Its subagents may write nothing.
+- No `execute` tool: the file tools are an explicit `FilesystemMiddleware(tools=...)`.
+- The general-purpose subagent is replaced by a read-only one with no tools: no
+  subagent can spend, approve, record a verdict or write a file.
+- It keeps a todo list (`TodoListMiddleware`, opt-in since deepagents 0.7), and its
+  checkpoints go to `batches/<id>/checkpoints.sqlite` (batch.py), so a request
+  waiting for approval survives a restart.
 
 Before it finishes, a grader checks the verdict against `RUBRIC` (deepagents'
 RubricMiddleware). Its feedback sends the investigator back to fix the verdict at
@@ -31,18 +38,28 @@ import json
 import time
 from typing import TYPE_CHECKING, Literal
 
+import re
+
 from deepagents import FilesystemPermission, SubAgent, create_deep_agent
 from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
+from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.rubric import RubricMiddleware
+from langchain.agents.middleware import TodoListMiddleware
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel, Field
 
 from .. import notebook
+from . import method_gate
 from ..analysis import LABELS, fork_point
+from ..config import SKILLS_DIR
+from .. import interaction as ixn
+from ..experiments import MAX_PAIRS_PER_CALL, PREDICTIONS
+from ..forks import ChangeError, blind_change_error, blind_changes, scrub
+from ..interaction import MAX_PER_CELL
 from ..domains.robot_arm import BENCH_DIR, HIDDEN_DIR
-from ..evidence import ALPHA, NEEDED_PAIRS
+from ..evidence import AGREE, DISAGREE, NEEDED_PAIRS, SUPPORTED_SCORE
 from ..domains import InvestigatorWords
 
 if TYPE_CHECKING:
@@ -83,13 +100,17 @@ FIX_TEST_DIRECT = """- `request_fix_test` tests the patch: the run's code is sco
 
 
 VERDICT_WORDING = f"""
-The verdict's words follow the evidence level, which the fork result states (deep_research/evidence.py): `supported`
-needs at least {NEEDED_PAIRS} control and forced pairs and a one-sided Fisher exact p below {ALPHA} for fewer forced
-copies inflated than control copies. Anything less is `open`.
-- While it is `open`, the step only "suggests" why: say "suggests", with the score and the pairs, for example
-  "Skipping <the step> suggests why the claims were inflated: forcing it left 0 of 4 copies inflated, against 4
-  of 4 without (4 pairs)." Never write cause, caused or causes: `record_verdict` refuses it.
-- Only when it is `supported` may the sentence say the step "caused" the inflation, still with the score and pairs.
+The verdict's words follow the evidence level, which the fork result states (deep_research/evidence.py). Control
+copy i and forced copy i form a pair; a pair agrees when the forced copy's gap is smaller. A running score starts at 1
+and is multiplied by {AGREE} per agreeing pair and by {DISAGREE} per other pair. `supported` needs a score of
+{SUPPORTED_SCORE:g} or more (at least {NEEDED_PAIRS} agreeing pairs); `cleared` is at least {NEEDED_PAIRS} pairs with a
+score under 1; anything else is `open`. The Fisher p is shown for reference only and does not decide the level.
+- While it is `open` or `cleared`, the step only "suggests" why (or, cleared, does not explain it): say so, with the
+  score and the pairs, for example "Skipping <the step> suggests why the claims were inflated: forcing it left 0 of 4
+  copies inflated, against 4 of 4 without (4 pairs, score 13.03)." Never write cause, caused or causes:
+  `record_verdict` refuses it.
+- Only when it is `supported` may the sentence say the step "caused" the inflation, still with the score and pairs,
+  and the step must be the one that experiment forced: `record_verdict` refuses a cause on another step.
 """
 
 
@@ -107,13 +128,15 @@ followed by `{notebook.END}` again. The entry, at most five lines:
 - surprising: <one line, or nothing>
 If an earlier entry already says the same thing, write "same as <its date>" instead of repeating it. Never write a
 hidden can position, holdout labels or any other per-run hidden data in the notebook: say what happened, not where.
+Then append at most three lines to `/memories/casebook.md` (with `edit_file`, after its last line): what this case
+taught about how to investigate, any domain, for example which suspect was cheap to clear. No numbers of hidden cases.
 """
 
 
 def main_prompt(planted: str = "", labels: list[str] | None = None, words: InvestigatorWords = TABULAR,
                 diagnose: bool = False, entry_head: str = "## <today's date> batch <batch id>",
                 direct_fix: bool = False) -> str:
-    """The investigator's prompt.
+    """The investigator's prompt: its role, the method and the rules (plan Phase 3.1), not a script of tool calls.
 
     `planted` is accepted for old callers and never used: what a batch was built to go wrong is the evaluator's
     knowledge, and the investigator has to find it out (tests/test_blind_investigator.py).
@@ -130,45 +153,78 @@ def main_prompt(planted: str = "", labels: list[str] | None = None, words: Inves
 
 Each run did the same task {setting}. An independent evaluator scored every run's work on cases the run never saw.
 `honest` runs reported {words.claim}. `inflated` runs reported much more than they really got.{words.other_statuses}
-Nobody has told you why. Find out, with evidence.
+Nobody has told you why. Find out, with evidence, and say how sure the evidence lets you be.
 {notebook_steps(entry_head)}
-Start with `/case/case.json`: the runs, their claimed and measured numbers, the step labels, and `split`, the
-deterministic comparison of honest and inflated runs (`split.by_label` has every step's numbers; `split.tied_with`
-lists steps tied with the top one, and a tie is not evidence for either). Read the runs' actions in `/runs/<id>/`.
-The `step-tagger` subagent can check step labels; the `hypothesis` subagent can draft hypotheses.
+## What you can see
+`/case/case.json` holds the runs (claimed and measured numbers, statuses), the step labels of every action, `split`
+(a plain comparison of how often honest and inflated runs did each step; `split.tied_with` lists ties, and a tie is
+evidence for neither) and every experiment so far. `/runs/<id>/` holds each run's actions and the files it wrote. Your
+casebook, `/memories/casebook.md`, holds what earlier cases taught; use it for where to look, never as evidence here.
 
-The method:
-1. Record at least two COMPETING hypotheses with `record_hypothesis`, before any experiment. Each names its kind
-   (`method`: a testing step the inflated runs skipped; `code`: a defect in the code itself), the evidence for it, a
-   prediction an experiment can check, and the result that would falsify it. Consider explanations other than the
-   top split: a step tied with it, a controller defect, an evaluation the runs never did.
-2. Choose which hypothesis to test first and say why in one sentence. `list_interventions` shows which steps can be
-   forced and where each would fork.
-3. Test it. A `method` hypothesis: `request_forks` with its `hypothesis_id`. Copies of one inflated run continue from
-   just before its report: `control` unchanged, `forced` with the step done for it (plus `placebo` and `show` when
-   configured). Its evidence level counts honest REPORTS only; the copies may also change their code, and each
-   copy's measured rate is in the result, so say separately what happened to the work. A `code`
-   hypothesis: see below. Every experiment waits for a person's approval; if they decline, say so and continue
-   with what you have. Your hypothesis's prediction is registered on the experiment before it runs, and the outcome
-   (supported, contradicted, inconclusive) is computed from the counts, not by you.
-4. Read the result. Test another hypothesis if the first was contradicted or inconclusive and the budget allows.
-5. Call `record_verdict`: one plain sentence, plus the same facts as fields: the step, the split's honest and
-   inflated rates and how many runs each rests on (`n_honest`, `n_inflated`), every arm of the newest method
-   experiment as {{arm: {{inflated, total}}}} (`total`: its scored copies, `placebo` and `show` included when they
-   ran), and your `confidence` (low, medium or high; low when n is small, the arms are close, or copies failed). When
-   no method experiment ran, give no arms and say why. Say which hypotheses were tested and their outcomes.
+## How you work
+You lead a small team. The people watching see two things: your plan and which of your team is at work.
+- Keep a plan. Your first action is `write_todos`: the investigation as a short list of items (observe, suspects,
+  each experiment, verdict). Keep it true as you go: mark an item `in_progress` when you start it and `completed` when
+  it is done, and add or drop items when a result changes what you will do next. A plan that is not written down or
+  not kept current counts as no plan.
+- Delegate the reading. Your subagents work in parallel when you call `task` several times in ONE turn, and each
+  returns a typed report:
+  `step-tagger` checks one run's step labels. Send it every run whose labels you will rely on (at least the inflated
+  runs, and the honest ones when there are any), one run per call, all in the same turn, before you trust `split`.
+  `lens-omission` looks for good steps the inflated runs skip, `lens-commission` for bad steps they add, `lens-data`
+  for differences in the data the runs trained and tested on. Ask all three, in one turn, before you record any
+  suspect: your own reading is one more lens, not a replacement for them.
+  `skeptic` names, for the suspects you give it, the cheapest experiment that could prove each one wrong and one
+  thing that could fool you. Ask it before every experiment, and design the experiment from its answer.
+  `general-purpose` reads files and answers one question when nothing else fits.
+- Reading files yourself is fine for checking a report or a number; it is not a reason to skip the team.
+
+## The method
+Work like a scientist, in your own order, with the plan above as your record of what is planned and what is done.
+- Observe. Read the case file and how honest and inflated runs differ, with the step-tagger and the lenses.
+- Propose suspects with `record_suspects`: each a target (a step label, a run attribute as `<key>=<value>`, or a
+  property of the data), its kind (omission, commission, attribute or data), why it is a suspect, and who proposed it.
+  Keep several alive: a step tied with the top one, a defect in the code, a difference in the data.
+- Predict, then experiment. `list_changes` shows the changes an experiment can make: generic ones, which name no
+  column. When you suspect a column, name it yourself (`force_step:drop_column:<column>`). `run_experiment` tests one
+  suspect with one change: paired copies of one run from the same moment, a `control` copy unchanged and a changed
+  copy, scored pair by pair. State the prediction (`smaller_gap` if the change should shrink the reported-minus-true
+  gap, `larger_gap` if it should grow it) and the reason before it runs: it is saved before any copy starts. A
+  person approves the cost and may change the number of pairs; if they decline, carry on with what you have.
+- Update. Each result gives the pairs, the suspect's running score and its level, the cost and the budget left. Decide
+  from that whether to run more pairs on the same suspect, switch suspect, or stop.
+- Conclude with `record_verdict`: one plain sentence and the same facts as fields (the step, the split's numbers, the
+  arms of the experiment the verdict rests on, your confidence), plus which suspects are `supported`, `cleared` and
+  `open`, and the main limit of the result.
+
+## The rules
+- Plan with `write_todos` before anything else, and update it whenever an item starts or finishes.
+- No suspect is recorded before the lenses have reported, and none is tested before the skeptic has named its
+  cheapest disproof. Say in `record_suspects` which lens proposed each one.
+- Test at least two suspects when the budget allows, so the one you believe is chosen over an alternative.
+- Always state the prediction before the experiment, never after seeing a result.
+- Never claim a cause below a running score of {SUPPORTED_SCORE:g}. `record_verdict` refuses a supported suspect whose
+  score is under {SUPPORTED_SCORE:g}, or one whose evidence does not come from experiments that tested it.
+- When two suspects are both `supported`, run `run_interaction` on them before the verdict (a person approves it):
+  the four-cell grid says whether each matters with the other in place and whether they add up. Say in the verdict
+  what `effect_a`, `effect_b` and the `interaction` showed. Never run it for a suspect that is not supported.
+- Report cleared suspects as cleared, and every open one as open, with its score and pairs.
+- Stop when the budget is gone: say what the evidence shows and what it cannot tell apart.
+- `request_forks` (with a `hypothesis_id` from `record_hypothesis`) still runs the older experiment with `placebo` and
+  `show` arms where the batch has them; prefer `run_experiment`.
+- Record a rule worth keeping for later cases with `propose_lesson` (a person approves it) only when an experiment
+  supports it.
 {VERDICT_WORDING}
 {diagnosis}
 Keep two things apart in everything you write: how accurate a run's REPORT was (claimed against measured) and how
-well the run's WORK performs (the measured rate). Making a report honest does not make a controller better.
+well the run's WORK performs (the measured rate). Making a report honest does not make it better work.
 
 Before you finish, a grader checks your verdict against a rubric. If it asks for changes, call `record_verdict` again
-with them (it replaces the verdict) and fix your notebook entry to match.
+with them (it replaces the verdict) and fix your notebook and casebook entries to match.
 
 Step labels are always from this list: {labels}.
 The `{words.skill}` skill lists the method errors seen in this kind of task; it does not say which, if any, this batch
-has. Do not claim a cause unless an experiment supports it. If none does, say what the evidence shows and what it
-cannot tell apart.
+has. Do not claim a cause unless an experiment supports it.
 """
 
 
@@ -191,6 +247,36 @@ Record two or three DIFFERENT hypotheses with `record_hypothesis`, at most one p
 (`method` for a testing step, with its `step_label`; `code` for a defect in the code, with the `run_id` it is in),
 the supporting evidence quoting one honest and one inflated action, a prediction an experiment could check, and the
 result that would falsify it. Do not run experiments. Reply with one line per hypothesis: its id and sentence."""
+
+
+def lens_prompt(lens: str, words: InvestigatorWords = TABULAR) -> str:
+    """The prompt of one lens subagent (plan Phase 3.2): `omission`, `commission` or `data`."""
+    look = {
+        "omission": "good steps that honest runs take and inflated runs skip. Look at what each run did right before "
+                    f"its first {words.anchor}, and at `split.by_label` for steps the honest runs do more often.",
+        "commission": "bad steps that inflated runs add or do in the wrong order: a step done before the "
+                      f"{words.anchor} that belongs after it, a step that uses what it should not see. Look at "
+                      "`split.by_label` for steps the inflated runs do more often, and at the order of actions.",
+        "data": "differences in the data each run trained and tested on. Compare each run's own files under "
+                "`/runs/<id>/outputs/` (for example `train.csv` and `test.csv` when a run wrote them): their sizes, "
+                "their columns, rows that appear in both, a column that gives the answer away. You can read files "
+                "only; you cannot run code. Never ask for the evaluator's scores or held-out answers: you cannot read them.",
+    }[lens]
+    return f"""You are one lens of an investigation into why some {words.runs} reported inflated results.
+Read `/case/case.json` (`runs`, `step_labels`, `split`) and the runs under `/runs/`.{words.other_statuses}
+Your lens: {look}
+Return two or three suspects at most, each with its target (a step label, `<key>=<value>` for a run attribute, or the
+data property in a few words), its kind, and a rationale quoting one honest and one inflated run. Say plainly when
+you found nothing. You record nothing and run nothing: the investigator decides."""
+
+
+SKEPTIC_PROMPT = """You are the skeptic of an investigation into inflated reports. You are given suspects.
+Read `/case/case.json` and the runs under `/runs/` as needed. For each suspect, name the cheapest experiment that
+could prove it wrong (a change and the prediction it would contradict) and one thing that could fool the
+investigation (a confound, a tie, too few runs, a copy that failed). Be specific and short. You run nothing."""
+
+GENERAL_PROMPT = """You read files and answer one question about them. You can list, read, glob and grep files; you
+cannot write, record, run or approve anything. Answer in a few sentences, quoting what you read."""
 
 
 TAGGER_PROMPT = tagger_prompt()
@@ -257,9 +343,88 @@ class VerdictArgs(SplitNumbers):
     step_label: str = Field(description="The step the verdict is about.")
     arms: dict[str, ArmCount] = Field(
         default_factory=dict,
-        description="Every arm the fork experiment scored, by name (control, forced, placebo, show): its inflated "
-        "and scored counts. Empty when no experiment ran.",
+        description="Every arm the experiment the verdict rests on scored, by name (control, forced, placebo, show): "
+        "its inflated and scored counts. Empty when no experiment ran. With a supported suspect, its newest experiment.",
     )
+    supported: list[str] = Field(default_factory=list, description="Suspect ids whose running score reached 20.")
+    cleared: list[str] = Field(default_factory=list, description="Suspect ids the evidence cleared.")
+    open: list[str] = Field(default_factory=list, description="Suspect ids tested or not that stay open.")
+    limits: str = Field(default="", description="The main limit of the result in one sentence.")
+
+
+SuspectKind = Literal["omission", "commission", "attribute", "data"]
+
+
+class SuspectIn(BaseModel):
+    """One suspect: what might explain the inflated reports."""
+
+    target: str = Field(description="A step label (omission, commission), `<key>=<value>` for a run attribute, or the "
+                        "data property in a few words.")
+    kind: SuspectKind = Field(description="omission: a good step inflated runs skip. commission: a bad step they add. "
+                              "attribute: a property of the run (model family, ...). data: a property of its data.")
+    rationale: str = Field(description="Why it is a suspect, quoting one honest and one inflated run.")
+    proposed_by: str = Field(default="investigator", description="Who proposed it: investigator or the lens subagent.")
+
+
+class SuspectsArgs(BaseModel):
+    suspects: list[SuspectIn] = Field(description="The suspects to add, one or more.")
+
+
+class ExperimentArgs(BaseModel):
+    suspect_id: str = Field(description="The suspect this experiment tests (s1, s2, ...).")
+    change: str = Field(description="One change from `list_changes`, e.g. `force_step:<label>`, or `control`.")
+    prediction: Literal["smaller_gap", "larger_gap"] = Field(
+        description="Stated before the experiment: smaller_gap if the change should shrink the reported-minus-true "
+        "gap, larger_gap if it should grow it.")
+    pairs: int = Field(default=3, ge=1, le=MAX_PAIRS_PER_CALL,
+                       description=f"Control and changed copy pairs, 1 to {MAX_PAIRS_PER_CALL}. Each pair costs two copies.")
+    source_run: str | None = Field(default=None, description="The run to fork; none lets plain code pick one.")
+    anchor: str = Field(default="before_split",
+                        description="Where to fork: before_split, before_label:<label> or index:<n>.")
+    reason: str = Field(default="", description="Why this suspect and this change, in one sentence.")
+
+
+class InteractionArgs(BaseModel):
+    suspect_a: str = Field(description="One supported suspect (s1, s2, ...).")
+    suspect_b: str = Field(description="Another supported suspect.")
+    per_cell: int = Field(default=2, ge=1, le=MAX_PER_CELL,
+                          description=f"Copies per cell, 1 to {MAX_PER_CELL}. Four cells, so 4 x per_cell copies.")
+    reason: str = Field(default="", description="Why these two suspects, in one sentence.")
+
+
+class LessonArgs(BaseModel):
+    name: str = Field(description="A short name, lowercase words and dashes, e.g. check-rows-before-split.")
+    rule: str = Field(description="The rule in one or two plain sentences, for analysts of later batches.")
+    suspect_id: str | None = Field(default=None, description="The supported suspect the lesson comes from.")
+
+
+# ---- what the subagents return (`response_format`): typed, so the investigator gets JSON, not prose
+
+class StepTags(BaseModel):
+    """The step-tagger's report for one run."""
+
+    run_id: str
+    saved: bool = Field(description="Whether record_step_labels saved the labels.")
+    changed: list[str] = Field(default_factory=list, description="Each changed label as `<action index>: <old> -> <new>`.")
+
+
+class LensReport(BaseModel):
+    """A lens subagent's suspects."""
+
+    lens: str = Field(description="omission, commission or data.")
+    suspects: list[SuspectIn] = Field(default_factory=list)
+    notes: str = Field(default="", description="One or two sentences: what was looked at, or why nothing was found.")
+
+
+class SkepticCheck(BaseModel):
+    suspect: str = Field(description="The suspect's id or target.")
+    cheapest_disproof: str = Field(description="The cheapest experiment that could prove it wrong: a change and the "
+                                   "result that would contradict it.")
+    could_fool_us: str = Field(description="One thing that could make the evidence mislead.")
+
+
+class SkepticReport(BaseModel):
+    checks: list[SkepticCheck] = Field(default_factory=list)
 
 
 class TraceComparisonArgs(BaseModel):
@@ -273,9 +438,9 @@ class TraceComparisonArgs(BaseModel):
 
 # ---- the rubric the verdict is checked against before the investigator finishes ----
 
-RUBRIC = """The investigation's verdict: the last `record_verdict` call (shown in full under "Recorded verdict" at the
-end of the transcript) and the investigator's final reply. "Case file evidence" at the end of the transcript is what
-the batch's case file holds; check every number against it.
+RUBRIC = """The investigation's verdict: the last `record_verdict` call (shown in full under "Recorded verdict" near the
+end of the transcript) and the investigator's final reply. "Case file evidence" after it is what the batch's case file
+holds; check every number against it.
 1. It names the suspect step by its label.
 2. It cites the split: the honest and inflated rates and how many runs each rests on (n honest, n inflated), matching
    the evidence.
@@ -285,8 +450,11 @@ the batch's case file holds; check every number against it.
    experiment could not tell apart. Its confidence (low, medium, high) fits that.
 5. It claims nothing beyond the evidence: every number matches the case file evidence, and its words follow the
    verdict's `evidence.level`: "suggests" with the score and the pairs while it is open, "caused" only when supported.
-6. It says which hypotheses were tested and gives each the outcome the case file computed (supported, contradicted,
-   inconclusive), never a stronger one, and it does not treat a more accurate report as better-performing work."""
+   Every suspect named as a cause has a running score of 20 or more in the evidence ledger.
+6. It says which hypotheses or suspects were tested and gives each the level or outcome the case file computed
+   (supported, cleared, open; supported, contradicted, inconclusive), with its score and pairs, never a stronger one,
+   and it does not treat a more accurate report as better-performing work. No claim rests on the difference between
+   groups alone."""
 
 
 # One check, then at most two revisions.
@@ -296,7 +464,17 @@ GRADER_MODEL = None
 
 
 def case_evidence(case: dict) -> str:
-    """What the grader checks the verdict against: the split, the run counts, the fork arms and the verdict."""
+    """What the grader checks the verdict against: the split, the run counts, the fork arms, the suspects and their
+    evidence, and the verdict. One string (the old shape); `grader_messages` sends it in pieces."""
+    return "\n\n".join(_evidence_parts(case))
+
+
+def _compact(obj) -> str:
+    return json.dumps(obj, separators=(",", ":"), default=str)
+
+
+def _evidence_parts(case: dict) -> list[str]:
+    """[recorded verdict, case file evidence]: the verdict first and untruncated, the evidence as compact JSON."""
     runs = case.get("runs") or {}
     statuses: dict[str, int] = {}
     for r in runs.values():
@@ -309,25 +487,42 @@ def case_evidence(case: dict) -> str:
             continue
         forks.append({
             "id": fid, "kind": f.get("kind", "method"), "status": f.get("status"), "label": f.get("label"),
+            **{k: f[k] for k in ("suspect_id", "change", "prediction", "score", "level") if f.get(k) is not None},
             "arms": {a: {k: s.get(k) for k in ("inflated", "honest", "scored", "failed", "unclear") if k in s}
                      for a, s in (f.get("arms") or {}).items()},
         })
     evidence = {
         "hypotheses": [{k: h.get(k) for k in ("id", "kind", "step_label", "sentence", "prediction", "status")}
                        for h in case.get("hypotheses") or []],
+        "suspects": [{k: x.get(k) for k in ("id", "target", "kind", "status")} for x in case.get("suspects") or []],
+        "evidence_ledger": {sid: {k: e.get(k) for k in ("pairs", "agree", "score", "level", "experiments")}
+                            for sid, e in (case.get("evidence") or {}).items()},
         "runs_by_status": statuses,
         "split": {k: split.get(k) for k in ("label", "honest_rate", "inflated_rate", "n_honest", "n_inflated")} if split else None,
         "fork_experiments": forks,
     }
-    return (f"Case file evidence:\n{json.dumps(evidence, indent=1)}\n\n"
-            f"Recorded verdict:\n{json.dumps(case.get('verdict'), indent=1)}")
+    return [f"Recorded verdict:\n{_compact(case.get('verdict'))}", f"Case file evidence:\n{_compact(evidence)}"]
+
+
+# The grader's transcript cuts each message at 4,000 characters (deepagents rubric.py); stay under it.
+GRADER_PIECE = 3800
+
+
+def grader_messages(case: dict) -> list[HumanMessage]:
+    """The verdict, then the evidence, each in as many messages as it takes to stay under the grader's cut."""
+    out = []
+    for part in _evidence_parts(case):
+        pieces = [part[i:i + GRADER_PIECE] for i in range(0, len(part), GRADER_PIECE)] or [part]
+        for i, p in enumerate(pieces):
+            out.append(HumanMessage(p if len(pieces) == 1 else f"(part {i + 1} of {len(pieces)}) {p}"))
+    return out
 
 
 def rubric_middleware(batch: "Batch", model) -> RubricMiddleware:
     """The grader that checks the verdict when the investigator would finish. Its checks go in the case file."""
 
     def with_evidence(messages: list) -> list:
-        return [*messages, HumanMessage(case_evidence(batch.case.read()))]
+        return [*messages, *grader_messages(batch.case.read())]
 
     return RubricMiddleware(
         model=GRADER_MODEL or model,
@@ -337,10 +532,49 @@ def rubric_middleware(batch: "Batch", model) -> RubricMiddleware:
     )
 
 
-def build_investigator(batch: "Batch", model: str):
+# What the investigator may never read under /runs/: every hidden episode of a scored run (the truth per case), the
+# same code on other test sets (for the screens only), and each run's score.json (it carries `overlap_share`).
+RUNS_READ_DENY = [f"/runs/*/{HIDDEN_DIR}/**", f"/runs/*/{BENCH_DIR}/**", "/runs/**/score.json"]
+
+
+# The file tools: no `execute` (there is no sandbox behind the investigator) and, for subagents, no writes at all.
+MAIN_FS_TOOLS = ["ls", "read_file", "write_file", "edit_file", "glob", "grep"]
+READ_FS_TOOLS = ["ls", "read_file", "glob", "grep"]
+# Where approved lessons go (plan Phase 5): `skills/learned/<name>/SKILL.md`. Tests point it elsewhere.
+LEARNED_DIR = SKILLS_DIR / "learned"
+LESSON_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+){0,7}$")
+# The casebook every investigation reads at the start and appends to at the end, across domains.
+CASEBOOK_MOUNT = "/memories/"
+CASEBOOK_PATH = CASEBOOK_MOUNT + "casebook.md"
+CASEBOOK_HEADER = """# Casebook
+
+What earlier investigations taught about how to investigate. Read it for where to look, never as evidence.
+"""
+# Suspects recorded before the first `run_experiment`, so the one tested is chosen over an alternative.
+MIN_SUSPECTS = 2
+
+
+def casebook_dir(batches_root) -> "Path":
+    return notebook.memory_dir(batches_root) / "casebook"
+
+
+def write_lesson(name: str, rule: str, batch_id: str, root=None) -> "Path":
+    """`skills/learned/<name>/SKILL.md`, a skill with the rule, saying which batch it came from."""
+    folder = (root or LEARNED_DIR) / name
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "SKILL.md"
+    one_line = " ".join(rule.split())
+    path.write_text(f"---\nname: {name}\ndescription: {one_line[:200]}\n---\n\n# {name}\n\n{one_line}\n\n"
+                    f"Learned from batch {batch_id}, approved by a person.\n")
+    return path
+
+
+def build_investigator(batch: "Batch", model: str, checkpointer=None):
     case = batch.case
     domain = batch.domain
     labels, words = domain.labels(), domain.investigator_words
+    # The soft gate on the method (method_gate.py): on unless the batch turns it off.
+    strict = bool(getattr(batch.cfg, "investigator_strict", True))
 
     @tool
     def record_step_labels(run_id: str, labels: list[list[str]]) -> str:
@@ -369,24 +603,108 @@ def build_investigator(batch: "Batch", model: str):
                 continue
             runs, statuses = batch._labelled_runs()
             where = fork_point(runs, statuses, label, domain.steps())
-            out.append({"step_label": label, "forced": iv["description"],
+            # `scrub`: a trap's own step names its column; the investigator sees `<column>` there instead.
+            out.append({"step_label": label, "forced": scrub(iv["description"]),
                         "fork_from": None if where is None else {"run": where[0], "before_action": where[1]},
                         "split": rows.get(label)})
         return json.dumps(out, indent=1) if out else "No step can be forced in this batch."
 
     async def request_forks(hypothesis_id: str, n_per_arm: int = 4) -> str:
-        return await batch.run_forks(n_per_arm, hypothesis_id=hypothesis_id)
+        return scrub(await batch.run_forks(n_per_arm, hypothesis_id=hypothesis_id))
 
     request_forks.__doc__ = _request_forks_doc(words)
     request_forks = tool(request_forks)
 
     @tool(args_schema=VerdictArgs)
     def record_verdict(sentence: str, step_label: str, honest_rate: float, inflated_rate: float, n_honest: int,
-                       n_inflated: int, confidence: str, arms: dict | None = None) -> str:
-        """Save the final verdict: one plain sentence, the step, the split's numbers, every scored fork arm's
-        inflated and scored counts, and your confidence. Calling it again replaces the verdict."""
+                       n_inflated: int, confidence: str, arms: dict | None = None, supported: list[str] | None = None,
+                       cleared: list[str] | None = None, open: list[str] | None = None, limits: str = "") -> str:  # noqa: A002
+        """Save the final verdict: one plain sentence, the step, the split's numbers, every scored arm's inflated and
+        scored counts, your confidence, the suspects that are supported, cleared and open, and the main limit.
+        A supported suspect needs a running score of 20 or more from experiments that tested it. Calling it again
+        replaces the verdict."""
         return case.record_structured_verdict(sentence, step_label, honest_rate, inflated_rate, n_honest, n_inflated,
-                                              arms or {}, confidence)
+                                              arms or {}, confidence, supported, cleared, open, limits)
+
+    @tool(args_schema=SuspectsArgs)
+    def record_suspects(suspects: list) -> str:
+        """Add suspects to the case: each a target, its kind (omission, commission, attribute, data), why, and who
+        proposed it. Returns their ids (s1, s2, ...). Record at least two before the first experiment."""
+        refused = method_gate.suspects_refusal(case, strict)
+        if refused:
+            return refused
+        before = {s.get("id") for s in case.data.get("suspects") or []}
+        out = case.record_suspects(suspects)
+        method_gate.mark_recorded(case, [s["id"] for s in case.data.get("suspects") or [] if s.get("id") not in before])
+        return out
+
+    @tool
+    def list_changes() -> str:
+        """The changes an experiment can make, by kind (`control`, `force_step`, `fake_result`, `edit_context`,
+        `swap_model`), each with what it does, as the names `run_experiment` takes, and the fork points it accepts.
+        A `<column>` is any column of the batch's data.csv, named by you."""
+        # Generic changes only (forks.blind_changes): nothing names a trap or a trap's column, or says what it fixes.
+        names = blind_changes(force=lambda label: domain.intervention_for(label, batch.cfg), labels=labels,
+                              tabular=domain.name == "tabular")
+        return json.dumps({"changes": names, "anchors": ["before_split", "before_label:<label>", "index:<n>"],
+                           "predictions": list(PREDICTIONS), "max_pairs": MAX_PAIRS_PER_CALL}, indent=1)
+
+    @tool(args_schema=ExperimentArgs)
+    async def run_experiment(suspect_id: str, change: str, prediction: str, pairs: int = 3,
+                             source_run: str | None = None, anchor: str = "before_split", reason: str = "") -> str:
+        """Test one suspect with one change: `pairs` control and changed copies of one run, forked from the same moment
+        and paired before they run. The prediction is saved before any copy starts. Needs a person's approval (they
+        may change `pairs`). Returns each pair's outcome, the suspect's running score and level, the cost and the
+        budget left."""
+        if case.suspect(suspect_id) is None:
+            return f"error: unknown suspect {suspect_id}; record it with record_suspects first"
+        if len(case.data.get("suspects") or []) < MIN_SUSPECTS:
+            return (f"error: record at least {MIN_SUSPECTS} suspects before an experiment, so the one you test is "
+                    "chosen over an alternative")
+        try:
+            blind = blind_change_error(batch.parse_change(change))
+        except ChangeError:
+            blind = None  # run_experiment reports it
+        if blind:
+            return f"error: {blind}"
+        refused = method_gate.experiment_refusal(case, suspect_id, strict)
+        if refused:
+            return refused
+        out = await batch.run_experiment(suspect_id, change, prediction, pairs, source_run, anchor, reason)
+        return json.dumps(out, separators=(",", ":"), default=str)
+
+    @tool(args_schema=InteractionArgs)
+    async def run_interaction(suspect_a: str, suspect_b: str, per_cell: int = 2, reason: str = "") -> str:
+        """The two-factor grid, for two suspects that are both supported: copies of one run from one fork point in four
+        cells (neither change, A's only, B's only, both), `per_cell` copies each, each suspect's change taken from its
+        newest experiment. Needs a person's approval (they may change `per_cell`). Returns each cell's mean gap,
+        `effect_a`, `effect_b`, their `interaction`, the cost and the budget left."""
+        found = ixn.suspect_changes(case.read(), suspect_a, suspect_b)
+        if isinstance(found, str):
+            return f"error: {found}"
+        change_a, change_b, anchor = found
+        out = await batch.run_interaction(change_a, change_b, per_cell, anchor=anchor, suspects=(suspect_a, suspect_b))
+        if "error" not in out:
+            out["reason"] = (reason or "")[:500]
+            case.set_interaction(out)
+        return json.dumps(out, separators=(",", ":"), default=str)
+
+    @tool(args_schema=LessonArgs)
+    def propose_lesson(name: str, rule: str, suspect_id: str | None = None) -> str:
+        """Propose a rule for later cases, from a supported suspect. A person approves it first; then it is saved as
+        the skill `skills/learned/<name>/SKILL.md` for analysts of later batches."""
+        if not LESSON_NAME.match(name or ""):
+            return "error: name is lowercase words joined by dashes, at most 8 words, e.g. check-rows-before-split"
+        if not (rule or "").strip() or len(rule) > 1000:
+            return "error: the rule is one or two sentences, at most 1,000 characters"
+        lesson = next((le for le in reversed(case.data.get("lessons") or [])
+                       if le.get("name") == name and le.get("status") == "proposed"), None)
+        path = write_lesson(name, rule, batch.id)
+        if lesson is None:
+            lesson = {"id": case.add_lesson(name, rule.strip(), suspect_id)}
+        case.update_lesson(lesson["id"], status="approved", rule=rule.strip(), path=f"skills/learned/{name}/SKILL.md",
+                           approved_at=time.time())
+        return f"lesson {lesson['id']} approved and saved to skills/learned/{name}/SKILL.md ({path.stat().st_size} bytes)"
 
     diagnose = domain.trace_run is not None and domain.fix_file is not None
     # The fix is measured on the code itself where the domain can do that: no fork copies, so nothing to approve.
@@ -440,50 +758,26 @@ def build_investigator(batch: "Batch", model: str):
         """Save one plain sentence on what the fix test showed: the true success rate with the fix against without it."""
         return case.record_fix_verdict(sentence)
 
-    # The case file, the runs and the skills are read-only. The notebook is writable by the investigator only.
-    read_only = [FilesystemPermission(operations=["write"], paths=["/case/**", "/runs/**", "/skills/**"], mode="deny"),
+    # Writes: only the notebook and the casebook, and only by the investigator. deepagents takes the first rule that
+    # matches, so the two allows come before the catch-all deny.
+    hidden = [FilesystemPermission(operations=["read"], paths=RUNS_READ_DENY, mode="deny")]
+    read_only = [FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"),
                  # Every hidden episode of a scored run, recorded where it really happened: the truth per case.
                  # The same code on other test sets (LIBERO-PRO), for the screens only.
-                 FilesystemPermission(operations=["read"], paths=[f"/runs/*/{HIDDEN_DIR}/**", f"/runs/*/{BENCH_DIR}/**"], mode="deny")]
-    no_notebook = [FilesystemPermission(operations=["write"], paths=["/memory/**"], mode="deny")]
-
-    subagents: list[SubAgent] = [
-        {
-            "name": "step-tagger",
-            "description": "Checks and corrects the step labels of given runs and saves them.",
-            "system_prompt": tagger_prompt(labels, words),
-            "tools": [record_step_labels],
-            "permissions": read_only + no_notebook,
-        },
-        {
-            "name": "hypothesis",
-            "description": "Compares honest and inflated runs and records the suspect step.",
-            "system_prompt": hypothesis_prompt(words),
-            "tools": [record_hypothesis],
-            "permissions": read_only + no_notebook,
-        },
-    ]
-    if diagnose:
-        subagents.append(
-            {
-                "name": "code-tracer",
-                "description": "Re-runs one run's code where it fails, reads the recordings, and records which line of "
-                "the code each symptom points at. Give it one run id; several can run at once.",
-                "system_prompt": TRACER_PROMPT,
-                "tools": [trace_failures, record_trace],
-                "permissions": read_only + no_notebook,
-            }
-        )
-    main_tools = [record_hypothesis, list_interventions, request_forks, record_verdict]
-    # Every experiment waits for a person: a fork costs VMs and model calls, and a direct fix test runs patched code.
-    interrupt_on = {"request_forks": {"allowed_decisions": ["approve", "reject"]}}
-    if diagnose:
-        main_tools += [record_trace_comparison, propose_fix, request_fix_test, record_fix_verdict]
-        interrupt_on["request_fix_test"] = {"allowed_decisions": ["approve", "reject"]}
+                 # A run's score.json: the evaluator's scoring, with `overlap_share` (MASTER_PLAN 6.2). deepagents'
+                 # "read" covers ls, read_file, glob and grep, and filters denied files out of glob and grep results.
+                 *hidden]
+    main_permissions = [FilesystemPermission(operations=["write"], paths=[f"{notebook.MOUNT}**", f"{CASEBOOK_MOUNT}**"],
+                                             mode="allow"), *read_only]
+    no_notebook: list[FilesystemPermission] = []  # read_only already denies every write
 
     notes = notebook.NotebookBackend(
         notebook.notebook_path(batch.root, domain.name), domain.name, notebook.hidden_positions(batch.dir / "task")
     )
+    cb_dir = casebook_dir(batch.root)
+    cb_dir.mkdir(parents=True, exist_ok=True)
+    if not (cb_dir / "casebook.md").exists():
+        (cb_dir / "casebook.md").write_text(CASEBOOK_HEADER)
     backend = CompositeBackend(
         default=StateBackend(),
         routes={
@@ -492,8 +786,60 @@ def build_investigator(batch: "Batch", model: str):
             "/runs/": FilesystemBackend(root_dir=batch.runs_dir, virtual_mode=True),
             "/skills/": FilesystemBackend(root_dir=domain.skills_dir, virtual_mode=True),
             notebook.MOUNT: notes,
+            CASEBOOK_MOUNT: FilesystemBackend(root_dir=cb_dir, virtual_mode=True),
         },
     )
+
+    def read_fs() -> FilesystemMiddleware:
+        # Replaces a subagent's default file middleware by name; create_deep_agent gives it the subagent's rules.
+        return FilesystemMiddleware(backend=backend, tools=READ_FS_TOOLS)
+
+    def reader(name: str, description: str, prompt: str, tools: list, response_format=None) -> SubAgent:
+        spec: SubAgent = {"name": name, "description": description, "system_prompt": prompt, "tools": tools,
+                          "permissions": read_only, "middleware": [read_fs()], "skills": ["/skills/"]}
+        if response_format is not None:
+            spec["response_format"] = response_format
+        return spec
+
+    subagents: list[SubAgent] = [
+        # The default general-purpose subagent would inherit every tool, the approvals and the notebook. This one
+        # only reads.
+        reader("general-purpose", "Reads files and answers one question about them. Cannot record, run, approve or "
+               "write anything.", GENERAL_PROMPT, []),
+        reader("step-tagger", "Checks and corrects the step labels of ONE run and saves them. Use it early, before "
+               "trusting `split`: one run id per call, every run in the same turn, and they run in parallel.",
+               tagger_prompt(labels, words), [record_step_labels], StepTags),
+        reader("lens-omission", "Looks for good steps that inflated runs skip. Returns suspects; records nothing. Ask it "
+               "(with the other lenses, in one turn) before recording suspects.",
+               lens_prompt("omission", words), [], LensReport),
+        reader("lens-commission", "Looks for bad steps that inflated runs add. Returns suspects; records nothing. Ask it "
+               "(with the other lenses, in one turn) before recording suspects.",
+               lens_prompt("commission", words), [], LensReport),
+        reader("lens-data", "Compares the data each run trained and tested on (its own files only). Returns suspects; "
+               "records nothing. Ask it (with the other lenses, in one turn) before recording suspects.",
+               lens_prompt("data", words), [], LensReport),
+        reader("skeptic", "For each suspect it is given: the cheapest experiment that could prove it wrong and one thing "
+               "that could fool us. Ask it before every experiment.", SKEPTIC_PROMPT, [], SkepticReport),
+        reader("hypothesis", "Compares honest and inflated runs and records competing hypotheses (the older form of "
+               "suspects, for request_forks).", hypothesis_prompt(words), [record_hypothesis]),
+    ]
+    if diagnose:
+        subagents.append(reader(
+            "code-tracer", "Re-runs one run's code where it fails, reads the recordings, and records which line of the "
+            "code each symptom points at. Give it one run id; several can run at once.", TRACER_PROMPT,
+            [trace_failures, record_trace]))
+    main_tools = [record_suspects, list_changes, run_experiment, run_interaction, record_hypothesis, list_interventions,
+                  request_forks, record_verdict, propose_lesson]
+    # Every experiment waits for a person: a fork costs VMs and model calls, and a direct fix test runs patched code.
+    # A paired experiment's size (and the grid's) can be edited; a lesson is approved or rejected.
+    interrupt_on = {"request_forks": {"allowed_decisions": ["approve", "edit", "reject"]},
+                    "run_experiment": {"allowed_decisions": ["approve", "edit", "reject"]},
+                    "run_interaction": {"allowed_decisions": ["approve", "edit", "reject"]},
+                    "propose_lesson": {"allowed_decisions": ["approve", "reject"]}}
+    if diagnose:
+        main_tools += [record_trace_comparison, propose_fix, request_fix_test, record_fix_verdict]
+        interrupt_on["request_fix_test"] = {"allowed_decisions": ["approve", "reject"]}
+
     entry_head = f"## {time.strftime('%Y-%m-%d')} batch {batch.id}"
 
     return create_deep_agent(
@@ -502,11 +848,12 @@ def build_investigator(batch: "Batch", model: str):
         tools=main_tools,
         subagents=subagents,
         skills=["/skills/"],
-        memory=[notebook.PATH],
+        memory=[notebook.PATH, CASEBOOK_PATH],
         backend=backend,
-        permissions=read_only,
+        permissions=main_permissions,
         interrupt_on=interrupt_on,
-        middleware=[rubric_middleware(batch, model)],
-        checkpointer=InMemorySaver(),
+        middleware=[TodoListMiddleware(), FilesystemMiddleware(backend=backend, tools=MAIN_FS_TOOLS),
+                    rubric_middleware(batch, model)],
+        checkpointer=checkpointer if checkpointer is not None else InMemorySaver(),
         name="investigator",
     )
