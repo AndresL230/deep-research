@@ -496,6 +496,38 @@ describe("forkView", () => {
     expect(html).toContain(`More pairs confirmed: ${n} arms x 3 + 1 base = ${n * 3 + 1} VMs, 4 pairs before, 7 pairs after`);
   });
 
+  it("says the method once and sets the experiments side by side: a row each, its pairs, its score against 20 and its level", () => {
+    const f1 = demo.forks.f1 as ForkExperiment;
+    const f2 = { ...structuredClone(f1), id: "f2", change: "force_step:deduplicate", prediction: "smaller_gap" } as ForkExperiment;
+    const two = forkView(vmOf({ forks: { f1, f2 } }, { open: "all" }));
+    expect(count(two, '<tr data-morph-key="cmp-')).toBe(2);
+    expect(two).toContain("Run a step: deduplicate");
+    expect(two).toContain("the change shrinks the gap");
+    // Never a level without its score: each row has both, and so does each picture's meter.
+    expect(count(two, 'class="ln-xt-sc"><b>')).toBe(2);
+    expect(count(two, '<span class="ln-meter-sc">Score <b>')).toBe(2);
+    // How a pair is read, the score's rule and the marks' key: once for the page, not once per experiment.
+    expect(count(two, 'data-morph-key="pair-key"')).toBe(1);
+    expect(count(two, "It sets the level: supported at 20 or more.")).toBe(1);
+    expect(count(two, '<p class="ln-key" data-morph-key="key">')).toBe(1);
+    // A single experiment is its own picture: no table, the method still said once.
+    const one = forkView(vmOf({ forks: { f1 } }));
+    expect(one).not.toContain('class="ln-xt"');
+    expect(count(one, 'data-morph-key="pair-key"')).toBe(1);
+  });
+
+  it("lays the copies out as one grid: a row per copy number, the pair those copies make beside them", () => {
+    const html = forkView(vmOf({}, { open: "all" }));
+    expect(html).toContain('class="ln-arms ln-pg" data-arms="2" data-pairs="1"');
+    // control-2 and forced-2 sit on the same row as pair 2, under the heads in row 1.
+    expect(html).toMatch(/data-arg="f1\/control-2"[^>]*style="--r:3"/);
+    expect(html).toMatch(/data-arg="f1\/forced-2"[^>]*style="--r:3"/);
+    expect(html).toMatch(/data-morph-key="pair-2:done" style="--i:1;--r:3"/);
+    // The statistics and the provenance fold, still on the page.
+    expect(html).toContain('<details class="ln-exact ln-ev-more"');
+    expect(html).toContain('<details class="ln-exact ln-prov-w"');
+  });
+
   it("is empty without forks", () => {
     expect(forkView(vmOf({ forks: {} }))).toBe("");
   });

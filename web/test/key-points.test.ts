@@ -574,7 +574,10 @@ describe("a fork experiment's fold", () => {
     expect(html).toContain('data-act="open-run" data-arg="r02"');
     expect(html).toContain('data-act="goto" data-arg="split"');
     expect(html).toContain('<span class="ln-meter-t">4 of 5 pairs</span><span class="ln-meter-w">1 more to confirm it</span>');
-    expect(html).toContain("A pair is one copy left alone and one made to take the step.");
+    // How a pair is read, and the score beside the level, said once for the page and kept while the detail is folded.
+    expect(html).toContain("A pair is one copy left alone and one made to take the step, cut from the same run");
+    expect(count(html, 'data-morph-key="pair-key"')).toBe(1);
+    expect(html).toContain('<span class="ln-meter-sc">Score <b>13.03</b> of 20</span>');
     // Each arm's card with its bars, the question as asked, the statistics and the provenance are the detail.
     expect(html).not.toContain('data-morph-key="arm-');
     expect(html).not.toContain('class="ln-bars"');

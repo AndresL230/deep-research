@@ -192,7 +192,7 @@ const STATUS_CHIP: Record<SxStatus, [ChipTone, ChipMark, string]> = {
 const statusChip = (s: SxStatus): string => { const [t, m, w] = STATUS_CHIP[s]; return chip(w, t, m, `sx-st sx-st--${s}`); };
 
 const tag = (text: string, cls = ""): string => `<span class="ln-tag sx-tag${cls ? ` ${cls}` : ""}">${esc(text)}</span>`;
-const simTag = (on: boolean): string => (on ? tag("simulated", "sx-tag--sim") : "");
+export const simTag = (on: boolean): string => (on ? tag("simulated", "sx-tag--sim") : "");
 
 /** The score on a log bar: a line at 1 (where it starts) and a line at 20 (supported). */
 export function scoreBar(score: number | null, level: SxLevel | null): string {

@@ -277,7 +277,7 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-approval-est b { color:var(--fg); font-weight:500; }
 
 /* F2 and F3: the question as the page's heading, the hypothesis and the prediction under it, the fork point. */
-.ln-exp { display:flex; flex-direction:column; gap:40px; min-width:0; }
+.ln-exp { display:flex; flex-direction:column; gap:28px; min-width:0; }
 .ln-exp-top { display:flex; flex-direction:column; gap:22px; }
 .ln-exp-h { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .ln-exp-t { margin:0; font-size:13.5px; color:var(--fg-55); }
@@ -363,6 +363,86 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-kid-k { font-size:12px; font-variant-numeric:tabular-nums; color:var(--fg-70); }
 .ln-kid-tag { font-size:12px; line-height:1.3; color:var(--accent); }
 .ln-kid-tag.ln-muted { color:var(--fg-40); }
+/* ── the fork page, said once: the experiments side by side, and how each is read (lanes.ts forkSummary) ── */
+.ln-xs { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.ln-xt-w { min-width:0; overflow-x:auto; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); }
+.ln-xt { width:100%; border-collapse:collapse; font-size:13px; }
+.ln-xt caption { caption-side:top; padding:12px 16px 4px; text-align:left; font-size:12.5px; }
+.ln-xt th, .ln-xt td { padding:10px 16px; border-top:1px solid var(--border); text-align:left; vertical-align:middle; }
+.ln-xt thead th { border-top:0; font-size:11.5px; font-weight:500; color:var(--fg-55); white-space:nowrap; }
+.ln-xt tbody th { font-weight:500; white-space:nowrap; }
+.ln-xt-id { font-family:var(--code); font-size:12.5px; margin-right:6px; }
+.ln-xt td { color:var(--fg-70); }
+.ln-xt-ch { max-width:30ch; overflow-wrap:anywhere; }
+.ln-xt-score { min-width:190px; }
+.ln-xt-sc { display:block; margin-bottom:4px; font-variant-numeric:tabular-nums; }
+.ln-xt-sc b { font-size:15px; font-weight:500; color:var(--fg); }
+.ln-how { display:flex; flex-direction:column; gap:8px; max-width:980px; }
+.ln-how-x { margin:0; font-size:12.5px; line-height:1.5; color:var(--fg-55); text-wrap:pretty; }
+.ln-meter-sc { font-size:13px; font-variant-numeric:tabular-nums; color:var(--fg-70); }
+.ln-meter-sc b { font-weight:500; color:var(--fg); }
+
+/* The evidence as one card: level, pairs and score on the left, the score's chart on the right. */
+.ln-ev-c { display:grid; grid-template-columns:minmax(220px, 1fr) minmax(0, 560px); gap:12px 32px; align-items:center; }
+.ln-exp .ln-sec-t { font-size:clamp(18px, 1.7vw, 22px); }
+.ln-ev-top { display:flex; flex-direction:column; gap:10px; }
+.ln-ev-c .ln-ev-n b { font-size:clamp(36px, 3.6vw, 48px); }
+.ln-ev-ch { min-width:0; }
+.ln-ev-more { align-self:flex-start; max-width:880px; }
+.ln-ev-more > p { margin:0; padding:8px 10px 0; }
+.ln-ev-more > p:last-child { padding-bottom:8px; }
+.ln-exp .ln-q-t { font-size:clamp(18px, 1.7vw, 22px); max-width:60ch; }
+/* The question and where the copies were cut, side by side: each is short once the method is said for the page. */
+@media (min-width: 1041px) { .ln-exp-top { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:22px 32px; align-items:start; } }
+.ln-prov-w { align-self:stretch; }
+.ln-prov-w > .ln-prov-c { border:0; border-radius:0; background:none; padding:4px 12px 8px; }
+
+/* The arms as one grid: a column per arm (its head, its copies one per row, its summary), and the pair those copies
+   make in the last column. The arm and its list of copies step aside (display: contents) so every copy numbered the
+   same sits on one row. */
+.ln-arms.ln-pg { display:grid; grid-template-columns:repeat(var(--arms, 2), minmax(0, 1fr)); grid-auto-rows:auto; gap:6px 12px; align-items:stretch; }
+.ln-arms.ln-pg[data-arms="3"] { --arms:3; }
+.ln-arms.ln-pg[data-arms="4"] { --arms:4; grid-template-columns:repeat(4, minmax(0, 1fr)); }
+.ln-arms.ln-pg[data-pairs="1"] { grid-template-columns:repeat(var(--arms, 2), minmax(0, 1fr)) minmax(220px, 1.1fr); }
+.ln-arms.ln-pg[data-arms="4"][data-pairs="1"] { grid-template-columns:repeat(4, minmax(0, 1fr)) minmax(200px, 1fr); }
+.ln-pg > .ln-arm, .ln-pg > .ln-arm--forced, .ln-pg > .ln-arm--fixed, .ln-pg .ln-kids, .ln-pg > .ln-pg-pairs, .ln-pg .ln-ev-pairs { display:contents; }
+.ln-pg .ln-arm-hd { grid-column:var(--c); grid-row:1; display:flex; flex-direction:column; gap:10px; min-width:0; padding:14px; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); }
+.ln-pg .ln-arm--forced > .ln-arm-hd, .ln-pg .ln-arm--fixed > .ln-arm-hd { padding:12px; border:3px solid transparent;
+  background:linear-gradient(var(--surface), var(--surface)) padding-box, linear-gradient(135deg, var(--pu-deep), var(--pu) 45%, var(--pu-hi)) border-box; }
+.ln-pg .ln-kid { grid-column:var(--c); grid-row:var(--r); flex-direction:row; flex-wrap:wrap; align-items:center; gap:4px 10px; }
+.ln-pg .ln-kid-h { width:auto; }
+.ln-pg .ln-kid-pic { flex:1 0 100%; }
+.ln-pg .ln-arm-sum { grid-column:var(--c); grid-row:var(--s); padding-top:8px; }
+.ln-pg-ph { grid-column:var(--c); grid-row:1; align-self:end; margin:0; padding:0 0 6px; font-size:12px; color:var(--fg-55); }
+.ln-pg .ln-ev-pair { grid-column:var(--c); grid-row:var(--r); border-top:0; padding:6px 10px; border-radius:var(--r-ctl); background:color-mix(in srgb, var(--fg) 3%, transparent); font-size:12.5px; }
+.ln-pg .ln-ev-pair--ok { box-shadow:inset 3px 0 0 var(--ok); }
+.ln-pg .ln-ev-pair--bad { box-shadow:inset 3px 0 0 var(--bad); }
+@media (max-width: 1040px) {
+  .ln-arms.ln-pg[data-arms="4"], .ln-arms.ln-pg[data-arms="4"][data-pairs="1"] { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+  .ln-pg[data-arms="4"] .ln-pg-ph { grid-column:1 / -1; grid-row:auto; }
+  .ln-pg[data-arms="4"] .ln-ev-pair { grid-column:1 / -1; grid-row:auto; }
+}
+/* At phone width the grid unfolds back into a card per arm, its copies two by two, and the pairs as a list. */
+@media (max-width: 640px) {
+  .ln-ev-c { grid-template-columns:minmax(0, 1fr); }
+  .ln-arms.ln-pg, .ln-arms.ln-pg[data-arms], .ln-arms.ln-pg[data-pairs] { display:flex; flex-direction:column; gap:12px; }
+  .ln-pg > .ln-arm, .ln-pg > .ln-arm--forced, .ln-pg > .ln-arm--fixed { display:flex; flex-direction:column; gap:10px; }
+  .ln-pg .ln-kids { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; }
+  .ln-pg > .ln-pg-pairs { display:block; }
+  .ln-pg .ln-ev-pairs { display:flex; flex-direction:column; gap:4px; }
+  .ln-pg .ln-kid { flex-direction:column; align-items:flex-start; }
+  .ln-pg .ln-kid-pic { flex:none; }
+  .ln-pg .ln-kid, .ln-pg .ln-arm-sum, .ln-pg .ln-ev-pair, .ln-pg .ln-arm-hd, .ln-pg-ph { grid-column:auto; grid-row:auto; }
+  .ln-pg .ln-arm-hd, .ln-pg .ln-arm--forced > .ln-arm-hd, .ln-pg .ln-arm--fixed > .ln-arm-hd { padding:0; border:0; background:none; }
+  .ln-xt-w { border:0; background:none; overflow:visible; }
+  .ln-xt, .ln-xt tbody, .ln-xt tr, .ln-xt th, .ln-xt td { display:block; }
+  .ln-xt thead { display:none; }
+  .ln-xt caption { display:block; padding:0 0 6px; }
+  .ln-xt tr { margin-bottom:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); }
+  .ln-xt th, .ln-xt td { padding:4px 0; border-top:0; }
+  .ln-xt td::before { content:attr(data-k); display:block; font-size:11px; color:var(--fg-40); }
+  .ln-xt-score { min-width:0; }
+}
 .ln-exact { min-width:0; border:1px solid var(--border); border-radius:var(--r-ctl); font-size:12.5px; }
 .ln-exact > summary { padding:7px 10px; cursor:pointer; color:var(--fg-70); }
 .ln-exact > summary:focus-visible { outline:2px solid var(--focus); outline-offset:-2px; border-radius:var(--r-ctl); }
