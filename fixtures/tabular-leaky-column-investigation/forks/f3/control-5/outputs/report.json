@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7317,
+  "model": "RandomForestClassifier (sklearn, 500 trees, random_state=42); zeros in glucose/blood_pressure/skin_thickness/insulin/bmi treated as missing and median-imputed from train",
+  "notes": "followup_score was excluded because it almost perfectly separates the classes (likely recorded after diagnosis); including it gives ~0.93 test accuracy but is leakage. Split was 80/20 stratified with random_state=42."
+}

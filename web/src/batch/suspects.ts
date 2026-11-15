@@ -592,13 +592,16 @@ function foolrateLink(vm: BatchVm, name: string): string {
   return r ? `<div class="sx-fr">${lessonLink(r)}</div>` : "";
 }
 
+/** Under a batch's lessons: what a lesson is for, and where to see whether one worked (#/lessons). */
+export const LESSON_THEN = `<p class="ln-sub ln-then"><a class="ln-then-a" href="#/lessons">Then Orro writes a lesson; the fool rate shows whether it works.</a></p>`;
+
 export function lessonsView(vm: BatchVm): string {
   const ls = (vm.case as SxCase).lessons;
   // A lesson a fool-rate run tested links to it ("Lessons work"), even from a batch that keeps no lessons[] itself.
-  const tested = (vm.foolrate ?? []).filter((r) => (r.lessons ?? []).some((l) => l.learned_from === vm.id));
+  const tested = (vm.foolrate ?? []).filter((r) => (r.lessons ?? []).some((l) => l.learned_from === vm.id || l.opens_as === vm.id));
   if ((!Array.isArray(ls) || !ls.length) && tested.length) {
     const first = tested.find((r) => !r.simulated) ?? tested[0];
-    return section("lessons", "Lessons", `<p class="ln-sub">A lesson from this batch was tested on new analysts</p><div class="sx-lessons">${lessonLink(first)}</div>`);
+    return section("lessons", "Lessons", `<p class="ln-sub">A lesson from this batch was tested on new analysts</p><div class="sx-lessons">${lessonLink(first)}</div>${LESSON_THEN}`);
   }
   if (!Array.isArray(ls) || !ls.length) return "";
   const admin = !vm.role || vm.role === "admin";
@@ -617,5 +620,5 @@ export function lessonsView(vm: BatchVm): string {
       `<p class="sx-rule-t">${esc(l.rule)}</p>${acts}${l.status === "approved" ? foolrateLink(vm, l.name) : ""}</article>`;
   };
   const n = ls.filter((l) => l.status === "proposed").length;
-  return section("lessons", "Lessons", `<p class="ln-sub">${n ? `${n} proposed for the next batch, waiting on a person` : "Nothing waiting"}</p><div class="sx-lessons" data-morph-list>${sorted.map(card).join("")}</div>`);
+  return section("lessons", "Lessons", `<p class="ln-sub">${n ? `${n} proposed for the next batch, waiting on a person` : "Nothing waiting"}</p><div class="sx-lessons" data-morph-list>${sorted.map(card).join("")}</div>${LESSON_THEN}`);
 }

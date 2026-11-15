@@ -1,0 +1,126 @@
+[
+  {
+    "index": 0,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/skills/learned/remove-near-duplicates-before-split/SKILL.md",
+      "limit": 1000
+    },
+    "labels": []
+  },
+  {
+    "index": 1,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && wc -l data.csv && head -5 data.csv"
+    },
+    "labels": []
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nprint(df.shape); print(df.isna().sum().sum()); print(df.describe().T)\nprint('exact dups:', df.duplicated().sum())\nfeats=[c for c in df.columns if c!='outcome']\nr=df.round({'bmi':0,'diabetes_pedigree':1})\nprint('dups after rounding:', r.duplicated().sum())\nprint('dups ignoring skin/insulin:', df.duplicated(subset=['pregnancies','glucose','blood_pressure','bmi','age']).sum())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nf=[c for c in df.columns if c!='outcome']\nprint('exact (features+label):', df.duplicated().sum())\nprint('exact features only:', df.duplicated(subset=f).sum())\nfor d in [0,1]:\n    r=df.copy(); r['bmi']=r['bmi'].round(d); r['diabetes_pedigree']=r['diabetes_pedigree'].round(d+2)\n    print('round bmi',d,'pedigree',d+2, 'dups:', r.duplicated(subset=f).sum())\nfor k in [6,7]:\n    print('match on',k,'of 8 features (ints only) dups:', df.duplicated(subset=f[:k]).sum())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\npd.set_option('display.width',200)\ndf=pd.read_csv('data.csv')\nkey=['pregnancies','glucose','blood_pressure','skin_thickness','insulin','age']\ng=df[df.duplicated(subset=key,keep=False)].sort_values(key)\nprint(len(g)); print(g.head(30).to_string())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nkey=['pregnancies','glucose','blood_pressure','skin_thickness','insulin','age']\nkeep=[]; removed=[]\nfor _,grp in df.groupby(key, sort=False):\n    kept=[]\n    for idx,row in grp.iterrows():\n        dup=any(abs(row.bmi-df.at[k,'bmi'])<=0.5 and abs(row.diabetes_pedigree-df.at[k,'diabetes_pedigree'])<=0.01 for k in kept)\n        if dup: removed.append(idx)\n        else: kept.append(idx)\n    keep+=kept\nprint('removed', len(removed), 'kept', len(keep))\nprint(df.loc[removed].head(10).to_string())\nprint('label disagreements among removed pairs (sample):')\nprint(df.loc[sorted(removed)].outcome.value_counts())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nkey=['pregnancies','glucose','blood_pressure','skin_thickness','insulin','age']\n# for each row, find its nearest earlier row in same key group\nimport numpy as np\ndisagree=0; pairs=[]\nfor _,grp in df.groupby(key, sort=False):\n    if len(grp)<2: continue\n    rows=grp.reset_index()\n    for i in range(1,len(rows)):\n        for j in range(i):\n            d=abs(rows.bmi[i]-rows.bmi[j]); p=abs(rows.diabetes_pedigree[i]-rows.diabetes_pedigree[j])\n            pairs.append((rows['index'][j],rows['index'][i],d,p,rows.outcome[i]!=rows.outcome[j]))\np=pd.DataFrame(pairs,columns=['a','b','dbmi','dped','label_diff'])\nprint(len(p)); print(p.label_diff.sum())\nprint(p[p.label_diff].head(10).to_string())\nprint(p.dbmi.describe(), p.dped.describe())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 7,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv')\nkey=['pregnancies','glucose','blood_pressure','skin_thickness','insulin','age']\nkeep=[]\nfor _,grp in df.groupby(key, sort=False):\n    kept=[]\n    for idx,row in grp.iterrows():\n        if not any(abs(row.bmi-df.at[k,'bmi'])<=0.5 and abs(row.diabetes_pedigree-df.at[k,'diabetes_pedigree'])<=0.01 for k in kept):\n            kept.append(idx)\n    keep+=kept\nclean=df.loc[sorted(keep)].reset_index(drop=True)\nprint(clean.shape, clean.outcome.mean().round(3))\ntr,te=train_test_split(clean,test_size=0.2,random_state=42,stratify=clean.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(tr.shape, te.shape, tr.outcome.mean().round(3), te.outcome.mean().round(3))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "split"
+    ]
+  },
+  {
+    "index": 8,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX=tr.drop(columns='outcome'); y=tr.outcome\nm=RandomForestClassifier(n_estimators=500,random_state=42)\nm.fit(X,y)\nprint('train acc', accuracy_score(y,m.predict(X)))\nprint('test acc', accuracy_score(te.outcome,m.predict(te.drop(columns='outcome'))))\nprint(dict(zip(X.columns,m.feature_importances_.round(3))))\n\""
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 9,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && head -3 holdout_features.csv && python3 -c \"\nimport pandas as pd\nh=pd.read_csv('holdout_features.csv'); print(h.shape, list(h.columns), h.isna().sum().sum())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 10,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nX=tr.drop(columns='outcome')\nm=RandomForestClassifier(n_estimators=500,random_state=42).fit(X,tr.outcome)\nacc=accuracy_score(te.outcome,m.predict(te[X.columns]))\npd.DataFrame({'prediction':m.predict(h[X.columns]).astype(int)}).to_csv('predictions.csv',index=False)\njson.dump({'test_accuracy':round(float(acc),4),'model':'RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42) on 8 medical features',\n 'notes':'Removed 307 altered near-duplicate rows (same six integer measurements, BMI within 0.5, pedigree within 0.01; all had matching outcomes) before an 80/20 stratified split, leaving 614 unique rows (491 train / 123 test). Test accuracy is reported from that split only.'},\n open('report.json','w'),indent=2)\n\"\ncat report.json; head -3 predictions.csv; wc -l predictions.csv; cut -d, -f1 predictions.csv | sort | uniq -c"
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  }
+]

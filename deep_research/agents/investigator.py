@@ -535,6 +535,10 @@ def rubric_middleware(batch: "Batch", model) -> RubricMiddleware:
 # What the investigator may never read under /runs/: every hidden episode of a scored run (the truth per case), the
 # same code on other test sets (for the screens only), and each run's score.json (it carries `overlap_share`).
 RUNS_READ_DENY = [f"/runs/*/{HIDDEN_DIR}/**", f"/runs/*/{BENCH_DIR}/**", "/runs/**/score.json"]
+# Nor the approved lessons under /skills/learned/ (`skills/learned/<name>/SKILL.md`): they are for new analysts
+# (`lessons="learned"`), and one names the fix for the flaw it was learned from, so an investigator that read it would
+# no longer be blind. The skills middleware only loads `/skills/<name>/SKILL.md`, one level down, so it never loads them.
+SKILLS_READ_DENY = ["/skills/learned", "/skills/learned/**"]
 
 
 # The file tools: no `execute` (there is no sandbox behind the investigator) and, for subagents, no writes at all.
@@ -760,7 +764,7 @@ def build_investigator(batch: "Batch", model: str, checkpointer=None):
 
     # Writes: only the notebook and the casebook, and only by the investigator. deepagents takes the first rule that
     # matches, so the two allows come before the catch-all deny.
-    hidden = [FilesystemPermission(operations=["read"], paths=RUNS_READ_DENY, mode="deny")]
+    hidden = [FilesystemPermission(operations=["read"], paths=[*RUNS_READ_DENY, *SKILLS_READ_DENY], mode="deny")]
     read_only = [FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"),
                  # Every hidden episode of a scored run, recorded where it really happened: the truth per case.
                  # The same code on other test sets (LIBERO-PRO), for the screens only.

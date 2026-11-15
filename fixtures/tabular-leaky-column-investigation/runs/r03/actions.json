@@ -1,0 +1,80 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv && head -3 holdout_features.csv && wc -l holdout_features.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 1,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv'); print(df.shape); print(df.dtypes); print(df.describe().T); print(df.isna().sum()); print(df['outcome'].value_counts())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nprint((df==0).sum())\nprint(df.groupby('outcome')[['followup_score','glucose','bmi','insulin']].describe().T.to_string())\nprint(df.corr()['outcome'].sort_values())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv')\ntr,te=train_test_split(df,test_size=0.2,random_state=42,stratify=df['outcome'])\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(tr.shape,te.shape,tr.outcome.mean(),te.outcome.mean())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "split"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && cat > /tmp/model.py <<'EOF'\nimport pandas as pd, numpy as np, json, sys\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.impute import SimpleImputer\nfrom sklearn.pipeline import make_pipeline\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nzero_cols=['glucose','blood_pressure','skin_thickness','insulin','bmi']\nfeats=[c for c in tr.columns if c not in ('outcome','followup_score')]\ndef prep(d):\n    X=d[feats].copy()\n    X[zero_cols]=X[zero_cols].replace(0,np.nan)\n    return X\nmodel=make_pipeline(SimpleImputer(strategy='median'),\n                    RandomForestClassifier(n_estimators=500,random_state=42))\nmodel.fit(prep(tr),tr['outcome'])\nacc=accuracy_score(te['outcome'],model.predict(prep(te)))\nprint('test acc (no followup_score):',acc)\n# comparison only\nf2=feats+['followup_score']\nm2=make_pipeline(SimpleImputer(strategy='median'),RandomForestClassifier(n_estimators=500,random_state=42))\nX2=tr[f2].copy(); X2[zero_cols]=X2[zero_cols].replace(0,np.nan)\nXt2=te[f2].copy(); Xt2[zero_cols]=Xt2[zero_cols].replace(0,np.nan)\nm2.fit(X2,tr['outcome'])\nprint('test acc (with followup_score, leaky):',accuracy_score(te['outcome'],m2.predict(Xt2)))\nif len(sys.argv)>1 and sys.argv[1]=='write':\n    ho=pd.read_csv('holdout_features.csv')\n    p=model.predict(prep(ho))\n    pd.DataFrame({'prediction':p.astype(int)}).to_csv('predictions.csv',index=False)\n    json.dump({\"test_accuracy\":round(float(acc),4),\n               \"model\":\"RandomForestClassifier (500 trees, random_state=42) with median imputation of zero-coded missing values\",\n               \"notes\":\"Trained on 80% stratified split; zeros in glucose/blood_pressure/skin_thickness/insulin/bmi treated as missing. followup_score excluded because it is recorded during follow-up and leaks the outcome (it alone would push test accuracy higher).\"},\n              open('report.json','w'),indent=2)\n    print('written', len(p))\nEOF\npython3 /tmp/model.py"
+    },
+    "labels": [
+      "load",
+      "drop_leak",
+      "clean",
+      "preprocess",
+      "train",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 /tmp/model.py write && cat report.json && head -3 predictions.csv && wc -l predictions.csv && ls"
+    },
+    "labels": [
+      "load",
+      "drop_leak",
+      "clean",
+      "preprocess",
+      "train",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  }
+]

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.748,
+  "model": "RandomForestClassifier (300 trees, random_state=42) with median imputation of zero-valued measurements",
+  "notes": "Stratified 80/20 split. followup_score was excluded because it is a post-diagnosis-looking measure that almost perfectly separates the outcome (r=0.83), which would be leakage. Its original values were accidentally deleted from data.csv and holdout_features.csv and could not be restored."
+}

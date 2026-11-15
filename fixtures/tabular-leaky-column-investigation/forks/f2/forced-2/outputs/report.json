@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7561,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42) on 8 medical features, stratified 80/20 split (random_state=42)",
+  "notes": "The original followup_score column was accidentally overwritten and deleted from data.csv and holdout_features.csv, so the model excludes it and train/test/predictions lack it. Zeros in the medical measurements were kept as-is."
+}

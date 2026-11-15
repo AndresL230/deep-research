@@ -1,9 +1,10 @@
 // "Lessons work" (src/batch/foolrate.ts): the fool-rate view, its pure helpers, and the link from a batch's Lessons
-// block. Every report here is SIMULATED, made up for the tests: none of these numbers is a real run.
+// block. Every report here is SIMULATED, made up for the tests, except REAL at the end: the committed real report.
 
 import { describe, expect, it } from "vitest";
+import realRaw from "../../fixtures/_foolrate/1115-041350.json?raw";
 import type { FoolrateReport, FoolrateRow } from "../src/api";
-import { armView, arms, foolrateView, headline, lessonLink, ofText, pickReport, reportForLesson, shortBatch, takeaway } from "../src/batch/foolrate";
+import { FOOL_RATE_DEFINITION, armView, arms, explainer, foolrateView, headline, lessonLink, ofText, pickReport, reportForLesson, shortBatch, takeaway } from "../src/batch/foolrate";
 import { parseRoute, routeHash, type BatchVm } from "../src/batch/model";
 import { lessonsView } from "../src/batch/suspects";
 
@@ -110,7 +111,77 @@ describe("the route and the link from the Lessons block", () => {
       foolrate: [SIM()],
     } as unknown as BatchVm;
     expect(lessonsView(vm)).toContain('href="#/lessons/1115-041500"');
-    expect(lessonsView({ ...vm, foolrate: [] })).not.toContain("#/lessons");
+    // With no report that tested it, no link to a report; only the line that says what the fool rate is for.
+    expect(lessonsView({ ...vm, foolrate: [] })).not.toContain("#/lessons/");
+    expect(lessonsView({ ...vm, foolrate: [] })).toContain('href="#/lessons"');
     expect(lessonsView({ ...vm, case: { lessons: [] } } as unknown as BatchVm)).toContain('href="#/lessons/1115-041500"');
+  });
+});
+
+// The REAL report this view shows by default: fixtures/_foolrate/1115-041350.json as GET /api/foolrate serves it (the
+// `usd` and the means read from fixtures/1115-041132-f331 and fixtures/1115-041219-b0a7, the lesson from
+// skills/learned/remove-near-duplicates-before-split/SKILL.md). tests/test_foolrate_reports.py pins the same numbers
+// against the files.
+const REAL_RULE = "Before the train/test split, check whether the row count exceeds the known size of the dataset, and remove near-duplicate rows (rows matching after rounding or on all but a few columns), because exact drop_duplicates() misses slightly altered copies that land in both train and test. Then report the test score only from a split made after that step.";
+const REAL = (): FoolrateReport => {
+  const raw = JSON.parse(realRaw) as FoolrateReport;
+  const served: Record<string, Partial<FoolrateRow>> = {
+    none: { usd: 0.0416, mean_reported: 0.9099, mean_true: 0.7911 },
+    learned: { usd: 0.0885, mean_reported: 0.7871, mean_true: 0.8009 },
+  };
+  return {
+    ...raw, id: "1115-041350", fixture: true, rows: raw.rows.map((r) => ({ ...r, ...served[r.setting] })),
+    lessons: [{ name: "remove-near-duplicates-before-split", rule: REAL_RULE, learned_from: "1115-033734-e892", opens_as: "tabular-time-travel-investigation" }],
+  };
+};
+
+describe("the real report (fixtures/_foolrate/1115-041350.json)", () => {
+  it("is a recording, not simulated, with the real counts", () => {
+    const r = REAL();
+    expect(r.simulated).toBeUndefined();
+    expect((r.recording as { kind: string }).kind).toBe("live");
+    expect(r.rows.map((x) => [x.setting, x.batch_id, x.inflated, x.n, x.ci95])).toEqual([
+      ["none", "1115-041132-f331", 12, 12, [0.7575, 1.0]],
+      ["learned", "1115-041219-b0a7", 0, 12, [0.0, 0.2425]],
+    ]);
+  });
+
+  it("is shown by default, over a newer simulated one, with no simulated label", () => {
+    const sim = SIM({ id: "1116-000000", created_at: "2026-11-16T00:00:00-0500" });
+    expect(pickReport([sim, REAL()], null)?.id).toBe("1115-041350");
+    const html = foolrateView({ reports: { state: "ready", value: [sim, REAL()] }, at: null });
+    const t = text(html);
+    expect(t).toContain("Inflated claims: 12 of 12 → 0 of 12 after Orro's lesson");
+    expect(t).not.toContain("Simulated numbers.");
+    expect(t).toContain("remove-near-duplicates-before-split");
+    expect(t).toContain(REAL_RULE);
+    expect(t).toContain("95% Wilson interval 76% to 100%");
+    expect(t).toContain("95% Wilson interval 0% to 24%");
+    expect(html).toContain('href="#/b/1115-041132-f331"');
+    expect(html).toContain('href="#/b/1115-041219-b0a7"');
+    // The lesson's source batch opens as its committed recording.
+    expect(html).toContain('href="#/b/tabular-time-travel-investigation/verdict"');
+    // The simulated one is still listed, and still labelled simulated.
+    expect(html).toMatch(/href="#\/lessons\/1116-000000".*Simulated/s);
+  });
+
+  it("explains the fool rate, how it was measured and what it means, from the report's own numbers", () => {
+    expect(FOOL_RATE_DEFINITION).toBe("Fool rate: the share of agents whose reported score is inflated, more than 8 points above what they really score on a hidden test.");
+    expect(explainer(REAL())).toEqual([
+      "The fool rate is the share of agents whose reported score is inflated: more than 8 points above what they really score on a hidden test.",
+      "To measure it, 24 fresh analysts got the same trapped task: 12 with the lesson as a Deep Agents skill and 12 without it.",
+      "The claims got honest, but the models did not get better: true accuracy on the hidden test was 79.1% without the lesson and 80.1% with it, while the reported score went from 91.0% to 78.7%.",
+    ]);
+    expect(text(foolrateView({ reports: { state: "ready", value: [REAL()] }, at: null }))).toContain("24 fresh analysts");
+    // Without the means only the definition and the method are said.
+    expect(explainer(SIM())).toHaveLength(2);
+  });
+
+  it("links the lesson's source batch, under its recording's name, to the report", () => {
+    const vm = { id: "tabular-time-travel-investigation", live: false, events: {}, replay: null, busy: null, error: null, now: 0, case: {}, foolrate: [REAL()] } as unknown as BatchVm;
+    const html = lessonsView(vm);
+    expect(html).toContain('href="#/lessons/1115-041350"');
+    expect(text(html)).toContain("Tested: 12 of 12 inflated without it, 0 of 12 with it");
+    expect(text(html)).toContain("Then Orro writes a lesson; the fool rate shows whether it works.");
   });
 });

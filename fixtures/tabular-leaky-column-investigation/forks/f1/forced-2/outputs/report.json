@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7561,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), 80/20 stratified split (random_state=42)",
+  "notes": "followup_score was dropped because it is likely a post-outcome leakage feature (r=0.83 with outcome, separates classes almost perfectly; this is inferred, not documented). The original data.csv and holdout_features.csv were accidentally overwritten without that column and no backup exists, so train.csv/test.csv lack followup_score."
+}

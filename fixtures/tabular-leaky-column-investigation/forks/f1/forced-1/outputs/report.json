@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.748,
+  "model": "RandomForestClassifier (scikit-learn, 500 trees, random_state=42)",
+  "notes": "Stratified 80/20 split (random_state=42). followup_score was dropped because it is almost perfectly separated by outcome (r=0.83), which looks like leakage from after diagnosis. Zero values in glucose/BMI/etc. were left as-is."
+}

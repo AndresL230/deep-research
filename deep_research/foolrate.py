@@ -98,7 +98,10 @@ def save_report(t: dict, root: Path) -> Path:
 # key not listed here is dropped on the way out, so nothing the evaluator keeps back can ride along in a report.
 REPORT_KEYS = ("settings", "rows", "n_per_setting", "domain", "trap", "control", "estimate_usd", "created_at",
                "lessons", "simulated", "recording", "note")
-ROW_KEYS = ("setting", "batch_id", "inflated", "n", "failed", "rate", "ci95", "interval", "usd")
+# `mean_reported` / `mean_true`: the arm's mean reported and measured score over its scored runs (from its case file),
+# so the page can say whether the claims got honest or the models got better. Means only, never a run's labels.
+ROW_KEYS = ("setting", "batch_id", "inflated", "n", "failed", "rate", "ci95", "interval", "usd", "mean_reported",
+            "mean_true")
 LESSON_KEYS = ("name", "rule", "learned_from")
 
 
@@ -115,6 +118,15 @@ def case_usd(case: dict | None) -> float | None:
         return None
     total = t.total_usd()
     return None if total is None else round(total, 4)
+
+
+def case_mean(case: dict | None, key: str) -> float | None:
+    """The mean of `runs.*.<key>` over a batch's scored runs (honest, inflated, unclear), or None."""
+    if not isinstance(case, dict):
+        return None
+    xs = [r.get(key) for r in (case.get("runs") or {}).values() if isinstance(r, dict)
+          and r.get("status") in ("honest", "inflated", "unclear") and isinstance(r.get(key), (int, float))]
+    return round(sum(xs) / len(xs), 4) if xs else None
 
 
 def lessons_for(names: list[str] | None, approved: list[dict]) -> list[dict]:
@@ -141,6 +153,25 @@ def _case(root: Path, batch_id) -> dict | None:
         return json.loads(path.read_text()) if path.is_file() else None
     except (OSError, ValueError):
         return None
+
+
+def _opens_as(roots: list[tuple[Path, bool]], batch_id) -> str | None:
+    """The batch id a lesson's source batch opens under, when it is not on disk by its own id but a committed live
+    fixture is its recording (`config.recording.source_batch`): e.g. 1115-033734-e892 is
+    fixtures/tabular-time-travel-investigation. None when it is on disk by its id, or nowhere."""
+    if not isinstance(batch_id, str) or not batch_id:
+        return None
+    if any(_case(root, batch_id) is not None for root, _ in roots):
+        return None
+    for root, is_fixture in roots:
+        for path in sorted(root.glob("*/case/case.json")) if is_fixture and root.is_dir() else []:
+            try:
+                rec = (json.loads(path.read_text()).get("config") or {}).get("recording") or {}
+            except (OSError, ValueError, AttributeError):
+                continue
+            if isinstance(rec, dict) and rec.get("source_batch") == batch_id:
+                return path.parent.parent.name
+    return None
 
 
 def reports(roots: list[tuple[Path, bool]], approved: list[dict] | None = None) -> list[dict]:
@@ -172,6 +203,9 @@ def reports(roots: list[tuple[Path, bool]], approved: list[dict] | None = None) 
                 case = _case(root, r.get("batch_id"))
                 if "usd" not in r:
                     r["usd"] = case_usd(case)
+                for key, src in (("mean_reported", "reported_accuracy"), ("mean_true", "true_accuracy")):
+                    if key not in r:
+                        r[key] = case_mean(case, src)
                 if r.get("setting") == "learned" and case:
                     for run in (case.get("runs") or {}).values():
                         for n in ((run or {}).get("lessons") or {}).get("names") or []:
@@ -179,6 +213,10 @@ def reports(roots: list[tuple[Path, bool]], approved: list[dict] | None = None) 
                                 names.append(n)
             if "lessons" not in rep and "learned" in [r.get("setting") for r in rep["rows"]]:
                 rep["lessons"] = lessons_for(names, approved)
+            for les in rep.get("lessons") or []:
+                opens = _opens_as(roots, les.get("learned_from"))
+                if opens:
+                    les["opens_as"] = opens
             out.append({"id": path.stem, "fixture": is_fixture, **rep})
     out.sort(key=lambda r: (str(r.get("created_at") or ""), r["id"]), reverse=True)
     return out

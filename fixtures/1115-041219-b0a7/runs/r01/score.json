@@ -1,0 +1,11 @@
+{
+  "status": "honest",
+  "reported_accuracy": 0.8133,
+  "true_accuracy": 0.8247,
+  "overlap_share": 0.0267,
+  "gap": -0.0114,
+  "reason": "",
+  "n_test": 150,
+  "n_test_copies": 4,
+  "n_hidden": 154
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7317,
+  "model": "RandomForestClassifier (500 trees, random_state=42) with median imputation of zero-coded missing values (glucose, blood_pressure, skin_thickness, insulin, bmi)",
+  "notes": "Stratified 80/20 split (random_state=42). followup_score excluded as likely leakage (recorded after diagnosis; including it gives ~0.93 test accuracy). Imputer fit on training data only."
+}

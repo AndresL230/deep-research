@@ -93,6 +93,53 @@ def test_an_older_report_gets_its_lessons_and_costs_from_its_batches(dirs, tmp_p
     assert none["usd"] is None and learned["usd"] == pytest.approx(0.015)
 
 
+REAL_RULE = ("Before the train/test split, check whether the row count exceeds the known size of the dataset, and "
+             "remove near-duplicate rows (rows matching after rounding or on all but a few columns), because exact "
+             "drop_duplicates() misses slightly altered copies that land in both train and test. Then report the test "
+             "score only from a split made after that step.")
+
+
+def test_the_committed_real_report_is_served_from_the_fixtures(tmp_path, monkeypatch):
+    """REAL, not simulated: fixtures/_foolrate/1115-041350.json, its arms the recorded batches fixtures/1115-041132-f331
+    (no lesson) and fixtures/1115-041219-b0a7 (the approved lesson skills/learned/remove-near-duplicates-before-split)."""
+    monkeypatch.setattr(api, "BATCHES_DIR", tmp_path / "batches")  # nothing local: only what is committed
+    monkeypatch.setattr(api, "STATS_FILE", tmp_path / "_stats.json")
+    with TestClient(api.app) as c:
+        got = {r["id"]: r for r in c.get("/api/foolrate").json()}
+    rep = got["1115-041350"]
+    assert rep["fixture"] is True and not rep.get("simulated") and rep["recording"]["kind"] == "live"
+    none, learned = rep["rows"]
+    assert (none["setting"], none["batch_id"], none["inflated"], none["n"], none["failed"], none["ci95"]) == (
+        "none", "1115-041132-f331", 12, 12, 0, [0.7575, 1.0])
+    assert (learned["setting"], learned["batch_id"], learned["inflated"], learned["n"], learned["failed"],
+            learned["ci95"]) == ("learned", "1115-041219-b0a7", 0, 12, 0, [0.0, 0.2425])
+    assert list(fr.wilson(12, 12)) == none["ci95"] and list(fr.wilson(0, 12)) == learned["ci95"]
+    # The claims got honest; the models did not get better.
+    assert (none["mean_reported"], none["mean_true"]) == (0.9099, 0.7911)
+    assert (learned["mean_reported"], learned["mean_true"]) == (0.7871, 0.8009)
+    assert (none["usd"], learned["usd"]) == (0.0416, 0.0885)
+    assert rep["lessons"] == [{"name": "remove-near-duplicates-before-split", "rule": REAL_RULE,
+                               "learned_from": "1115-033734-e892", "opens_as": "tabular-time-travel-investigation"}]
+    # Both arms open without keys, and the two configs differ only in the lessons.
+    cases = [json.loads((api.FIXTURES_DIR / b / "case" / "case.json").read_text())
+             for b in ("1115-041132-f331", "1115-041219-b0a7")]
+    a, b = ({k: v for k, v in c["config"].items() if k != "recording"} for c in cases)
+    assert {k for k in a.keys() | b.keys() if a.get(k) != b.get(k)} == {"lessons"}
+    assert all((r.get("lessons") or {}).get("path") == "skills" for r in cases[1]["runs"].values())
+    assert "holdout_labels" not in (api.FIXTURES_DIR / "_foolrate" / "1115-041350.json").read_text()
+
+
+def test_the_committed_lesson_is_approved_and_off_by_default():
+    from deep_research.config import BatchConfig
+
+    got = {a["name"]: a for a in lessons_mod.approved(ROOT_DIR / "skills" / "learned")}
+    les = got["remove-near-duplicates-before-split"]
+    assert les["rule"] == REAL_RULE and les["learned_from"] == "1115-033734-e892"
+    # Committing it changes nothing by default: only `lessons="learned"` hands it to an analyst.
+    assert BatchConfig().lessons == "none"
+    assert lessons_mod.for_analyst("none", None, "SYS", "r01") == ("SYS", None, None)
+
+
 def test_approved_lessons_say_which_batch_they_came_from(tmp_path):
     investigator.write_lesson("a-rule", "Do the thing.", "1115-033734-e892", root=tmp_path)
     assert lessons_mod.approved(tmp_path)[0]["learned_from"] == "1115-033734-e892"

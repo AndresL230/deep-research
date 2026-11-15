@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.748,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42) on 8 medical features, stratified 80/20 split",
+  "notes": "followup_score was accidentally deleted from data.csv and holdout_features.csv before modeling (no backup), so it is not used; zeros in glucose/bmi/etc. were kept as raw values."
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.8224,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42)",
+  "notes": "Removed 161 near-duplicate rows (same values except BMI at 1 decimal and diabetes_pedigree within 0.002; includes 57 exact copies) before an 80/20 stratified split (random_state=42); 760 rows remain, 8 fewer than the 768 expected, so the tolerance may have removed a few genuine rows. Test accuracy is from the split made after cleaning."
+}

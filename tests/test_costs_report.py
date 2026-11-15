@@ -186,6 +186,11 @@ class _LiveBatch:
         pass
 
 
+# The committed recordings of real batches (config.recording.kind = "live").
+REAL_RECORDINGS = ("1115-041219-b0a7", "1115-041132-f331", "robot-live-investigation", "tabular-leaky-column-investigation",
+                   "tabular-live-investigation", "tabular-time-travel-investigation")
+
+
 def test_costs_endpoint_reads_live_batches_from_memory_and_saved_ones_from_disk(client, tmp_path, monkeypatch):  # noqa: F811
     def save(batch_id, text):
         d = tmp_path / "batches" / batch_id / "case"
@@ -205,34 +210,34 @@ def test_costs_endpoint_reads_live_batches_from_memory_and_saved_ones_from_disk(
     report = res.json()
     rows = {b["id"]: b for b in report["batches"]}
     assert [b["id"] for b in report["batches"]] == [
-        "1114-093012-a1b2", "1113-080000-ffff", "robot-live-investigation", "tabular-live-investigation",
+        "1115-041219-b0a7", "1115-041132-f331", "1114-093012-a1b2", "1113-080000-ffff", "robot-live-investigation", "tabular-leaky-column-investigation", "tabular-live-investigation",
         "tabular-time-travel-investigation", "demo-batch", "humanoid-demo-batch", "robot-demo-batch", "suspects-demo-batch", "track-demo-batch"]
     assert rows["1114-093012-a1b2"]["kind"] == "live" and rows["1114-093012-a1b2"]["usd"]["total"] == 0.25
     assert rows["1113-080000-ffff"]["kind"] == "replay" and rows["1113-080000-ffff"]["started_at"].endswith("-11-13T08:00:00")
     assert rows["demo-batch"]["simulated"] is True and rows["demo-batch"]["usd"] is None and rows["demo-batch"]["started_at"] is None
     t = report["totals"]
     # The real recordings (fixtures/robot-live-investigation, fixtures/tabular-live-investigation,
-    # fixtures/tabular-time-travel-investigation) are real spend, counted like any saved batch.
-    recorded = rows["robot-live-investigation"]
-    tabular = rows["tabular-live-investigation"]
-    time_travel = rows["tabular-time-travel-investigation"]
-    for r in (recorded, tabular, time_travel):
+    # fixtures/tabular-time-travel-investigation, fixtures/tabular-leaky-column-investigation and the fool-rate arms
+    # fixtures/1115-041132-f331 and fixtures/1115-041219-b0a7) are real spend, counted like any saved batch.
+    recordings = [rows[k] for k in REAL_RECORDINGS]
+    for r in recordings:
         assert r["kind"] == "replay" and not r.get("simulated") and r["usd"]["total"] > 0
-    assert t["usd"]["total"] == pytest.approx(0.815 + 0.25 + recorded["usd"]["total"] + tabular["usd"]["total"]
-                                              + time_travel["usd"]["total"])
-    assert t["batches"] == 5 and t["excludes_simulated"] is True
+    assert rows["tabular-leaky-column-investigation"]["usd"]["total"] == pytest.approx(1.0573, abs=1e-3)
+    assert t["usd"]["total"] == pytest.approx(0.815 + 0.25 + sum(r["usd"]["total"] for r in recordings))
+    assert t["batches"] == 2 + len(REAL_RECORDINGS) and t["excludes_simulated"] is True
     assert report["simulated"]["batches"] == 5
 
 
 def test_costs_endpoint_with_only_the_demo_batch(client):  # noqa: F811
     report = client.get("/api/costs").json()
-    assert [b["id"] for b in report["batches"]] == ["robot-live-investigation", "tabular-live-investigation",
-                                                    "tabular-time-travel-investigation", "demo-batch",
+    assert [b["id"] for b in report["batches"]] == ["1115-041219-b0a7", "1115-041132-f331", "robot-live-investigation", "tabular-leaky-column-investigation", "tabular-live-investigation",
+        "tabular-time-travel-investigation", "demo-batch",
                                                     "humanoid-demo-batch", "robot-demo-batch", "suspects-demo-batch",
                                                     "track-demo-batch"]
     # Only the real recordings count: the simulated fixtures are tokens only.
-    live = report["batches"][:3]
-    assert report["totals"]["batches"] == 3
+    live = report["batches"][:len(REAL_RECORDINGS)]
+    assert sorted(b["id"] for b in live) == sorted(REAL_RECORDINGS)
+    assert report["totals"]["batches"] == len(REAL_RECORDINGS)
     assert report["totals"]["usd"]["total"] == pytest.approx(sum(b["usd"]["total"] for b in live))
 
 

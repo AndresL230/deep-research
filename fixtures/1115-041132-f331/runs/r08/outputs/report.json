@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9075,
+  "model": "RandomForestClassifier (scikit-learn, 500 trees, random_state=42) with median imputation of zero-placeholder values (glucose, blood_pressure, skin_thickness, insulin, bmi)",
+  "notes": "Dropped 57 exact duplicate rows before a stratified 80/20 split (691 train / 173 test). Zeros in physiological columns were treated as missing and imputed with training medians."
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7973,
+  "model": "RandomForestClassifier(n_estimators=500, random_state=42), trained on 80% stratified split",
+  "notes": "Removed 185 near-duplicate rows (identical after rounding to 1 decimal; bmi/pedigree differ by <0.05) from 921 rows leaving 736 before an 80/20 stratified split. Test accuracy is from the deduplicated split."
+}

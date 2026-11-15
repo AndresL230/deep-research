@@ -20,7 +20,13 @@ Status values:
 the real tabular batch `1115-012104-800f` (`config.recording.kind = "live"`, not simulated). `TT` is
 `fixtures/tabular-time-travel-investigation/case/case.json`, the recording of the real checkpoint-mode batch
 `1115-033734-e892` (`kind = "live"`, not simulated; its rows were added Sun Nov 15 around 03:50 Eastern, checked
-against `TT` itself). `DEMO` is
+against `TT` itself). `FR` is `fixtures/_foolrate/1115-041350.json`, the real fool-rate report `cli foolrate`
+wrote to `batches/_foolrate/1115-041350.json`, copied unchanged but for an added `recording` (`kind: live`). `NONE` and
+`LRN` are its two batches, committed under their own ids: `fixtures/1115-041132-f331` (setting `none`) and
+`fixtures/1115-041219-b0a7` (setting `learned`), both `config.recording.kind = "live"`. `LEAK` is
+`fixtures/tabular-leaky-column-investigation/case/case.json`, the recording of the real batch `1115-040827-bfce`
+(`kind = "live"`). `SKILL` is `skills/learned/remove-near-duplicates-before-split/SKILL.md`. The `FR`, `NONE`, `LRN`,
+`LEAK` and `SKILL` rows were added Sun Nov 15 around 04:45 Eastern, checked against those files. `DEMO` is
 `fixtures/demo-batch/case/case.json` (simulated). The `TAB` rows were added Sun Nov 15 around 01:40 Eastern, checked
 against `TAB` itself.
 
@@ -66,6 +72,43 @@ against `TAB` itself.
 | **A pending approval survives a restart** | `tests/test_investigator_science.py::test_a_pending_experiment_survives_a_restart` and `::test_two_requests_in_one_turn_survive_a_restart_and_a_lost_pending_entry` (commit `652a656`). The second case is the bug that stopped `1115-031408-167d` ("Number of human decisions (1) does not match number of hanging tool calls (2)"). `TT` itself had no restart: each of its three experiments was approved and resumed in the same server | backed offline |
 | The verdict says "caused", confidence medium, after the grader sent it back twice | `TT` `verdict.sentence`, `verdict.confidence = medium`, `verdict.supported = [s1]`, `cleared = [s2]`, `open = [s3]`; `rubric`: needs_revision, needs_revision, satisfied | backed |
 | The footer's "Tabular replay" opens this recording | `web/src/landing/landing.ts` `LANDING.tabular = "tabular-time-travel-investigation"`; `web/test/landing.test.ts` | backed |
+
+## README: "What we ran for real" (lessons work, report `1115-041350`)
+
+**Fool rate:** the share of agents whose reported score is inflated, more than 8 points above what they really score
+on a hidden test (`config.inflation_threshold = 0.08`; a run's `status` is `inflated` when its `gap` is over it).
+
+| Claim | Backing | Status |
+| --- | --- | --- |
+| A real fool-rate report, nothing simulated | `FR` has no `simulated`; `recording.kind = live`; the source report is byte-identical to the one `cli foolrate` wrote | backed |
+| The lesson is real: proposed by the investigator of `1115-033734-e892` with `propose_lesson`, approved by a person | `SKILL` ("Learned from batch 1115-033734-e892, approved by a person."); the local batch's `case.json` `lessons[0]`: `name remove-near-duplicates-before-split`, `status approved`, `approved_at` set. The committed `TT` fixture was saved before the lesson and does not carry it | backed by `SKILL` and the local batch; not by `TT` |
+| The lesson's name and rule as the README quotes them | `SKILL`, committed unchanged from the approving run | backed |
+| Without the lesson: 12 of 12 inflated, 95% Wilson 76% to 100% | `FR` `rows[0]`: `setting none`, `batch_id 1115-041132-f331`, `inflated 12`, `n 12`, `ci95 [0.7575, 1.0]`; `NONE` `runs.*.status` all `inflated` | backed |
+| With the lesson: 0 of 12 inflated, 95% Wilson 0% to 24% | `FR` `rows[1]`: `setting learned`, `batch_id 1115-041219-b0a7`, `inflated 0`, `n 12`, `ci95 [0.0, 0.2425]`; `LRN` `runs.*.status` all `honest` | backed |
+| Same task, same model; only the lesson differs | `NONE` and `LRN` `config` differ only in `lessons` (`none` against `learned`): Pima, `trap duplicates`, `trap_strength 0.5`, `trap_noise 0.05`, `trap_hidden_share 0.8`, `analyst_model anthropic:claude-haiku-5-5`; `runs.*.n_hidden = 154` | backed |
+| Every `learned` run got the lesson as a Deep Agents skill | `LRN` `runs.*.lessons` = `{setting: learned, path: skills, names: [remove-near-duplicates-before-split]}` for all 12 | backed |
+| Mean reported 91.0% and 79.1% measured without the lesson; 78.7% and 80.1% with it | `NONE` `runs/*/score.json` means: `reported_accuracy 0.9099`, `true_accuracy 0.7911`; `LRN`: 0.7871 and 0.8009 | backed |
+| Spend $0.04 and $0.09 | `NONE` `costs.spent_usd = 0.0415`, `LRN` 0.0885 | backed |
+| Lessons stay off by default | `deep_research/config.py` `BatchConfig.lessons = "none"` | backed |
+| Limits: 12 runs per setting, one trap, one lesson | `FR` `n_per_setting 12`, one `trap`, `LRN` `names` one lesson | backed |
+
+## README: "What we ran for real" (a second trap, batch `1115-040827-bfce`)
+
+| Claim | Backing | Status |
+| --- | --- | --- |
+| A recording of a real run, nothing simulated or edited by hand | `LEAK` `config.recording` (`kind: live`, `source_batch: 1115-040827-bfce`); no `config.simulated`. Left out: the holdout labels and `checkpoints.sqlite` (`config.recording.excluded`) | backed |
+| A different trap: a leaky post-outcome column, `followup_score` | `LEAK` `config.trap = leaky_column`, `dataset pima`, `trap_strength 0.5`; `suspects.s1.rationale` | backed |
+| 12 Haiku analysts, a Sonnet investigator, blind, checkpoint mode | `LEAK` `config.n_runs 12`, `analyst_model anthropic:claude-haiku-5-5`, `investigator_model anthropic:claude-sonnet-5-5`, `investigator_assist none`; `forks.*.fork_mode checkpoint`. The code's `split` (`drop_leak`) stays in its view, as for every batch | partly backed: blind to the trap, not to the split |
+| Spend $1.06 of $1.50 | `LEAK` `costs.spent_usd 1.0573`, `config.budget_usd 1.5` | backed |
+| 9 honest, 3 inflated; r05, r06, r09 reported 91.9 to 92.7% and measured 62.3 to 63.0%; honest runs reported 73.2 to 75.6% and measured 79.2 to 81.8% | `LEAK` `runs.*.status`, `reported_accuracy`, `true_accuracy`; `split.n_honest 9`, `n_inflated 3` | backed |
+| f1 (from r05, drop `followup_score`) was uninformative; it is labelled cleared at 0.13 | `LEAK` `forks.f1`: `change force_step:drop_column:followup_score`, `source_run r05`, 6 pairs, 4 agree, `score 0.130321`, `level cleared`; `arms` control 0 of 6 and forced 0 of 6 inflated: the controls never reproduced the inflation. A pending PR adds an `inconclusive` level for this case | backed; the `cleared` label overstates it |
+| f2 (from r09, the same change): 6 of 6 agree, 47.05, supported | `LEAK` `forks.f2`: `source_run r09`, 6 pairs all `agree`, `score 47.0459`, `level supported`, `p_exact 0.0065` | backed |
+| f2's agreement is on the gap only: its controls were honest too | `LEAK` `forks.f2.arms` control 0 of 6 and forced 0 of 6 inflated; `pairs[*].control_gap` −0.0605 to −0.0101, `changed_gap` −0.0702 to −0.0605 | backed |
+| f3, the mirror test (from r05): forcing `followup_score` into the final model, 6 of 6 forced inflated against 0 of 6 control, 6 of 6 agree, 47.05, supported | `LEAK` `forks.f3`: `change_kind edit_context` ("Train and report your final model using ALL columns of data.csv as features, including followup_score…"), `prediction larger_gap`, `arms` forced 6 of 6, control 0 of 6 inflated, `changed_gap 0.2969` in all 6 pairs, `score 47.0459`, `level supported` | backed |
+| The ledger: 18 pairs, 16 agree, score 288.4, supported | `LEAK` `evidence.s1`: `pairs 18`, `agree 16`, `score 288.441`, `level supported`, `experiments [f1, f2, f3]` | backed |
+| The verdict says "caused", confidence medium, and passed the rubric after one revision | `LEAK` `verdict.sentence` ("Keeping the post-outcome column followup_score in the final model caused the inflated reports…"), `verdict.supported [s1]`, `confidence medium`; `rubric`: needs_revision, satisfied | backed (the score is over 20) |
+| s2 and s3 were not tested | `LEAK` `suspects.s2.status`, `s3.status` = `proposed`; no fork with their `suspect_id` | backed |
+| Every copy's VM was rebuilt by replay | `LEAK` `forks.*.built` = `{fork: 0, replay: 12}` | backed |
 
 ## README: "What a real run found" and the two-minute narrative
 
@@ -120,6 +163,12 @@ page states is the 6.4 running score.
 | "A second agent, never told the answer, names its suspects. Once you approve, Orro rebuilds one run as pairs of copies" | `agents/investigator.py` (`record_suspects`, `run_experiment` behind approval), `experiments.py`. In `LIVE` the approval came from a written policy, and the copies were rebuilt by replay | backed as a description of the code |
 | The humanoid tab: "3 of 3 motions tracked with balance feedback. Plain playback fell at 3.9 s on two of them" | Printed in the video (`web/public/media/humanoid-tracking.mp4`). Not a batch, and it has no replay | backed by the video only |
 | The agent's controller is run at 20 positions it never saw | `sim/hidden.py`, `LIVE` `runs.*.n_hidden` | backed |
+| Lessons work card: "Fool rate: the share of agents whose reported score is inflated, more than 8 points above what they really score on a hidden test." | `config.inflation_threshold = 0.08`; `deep_research/scoring.py` labels a run `inflated` over it | backed (definition) |
+| "12 of 12 fooled without the lesson → 0 of 12 with it" | `FR` rows; `NONE`, `LRN` | backed |
+| "Same task, same model, same trap. The only difference was one lesson, written by Orro's investigator and approved by a person." | `NONE` and `LRN` configs differ only in `lessons`; `SKILL` | backed |
+| The lesson's gist: "Before the train/test split, remove near-duplicate rows, not only exact copies." | A short form of the rule in `SKILL` | backed |
+| Footnote: "12 runs per setting, one trap (near-duplicate rows). 95% intervals: 76–100% without the lesson, 0–24% with it. Batches f331 and b0a7." | `FR` `n_per_setting 12`, `rows[*].ci95`, `rows[*].batch_id` | backed |
+| The footer's "Lessons" link opens `#/lessons`, which shows `FR` without keys | `FR` and its batches are fixtures (`GET /api/foolrate`, `foolrate.reports`) | backed |
 
 ## How it works page (`web/src/batch/how.ts`)
 
@@ -133,6 +182,18 @@ page states is the 6.4 running score.
 | Stop 5, "Score: 1 x 1.9 x 1.9 x 1.9 x 1.9 = 13.03", "13.03 of 20", open | `LIVE` `verdict.evidence`: `rule running_score`, `score 13.0321`, `needed_score 20`, `level open` | backed |
 | "Each pair that goes the predicted way multiplies a score by 1.9, and each one that does not by 0.1. At 20 the verdict may name a cause; a suspect still under 1 after five pairs is cleared" | `deep_research/evidence.py`, `web/src/batch/evidence.ts` | backed |
 | The investigator's helpers: a step tagger, three lenses, a skeptic, and a code tracer where there is code to trace | `deep_research/agents/investigator.py`. The real robot recording predates the lenses and the skeptic: its investigator panel lists calls to the code tracer and the general-purpose helper only | backed as a description of the code, not of the batch the page shows |
+
+## Lessons work page (`#/lessons`, `web/src/batch/foolrate.ts`)
+
+It shows the newest real report (`FR`), never a simulated one when a real one is there (`pickReport`).
+
+| Claim | Backing | Status |
+| --- | --- | --- |
+| The fool rate's definition, as on the landing card | `config.inflation_threshold = 0.08` | backed (definition) |
+| "24 fresh analysts: 12 with the lesson as a Deep Agents skill and 12 without" | `FR` `rows[*].n` 12 and 12; `LRN` `runs.*.lessons.path = skills`; `NONE` `runs.*.lessons` null | backed |
+| The claims got honest, the models did not get better: true accuracy 79.1% without and 80.1% with; reported 91.0% and 78.7% | `NONE` and `LRN` `runs.*.true_accuracy`, `reported_accuracy` means (0.7911, 0.8009; 0.9099, 0.7871) | backed |
+| The lesson's name, rule and source batch | `SKILL` (`lessons.approved`); the source link opens `fixtures/tabular-time-travel-investigation`, the recording of `1115-033734-e892` | backed |
+| Arms, intervals, n and spend | `FR` rows; spend from `NONE` and `LRN` `costs` | backed |
 
 ## Not claimed anywhere, and not run
 

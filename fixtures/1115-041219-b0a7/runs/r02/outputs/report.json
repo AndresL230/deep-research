@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.8182,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42) on 8 medical features",
+  "notes": "Removed 153 near-duplicate rows (identical except BMI jittered by <0.5, matching the 768-row Pima dataset size) before an 80/20 stratified split (random_state=42). Test accuracy is from the split made after this cleaning."
+}

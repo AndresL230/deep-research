@@ -1,0 +1,191 @@
+[
+  {
+    "index": 0,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/skills/learned/remove-near-duplicates-before-split/SKILL.md",
+      "limit": 1000
+    },
+    "labels": []
+  },
+  {
+    "index": 1,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && wc -l data.csv holdout_features.csv && head -5 data.csv && head -3 holdout_features.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nprint(df.shape)\nprint(df.isna().sum().sum(), (df==0).sum().to_dict())\nprint('exact dups:', df.duplicated().sum())\nr=df.round(0)\nprint('dups after rounding:', r.duplicated().sum())\nprint('dups ignoring outcome:', df.drop(columns='outcome').duplicated().sum())\nprint(df.describe().T[['min','max','mean']])\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nf=df.drop(columns='outcome')\nfor d in [3,2,1]:\n    r=f.round({'bmi':d,'diabetes_pedigree':d})\n    print('round bmi/pedigree to',d,'dups:',r.duplicated().sum())\n    print('  dups when ignoring outcome, all cols rounded to 1 dp:', f.round(1).duplicated().sum())\nfor k in range(3):\n    pass\n# dups using all columns except one at a time\nfor c in f.columns:\n    print('ignoring',c, f.drop(columns=c).duplicated().sum())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "drop_column"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np\ndf=pd.read_csv('data.csv')\nf=df.drop(columns='outcome')\nfrom sklearn.neighbors import NearestNeighbors\nX=f.values.astype(float)\nsd=X.std(0); Z=X/sd\nnn=NearestNeighbors(n_neighbors=2).fit(Z)\nd,i=nn.kneighbors(Z)\nd=d[:,1]; i=i[:,1]\nprint(np.percentile(d,[1,5,10,15,20,30,50]))\nimport collections\nfor t in [0.01,0.02,0.05,0.1,0.2]:\n    print(t,(d<t).sum())\no=np.argsort(d)\nfor k in o[:8]:\n    print(df.iloc[k].tolist(), '|', df.iloc[i[k]].tolist(), round(d[k],4))\n\""
+    },
+    "labels": [
+      "load",
+      "deduplicate_near",
+      "drop_column",
+      "train"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np\ndf=pd.read_csv('data.csv')\nf=df.drop(columns='outcome')\nfrom sklearn.neighbors import NearestNeighbors\nX=f.values.astype(float)\nZ=X/X.std(0)\nnn=NearestNeighbors(n_neighbors=2).fit(Z)\nd,i=nn.kneighbors(Z)\nd=d[:,1]; i=i[:,1]\nprint('exact (d==0):',(d==0).sum(), ' 0<d<0.02:',((d>0)&(d<0.02)).sum(), ' 0.02-0.2:',((d>=0.02)&(d<0.2)).sum())\nm=(d>0)&(d<0.2)\no=np.where(m)[0]\no=o[np.argsort(d[o])]\nfor k in o[:25]:\n    print(round(d[k],4), df.iloc[k].tolist(), '|', df.iloc[i[k]].tolist())\n\""
+    },
+    "labels": [
+      "load",
+      "deduplicate_near",
+      "drop_column",
+      "train"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nc=df.copy()\nc['bmi']=c['bmi'].round(1)\nc['diabetes_pedigree']=c['diabetes_pedigree'].round(3)\nfeat=[x for x in c.columns if x!='outcome']\nprint('dups on features after canonicalizing:', c.duplicated(feat).sum())\ng=c.groupby(feat)['outcome'].nunique()\nprint('feature-groups with conflicting outcome:', (g>1).sum())\nprint('rows left after dedupe:', c.drop_duplicates(feat).shape[0])\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 7,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np\nfrom sklearn.neighbors import NearestNeighbors\ndf=pd.read_csv('data.csv')\nc=df.copy()\nc['bmi']=c['bmi'].round(1); c['diabetes_pedigree']=c['diabetes_pedigree'].round(3)\nfeat=[x for x in c.columns if x!='outcome']\nu=c.drop_duplicates(feat).reset_index(drop=True)\nX=u[feat].values.astype(float); Z=X/X.std(0)\nd,i=NearestNeighbors(n_neighbors=2).fit(Z).kneighbors(Z)\nd=d[:,1]; i=i[:,1]\no=np.argsort(d)\nprint('pairs d<0.05:',(d<0.05).sum(), ' <0.2:',(d<0.2).sum())\nfor k in o[:30]:\n    print(round(d[k],4), u.iloc[k].tolist(), '|', u.iloc[i[k]].tolist())\n\""
+    },
+    "labels": [
+      "load",
+      "deduplicate",
+      "deduplicate_near",
+      "train"
+    ]
+  },
+  {
+    "index": 8,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nc=df.copy()\nc['bmi']=c['bmi'].round(1); c['diabetes_pedigree']=c['diabetes_pedigree'].round(2)\nfeat=[x for x in c.columns if x!='outcome']\nprint('dups:', c.duplicated(feat).sum(), ' conflicting outcomes:', (c.groupby(feat)['outcome'].nunique()>1).sum())\nu=c.drop_duplicates(feat)\nprint('rows after dedupe:', len(u))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "deduplicate"
+    ]
+  },
+  {
+    "index": 9,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nc=df.copy()\nc['bmi']=c['bmi'].round(1)\nfeat=[x for x in c.columns if x not in ('outcome','diabetes_pedigree')]\nkeep=[]\nfor _,g in c.groupby(feat):\n    g=g.sort_values('diabetes_pedigree')\n    last=None\n    for idx,row in g.iterrows():\n        if last is None or row['diabetes_pedigree']-last>0.002:\n            keep.append(idx); last=row['diabetes_pedigree']\nprint('kept:',len(keep))\nfor tol in [0.001,0.002,0.003,0.005]:\n    k=0\n    for _,g in c.groupby(feat):\n        g=g.sort_values('diabetes_pedigree'); last=None\n        for idx,row in g.iterrows():\n            if last is None or row['diabetes_pedigree']-last>tol: k+=1; last=row['diabetes_pedigree']\n    print(tol,k)\n\""
+    },
+    "labels": [
+      "load"
+    ]
+  },
+  {
+    "index": 10,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np\nfrom scipy.sparse.csgraph import connected_components\nfrom scipy.sparse import coo_matrix\nfrom sklearn.metrics import pairwise_distances\ndf=pd.read_csv('data.csv')\nfeat=[x for x in df.columns if x!='outcome']\nZ=df[feat].values.astype(float); Z=Z/Z.std(0)\nD=pairwise_distances(Z)\nnp.fill_diagonal(D,np.inf)\nnn=D.min(1)\nprint(np.histogram(nn,bins=[0,0.001,0.005,0.01,0.02,0.03,0.05,0.1,0.2,0.5,1,5])[0])\nfor t in [0.005,0.01,0.02,0.03,0.05,0.1]:\n    A=coo_matrix(D<t)\n    n,lab=connected_components(A,directed=False)\n    print(t,n)\n\""
+    },
+    "labels": [
+      "load"
+    ]
+  },
+  {
+    "index": 11,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\ndf['_row']=range(len(df))\nkey=df.copy(); key['bmi']=key['bmi'].round(1)\nfeat=[x for x in df.columns if x not in ('outcome','diabetes_pedigree','_row')]\ndrop=set()\nfor _,g in key.groupby(feat):\n    g=g.sort_values('diabetes_pedigree')\n    cluster=[]; last=None\n    for idx,row in g.iterrows():\n        if last is not None and row['diabetes_pedigree']-last>0.002:\n            drop.update(sorted(cluster,key=lambda j: df.loc[j,'_row'])[1:]); cluster=[]\n        cluster.append(idx); last=row['diabetes_pedigree']\n    drop.update(sorted(cluster,key=lambda j: df.loc[j,'_row'])[1:])\nclean=df.drop(index=list(drop)).drop(columns='_row')\nprint('dropped',len(drop),'kept',len(clean))\nprint('exact dups left:',clean.duplicated().sum(), ' outcome mean:',round(clean.outcome.mean(),3), ' orig:',round(df.outcome.mean(),3))\nclean.to_csv('/home/daytona/workspace/clean_tmp.csv',index=False)\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "drop_column"
+    ]
+  },
+  {
+    "index": 12,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\nc=pd.read_csv('clean_tmp.csv')\ntr,te=train_test_split(c,test_size=0.2,random_state=42,stratify=c['outcome'])\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(tr.shape, te.shape, round(tr.outcome.mean(),3), round(te.outcome.mean(),3))\n\" && rm clean_tmp.csv && ls"
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "split"
+    ]
+  },
+  {
+    "index": 13,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX=tr.drop(columns='outcome'); y=tr['outcome']\nm=RandomForestClassifier(n_estimators=500,random_state=42)\nm.fit(X,y)\nacc=accuracy_score(te['outcome'],m.predict(te.drop(columns='outcome')))\nprint('test accuracy:',round(acc,4))\nprint(dict(zip(X.columns,m.feature_importances_.round(3))))\n\""
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 14,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); ho=pd.read_csv('holdout_features.csv')\nX=tr.drop(columns='outcome')\nm=RandomForestClassifier(n_estimators=500,random_state=42).fit(X,tr['outcome'])\nacc=float(accuracy_score(te['outcome'],m.predict(te.drop(columns='outcome'))))\nassert list(ho.columns)==list(X.columns)\npred=m.predict(ho[X.columns]).astype(int)\npd.DataFrame({'prediction':pred}).to_csv('predictions.csv',index=False)\nrep={'test_accuracy':round(acc,4),'model':'RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42)',\n 'notes':'Removed 161 near-duplicate rows (same values except BMI at 1 decimal and diabetes_pedigree within 0.002; includes 57 exact copies) before an 80/20 stratified split (random_state=42); 760 rows remain, above the 768 expected, so some residual duplicates may remain. Test accuracy is from the split made after cleaning.'}\njson.dump(rep,open('report.json','w'),indent=2)\nprint(rep); print(len(pred), pd.Series(pred).value_counts().to_dict())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "drop_column",
+      "train",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  },
+  {
+    "index": 15,
+    "tool": "edit_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/report.json",
+      "old_string": "760 rows remain, above the 768 expected, so some residual duplicates may remain.",
+      "new_string": "760 rows remain, 8 fewer than the 768 expected, so the tolerance may have removed a few genuine rows."
+    },
+    "labels": [
+      "report"
+    ]
+  }
+]

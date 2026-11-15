@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7561,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), default settings, 80/20 stratified split (random_state=42)",
+  "notes": "followup_score was removed from data.csv and holdout_features.csv before modelling (possible post-outcome leakage; the original file was overwritten without a backup). Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is."
+}

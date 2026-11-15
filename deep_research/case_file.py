@@ -122,7 +122,9 @@ VIEW_HIDDEN = frozenset({"hidden_results", "benchmarks", "overlap_share", "n_tes
 PRIVILEGED_CONFIG = frozenset({"hint_level", "seed"})
 # Top-level sections the plan keeps out of the view (MASTER_PLAN 6.2), when a case file has them. `split` stays in on
 # purpose (docs/PLAN_STATUS.md): the investigator is built around it and cutting it now could not be re-tested.
-VIEW_HIDDEN_SECTIONS = frozenset({"candidates", "audit"})
+# `foolrate` (cli foolrate, Phase 5.3) is the table a fool-rate batch is a row of: it names the trap's settings
+# (`trap.trap_noise`, `trap.trap_hidden_share`), so it is for the screens only.
+VIEW_HIDDEN_SECTIONS = frozenset({"candidates", "audit", "foolrate"})
 # The keys check_invariants.py and the blind-view test look for anywhere in what the investigator can read.
 BANNED_VIEW_KEYS = ("trap", "trap_strength", "trap_noise", "trap_info", "trap_hidden_share", "seed", "overlap_share",
                     "n_test_copies", "candidates", "audit", "hidden_results", "holdout_labels")

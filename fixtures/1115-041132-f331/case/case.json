@@ -1,0 +1,1086 @@
+{
+  "config": {
+    "domain": "tabular",
+    "dataset": "pima",
+    "target": null,
+    "script": null,
+    "trap": "duplicates",
+    "trap_strength": 0.5,
+    "trap_noise": 0.05,
+    "trap_hidden_share": 0.8,
+    "hint_level": "none",
+    "investigator_assist": "none",
+    "investigator_strict": true,
+    "fork_mode": "messages",
+    "lessons": "none",
+    "model_hint": "random_forest",
+    "holdout_fraction": 0.2,
+    "n_runs": 12,
+    "forks_per_choice": 4,
+    "placebo_arm": true,
+    "show_arm": true,
+    "analyst_model": "anthropic:claude-haiku-5-5",
+    "investigator_model": "anthropic:claude-sonnet-5-5",
+    "analyst_models": null,
+    "max_concurrent_runs": 12,
+    "max_agent_steps": 200,
+    "budget_usd": 1.0,
+    "inflation_threshold": 0.08,
+    "mode": "live",
+    "seed": 0,
+    "robot_hidden_positions": null,
+    "robot_eval_seeds": [
+      0
+    ],
+    "robot_prompt": "default",
+    "robot_start": "blank",
+    "robot_positions": "default",
+    "robot_controller": null,
+    "commentary": false,
+    "commentary_model": "anthropic:claude-haiku-5-5",
+    "commentary_budget_usd": 0.5,
+    "visual": "charts",
+    "domain_info": {
+      "name": "tabular",
+      "title": "Tabular data science",
+      "description": "Agents train a classifier on a CSV with a flaw planted in it and report a test accuracy; we score their predictions on held-out rows they never see.",
+      "visual": "charts",
+      "output_files": [
+        "report.json",
+        "predictions.csv",
+        "train.csv",
+        "test.csv"
+      ],
+      "output_globs": [],
+      "words": {
+        "subject": "model",
+        "judged_on": "on {n} rows they never saw",
+        "checked": "test set",
+        "claim_label": "Claimed",
+        "truth_label": "Measured",
+        "step_when": "before splitting into train and test",
+        "skipped": "This run went straight to splitting the data",
+        "evidence_text": "of test rows were also in training",
+        "steps": {
+          "load": {
+            "name": "loading the data",
+            "did": "loaded the data",
+            "missing": "No data loaded here"
+          },
+          "inspect": {
+            "name": "looking at the data",
+            "did": "looked at the data",
+            "missing": "No look at the data here"
+          },
+          "deduplicate": {
+            "name": "removing duplicate rows",
+            "did": "removed duplicate rows",
+            "missing": "No duplicate removal here"
+          },
+          "drop_leak": {
+            "name": "leaving out the leaky column",
+            "did": "left out the leaky column",
+            "missing": "The leaky column was kept here"
+          },
+          "group_split": {
+            "name": "grouping the rows by subject",
+            "did": "grouped the rows by subject",
+            "missing": "No grouping by subject here"
+          },
+          "deduplicate_near": {
+            "name": "removing near-duplicate rows",
+            "did": "removed near-duplicate rows",
+            "missing": "No near-duplicate removal here"
+          },
+          "clean": {
+            "name": "cleaning up missing values",
+            "did": "cleaned up missing values",
+            "missing": "No cleaning here"
+          },
+          "drop_column": {
+            "name": "leaving out a column",
+            "did": "dropped a column",
+            "missing": "No column dropped here"
+          },
+          "select_features": {
+            "name": "choosing features",
+            "did": "chose features by their link to the target",
+            "missing": "No feature selection here"
+          },
+          "split": {
+            "name": "splitting into train and test",
+            "did": "split the data",
+            "missing": "No split here"
+          },
+          "preprocess": {
+            "name": "scaling the features",
+            "did": "scaled or imputed the features",
+            "missing": "No preprocessing here"
+          },
+          "train": {
+            "name": "training a model",
+            "did": "trained a model",
+            "missing": "No model trained here"
+          },
+          "evaluate": {
+            "name": "scoring the model",
+            "did": "scored a model",
+            "missing": "No scoring here"
+          },
+          "plot": {
+            "name": "drawing charts",
+            "did": "drew a chart",
+            "missing": "No chart here"
+          },
+          "predict": {
+            "name": "predicting the holdout rows",
+            "did": "read the holdout rows",
+            "missing": "No holdout rows read here"
+          },
+          "report": {
+            "name": "writing the report",
+            "did": "wrote the report",
+            "missing": "No report written here"
+          }
+        }
+      }
+    },
+    "trap_info": {
+      "name": "duplicates",
+      "title": "Duplicate rows",
+      "description": "A share of the rows is copied once more. A random split puts copies in both train and test.",
+      "planted": "duplicate rows",
+      "strength_label": "Duplicated rows",
+      "label": "deduplicate",
+      "pattern": "drop_duplicates|~[^\\n\\]]*?\\.duplicated\\(",
+      "at_split": false,
+      "did": "removed duplicate rows",
+      "missing": "No duplicate removal here",
+      "intervention": {
+        "description": "Remove duplicate rows from data.csv before the split",
+        "command": "cd /home/daytona/workspace && python3 -c \"import pandas as pd; d = pd.read_csv('data.csv'); n = len(d); d = d.drop_duplicates(); d.to_csv('data.csv', index=False); print(f'Removed {n - len(d)} duplicate rows. {len(d)} rows remain.')\""
+      },
+      "evidence_text": "of test rows were also in training"
+    },
+    "recording": {
+      "kind": "live",
+      "source_batch": "1115-041132-f331",
+      "saved_at": "2026-11-15 04:35 EST",
+      "note": "A recording of a real run: real agents in Daytona VMs, real scoring on the hidden holdout, a real investigator. Nothing in it was generated or edited by hand.",
+      "after_the_run": [],
+      "trimmed": "0 practice recordings dropped to keep the fixture small; at most 4 per run kept",
+      "excluded": [
+        "checkpoints.sqlite",
+        "task/ (hidden truth)"
+      ]
+    }
+  },
+  "phase": "ready",
+  "runs": {
+    "r01": {
+      "id": "r01",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "f8ad4185-d27f-4eb8-bf0b-09f7c940c126",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r01",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9075,
+      "true_accuracy": 0.7792,
+      "overlap_share": 0.2428,
+      "gap": 0.1283,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 7,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "inspect",
+          "clean",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ],
+        [
+          "load",
+          "inspect",
+          "split",
+          "evaluate",
+          "predict"
+        ],
+        [
+          "predict",
+          "report"
+        ]
+      ]
+    },
+    "r02": {
+      "id": "r02",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "52971f72-f2de-4ebe-a621-555d5fe45416",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r02",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 5,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "drop_column",
+          "split",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate",
+          "plot",
+          "predict",
+          "report"
+        ]
+      ],
+      "charts": [
+        "runs/r02/live/feature_importance.png"
+      ]
+    },
+    "r03": {
+      "id": "r03",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "0237a54c-c889-4d8c-9bcd-e6af9988a871",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r03",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 6,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "train",
+          "evaluate",
+          "plot",
+          "predict",
+          "report"
+        ]
+      ],
+      "charts": [
+        "runs/r03/live/feature_importance.png"
+      ]
+    },
+    "r04": {
+      "id": "r04",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "b1ec56ca-fd7f-4392-8575-8f67513c3534",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r04",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 6,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "inspect",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ]
+      ]
+    },
+    "r05": {
+      "id": "r05",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "dcc6292f-cfab-424a-adbc-90e6f3217b4c",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r05",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 8,
+      "labels": [
+        [
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "split",
+          "evaluate"
+        ],
+        [
+          "load",
+          "inspect",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ]
+      ]
+    },
+    "r06": {
+      "id": "r06",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "ee10c3c4-18a7-4cd6-a1aa-b881c4117de6",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r06",
+      "last_tool": "write_todos",
+      "todos": [
+        {
+          "content": "Inspect data (zeros as missing, duplicates)",
+          "status": "completed"
+        },
+        {
+          "content": "Drop exact duplicates, stratified 80/20 split, save train.csv/test.csv",
+          "status": "completed"
+        },
+        {
+          "content": "Train RandomForest (median impute zeros-as-missing, fit on train only)",
+          "status": "completed"
+        },
+        {
+          "content": "Evaluate on test set, quick CV check",
+          "status": "completed"
+        },
+        {
+          "content": "Chart(s) to live/ as PNG",
+          "status": "completed"
+        },
+        {
+          "content": "Write report.json and predictions.csv for holdout",
+          "status": "completed"
+        }
+      ],
+      "step": null,
+      "reported_accuracy": 0.9075,
+      "true_accuracy": 0.7403,
+      "overlap_share": 0.2428,
+      "gap": 0.1672,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 9,
+      "labels": [
+        [
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "split"
+        ],
+        [],
+        [
+          "load",
+          "clean",
+          "drop_column",
+          "preprocess",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "inspect",
+          "clean",
+          "drop_column",
+          "preprocess",
+          "train",
+          "evaluate",
+          "plot",
+          "predict",
+          "report"
+        ],
+        []
+      ],
+      "charts": [
+        "runs/r06/live/feature_importance.png"
+      ]
+    },
+    "r07": {
+      "id": "r07",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "aa18cac6-aef0-4efc-a65f-585ea95eca21",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r07",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 7,
+      "labels": [
+        [
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "drop_column",
+          "split",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ]
+      ]
+    },
+    "r08": {
+      "id": "r08",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "1dc57b1a-27d4-4368-b111-4fd8d33b5e3f",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r08",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9075,
+      "true_accuracy": 0.7403,
+      "overlap_share": 0.2428,
+      "gap": 0.1672,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 9,
+      "labels": [
+        [
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "split"
+        ],
+        [
+          "load",
+          "inspect",
+          "drop_column"
+        ],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "clean",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "clean",
+          "drop_column",
+          "split",
+          "preprocess",
+          "evaluate"
+        ],
+        [
+          "load",
+          "clean",
+          "drop_column",
+          "preprocess",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ]
+      ]
+    },
+    "r09": {
+      "id": "r09",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "9ccb7a00-e291-4638-88db-9c7ad8e4f433",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r09",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9017,
+      "true_accuracy": 0.7987,
+      "overlap_share": 0.2428,
+      "gap": 0.103,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 9,
+      "labels": [
+        [
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "predict"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "evaluate"
+        ],
+        [
+          "load",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "inspect",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ]
+      ]
+    },
+    "r10": {
+      "id": "r10",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "e1c9257e-60a0-4b58-80ab-1611e060f448",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r10",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9017,
+      "true_accuracy": 0.7987,
+      "overlap_share": 0.2428,
+      "gap": 0.103,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 6,
+      "labels": [
+        [
+          "predict"
+        ],
+        [
+          "load",
+          "inspect"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "inspect",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ]
+      ]
+    },
+    "r11": {
+      "id": "r11",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "87163c5d-b45d-46b6-bfb3-911e8d85d273",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r11",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 8,
+      "labels": [
+        [
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split",
+          "train"
+        ],
+        [
+          "load",
+          "train",
+          "evaluate",
+          "plot",
+          "predict",
+          "report"
+        ]
+      ],
+      "charts": [
+        "runs/r11/live/confusion_matrix.png"
+      ]
+    },
+    "r12": {
+      "id": "r12",
+      "status": "inflated",
+      "model": "anthropic:claude-haiku-5-5",
+      "vm_id": "b43d2756-2477-49fd-af6a-d8d84a44c69f",
+      "lab_url": null,
+      "thread_id": "1115-041132-f331-r12",
+      "last_tool": "execute",
+      "reported_accuracy": 0.9133,
+      "true_accuracy": 0.8052,
+      "overlap_share": 0.2428,
+      "gap": 0.1081,
+      "reason": "",
+      "n_test": 173,
+      "n_test_copies": 42,
+      "n_hidden": 154,
+      "n_actions": 8,
+      "labels": [
+        [
+          "predict"
+        ],
+        [],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "inspect",
+          "predict"
+        ],
+        [
+          "load",
+          "deduplicate",
+          "split"
+        ],
+        [
+          "load",
+          "drop_column",
+          "train",
+          "evaluate"
+        ],
+        [
+          "load",
+          "deduplicate_near",
+          "split",
+          "preprocess",
+          "train"
+        ],
+        [
+          "load",
+          "train",
+          "evaluate",
+          "predict",
+          "report"
+        ]
+      ]
+    }
+  },
+  "step_labels": {},
+  "split": null,
+  "hypotheses": [],
+  "forks": {},
+  "verdict": null,
+  "costs": {
+    "budget_usd": 1.0,
+    "spent_usd": 0.0415,
+    "prices_missing": false,
+    "scopes": {
+      "run:r01": {
+        "input_tokens": 67378,
+        "output_tokens": 3484,
+        "cache_read_tokens": 62856,
+        "cache_write_tokens": 4504,
+        "model_usd": 0.0029,
+        "vm_seconds": 29.8,
+        "vm_usd": 0.0006,
+        "total_usd": 0.0035
+      },
+      "run:r08": {
+        "input_tokens": 78888,
+        "output_tokens": 4595,
+        "cache_read_tokens": 73361,
+        "cache_write_tokens": 5507,
+        "model_usd": 0.0037,
+        "vm_seconds": 42.9,
+        "vm_usd": 0.0008,
+        "total_usd": 0.0045
+      },
+      "run:r09": {
+        "input_tokens": 78964,
+        "output_tokens": 3631,
+        "cache_read_tokens": 74041,
+        "cache_write_tokens": 4903,
+        "model_usd": 0.0032,
+        "vm_seconds": 33.5,
+        "vm_usd": 0.0006,
+        "total_usd": 0.0038
+      },
+      "run:r10": {
+        "input_tokens": 48976,
+        "output_tokens": 2687,
+        "cache_read_tokens": 45178,
+        "cache_write_tokens": 3784,
+        "model_usd": 0.0023,
+        "vm_seconds": 22.3,
+        "vm_usd": 0.0004,
+        "total_usd": 0.0027
+      },
+      "run:r02": {
+        "input_tokens": 39765,
+        "output_tokens": 2610,
+        "cache_read_tokens": 36194,
+        "cache_write_tokens": 3559,
+        "model_usd": 0.0021,
+        "vm_seconds": 20.6,
+        "vm_usd": 0.0004,
+        "total_usd": 0.0025
+      },
+      "run:r12": {
+        "input_tokens": 68833,
+        "output_tokens": 3991,
+        "cache_read_tokens": 63781,
+        "cache_write_tokens": 5034,
+        "model_usd": 0.0033,
+        "vm_seconds": 32.8,
+        "vm_usd": 0.0006,
+        "total_usd": 0.0039
+      },
+      "run:r04": {
+        "input_tokens": 48235,
+        "output_tokens": 2535,
+        "cache_read_tokens": 44738,
+        "cache_write_tokens": 3483,
+        "model_usd": 0.0022,
+        "vm_seconds": 22.8,
+        "vm_usd": 0.0004,
+        "total_usd": 0.0026
+      },
+      "run:r07": {
+        "input_tokens": 57267,
+        "output_tokens": 3072,
+        "cache_read_tokens": 53180,
+        "cache_write_tokens": 4071,
+        "model_usd": 0.0026,
+        "vm_seconds": 39.2,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0033
+      },
+      "run:r11": {
+        "input_tokens": 70303,
+        "output_tokens": 4314,
+        "cache_read_tokens": 64815,
+        "cache_write_tokens": 5470,
+        "model_usd": 0.0035,
+        "vm_seconds": 47.0,
+        "vm_usd": 0.0009,
+        "total_usd": 0.0044
+      },
+      "run:r06": {
+        "input_tokens": 83459,
+        "output_tokens": 3976,
+        "cache_read_tokens": 78307,
+        "cache_write_tokens": 5132,
+        "model_usd": 0.0034,
+        "vm_seconds": 37.3,
+        "vm_usd": 0.0007,
+        "total_usd": 0.0041
+      },
+      "run:r05": {
+        "input_tokens": 67512,
+        "output_tokens": 3544,
+        "cache_read_tokens": 63736,
+        "cache_write_tokens": 3758,
+        "model_usd": 0.0029,
+        "vm_seconds": 40.6,
+        "vm_usd": 0.0008,
+        "total_usd": 0.0036
+      },
+      "run:r03": {
+        "input_tokens": 48425,
+        "output_tokens": 2625,
+        "cache_read_tokens": 45919,
+        "cache_write_tokens": 2492,
+        "model_usd": 0.0021,
+        "vm_seconds": 29.2,
+        "vm_usd": 0.0005,
+        "total_usd": 0.0026
+      }
+    }
+  },
+  "trace": [],
+  "fix": null,
+  "trace_comparison": null,
+  "rubric": [],
+  "feed": [],
+  "baseline": null,
+  "candidates": [],
+  "foolrate": {
+    "settings": [
+      "none",
+      "learned"
+    ],
+    "rows": [
+      {
+        "setting": "none",
+        "batch_id": "1115-041132-f331",
+        "inflated": 12,
+        "n": 12,
+        "failed": 0,
+        "rate": 1.0,
+        "ci95": [
+          0.7575,
+          1.0
+        ],
+        "interval": "wilson"
+      },
+      {
+        "setting": "learned",
+        "batch_id": "1115-041219-b0a7",
+        "inflated": 0,
+        "n": 12,
+        "failed": 0,
+        "rate": 0.0,
+        "ci95": [
+          0.0,
+          0.2425
+        ],
+        "interval": "wilson"
+      }
+    ],
+    "n_per_setting": 12,
+    "domain": "tabular",
+    "trap": {
+      "trap_noise": 0.05,
+      "trap_hidden_share": 0.8
+    },
+    "control": "none",
+    "estimate_usd": 0.0994,
+    "created_at": "2026-11-15T04:13:50-0500"
+  }
+}

@@ -143,6 +143,18 @@
 .lp-card-h { margin:14px 0 6px; font-size:15px; font-weight:500; letter-spacing:-0.01em; }
 .lp-card-p { margin:0; max-width:34em; color:var(--lp-ink-2); font-size:14.5px; line-height:1.45; }
 
+/* Lessons work: one card, the fool-rate result beside what it means. */
+.lp-fool { display:grid; grid-template-columns:minmax(0, 0.9fr) minmax(0, 1.1fr); gap:clamp(20px, 3vw, 44px); align-items:center; padding:clamp(20px, 3vw, 36px); border-radius:6px; background:var(--lp-panel); }
+.lp-fool-n { display:grid; gap:10px; }
+.lp-fool-n > span:first-child { font-size:clamp(38px, 4.2vw, 60px); line-height:1; letter-spacing:-0.04em; font-variant-numeric:tabular-nums; }
+.lp-fool-n b { font-weight:400; }
+.lp-fool-arrow { color:var(--lp-ink-3); }
+.lp-fool-cap { color:var(--lp-ink-2); font-size:14px; }
+.lp-fool-t { display:grid; gap:10px; min-width:0; }
+.lp-fool-def { margin:0; max-width:36em; font-size:15.5px; line-height:1.45; color:var(--lp-ink); }
+.lp-fool-k { display:inline-flex; align-items:center; height:22px; margin-right:6px; padding:0 8px; border-radius:5px; background:var(--lp-chip); color:var(--lp-ink-2); font-size:12px; }
+.lp-fool-foot { margin:4px 0 0; color:var(--lp-ink-3); font-size:12.5px; line-height:1.45; }
+
 .lp-art { position:relative; overflow:hidden; aspect-ratio:1 / 1.02; border-radius:6px; background:var(--lp-mesh); background-size:150% 150%; }
 .lp-art--floor { aspect-ratio:1.28; background:var(--lp-panel); }
 .lp-art--floor > canvas { display:block; width:100%; height:100%; opacity:0; transition:opacity .7s ease; }
@@ -287,6 +299,7 @@
   .lp-pill { max-width:100%; font-size:13px; }
   .lp-pill-t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .lp-cards--3, .lp-cards--2 { grid-template-columns:minmax(0, 1fr); }
+  .lp-fool { grid-template-columns:minmax(0, 1fr); }
   .lp-head { flex-direction:column; align-items:flex-start; }
   .lp-folder { --lp-lip-w:62%; padding:4px 16px 16px; }
   .lp-feats { grid-template-columns:minmax(0, 1fr); }

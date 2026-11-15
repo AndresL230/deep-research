@@ -313,6 +313,9 @@ const START = {
   tip: "Start here.",
 };
 
+/** Under the verdict stop: what comes after a verdict, and where to see whether it worked (#/lessons). */
+export const HOW_LESSON_LINE = `<p class="hw-p hw-then"><a class="hw-then-a" href="${attr(routeHash({ name: "lessons" }))}">Then Orro writes a lesson; the fool rate shows whether it works.</a></p>`;
+
 /** How many stops the tour has: the steps, then the way on. */
 export const HOW_STOPS = HOW_STEPS.length + 1;
 /** The stop a number names, kept inside the tour. */
@@ -405,6 +408,7 @@ export function howView(demo: Loadable<CaseFile>, at = 0): string {
     + `<div class="hw-stop-l" data-morph-key="how:text:${s ? s.key : START.key}">`
     + `<p class="hw-count">${i + 1} of ${HOW_STOPS}</p>`
     + `<h2 class="hw-h">${esc(s ? s.title : START.title)}</h2><p class="hw-p">${esc(s ? s.text : START.text)}</p>`
+    + (s?.key === "verdict" ? HOW_LESSON_LINE : "")
     + `<div class="hw-nav">${back}${next}</div></div>`
     + stage
     + `</div>`
