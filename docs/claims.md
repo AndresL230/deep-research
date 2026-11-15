@@ -136,7 +136,6 @@ page states is the 6.4 running score.
 | Stop 5, "Score: 1 x 1.9 x 1.9 x 1.9 x 1.9 = 13.03", "13.03 of 20", open | `LIVE` `verdict.evidence`: `rule running_score`, `score 13.0321`, `needed_score 20`, `level open` | backed |
 | "Each pair that goes the predicted way multiplies a score by 1.9, and each one that does not by 0.1. At 20 the verdict may name a cause; a suspect still under 1 after five pairs is cleared" | `deep_research/evidence.py`, `web/src/batch/evidence.ts` | backed |
 | The investigator's helpers: a step tagger, three lenses, a skeptic, and a code tracer where there is code to trace | `deep_research/agents/investigator.py`. The real robot recording predates the lenses and the skeptic: its investigator panel lists calls to the code tracer and the general-purpose helper only | backed as a description of the code, not of the batch the page shows |
-| The last stop's moving dots | Drawn from `LIVE`: one dot per run in the colour of its status, sparks in proportion to each inflated run's gap, and r06 splitting into its four scored pairs (`web/src/batch/how-fx.ts`) | backed |
 
 ## Not claimed anywhere, and not run
 

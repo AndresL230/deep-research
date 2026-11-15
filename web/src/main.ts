@@ -58,12 +58,12 @@ import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, isRunPanel, logView, runSummaryView, taskText, togglePanel, type RunPanel } from "./batch/run";
 import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule } from "./batch/replay";
 import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook";
-import { fetchCosts, type CostReport } from "./api";
+import { fetchCosts, fetchFoolrate, type CostReport, type FoolrateReport } from "./api";
+import { foolrateView } from "./batch/foolrate";
 import type { Loadable } from "./batch/model";
 import { costsView } from "./batch/costs";
 import { HOW_BATCH, firstVisitRedirect, howSeen, howStop, howView } from "./batch/how";
 import { placeHowTour } from "./batch/tour";
-import { syncHowFx } from "./batch/how-fx";
 import { landingView } from "./landing/landing";
 import { syncLanding } from "./landing/mount";
 import { syncMotion } from "./motion";
@@ -116,6 +116,8 @@ interface AppState {
   runChart: number;
   /** The cost screen's report (GET /api/costs), loaded again on every visit. */
   costs: Loadable<CostReport>;
+  /** The fool-rate reports (GET /api/foolrate), for "Lessons work" and the link on a batch's Lessons block. */
+  foolrate: Loadable<FoolrateReport[]>;
   /** The robot demo's case file, for the How it works page's pictures (batch/how.ts). */
   how: Loadable<CaseFile>;
   /** How it works: the tour's stop on screen (batch/how.ts `howView`). Back to the first on every visit. */
@@ -150,6 +152,7 @@ const S: AppState = {
   runPanel: null,
   runChart: 0,
   costs: { state: "loading" },
+  foolrate: { state: "loading" },
   how: { state: "loading" },
   howAt: 0,
   costsBack: { name: "home" },
@@ -304,6 +307,7 @@ function batchVm(b: BatchState, full: CaseFile): BatchVm {
     open: S.foldsFor === b.id ? S.folds : {},
     role: roleOf(S.access),
     pairs: S.pairsFor === pendingKey(b.id, c) ? S.pairs : null,
+    foolrate: S.foolrate.state === "ready" ? S.foolrate.value : undefined,
   };
 }
 
@@ -462,6 +466,7 @@ function render(): void {
   else if (r.name === "home") body = homeView(S.home, roleOf(S.access));
   else if (r.name === "how") body = howView(S.how, S.howAt);
   else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
+  else if (r.name === "lessons") body = foolrateView({ reports: S.foolrate, at: r.report ?? null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
   else if (!vm) body = messageView("loading", "Opening the batch", "Loading its case file and event logs…");
   else if (r.name === "batch") body = batchBody(vm, r.step ?? "wall");
@@ -532,14 +537,12 @@ function scrollHome(): void {
  *  once the fonts and the picture have settled, and whenever the window changes size. */
 let tourSettle = 0;
 function placeTour(): void {
-  // The last stop's moving recap (batch/how-fx.ts) starts and stops with its canvas, on any route.
-  if (S.route.name !== "how") { syncHowFx(scrollEl); return; }
-  const place = (): void => { placeHowTour(scrollEl); syncHowFx(scrollEl); };
-  place();
+  if (S.route.name !== "how") return;
+  placeHowTour(scrollEl);
   clearTimeout(tourSettle);
-  tourSettle = window.setTimeout(() => { if (S.route.name === "how") place(); }, 450);
+  tourSettle = window.setTimeout(() => { if (S.route.name === "how") placeHowTour(scrollEl); }, 450);
 }
-window.addEventListener("resize", () => { if (S.route.name === "how") { placeHowTour(scrollEl); syncHowFx(scrollEl); } });
+window.addEventListener("resize", () => { if (S.route.name === "how") placeHowTour(scrollEl); });
 
 let ticker: ReturnType<typeof setInterval> | null = null;
 /** An element to focus once the next paint is in (a row's Start once its confirm opens, say), as a selector. */
@@ -882,6 +885,20 @@ async function start(): Promise<void> {
 
 // ── the cost screen ──────────────────────────────────────────────────────────
 
+// ── the fool rate ("Lessons work") ───────────────────────────────────────────
+
+let foolrateSeq = 0;
+async function loadFoolrate(): Promise<void> {
+  const seq = ++foolrateSeq;
+  try {
+    const value = await fetchFoolrate();
+    if (seq === foolrateSeq) S.foolrate = { state: "ready", value };
+  } catch (e) {
+    if (seq === foolrateSeq && S.foolrate.state !== "ready") S.foolrate = { state: "error", message: message(e, "Couldn't load the fool-rate runs.") };
+  }
+  paint();
+}
+
 let costsSeq = 0;
 async function loadCosts(): Promise<void> {
   const seq = ++costsSeq;
@@ -1099,7 +1116,11 @@ function onRoute(): void {
     if (prev.name !== "costs") S.costsBack = prev;
     closeBatch();
     void loadCosts();
+  } else if (r.name === "lessons") {
+    closeBatch();
+    void loadFoolrate();
   } else {
+    if (S.foolrate.state !== "ready") void loadFoolrate();
     openBatch(r.id);
     const b = S.batch;
     if (b?.live && b.full) void loadLiveLogs(b);
@@ -1212,6 +1233,16 @@ root.addEventListener("click", (e) => {
       // The button says whether its fold is open now, whatever made it so (its default, or an earlier click).
       const was = el.getAttribute("aria-expanded") === "true";
       S.folds = { ...(S.foldsFor === b.id ? S.folds : {}), [arg]: !was };
+      S.foldsFor = b.id;
+      paint();
+      return;
+    }
+    case ACT.pick: {
+      if (!b) return;
+      // One of a group: every other key of the group ("dx-run:") is forgotten, so exactly one is on.
+      const group = arg.slice(0, arg.indexOf(":") + 1);
+      const kept = Object.entries(S.foldsFor === b.id ? S.folds : {}).filter(([k]) => !group || !k.startsWith(group));
+      S.folds = { ...Object.fromEntries(kept), [arg]: true };
       S.foldsFor = b.id;
       paint();
       return;
