@@ -5,6 +5,7 @@
   "scripts": {
     "deploy": "cd ../web && npm run build && cd ../gateway && wrangler deploy",
     "migrate": "wrangler d1 migrations apply orro-gateway --remote",
+    "test": "node --test 'test/*.test.ts'",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
