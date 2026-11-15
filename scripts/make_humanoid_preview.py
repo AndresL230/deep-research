@@ -17,7 +17,8 @@ says `"simulated": true`, so the page says so and the batch can never be investi
 
 Run from the repo root (the sim needs mujoco and the G1 model, `python -m sim.g1.fetch_assets`):
 
-    uv run python scripts/make_humanoid_preview.py
+    uv run python scripts/make_humanoid_preview.py              # batches/humanoid-preview, on this machine only
+    uv run python scripts/make_humanoid_preview.py --fixture    # fixtures/humanoid-demo-batch, the committed demo
 """
 
 from __future__ import annotations
@@ -66,13 +67,18 @@ def controller_text(name: str) -> str:
     return text.replace(text[text.index("KICK_BELOW = 0.72"):].splitlines()[0], off)
 
 
+FIXTURE_ID = "humanoid-demo-batch"
+
+
 def main() -> None:
     from deep_research import hub
     from deep_research.batch import Batch
-    from deep_research.config import BATCHES_DIR, BatchConfig
+    from deep_research.config import BATCHES_DIR, FIXTURES_DIR, BatchConfig
     from sim.g1.evaluate import evaluate
 
     hub.pusher = lambda: None  # a preview never leaves this machine
+    fixture = "--fixture" in sys.argv[1:]
+    BATCHES_DIR, BATCH_ID = (FIXTURES_DIR, FIXTURE_ID) if fixture else (BATCHES_DIR, globals()["BATCH_ID"])  # noqa: N806
     out = BATCHES_DIR / BATCH_ID
     if out.exists():
         shutil.rmtree(out)

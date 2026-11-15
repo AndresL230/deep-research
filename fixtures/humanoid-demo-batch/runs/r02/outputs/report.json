@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 5,
+  "notes": "Scripted preview, no agent: 5 of 5 episodes struck the bag and stayed standing, with the baseline: a punch for a high bag, a kick for a low one: the practice bag 5 times."
+}
