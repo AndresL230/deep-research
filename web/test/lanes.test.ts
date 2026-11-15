@@ -10,7 +10,7 @@ import robotCaseRaw from "../../fixtures/robot-demo-batch/case/case.json?raw";
 import type { AgentEvent, CaseFile, ForkExperiment, PendingForks, ProposedFix, RunRecord, SplitFinding, StepLabel, TraceEntry } from "../src/api";
 import {
   armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, diagnosisView, eventLine, fixSummaryText, fixTestedText, fixMeasuredText, fixView,
-  forkView, investigatorView, isProblemPhase, lineWindows,
+  forkMode, forkView, investigatorView, isProblemPhase, lineWindows, rewindText, timeTravelTag,
   phaseText, pickRuns, planCells, scoreStats, selfCheckText, shortArgs, sortedChildren, splitCounts, splitHeadline,
   splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictLine, verdictSplit, verdictView, stepRows,
 } from "../src/batch/lanes";
@@ -1326,5 +1326,92 @@ describe("copy", () => {
       fixView(vmOf({ forks: { f2: fixFork }, fix: { ...proposedFix, fork_id: "f2", status: "tested" } })),
     ].join("");
     expect(all).not.toContain(String.fromCharCode(0x2014));
+  });
+});
+
+// ── how the copies were rewound: LangGraph time travel from a checkpoint, or a fresh analyst on the run's messages ──
+
+describe("the fork's rewind line", () => {
+  const CP = "1f1e0c93-0e8b-6046-8007-4da8a18e0cd7";
+  const real = { config: { ...demo.config, simulated: false } as CaseFile["config"], costs: { ...demo.costs, simulated: false } };
+  const base = (over: Partial<ForkExperiment> = {}): ForkExperiment => {
+    const f = structuredClone(demo.forks.f1) as ForkExperiment;
+    for (const k of Object.values(f.children)) k.how = "replay";
+    return { ...f, ...over };
+  };
+  const checkpoint = base({
+    fork_mode: "checkpoint", fork_mode_requested: "checkpoint", fork_mode_fallback: null,
+    restore: { agent_state: "checkpoint", vm: "replay" }, checkpoint_id: CP, source_thread_id: "demo-r02",
+  });
+  const fallback = base({
+    fork_mode: "messages", fork_mode_requested: "checkpoint", fork_mode_fallback: "the source run saved no checkpoint at action 3",
+    restore: { agent_state: "messages", vm: "replay" }, checkpoint_id: null, source_thread_id: "demo-r02",
+  });
+  const messagesText = "Each copy starts a fresh analyst from a copy of r02's message history, on a machine rebuilt by replaying its first 3 actions.";
+  /** The experiments table, alone. */
+  const table = (html: string): string => html.slice(html.indexOf('class="ln-xt"'), html.indexOf("</table>"));
+
+  it("checkpoint mode: the copies resume the analyst's saved state by LangGraph time travel, and say so with a tag", () => {
+    expect(forkMode(checkpoint)).toBe("checkpoint");
+    expect(rewindText(checkpoint)).toBe(
+      "Rewound with LangGraph time travel: each copy resumes the analyst's saved state (its messages and plan) from checkpoint " +
+      `<code title="${CP}">1f1e0c93…</code> of run r02, and its machine is rebuilt by replaying the run's first 3 actions.`,
+    );
+    const html = forkView(vmOf({ ...real, forks: { f1: checkpoint } }, { events: demoLogs }));
+    expect(html).toContain(`<p class="ln-src-how ln-rewind">${timeTravelTag(checkpoint)}<span>Rewound with LangGraph time travel`);
+    expect(timeTravelTag(checkpoint)).toContain(">Time travel</span>");
+    // The provenance says the analyst resumed, never that a fresh one continued.
+    expect(html).toContain("resumed from its LangGraph checkpoint.");
+    expect(html).toContain("analyst Deep Agents resumed from LangGraph checkpoint 1f1e0c93… of r02;");
+    expect(html).toContain("forks.f1.checkpoint_id");
+    expect(html).not.toContain("a fresh analyst Deep Agent");
+    expect(html).not.toContain("fresh analyst Deep Agents continued");
+  });
+
+  it("messages mode: a fresh analyst on a copy of the run's messages, and a fork with no mode reads as messages", () => {
+    const old = base();
+    expect(old.fork_mode).toBeUndefined();
+    expect(forkMode(old)).toBe("messages");
+    expect(rewindText(old)).toBe(messagesText);
+    expect(rewindText(base({ fork_mode: "messages", restore: { agent_state: "messages", vm: "replay" } }))).toBe(messagesText);
+    // Copies that were copy-on-write forks of the replayed base say so.
+    expect(rewindText(structuredClone(demo.forks.f1) as ForkExperiment)).toBe(
+      "Each copy starts a fresh analyst from a copy of r02's message history, on a copy-on-write fork of a machine that replayed its first 3 actions.",
+    );
+    expect(timeTravelTag(old)).toBe("");
+    const html = forkView(vmOf({ ...real, forks: { f1: old } }, { events: demoLogs }));
+    expect(html).toContain(messagesText);
+    expect(html).not.toContain("Time travel");
+    expect(html).toContain("continued from a copy of the run's messages.");
+    expect(html).toContain("fresh analyst Deep Agents continued from copies of r02&#39;s messages;");
+  });
+
+  it("a fallback: checkpoint mode was asked for, messages mode was used, and the page gives the reason", () => {
+    expect(forkMode(fallback)).toBe("messages");
+    expect(rewindText(fallback)).toBe(`${messagesText} LangGraph time travel was asked for but not used: the source run saved no checkpoint at action 3.`);
+    expect(rewindText({ ...fallback, fork_mode_fallback: null })).toContain("asked for but not used: no reason was recorded.");
+    const html = forkView(vmOf({ ...real, forks: { f1: fallback } }, { events: demoLogs }));
+    expect(html).toContain("LangGraph time travel was asked for but not used: the source run saved no checkpoint at action 3.");
+    expect(html).not.toContain(">Time travel<");
+  });
+
+  it("tags only the checkpoint-mode experiments in the experiments table", () => {
+    const html = forkView(vmOf({ ...real, forks: { f1: checkpoint, f2: { ...fallback, id: "f2" }, f3: { ...base(), id: "f3" } } }));
+    const t = table(html);
+    expect(count(t, '<tr data-morph-key="cmp-')).toBe(3);
+    expect(count(t, ">Time travel<")).toBe(1);
+    expect(t).toMatch(/<span class="ln-xt-id">f1<\/span><span class="ln-tag ln-tt"/);
+  });
+
+  it("renders a same-against-same control fork, which tests no step and so has no label", () => {
+    const control = { ...checkpoint, id: "f2", change: "control", change_kind: "control" } as ForkExperiment;
+    delete (control as Partial<ForkExperiment>).label;
+    const html = forkView(vmOf({ ...real, forks: { f1: checkpoint, f2: control } }, { events: demoLogs }));
+    expect(html).toContain("Step under test: <b class=\"ln-lit-word\" title=\"\">no change</b>.");
+  });
+
+  it("a fix fork has no rewind line", () => {
+    const html = forkView(vmOf({ forks: { f2: { ...fixFork, fork_mode: "checkpoint", checkpoint_id: CP } }, fix: proposedFix }));
+    expect(html).not.toContain("ln-rewind");
   });
 });

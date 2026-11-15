@@ -7,7 +7,7 @@
 import "./lanes.css";
 import {
   batchFileUrl, isPendingForks, notebookUrl, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
-  type Benchmark, type FixEvidence, type FixMeasured, type ForkExperiment, type Hypothesis, type MeasuredRate, type PendingForks, type ProposedFix, type RubricCheck, type RunRecord, type SplitFinding, type TrapInfo,
+  type Benchmark, type FixEvidence, type FixMeasured, type ForkExperiment, type ForkMode, type Hypothesis, type MeasuredRate, type PendingForks, type ProposedFix, type RubricCheck, type RunRecord, type SplitFinding, type TrapInfo,
   type Verdict,
 } from "../api";
 import { askIcon } from "../ask-icons";
@@ -1028,7 +1028,7 @@ function forkSummary(exps: readonly ForkExperiment[], vm: BatchVm): string {
     const change = f.change ? changeText(f.change) : f.intervention;
     const cell = (k: string, body: string, cls = ""): string => `<td data-k="${attr(k)}"${cls ? ` class="${cls}"` : ""}>${body}</td>`;
     return `<tr data-morph-key="${attr(`cmp-${f.id}`)}">` +
-      `<th scope="row"><span class="ln-xt-id">${esc(f.id)}</span>${simTag(!!(f as { simulated?: boolean }).simulated)}</th>` +
+      `<th scope="row"><span class="ln-xt-id">${esc(f.id)}</span>${simTag(!!(f as { simulated?: boolean }).simulated)}${timeTravelTag(f)}</th>` +
       cell("Suspect", `${sus ? `<span class="ln-tag">${esc(sus)}</span> ` : ""}${esc(stepName(c, f.label))}`) +
       cell("Change", esc(change), "ln-xt-ch") +
       cell("Prediction", esc(predictionText(f.prediction))) +
@@ -1380,6 +1380,38 @@ export function builtText(forkAt: number, nFork: number, nReplay: number): strin
   return `One base VM replayed the first ${forkAt} actions. Each copy is a copy-on-write fork of it`;
 }
 
+/** How the copies got the source run's agent state (MASTER_PLAN Phase 6). A fork saved before Phase 6 has no
+ *  `fork_mode`: its copies started from the run's messages. */
+export const forkMode = (f: Pick<ForkExperiment, "fork_mode" | "restore">): ForkMode => f.fork_mode ?? f.restore?.agent_state ?? "messages";
+
+/** A checkpoint id as the page shows it: its first eight characters. */
+const shortCheckpoint = (id: string): string => (id.length > 8 ? `${id.slice(0, 8)}…` : id);
+
+/** The "Time travel" tag a checkpoint-mode experiment wears. */
+export const timeTravelTag = (f: Pick<ForkExperiment, "fork_mode" | "restore">): string =>
+  forkMode(f) === "checkpoint" ? `<span class="ln-tag ln-tt" title="LangGraph time travel: the copies resume the analyst's saved state">Time travel</span>` : "";
+
+/** How the copies were rewound to the fork point, as html: the analyst's state from a LangGraph checkpoint, or a
+ *  fresh analyst given the run's messages; the machine rebuilt by replay either way. When checkpoint mode was asked
+ *  for and messages mode was used, why. */
+export function rewindText(
+  f: Pick<ForkExperiment, "fork_mode" | "fork_mode_requested" | "fork_mode_fallback" | "restore" | "checkpoint_id" | "source_run" | "fork_at" | "children">,
+): string {
+  const first = f.fork_at === 1 ? "first action" : `first ${f.fork_at} actions`;
+  const kids = Object.values(f.children ?? {});
+  const forked = f.restore?.vm ? f.restore.vm === "fork" : kids.length > 0 && kids.every((k) => k.how === "fork");
+  const src = esc(f.source_run);
+  if (forkMode(f) === "checkpoint") {
+    const at = f.checkpoint_id ? `checkpoint <code title="${attr(f.checkpoint_id)}">${esc(shortCheckpoint(f.checkpoint_id))}</code>` : "a checkpoint";
+    return `Rewound with LangGraph time travel: each copy resumes the analyst's saved state (its messages and plan) from ${at} of run ${src}, ` +
+      (forked ? `and its machine is a copy-on-write fork of one that replayed the run's ${first}.` : `and its machine is rebuilt by replaying the run's ${first}.`);
+  }
+  const text = `Each copy starts a fresh analyst from a copy of ${src}'s message history, ` +
+    (forked ? `on a copy-on-write fork of a machine that replayed its ${first}.` : `on a machine rebuilt by replaying its ${first}.`);
+  if (f.fork_mode_requested !== "checkpoint") return text;
+  return `${text} LangGraph time travel was asked for but not used: ${esc(f.fork_mode_fallback ?? "no reason was recorded")}.`;
+}
+
 /** A hypothesis's state in words. */
 const OUTCOME_WORDS: Record<string, string> = {
   untested: "untested", testing: "testing", supported: "supported", contradicted: "contradicted",
@@ -1419,7 +1451,7 @@ function forkPoint(f: ForkExperiment, vm: BatchVm): string {
     ? `Fork <b>${esc(f.id)}</b> from run <b>${esc(f.source_run)}</b> at the same moment, with the proposed fix applied in the fixed arm.` +
       (fix ? ` Tests: <b class="ln-lit-word">${esc(fix.description)}</b>.` : "")
     : `Forked run <b>${esc(f.source_run)}</b> after action ${f.fork_at}, just ${esc(domainWords(c.config).step_when)}. Step under test: ` +
-      `<b class="ln-lit-word" title="${attr(f.label)}">${esc(stepName(c, f.label))}</b>.`;
+      `<b class="ln-lit-word" title="${attr(f.label ?? "")}">${esc(stepName(c, f.label))}</b>.`;
   const kids = Object.values(f.children ?? {});
   const nFork = kids.filter((k) => k.how === "fork").length;
   const nReplay = kids.filter((k) => k.how === "replay").length;
@@ -1427,12 +1459,17 @@ function forkPoint(f: ForkExperiment, vm: BatchVm): string {
   // How each copy was made, only when the case file says: older batches did not record it.
   const made = nFork + nReplay ? ` (${nFork} of ${kids.length} forked, ${nReplay} rebuilt by replay)` : "";
   // A simulated batch scripts what the copies do, so the page does not say an agent did it.
+  const on = model ? ` on ${esc(model)}` : "";
   const who = isSimulated(c)
-    ? `a scripted analyst continued from there, standing in for a fresh Deep Agent${model ? ` on ${esc(model)}` : ""}`
-    : `a fresh analyst Deep Agent${model ? ` on ${esc(model)}` : ""} continued from there`;
+    ? `a scripted analyst continued from there, standing in for a fresh Deep Agent${on}`
+    : forkMode(f) === "checkpoint"
+      ? `the analyst Deep Agent${on} resumed from its LangGraph checkpoint`
+      : `a fresh analyst Deep Agent${on} continued from a copy of the run's messages`;
   const mechanics = kids.length
     ? `<p class="ln-src-how">${whoTag("py")}<span>${esc(builtText(f.fork_at, nFork, nReplay))}${made}, and ${who}.</span></p>`
     : "";
+  // How the copies were rewound: the analyst's state (a LangGraph checkpoint, or the run's messages) and the machine.
+  const rewind = fixing ? "" : `<p class="ln-src-how ln-rewind">${timeTravelTag(f)}<span>${rewindText(f)}</span></p>`;
   const splitAt = c.split?.fork_at;
   const moved = !fixing && splitAt != null && c.split?.fork_run_id === f.source_run && splitAt !== f.fork_at
     ? `<p class="ln-sub">The cut moved back to a turn boundary: split at action ${splitAt}, fork at action ${f.fork_at}.</p>` : "";
@@ -1440,6 +1477,7 @@ function forkPoint(f: ForkExperiment, vm: BatchVm): string {
     strip +
     `<p class="ln-exp-t">${headline}</p>` +
     (f.status === "rebuilding" ? `<p class="ln-sub">Replaying the run's first ${f.fork_at} actions on a fresh VM.</p>` : "") +
+    rewind +
     mechanics +
     (inheritsController(c, f) ? `<p class="ln-sub">${esc(CONTROLLER_LINE)}</p>` : "") +
     moved +
@@ -1760,7 +1798,13 @@ function provenance(f: ForkExperiment, vm: BatchVm): string {
   const after = !read.length && kids.length ? "their logs are loading"
     : read.length < kids.length ? `${ran} of the ${read.length} read so far ran anything after the cut`
       : `${ran} of them ran anything after the cut`;
-  lines.push({ who: "llm", src: "copy logs", beam: f.status === "running", text: `${kids.length} ${sim ? "scripted analysts" : "fresh analyst Deep Agents"} continued; ${after}` });
+  // Who continued, in the mode the copies used: resumed from a LangGraph checkpoint, or fresh from the run's messages.
+  const tt = forkMode(f) === "checkpoint";
+  const cp = f.checkpoint_id ? `checkpoint ${shortCheckpoint(f.checkpoint_id)}` : "a checkpoint";
+  const cont = sim ? "scripted analysts continued"
+    : tt ? `analyst Deep Agents resumed from LangGraph ${cp} of ${f.source_run}`
+      : `fresh analyst Deep Agents continued from copies of ${f.source_run}'s messages`;
+  lines.push({ who: "llm", src: tt ? `forks.${f.id}.checkpoint_id` : "copy logs", beam: f.status === "running", text: `${kids.length} ${cont}; ${after}` });
   // What each copy is measured on: real results, which a copy's own page may show once it is scored; never the
   // investigator's to read.
   const nH = isMotionBatch(c.config) ? nHidden(c.config) : null;
@@ -1974,7 +2018,7 @@ function standing(c: CaseFile, f: ForkExperiment | null, cmp: Comparison | null,
     const dw = domainWords(c.config);
     // The arm means are over the complete pairs, the same copies the difference is over.
     const line = e
-      ? `In this experiment, forcing <b class="ln-lit-word" title="${attr(f.label)}">${esc(stepName(c, f.label))}</b> ${e.meanDiff >= 0 ? "lowered" : "raised"} the gap between ` +
+      ? `In this experiment, forcing <b class="ln-lit-word" title="${attr(f.label ?? "")}">${esc(stepName(c, f.label))}</b> ${e.meanDiff >= 0 ? "lowered" : "raised"} the gap between ` +
         `${esc(dw.claim_label.toLowerCase())} and ${esc(dw.truth_label.toLowerCase())} by ${esc(ptsAbs(e.meanDiff))} ` +
         `(${esc(`${cmp.base} ${pts(cmp.pairMeanBase)}, ${cmp.changed} ${pts(cmp.pairMeanChanged)}`)}) in ${cmp.agree} of ${cmp.n} pairs.`
       : "In this experiment no pair of copies is complete yet.";

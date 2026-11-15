@@ -94,6 +94,8 @@ const unlabel = (label: string): string => label.replace(/[_-]+/g, " ").trim();
 /** A step label in words: the batch trap's for its own step, else the domain's, else generic ones. Never the raw
  *  label. */
 export function stepText(label: string, words: DomainWords, trap: TrapInfo | null = null): StepText {
+  // A same-against-same control experiment (`change: "control"`) tests no step: its fork has no label.
+  if (!label) return { name: "no change", did: "changed nothing", missing: "No change here" };
   const own = words.steps[label];
   const t = trapWords(trap, label);
   const plain = unlabel(label);

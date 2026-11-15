@@ -207,7 +207,7 @@ export interface BatchConfig {
   /** MASTER_PLAN Phase 5.2: "learned" gives the analysts the approved lessons (skills/learned/); the UI tags it. */
   lessons?: "none" | "learned";
   /** MASTER_PLAN Phase 6: how fork copies get the source run's agent state. The VM is rebuilt by replay either way. */
-  fork_mode?: "checkpoint" | "messages";
+  fork_mode?: ForkMode;
 }
 
 /** A run's score (deep_research/scoring.py RunScore). */
@@ -315,7 +315,17 @@ export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   how?: "fork" | "replay";
   /** The analyst model the copy continues on: its source run's. */
   model?: string;
+  /** How the copy got the source run's agent state (MASTER_PLAN Phase 6). Absent on older batches: messages. */
+  fork_mode?: ForkMode;
+  state_from?: ForkMode;
+  /** Checkpoint mode: the LangGraph checkpoint the copy resumed from, and the source run's thread it is in. */
+  checkpoint_id?: string;
+  source_thread_id?: string;
 }
+
+/** "checkpoint": LangGraph time travel, the copy resumes the analyst's saved state. "messages": a fresh analyst
+ *  is given a copy of the source run's messages. The VM is rebuilt by replay either way. */
+export type ForkMode = "checkpoint" | "messages";
 
 export interface ArmSummary {
   total: number;
@@ -397,6 +407,16 @@ export interface ForkExperiment {
   /** A two-factor grid's changes (kind "interaction"); its arms are `neither`, `a`, `b` and `both`. */
   change_a?: string;
   change_b?: string;
+  // -- how the copies were rewound (MASTER_PLAN Phase 6, docs/api-contract.md) --
+  /** The mode the copies used. Absent on batches saved before Phase 6: messages. */
+  fork_mode?: ForkMode;
+  /** Only when checkpoint mode was asked for: what was asked, and why messages mode was used instead (or null). */
+  fork_mode_requested?: ForkMode;
+  fork_mode_fallback?: string | null;
+  /** LangGraph restores the agent state only; the VM is rebuilt by replay, then copied or forked. */
+  restore?: { agent_state: ForkMode; vm: "replay" | "fork" };
+  checkpoint_id?: string | null;
+  source_thread_id?: string | null;
 }
 
 /** The five kinds of change an experiment can make (deep_research/forks.py `CHANGE_KINDS`). */
