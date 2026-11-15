@@ -7,6 +7,7 @@
     python -m deep_research.cli runs --domain robot_arm --robot-prompt practice --n 12
     python -m deep_research.cli runs --domain robot_arm --robot-start colleague --n 12
     python -m deep_research.cli forks <batch_id> --n 4
+    python -m deep_research.cli experiment <batch_id> --suspect s1 --change force_step:deduplicate --pairs 3 --auto-approve
     python -m deep_research.cli investigate <batch_id>                  # asks before each experiment
     python -m deep_research.cli investigate <batch_id> --auto-approve   # unattended, small budgets only
     python -m deep_research.cli vms                 # count the running VMs on the Daytona key
@@ -31,6 +32,7 @@ from . import domains  # noqa: E402
 from .batch import Batch  # noqa: E402
 from .config import BATCHES_DIR, BatchConfig  # noqa: E402
 from .domains.robot_arm import BENCH_DIR  # noqa: E402
+from .experiments import MAX_PAIRS_PER_CALL as MAX_EXPERIMENT_PAIRS  # noqa: E402
 
 # Unattended approval is for small test batches only: nobody is there to say no.
 AUTO_APPROVE_MAX_BUDGET_USD = 3.0
@@ -83,6 +85,39 @@ async def forks(batch_id: str, n: int) -> None:
         print(await b.run_forks(n))
     finally:
         # The fork children's VMs are done once they are scored.
+        await b.close()
+    _print_case(b)
+
+
+async def experiment(batch_id: str, suspect: str, change: str, prediction: str, pairs: int, source_run: str | None,
+                     anchor: str, reason: str, auto_approve: bool) -> None:
+    """One paired experiment on a saved batch (`Batch.run_experiment`). It costs money, so it asks first;
+    `auto_approve` answers yes for it under a small budget."""
+    cfg = _saved_config(batch_id)
+    if auto_approve and cfg.budget_usd > AUTO_APPROVE_MAX_BUDGET_USD:
+        raise SystemExit(
+            f"--auto-approve needs a batch budget of ${AUTO_APPROVE_MAX_BUDGET_USD:.0f} or less; "
+            f"this batch has ${cfg.budget_usd:.2f}. Answer the approval yourself instead."
+        )
+    b = _reopen(batch_id)
+    try:
+        try:
+            b.parse_change(change)
+        except ValueError as e:
+            raise SystemExit(f"error: {e}") from None
+        n = max(1, min(pairs, MAX_EXPERIMENT_PAIRS))
+        est = b.estimate_forks_usd(n, 2)
+        question = (f"Run {n} pairs ({2 * n} copies and 1 base VM) of {change} to test {suspect} "
+                    f"(predicted {prediction}), about ${'?' if est is None else f'{est:.2f}'}. Approve? [y/N] ")
+        if auto_approve:
+            print(question + "yes (auto)")
+        elif input(question).strip().lower() not in ("y", "yes"):
+            print("declined: nothing ran")
+            return
+        out = await b.run_experiment(suspect, change, prediction, pairs=pairs, source_run=source_run,
+                                     anchor=anchor, reason=reason)
+        print(json.dumps(out, indent=2, default=str))
+    finally:
         await b.close()
     _print_case(b)
 
@@ -207,6 +242,17 @@ def main(argv: list[str] | None = None) -> None:
     f = sub.add_parser("forks")
     f.add_argument("batch_id")
     f.add_argument("--n", type=int, default=4)
+    e = sub.add_parser("experiment", help="one paired experiment: control and changed copies from one fork point")
+    e.add_argument("batch_id")
+    e.add_argument("--suspect", required=True, help="the suspect id the experiment tests")
+    e.add_argument("--change", required=True, help="a registry change, e.g. force_step:deduplicate or control")
+    e.add_argument("--prediction", choices=["smaller_gap", "larger_gap"], default="smaller_gap")
+    e.add_argument("--pairs", type=int, default=3, help=f"pairs to run, at most {MAX_EXPERIMENT_PAIRS}")
+    e.add_argument("--source-run", default=None, help="the run to fork; by default the first eligible one")
+    e.add_argument("--anchor", default="before_split", help="before_split, before_label:<label> or index:<n>")
+    e.add_argument("--reason", default="")
+    e.add_argument("--auto-approve", action="store_true",
+                   help=f"approve the spend unattended (budget ${AUTO_APPROVE_MAX_BUDGET_USD:.0f} or less)")
     i = sub.add_parser("investigate")
     i.add_argument("batch_id")
     i.add_argument("--auto-approve", action="store_true",
@@ -234,6 +280,9 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(benchmarks(a.batch_id))
     elif a.cmd == "forks":
         asyncio.run(forks(a.batch_id, a.n))
+    elif a.cmd == "experiment":
+        asyncio.run(experiment(a.batch_id, a.suspect, a.change, a.prediction, a.pairs, a.source_run, a.anchor,
+                               a.reason, a.auto_approve))
     else:
         asyncio.run(investigate(a.batch_id, a.auto_approve))
 
