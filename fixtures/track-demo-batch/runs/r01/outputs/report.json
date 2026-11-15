@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 7,
+  "notes": "Scripted preview, no agent: 7 of 7 episodes tracked the reference and stayed standing, with the reference's joint angles with balance feedback: the practice motion 2 times, then the others (calm tracked, calm tracked, demanding tracked, demanding tracked, demanding tracked)."
+}

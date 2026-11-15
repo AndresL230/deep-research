@@ -11,7 +11,7 @@ import { pct, pts } from "./format";
 import { barShare, forkExperiments, isProblemPhase, pendingForks, phaseText } from "./lanes";
 import { ACT, STEP_LABEL, type BatchStep, type BatchVm } from "./model";
 import { claimStatus, wallSummary } from "./wall";
-import { isMotionBatch, scoreWords } from "../robot/markup";
+import { isMotionBatch, researchCard, scoreWords } from "../robot/markup";
 import { domainWords } from "./words";
 
 // ── the pipeline ─────────────────────────────────────────────────────────────
@@ -269,6 +269,7 @@ export function overviewView(vm: BatchVm): string {
     + eyebrows(vm)
     + `<h1 class="ov-title${isProblemPhase(phase) ? " ov-title--bad" : ""}" data-morph-key="title">${reveal(headline(vm))}</h1>`
     + `</header>`
+    + researchCard(c.config)
     + steps(vm, "wall")
     + claimBars(vm.case)
     + `</section>`;

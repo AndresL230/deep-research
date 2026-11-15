@@ -4,6 +4,7 @@ import "./home.css";
 import type { BatchConfig, BatchListItem, ControllerInfo, Costs, Defaults, Health, ScopeCost, TrapInfo } from "../api";
 import { askIcon, askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
+import { researchLink } from "../robot/markup";
 import { pct, tokens, usd } from "./format";
 import { DEFAULT_VIEW, batchTable, type TableView } from "./batch-table";
 import { ACT, type HomeVm, type Loadable } from "./model";
@@ -56,7 +57,7 @@ export function newBatchView(vm: HomeVm, inputs?: HomeInputs): string {
       ${vm.draft ? domainRow(vm.draft, vm.defaults, vm.starting) : ""}
       ${tabular ? inputs?.html ?? "" : isArm(vm.draft) ? inputs?.controllerHtml ?? "" : ""}
       ${vm.draft && tabular ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
-      ${vm.draft && isArm(vm.draft) ? positionsRow(vm.draft) : vm.draft && isStrike(vm.draft) ? humanoidRow() : ""}
+      ${vm.draft && isArm(vm.draft) ? positionsRow(vm.draft) : vm.draft && isStrike(vm.draft) ? humanoidRow() : vm.draft && isTrack(vm.draft) ? humanoidRow(TRACK_TEXT) : ""}
       ${vm.draft ? mainRow(vm.draft, trap, vm.starting) : mainSkeleton(defaultsFailed(vm))}
       ${advancedBlock(vm, controller)}
     </div>
@@ -124,6 +125,8 @@ const isArm = (c: BatchConfig | null | undefined): boolean => domainOf(c) === "r
 const takesUploads = isArm;
 /** The strike domain (the G1 and a hanging bag): its agents always start from the template. */
 const isStrike = (c: BatchConfig | null | undefined): boolean => domainOf(c) === "humanoid";
+/** The tracking domain (the G1 following a reference motion): its agents always start from the template too. */
+const isTrack = (c: BatchConfig | null | undefined): boolean => domainOf(c) === "humanoid_track";
 
 /** Settings only the tabular domain reads: what the agents get (dataset, target, script) and the planted flaw. */
 export const TABULAR_ONLY = [
@@ -210,7 +213,7 @@ export function rememberDomain(name: string): void {
 }
 
 /** Short names for the picker. A domain added later shows its own title. */
-const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm", humanoid: "Humanoid strike", humanoid_push: "Humanoid push" };
+const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm", humanoid: "Humanoid strike", humanoid_push: "Humanoid push", humanoid_track: "Humanoid tracking" };
 
 /** The choice of domain, with the chosen one's line under it. Only when the server offers more than one. */
 function domainRow(c: BatchConfig, d: Defaults | null, locked: boolean): string {
@@ -341,8 +344,16 @@ export const HUMANOID_TEXT = "The agents practise on one bag at chest height. Th
   + "front of the robot: half high, where a punch reaches, and half between shin and knee height, where only a kick does. "
   + "A strike counts when the bag swings 20 cm and the robot never falls.";
 
-function humanoidRow(): string {
-  return `<div class="hm-pos" data-morph-key="positions"><span class="hm-pos-d">${esc(HUMANOID_TEXT)}</span></div>`;
+/** What a tracking batch's test is. */
+export const TRACK_TEXT = "The agents practise on one reference motion: a motion capture clip fitted to the robot, with the "
+  + "feet planted. Their controller is measured on 20 motions it never tracked: half calm, half demanding (weight "
+  + "shifts, twists, fast arms). An episode counts when the robot never falls and stays within 6 cm and 0.05 rad of "
+  + "the reference on average. The task and its tracking errors follow the ExBody2 research paper.";
+
+function humanoidRow(text: string = HUMANOID_TEXT): string {
+  // The tracking batch's text names the paper it follows: the link to it comes after.
+  const link = text === TRACK_TEXT ? ` ${researchLink({ domain: "humanoid_track" })}` : "";
+  return `<div class="hm-pos" data-morph-key="positions"><span class="hm-pos-d">${esc(text)}${link}</span></div>`;
 }
 
 /** A robot batch's test: this sim's own positions, or LIBERO's practice spot measured at LIBERO-PRO's positions. */
@@ -350,7 +361,7 @@ function positionsRow(c: BatchConfig): string {
   const v = c.robot_positions ?? "default";
   return `<div class="hm-pos" data-morph-key="positions">
     ${choiceField({ ...c, robot_positions: v }, "robot_positions", "Test positions", [["default", "Whole table"], ["libero_pro", "LIBERO-PRO"]])}
-    <span class="hm-pos-d">${esc(POSITIONS_TEXT[v] ?? "")}</span>
+    <span class="hm-pos-d">${esc(POSITIONS_TEXT[v] ?? "")} ${researchLink({ domain: "robot_arm", robot_positions: v })}</span>
   </div>`;
 }
 
@@ -387,7 +398,7 @@ function advancedBlock(vm: HomeVm, controller: ControllerInfo | null = null): st
     return `<div class="hm-adv" data-morph-key="adv">
     ${head}
     <div class="hm-adv-grid" id="hm-adv" data-morph-key="adv-grid">
-      ${isStrike(c) ? "" : choiceField(c, "robot_start", "Controller start", [["blank", "Blank"], ["colleague", "Colleague's"], ["uploaded", "Your upload"]], takesUploads(c) && (controller || c.robot_controller) ? [] : ["uploaded"])}
+      ${isStrike(c) || isTrack(c) ? "" : choiceField(c, "robot_start", "Controller start", [["blank", "Blank"], ["colleague", "Colleague's"], ["uploaded", "Your upload"]], takesUploads(c) && (controller || c.robot_controller) ? [] : ["uploaded"])}
       ${choiceField(c, "robot_prompt", "Prompt", [["default", "Default"], ["practice", "Practice focus"]])}
       ${rangeField(c, "inflation_threshold", "Inflation threshold", 0.05, 0.5, 0.025, points(c.inflation_threshold))}
       ${numberField(c, "forks_per_choice", "Forks per arm", { min: 1, max: 8 })}

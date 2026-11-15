@@ -173,7 +173,7 @@ def test_defaults_and_estimate_cover_every_domain(tmp_path, monkeypatch):
     with TestClient(api.app) as client:
         d = client.get("/api/defaults").json()
         by_name = {x["name"]: x for x in d["domains"]}
-        assert set(by_name) == {"tabular", "robot_arm", "humanoid", "humanoid_push"} and d["config"]["domain"] == "tabular"
+        assert set(by_name) == {"tabular", "robot_arm", "humanoid", "humanoid_push", "humanoid_track"} and d["config"]["domain"] == "tabular"
         assert by_name["robot_arm"]["visual"] == "motion" and by_name["tabular"]["visual"] == "charts"
         robot = by_name["robot_arm"]["config"]
         assert robot["domain"] == "robot_arm" and robot["inflation_threshold"] == pytest.approx(sim_domain.inflated_threshold())
