@@ -42,7 +42,7 @@ const col = (html: string, group: "honest" | "inflated"): string => {
 };
 
 describe("helpers", () => {
-  it("phaseText covers every phase and keeps blocked and error reasons", () => {
+  it("phaseText covers every phase, keeps blocked reasons and folds error text away", () => {
     expect(phaseText("running")).toBe("Agents are running");
     expect(phaseText("analyzing")).toBe("Scoring runs and finding the split");
     expect(phaseText("ready")).toBe("Split found. Ready to investigate");
@@ -50,7 +50,7 @@ describe("helpers", () => {
       expect(phaseText(p)).not.toBe(p);
     }
     expect(phaseText("blocked: over budget")).toBe("Blocked: over budget");
-    expect(phaseText("error: VM died")).toBe("Error: VM died");
+    expect(phaseText("error: VM died")).toBe("Stopped by an error");
     expect(isProblemPhase("error: x")).toBe(true);
     expect(isProblemPhase("done")).toBe(false);
     expect(phaseText("something_new")).toBe("something_new");
@@ -914,8 +914,9 @@ describe("investigatorView", () => {
     expect(running).toContain("Nope &lt;b&gt;");
   });
 
-  it("shows error phases as an error line", () => {
-    expect(investigatorView(vmOf({ phase: "error: VM died" }))).toContain('class="ln-err" role="alert">Error: VM died');
+  it("shows error phases as an error line, the raw text behind details", () => {
+    const html = investigatorView(vmOf({ phase: "error: VM died" }));
+    expect(html).toContain('class="ln-err" role="alert">Stopped by an error</p><details class="ph-details"><summary>details</summary><code>VM died</code>');
   });
 
   it("lists the last 8 investigator events with their agent", () => {

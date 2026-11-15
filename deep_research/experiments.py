@@ -70,19 +70,23 @@ def adherence(children: dict[str, dict], dropped: list[dict], changed_arm: str =
     return out
 
 
-def score_pairs(pairs: list[dict], prediction: str) -> dict:
-    """`{n_pairs, agree, score, p_exact, level}` of a list of kept pairs (`evidence.score_pairs`)."""
-    return ev.score_pairs(pairs, direction(prediction))
+def score_pairs(pairs: list[dict], prediction: str, dropped: list[dict] | None = None) -> dict:
+    """`{n_pairs, agree, score, p_exact, level}` of a list of kept pairs (`evidence.score_pairs`): `inconclusive` when
+    none was kept and some of `dropped` were dropped because the control copy did not reproduce the effect."""
+    return ev.score_pairs(pairs, direction(prediction), dropped)
 
 
 def suspect_evidence(experiments: list[dict]) -> dict:
     """The running evidence of one suspect over its experiments, oldest first. Each experiment is a fork record with
     `id`, `prediction`, `pairs` and optionally `cost_usd`. The score runs over every pair of every experiment (it stays
-    a valid test when checked after each pair); `p_exact` is over the pairs of the newest prediction."""
+    a valid test when checked after each pair); `p_exact` is over the pairs of the newest prediction. With no counted
+    pair at all and some pair (`dropped_pairs`) whose control copy did not reproduce the effect, the level is
+    `inconclusive`."""
     pairs = [p for e in experiments for p in (e.get("pairs") or [])]
     latest = experiments[-1]["prediction"] if experiments else "smaller_gap"
     same = [p for e in experiments if e.get("prediction") == latest for p in (e.get("pairs") or [])]
-    scored = ev.score_pairs(pairs, direction(latest))
+    dropped = [d for e in experiments for d in (e.get("dropped_pairs") or [])]
+    scored = ev.score_pairs(pairs, direction(latest), dropped)
     exact = ev.score_pairs(same, direction(latest))["p_exact"]
     costs = [e.get("cost_usd") for e in experiments]
     return {

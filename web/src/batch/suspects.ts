@@ -24,7 +24,7 @@ import { chip, spinner, type ChipMark, type ChipTone } from "../motion";
 import { attr, esc } from "../ui";
 import { usd } from "./format";
 import { ACT, type BatchVm } from "./model";
-import { isDone, pairs as childPairs } from "./evidence";
+import { INCONCLUSIVE_NOTE, isDone, pairs as childPairs } from "./evidence";
 import { lessonLink, reportForLesson } from "./foolrate";
 import { ADMIN_ONLY } from "../access";
 
@@ -37,7 +37,7 @@ export const CLEARED_AFTER = 5;
 /** The most pairs one experiment may ask for (experiments.MAX_PAIRS_PER_CALL). */
 export const MAX_PAIRS = 6;
 
-export type SxLevel = "open" | "supported" | "cleared";
+export type SxLevel = "open" | "supported" | "cleared" | "inconclusive";
 export type SxStatus = "proposed" | "testing" | SxLevel;
 
 /** The running score of a list of pair outcomes. */
@@ -195,6 +195,7 @@ export const anchorText = (a: string | null | undefined): string =>
 const STATUS_CHIP: Record<SxStatus, [ChipTone, ChipMark, string]> = {
   proposed: ["idle", "dot", "Proposed"], testing: ["live", "spin", "Testing"], open: ["warn", "hold", "Open"],
   supported: ["ok", "check", "Supported"], cleared: ["idle", "cross", "Cleared"],
+  inconclusive: ["idle", "dot", "Inconclusive"],
 };
 const statusChip = (s: SxStatus): string => { const [t, m, w] = STATUS_CHIP[s]; return chip(w, t, m, `sx-st sx-st--${s}`); };
 
@@ -265,6 +266,7 @@ function suspectCard(r: SuspectRow, ctx: CardCtx = { done: false, testable: [], 
     `<header class="sx-sus-h"><span class="sx-id">${esc(s.id)}</span><b class="sx-target">${esc(s.target)}</b>` +
     `${tag(s.kind)}${simTag(r.simulated)}<span class="sx-sp"></span>${statusChip(r.status)}</header>` +
     (s.rationale ? `<p class="sx-why">${esc(s.rationale)}</p>` : "") +
+    (r.level === "inconclusive" ? `<p class="sx-why sx-inconclusive">${esc(INCONCLUSIVE_NOTE)}</p>` : "") +
     `<dl class="sx-facts">` +
     `<div><dt>Proposed by</dt><dd><span class="sx-agent">${esc(s.proposed_by || "investigator")}</span></dd></div>` +
     `<div><dt>Prediction</dt><dd>${r.prediction ? esc(predictionText(r.prediction)) : `<span class="ln-muted">no experiment yet</span>`}</dd></div>` +
@@ -283,10 +285,10 @@ export function suspectBoardView(vm: BatchVm): string {
   // A replay (vm.case is the case at its clock) is done only once it reaches the end; a simulated batch is never testable.
   const ctx: CardCtx = { done: investigatorDone(vm.case), testable: isSimulatedCase(vm.case) ? [] : vm.testable ?? [],
     busy: vm.busy, admin: !vm.role || vm.role === "admin" };
-  const order: SxStatus[] = ["supported", "testing", "open", "proposed", "cleared"];
+  const order: SxStatus[] = ["supported", "testing", "open", "inconclusive", "proposed", "cleared"];
   const sorted = [...rows].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
   const n = (st: SxStatus): number => rows.filter((r) => r.status === st).length;
-  const sum = [`${rows.length} ${rows.length === 1 ? "suspect" : "suspects"}`, ...(["supported", "cleared", "open", "testing"] as const).filter((st) => n(st)).map((st) => `${n(st)} ${st}`)].join(" · ");
+  const sum = [`${rows.length} ${rows.length === 1 ? "suspect" : "suspects"}`, ...(["supported", "cleared", "open", "inconclusive", "testing"] as const).filter((st) => n(st)).map((st) => `${n(st)} ${st}`)].join(" · ");
   const rule = `<p class="sx-rule">Score starts at 1, ×${AGREE} for each pair that goes the predicted way, ×${DISAGREE} for each that does not. Supported at ${SUPPORTED_AT}; cleared after ${CLEARED_AFTER} pairs under 1.</p>`;
   return section("board", "Suspects", `<p class="ln-sub">${esc(sum)}</p>${rule}<div class="sx-board" data-morph-list>${sorted.map((r) => suspectCard(r, ctx)).join("")}</div>`);
 }
@@ -440,7 +442,7 @@ export function suspectVerdictView(vm: BatchVm): string {
       (rs.length ? `<ul class="sx-vlist">${rs.map(verdictRow).join("")}</ul>` : `<p class="ln-muted sx-vnone">${esc(none)}</p>`) + `</div>`;
   };
   const groups = decided.length
-    ? `<div class="sx-vgrps">${group("supported", "Supported causes", "No suspect reached a score of 20.")}${group("cleared", "Cleared", "No suspect cleared yet.")}${group("open", "Still open", "Nothing left open.")}</div>`
+    ? `<div class="sx-vgrps">${group("supported", "Supported causes", "No suspect reached a score of 20.")}${group("cleared", "Cleared", "No suspect cleared yet.")}${group("open", "Still open", "Nothing left open.")}${decided.some((r) => r.level === "inconclusive") ? group("inconclusive", "Inconclusive", "") : ""}</div>`
     : "";
   return section("verdict", "Verdict by suspect", groups + grid + audit);
 }

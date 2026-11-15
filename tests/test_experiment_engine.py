@@ -128,11 +128,14 @@ def test_pair_score_levels_and_the_fixtures_known_answers():
     assert evidence.score_level(0.5, 5) == "cleared" and evidence.score_level(0.5, 4) == "open"
     assert evidence.score_level(13.03, 4) == "open"
     assert not hasattr(xp, "running_score") and not hasattr(xp, "p_exact")
-    # fixtures/demo-batch fork f1: four pairs, all agreeing, give 13.03; the gap test gives 1/70.
+    # fixtures/demo-batch fork f1: its control-3 came out honest, so that pair is dropped (the control copy must
+    # reproduce the inflation). The other three agree: 6.86; the gap test gives 1/20. It recorded 13.03, open.
     f1 = json.loads((FIXTURES / "demo-batch" / "case" / "case.json").read_text())["forks"]["f1"]
     kept, dropped = xp.pair_outcomes(f1["children"], 4, "smaller_gap")
-    s = xp.score_pairs(kept, "smaller_gap")
-    assert dropped == [] and s["score"] == pytest.approx(13.0321) and s["p_exact"] == pytest.approx(1 / 70, abs=1e-4)
+    s = xp.score_pairs(kept, "smaller_gap", dropped)
+    assert dropped == [{"i": 3, "reason": evidence.NOT_REPRODUCED[1]}]
+    assert s["score"] == pytest.approx(6.859) and s["p_exact"] == pytest.approx(1 / 20, abs=1e-4)
+    assert s["level"] == f1["level"] == "open"
 
 
 def test_a_pair_with_a_failed_copy_is_dropped():

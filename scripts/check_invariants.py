@@ -15,7 +15,8 @@ Checks the committed fixtures, the local `batches/` folder when there is one, an
 - something is `supported` with a running score under 20: a verdict, a method fork, or a method hypothesis whose
   experiment's score is under 20 (all read the way the server reads them, `case_file.with_evidence`);
 - a suspect's status disagrees with `evidence.<id>` under the running-score rule (the ledger's level is not its
-  score's, or the status is not the level), or `verdict.supported` names a suspect whose ledger score is under 20;
+  score's, or the status is not the level), a `cleared` suspect has fewer than 5 counted pairs (pairs whose control
+  copy reproduced the effect), or `verdict.supported` names a suspect whose ledger score is under 20;
 - a case section or field `docs/api-contract.md` lists is missing from a batch's case file;
 - a simulated batch lacks its flag: every fixture is either `config.simulated` or a recording
   (`config.recording.kind = "live"`), and a batch whose costs say simulated is flagged simulated;
@@ -41,7 +42,7 @@ from deep_research import domains  # noqa: E402
 from deep_research.agents.investigator import RUNS_READ_DENY  # noqa: E402
 from deep_research.case_file import BANNED_VIEW_KEYS, investigator_view, with_evidence  # noqa: E402
 from deep_research.config import FIXTURES_DIR  # noqa: E402
-from deep_research.evidence import SUPPORTED_SCORE, score_level  # noqa: E402
+from deep_research.evidence import NEEDED_PAIRS, SUPPORTED_SCORE, fork_pairs, score_level  # noqa: E402
 
 CONTRACT = ROOT / "docs" / "api-contract.md"
 # The sections `CaseFile.__init__` sets to their default when an older case file lacks them.
@@ -151,8 +152,21 @@ def check_case(name: str, root: Path, raw: dict, sections: list[str], ev_fields:
             continue
         score, n_pairs = float(ev.get("score") or 0), int(ev.get("pairs") or 0)
         level = score_level(score, n_pairs)
-        if ev.get("level") != level:
+        # `inconclusive` is the open level of a ledger with no counted pair (no control copy reproduced the effect).
+        if ev.get("level") != level and not (ev.get("level") == "inconclusive" and n_pairs == 0):
             fail(name, f"evidence.{sid} says {ev.get('level')}, but a score of {score:g} over {n_pairs} pairs is {level}")
+        # A cleared suspect needs NEEDED_PAIRS counted pairs in its ledger (since the control-must-reproduce fix, only
+        # pairs whose control copy reproduced the effect are counted). A recording saved before that fix keeps its
+        # ledger; when today's rule (evidence.pair_up) would count fewer of its pairs, that is printed, not failed.
+        if status == "cleared":
+            if n_pairs < NEEDED_PAIRS:
+                fail(name, f"suspect {sid} is cleared on {n_pairs} counted pairs (cleared needs {NEEDED_PAIRS})")
+            recount = sum(len(fork_pairs(f) if fork_pairs(f) is not None else (f.get("pairs") or []))
+                          for fid, f in forks.items() if fid != "pending" and isinstance(f, dict)
+                          and f.get("suspect_id") == sid and f.get("status") == "done")
+            if recount < NEEDED_PAIRS:
+                print(f"check_invariants: note: {name}: suspect {sid} was cleared on {n_pairs} pairs; today's rule "
+                      f"counts {recount} (a control copy did not reproduce the inflation). Recorded data, kept as is.")
         running = any(isinstance(f, dict) and f.get("suspect_id") == sid and f.get("status") not in ("done", "failed")
                       for fid, f in forks.items() if fid != "pending")
         if status != level and (status in ("supported", "cleared") or level != "open") \

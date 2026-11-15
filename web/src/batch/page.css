@@ -68,3 +68,9 @@ button.pg-crumb.is-cur:hover { background:none; cursor:default; }
 }
 @media (prefers-reduced-motion: reduce) { .pg-sec { animation:none; } }
 
+/* An `error: x` phase's raw text, folded behind "details" (phase.ts phaseDetails). */
+.ph-details { display:inline-block; vertical-align:middle; max-width:100%; font-size:12px; color:var(--fg-55); }
+.ph-details > summary { cursor:pointer; color:var(--fg-70); }
+.ph-details > summary:focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:var(--r-ctl); }
+.ph-details > code { display:block; margin-top:4px; white-space:pre-wrap; overflow-wrap:anywhere; }
+

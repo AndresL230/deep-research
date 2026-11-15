@@ -9,6 +9,7 @@ import { attr, esc } from "../ui";
 import { badge, chip, count, reveal, spinner } from "../motion";
 import { pct, pts } from "./format";
 import { barShare, forkExperiments, isProblemPhase, pendingForks, phaseText } from "./lanes";
+import { STOPPED_BY_ERROR, phaseDetails } from "./phase";
 import { ACT, STEP_LABEL, type BatchStep, type BatchVm } from "./model";
 import { claimStatus, wallSummary } from "./wall";
 import { isMotionBatch, researchCard, researchSource, scoreWords } from "../robot/markup";
@@ -213,7 +214,7 @@ export function headline(vm: BatchVm): string {
 
 /** The phase as a chip beside the batch's name. */
 function phaseChip(phase: string): string {
-  if (isProblemPhase(phase)) return chip(phase.startsWith("blocked") ? "Blocked" : "Error", "bad", "alert");
+  if (isProblemPhase(phase)) return chip(phase.startsWith("blocked") ? "Blocked" : STOPPED_BY_ERROR, "bad", "alert") + phaseDetails(phase);
   if (WORKING.has(phase)) return chip(phaseText(phase), "live", phase === "awaiting_approval" ? "dot" : "spin");
   if (phase === "done") return chip("Done", "ok", "check");
   return chip(phaseText(phase), "idle", "dot");

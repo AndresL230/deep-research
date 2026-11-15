@@ -10,7 +10,10 @@ Status values:
 - **rule**: backed, but the words depend on the evidence rule. This PR replaces the Fisher rule ("8 pairs and p < 0.05")
   with the plan 6.4 running score. The score starts at 1 and is multiplied by 1.9 for each control/forced pair that
   agrees and by 0.1 for each pair that does not. `supported` needs a score of 20 or more, which takes at least 5
-  agreeing pairs. `cleared` needs at least 5 pairs and a score under 1. Anything else is `open`.
+  agreeing pairs. `cleared` needs at least 5 pairs and a score under 1. Anything else is `open`. Since the
+  control-must-reproduce fix (Sun Nov 15, 04:20 Eastern), a pair counts only when its control copy reproduces the
+  effect under test (inflated for `smaller_gap`, honest for `larger_gap`); an experiment with no such pair is
+  `inconclusive`, never cleared. Recorded fixtures keep the levels they saved.
 - **simulated**: backed by a simulated fixture (`config.simulated = true`), not by a real run.
 - **wrong**: the cited file contradicts the claim.
 - **UNBACKED**: no file or batch backs it.
@@ -40,7 +43,7 @@ against `TAB` itself.
 | Control copies' gaps +10.3 to +12.8 pts; changed copies' −2.3 to −6.1 pts | `TAB` `forks.f1.pairs[*].control_gap` 0.103 to 0.1283, `changed_gap` −0.0231 to −0.0605 | backed |
 | 5 of 5 control copies inflated, 0 of 5 forced | `TAB` `forks.f1.arms` | backed |
 | The forced copies reported honestly, not better: mean measured 79.1% (control) and 79.4% (forced) | `TAB` `forks.f1.arms.control.mean_true = 0.7909`, `forced.mean_true = 0.7935`; reported 0.9075 against 0.7414 | backed |
-| s2: forcing exact `deduplicate` on r08, 5 pairs, 1 agrees, score 0.0002, **cleared** | `TAB` `forks.f2`: `change force_step:deduplicate`, `source_run r08`, `score 0.00019`, `level cleared`, `p_exact 0.6746`; arms 4 of 5 inflated in both | backed |
+| s2: forcing exact `deduplicate` on r08, 5 pairs, 1 agrees, score 0.0002, **cleared** | `TAB` `forks.f2`: `change force_step:deduplicate`, `source_run r08`, `score 0.00019`, `level cleared`, `p_exact 0.6746`; arms 4 of 5 inflated in both. Under today's rule its control-2 (gap 0.0792, just under the 0.08 threshold) did not reproduce the inflation, so 4 pairs count and it would read **open**, not cleared. The recording keeps `cleared` as saved; do not cite it as a clearing | rule (recorded cleared; open by today's rule) |
 | s3 (`evaluate`) was not tested and stays open | `TAB` `suspects.s3.status = proposed`, `verdict.open = [s3]`, no fork with `suspect_id s3` | backed |
 | The verdict says "caused", confidence medium | `TAB` `verdict.sentence` ("Skipping deduplicate_near caused the inflated claims…"), `verdict.evidence.level = supported` at 24.76, `confidence = medium` | backed (the score is over 20) |
 | The rubric grader sent the verdict back before passing it | `TAB` `rubric`: needs_revision (wrong `inflated_rate`, f2's arm counts missing), needs_revision (rates still wrong), satisfied. Sent back **twice**; the third version passed | backed |

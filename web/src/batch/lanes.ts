@@ -21,7 +21,7 @@ import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parse
 import { evidenceParts, trapMark, trapOf, type Mark } from "./trap";
 import { isMotionBatch, motionName, robotThumb, scoreWords, type ScoreWords } from "../robot/markup";
 import {
-  AGREE, DISAGREE, NEEDED_PAIRS, RULE, RULE_TEXT, SUPPORTED_SCORE, causeWords, ceilingText, compare, evidenceFrom, fmtFrac, forkEvidence, isDone, isDropped, isPending, kOfN, nHidden,
+  AGREE, DISAGREE, INCONCLUSIVE_NOTE, NEEDED_PAIRS, RULE, RULE_TEXT, SUPPORTED_SCORE, causeWords, ceilingText, compare, evidenceFrom, fmtFrac, forkEvidence, isDone, isDropped, isPending, kOfN, nHidden,
   verdictFork, type Comparison, type Evidence, type Level, type Pair,
 } from "./evidence";
 import { bestMotion, copyStory, forcedCheck, forcedEvent, investigatorCounts, type StepTest } from "./forkread";
@@ -29,16 +29,18 @@ import { scoreStep, sourceStrip, tableMap } from "./trial-charts";
 import { TABULAR_WORDS, capital, domainWords, judgedOn, stepText } from "./words";
 import type { DomainWords, TraceEntry } from "../api";
 import { ADMIN_ONLY } from "../access";
+import { STOPPED_BY_ERROR, phaseDetails } from "./phase";
 import { changeText, pairDots, predictionText, scoreBar, scoreText, simTag, suspectPending } from "./suspects";
 
 export { NEEDED_PAIRS } from "./evidence";
 
 // ── pure helpers (exported for the tests) ────────────────────────────────────
 
-/** The phase in words for the investigator panel. `blocked: x` and `error: x` keep their reason. */
+/** The phase in words for the investigator panel. `blocked: x` keeps its reason; `error: x` folds it into phaseDetails. */
 export function phaseText(phase: string): string {
-  const m = /^(blocked|error):\s*(.*)$/s.exec(phase);
-  if (m) return `${m[1] === "blocked" ? "Blocked" : "Error"}: ${m[2] || "no reason given"}`;
+  if (phase.startsWith("error:")) return STOPPED_BY_ERROR;
+  const m = /^blocked:\s*(.*)$/s.exec(phase);
+  if (m) return `Blocked: ${m[1] || "no reason given"}`;
   switch (phase) {
     case "config": return "Not started";
     case "running": return "Agents are running";
@@ -959,6 +961,7 @@ const LEVEL: Record<Level, { text: string; tone: ChipTone; mark: ChipMark }> = {
   open: { text: "Open", tone: "warn", mark: "hold" },
   supported: { text: "Supported", tone: "ok", mark: "check" },
   cleared: { text: "Cleared", tone: "idle", mark: "dot" },
+  inconclusive: { text: "Inconclusive", tone: "idle", mark: "dot" },
 };
 /** The rule behind the chip, said once in its tooltip. */
 const levelChip = (l: Level): string =>
@@ -1994,7 +1997,9 @@ export function verdictText(c: CaseFile): string {
     return `${capital(`not ${name}`)} caused the inflated claims: ${counts}${ev.p != null ? ` (${pText(ev.p)})` : ""}.`;
   }
   const lower = ev.forcedInflated / ev.forcedTotal < ev.controlInflated / ev.controlTotal;
-  const open = ev.level === "cleared"
+  const open = ev.level === "inconclusive"
+    ? `Inconclusive: ${INCONCLUSIVE_NOTE}`
+    : ev.level === "cleared"
     ? `Cleared: the score is ${two(ev.score)} after ${ev.pairs} pairs, under 1.`
     : ev.pairs < ev.needed
       ? `Open: supported needs ${ev.needed} pairs.`
@@ -2512,7 +2517,7 @@ export function investigatorView(vm: BatchVm): string {
   return `<section class="ln-sec ln-inv${picture ? " ln-inv--pic" : ""} ds-rise" data-io data-morph-key="ln-inv" aria-label="Investigator">` +
     `<div class="ln-head"><h2 class="ln-h">Investigator</h2>${nb}</div>` +
     `<div class="ln-inv-status">` +
-    (problem ? `<p class="ln-err" role="alert">${esc(phaseText(phase))}</p>`
+    (problem ? `<p class="ln-err" role="alert">${esc(phaseText(phase))}</p>${phaseDetails(phase)}`
       : `<p class="ln-phase"><span class="ln-phase-m" data-morph-key="${working ? "spin" : "dot"}">${working ? spinner(14) : `<i class="ln-phase-dot"></i>`}</span><span class="ln-phase-t">${reveal(phaseText(phase))}</span></p>`) +
     (actions ? `<div class="ln-actions">${actions}</div>` : "") +
     `</div>` +

@@ -127,7 +127,8 @@ def test_a_cause_must_be_the_step_the_supporting_fork_tested(batch):
 
 def test_the_verdict_reads_the_forks_pairs_not_only_its_counts(batch):
     # 3 of 4 control inflated against 0 of 4 forced: from counts alone at least 3 pairs agree (score 0.69), but the
-    # copies' gaps show all 4 agree (13.03), as in fixtures/demo-batch.
+    # copies' gaps show all 3 counted pairs agree (6.86), as in fixtures/demo-batch. control-3 came out honest, so its
+    # pair does not count (the control copy must reproduce the inflation).
     gaps = {"control-1": 0.17, "control-2": 0.22, "control-3": 0.06, "control-4": 0.12,
             "forced-1": 0.02, "forced-2": 0.03, "forced-3": -0.02, "forced-4": 0.02}
     batch.case.update_fork("f1", children={cid: {"arm": cid.split("-")[0], "status": "inflated" if g > 0.1 else "honest",
@@ -136,8 +137,8 @@ def test_the_verdict_reads_the_forks_pairs_not_only_its_counts(batch):
     sentence = "Skipping the duplicate check suggests why the scores were inflated: 0 of 4 against 3 of 4 (4 pairs)."
     assert batch.case.record_structured_verdict(sentence, "deduplicate", 1.0, 0.0, 1, 1, arms, "low") == "verdict saved"
     ev = batch.case.data["verdict"]["evidence"]
-    assert ev["basis"] == "pairs" and ev["agree"] == 4 and ev["score"] == pytest.approx(13.0321)
-    assert ev["p_exact"] == pytest.approx(1 / 70, abs=1e-4) and ev["p_value"] == pytest.approx(5 / 70, abs=1e-4)
+    assert ev["basis"] == "pairs" and ev["agree"] == 3 and ev["pairs"] == 3 and ev["score"] == pytest.approx(6.859)
+    assert ev["p_exact"] == pytest.approx(1 / 20, abs=1e-4) and ev["p_value"] == pytest.approx(5 / 70, abs=1e-4)
 
 
 def test_old_verdicts_get_their_evidence_when_read(tmp_path):
@@ -280,7 +281,12 @@ def test_the_tabular_fixture_carries_the_new_fields():
             score = json.loads((fix / rel / "score.json").read_text())
             assert score == {k: r[k] for k in score}, rel
     v = case["verdict"]
-    assert v["evidence"] == current_verdict_evidence(case) and v["evidence"]["level"] == "open"
+    # Recorded under the rule before the control-must-reproduce fix (4 pairs, 13.03) and kept as recorded; today's
+    # rule drops the pair whose control copy came out honest (3 pairs, 6.86). The level is open either way.
+    now = current_verdict_evidence(case)
+    assert v["evidence"]["level"] == now["level"] == "open" and (v["evidence"]["pairs"], now["pairs"]) == (4, 3)
+    assert {k: v["evidence"][k] for k in ("control_inflated", "forced_inflated", "p_value")} == \
+        {k: now[k] for k in ("control_inflated", "forced_inflated", "p_value")}
     assert v["sentence"] == ("Skipping the duplicate check suggests why the scores were inflated: forcing it left 0 of 4 "
                              "copies inflated, against 3 of 4 without (4 pairs).")
 

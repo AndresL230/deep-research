@@ -386,7 +386,7 @@ export interface ForkExperiment {
    *  score decides the level (evidence.py); read through `with_evidence` on older forks. */
   score?: number;
   p_exact?: number | null;
-  level?: "open" | "supported" | "cleared";
+  level?: "open" | "supported" | "cleared" | "inconclusive";
   /** The fork's evidence by the running score (the same shape as a verdict's), and, on a fork saved before it, the
    *  evidence the older Fisher rule gave. */
   evidence?: VerdictEvidence;
@@ -443,7 +443,7 @@ export interface SuspectEvidence {
   agree: number;
   score: number;
   p_exact: number | null;
-  level: "open" | "supported" | "cleared";
+  level: "open" | "supported" | "cleared" | "inconclusive";
   cost_usd: number | null;
   /** Fork ids, oldest first. */
   experiments: string[];
@@ -629,12 +629,13 @@ export interface VerdictRevision {
 
 /** The level follows MASTER_PLAN 6.4's running score of the control/forced pairs, matched by copy number (`rule`:
  *  "running_score"): "supported" at a score of `needed_score` (20) or more, "cleared" after `needed_pairs` (5) or
- *  more pairs with a score under 1, else "open". Evidence without `rule` was saved by the older Fisher rule
+ *  more counted pairs with a score under 1, "inconclusive" when no pair counted because no control copy reproduced
+ *  the effect under test (inflated for `smaller_gap`, honest for `larger_gap`), else "open". Evidence without `rule` was saved by the older Fisher rule
  *  (supported at 8 pairs and p < 0.05); the server now reads it by the new rule and keeps it as
  *  `Verdict.evidence_old_rule`. `p_value` (one-sided Fisher on the counts) and `p_exact` (exact test on the gaps)
  *  are shown only. */
 export interface VerdictEvidence {
-  level: "open" | "supported" | "cleared";
+  level: "open" | "supported" | "cleared" | "inconclusive";
   /** Complete control/forced pairs; from counts alone, min(control_total, forced_total). */
   pairs: number;
   /** The fewest agreeing pairs a supported score takes (5); 8 on evidence saved by the old rule. */
@@ -959,7 +960,7 @@ export interface BatchListItem {
 
 /** Where the fork experiment and the verdict are. `open` and `supported` are the verdict's evidence level
  *  (deep_research/evidence.py); `fork_stopped` is a fork the batch stopped before it finished. */
-export type VerdictState = "none" | "awaiting_approval" | "fork_running" | "fork_stopped" | "forked" | "open" | "supported" | "cleared";
+export type VerdictState = "none" | "awaiting_approval" | "fork_running" | "fork_stopped" | "forked" | "open" | "supported" | "cleared" | "inconclusive";
 
 export interface BatchSummary {
   /** The domain's name (`config.domain`, "tabular" for batches saved before domains) and title. */
