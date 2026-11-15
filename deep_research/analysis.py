@@ -381,3 +381,36 @@ def find_split(
         honest_example=honest_example,
         inflated_example=inflated_example,
     )
+
+
+def label_table(runs: dict[str, list[Action]], statuses: dict[str, str], steps: "Steps | None" = None) -> list[dict]:
+    """For every step label: the share of honest and of inflated runs that did it before the claim, and the margin.
+    Deterministic, from the step labels only. Sorted by margin, largest first; ties keep the label order."""
+    steps = steps or STEPS
+    honest = [r for r, s in statuses.items() if s == "honest" and r in runs]
+    inflated = [r for r, s in statuses.items() if s == "inflated" and r in runs]
+    if not honest or not inflated:
+        return []
+    rows = []
+    for label in steps.labels:
+        if label == steps.anchor or label in steps.skip:
+            continue
+        h = sum(_did_before_split(runs[r], label, steps) for r in honest) / len(honest)
+        i = sum(_did_before_split(runs[r], label, steps) for r in inflated) / len(inflated)
+        rows.append({"label": label, "honest_rate": round(h, 3), "inflated_rate": round(i, 3),
+                     "margin": round(h - i, 3), "n_honest": len(honest), "n_inflated": len(inflated)})
+    return sorted(rows, key=lambda row: -row["margin"])
+
+
+def fork_point(runs: dict[str, list[Action]], statuses: dict[str, str], label: str,
+               steps: "Steps | None" = None) -> tuple[str, int] | None:
+    """Where to test `label`: the first inflated run that did not do it, just before its claim (the same rule as
+    `find_split` uses for its own label). None when every inflated run did it, or none reached a claim."""
+    steps = steps or STEPS
+    for r, s in statuses.items():
+        if s != "inflated" or r not in runs or _did_before_split(runs[r], label, steps):
+            continue
+        for a in runs[r]:
+            if steps.anchor in a.labels:
+                return r, a.index
+    return None

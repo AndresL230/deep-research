@@ -1,0 +1,51 @@
+# Deploy the web app and the gateway Worker ("orro", served at orrolab.dev) when main changes them.
+# The Python server deploys to Fly.io separately (fly-deploy.yml).
+#
+# Needs the repository secret CLOUDFLARE_API_TOKEN: a token that can deploy the "orro" Worker, made in the Cloudflare
+# dashboard (Workers & Pages → orro → Settings → Builds → API token for external CI/CD → Create token), then
+#   gh secret set CLOUDFLARE_API_TOKEN -R AndresL230/deep-research
+# Without it the job skips with a notice instead of failing. D1 migrations are not applied here: run
+# `npm run migrate` in gateway/ when a new one is added.
+name: Deploy to Cloudflare
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "gateway/**"
+      - ".github/workflows/cloudflare-deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: cloudflare-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: f56d3cab31332778edabd283b5d28d17
+    steps:
+      - name: Check the token
+        id: token
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::notice::CLOUDFLARE_API_TOKEN is not set, so nothing was deployed. See the comment at the top of this file."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.skip != 'true'
+      - uses: actions/setup-node@v4
+        if: steps.token.outputs.skip != 'true'
+        with:
+          node-version: 24
+      - name: Build the web app
+        if: steps.token.outputs.skip != 'true'
+        working-directory: web
+        run: npm ci --no-audit --no-fund && npm run build
+      - name: Deploy the gateway with the web app
+        if: steps.token.outputs.skip != 'true'
+        working-directory: gateway
+        run: npm ci --no-audit --no-fund && npx wrangler deploy

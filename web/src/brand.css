@@ -1,20 +1,20 @@
 /* Orro's logo (brand.ts): the Fault symbol and the wordmark, in the colour of the text around them. The lockup keeps
-   the identity's proportions: symbol as tall as the word, a one-bar gap (0.41 x-height), the word centred on it. */
+   the identity's proportions: symbol about 1.6 times the word's height, a one-bar gap (0.41 x-height), the word centred on it. */
 .brand-word, .brand-mark, .brand-sym { display:block; flex:none; }
 .brand-lock { display:inline-flex; align-items:center; gap:calc(var(--xh) * 0.41); }
 
 /* Small marks inside buttons, pills and chips: the symbol on the dashboard's purple tile, flat, in both themes. */
 .brand-tile { flex:none; display:grid; place-items:center; width:var(--brand-tile); height:var(--brand-tile); border-radius:22%; background:#b07af2; color:#121317; }
 
-/* The app header: the symbol, then the wordmark (x-height 15), which dims like the old text once crumbs follow it.
+/* The app header: the symbol, then the wordmark (x-height 11.5), which dims like the old text once crumbs follow it.
    It overrides page.css's phone rule that hid the old text title, so the lockup stays whole on phones too. */
 .pg-home { gap:6px; }
 .pg-home .ask-h1 { display:flex; align-items:center; }
 
-/* The landing nav: the same lockup at x-height 21 (18 on phones). */
+/* The landing nav: the same lockup at x-height 16 (13.6 on phones). */
 .lp-nav .lp-brand { gap:9px; }
 @media (max-width: 640px) {
   .lp-nav .lp-brand { gap:7px; }
-  .lp-nav .lp-brand .brand-mark { height:18.5px; width:auto; }
-  .lp-nav .lp-brand .brand-word { height:18.5px; width:auto; }
+  .lp-nav .lp-brand .brand-mark { height:22.4px; width:auto; }
+  .lp-nav .lp-brand .brand-word { height:14px; width:auto; }
 }

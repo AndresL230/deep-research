@@ -379,7 +379,9 @@ function childAt(c: ForkChild, slot: ChildSlot, evs: AgentEvent[], times: number
 function forkAt(f: ForkExperiment, slot: ForkSlot, events: Record<EventKey, AgentEvent[]>, times: Record<EventKey, number[]>, t: number): ForkExperiment | null {
   if (t < slot.rebuildAt) return null;
   if (t >= slot.doneAt) return { ...f };
-  const rest = without(f, ["status", "children", "arms"]) as Omit<ForkExperiment, "status" | "children" | "arms">;
+  // What the fork knows only once its copies are scored: its arms, its evidence, the outcome of its prediction, and
+  // how many copies were built each way.
+  const rest = without(f, ["status", "children", "arms", "evidence", "outcome", "built"]) as Omit<ForkExperiment, "status" | "children" | "arms">;
   if (t < slot.runningAt) return { ...rest, status: "rebuilding", children: {} };
   const children: Record<string, ForkChild> = {};
   for (const [cid, c] of Object.entries(f.children)) {
@@ -438,6 +440,18 @@ function costsAt(full: CaseFile, s: ReplaySchedule, t: number): Costs {
 }
 
 /** The case file as it was `t` seconds into the timeline. Never mutates `full`; at `t >= duration` it equals `full`. */
+/** A competing hypothesis as it stood at `t`: untested until the fork that tested it was approved, testing while that
+ *  fork ran, and its computed outcome once the fork was done. A hypothesis tested by the fix is untested until the
+ *  end, where the fix appears. */
+function hypothesisAt(h: Hypothesis, full: CaseFile, s: ReplaySchedule, t: number): Hypothesis {
+  if (!h.tested_by) return h;
+  const i = realForks(full).findIndex((f) => f.id === h.tested_by);
+  const slot = i >= 0 ? s.forks[i] : undefined;
+  if (slot && t >= slot.doneAt) return h;
+  const before = without(h, ["tested_by"]) as Hypothesis;
+  return { ...before, status: slot && t >= slot.rebuildAt ? "testing" : "untested" };
+}
+
 export function caseAt(full: CaseFile, events: Record<EventKey, AgentEvent[]>, t: number): CaseFile {
   const s = replaySchedule(full, events);
   if (t >= s.duration) {
@@ -448,7 +462,7 @@ export function caseAt(full: CaseFile, events: Record<EventKey, AgentEvent[]>, t
 
   const step_labels: Record<string, StepLabel[][]> = {};
   for (const [run, labels] of Object.entries(full.step_labels)) if (t >= s.stepLabelsAt[run]) step_labels[run] = labels;
-  const hypotheses: Hypothesis[] = full.hypotheses.filter((_, i) => t >= s.hypothesesAt[i]);
+  const hypotheses: Hypothesis[] = full.hypotheses.filter((_, i) => t >= s.hypothesesAt[i]).map((h) => hypothesisAt(h, full, s, t));
 
   const forks: Record<string, ForkExperiment | PendingForks> = {};
   const real = realForks(full);

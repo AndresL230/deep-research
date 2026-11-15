@@ -73,3 +73,15 @@ def script_analysts(monkeypatch, script_for) -> None:
         return real(*args, **kwargs)
 
     monkeypatch.setattr(analyst_mod, "create_deep_agent", scripted)
+
+
+def seed_hypotheses(case, label: str = "deduplicate") -> None:
+    """Two competing hypotheses, h1 (the method step `label`) and h2 (a code defect), as the investigator records them
+    before any experiment."""
+    assert case.record_competing_hypothesis(
+        "method", f"Skipping {label} inflates the claims.", "honest runs did it, inflated runs did not",
+        "forced copies come out inflated less often than control copies",
+        "forced copies inflate as often as control with 8 or more pairs", "low", step_label=label) == "h1"
+    assert case.record_competing_hypothesis(
+        "code", "The code is wrong where it was never tried.", "the measured rate is low in every run",
+        "a patch raises the measured rate", "the patched code does no better", "low") == "h2"

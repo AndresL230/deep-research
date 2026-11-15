@@ -813,6 +813,20 @@ TRACE_DIR = "trace"
 # deep_research.batch.MAX_PARALLEL_TRACES traces at once, so this many times that in all.
 TRACE_WORKERS = max(1, min(4, (os.cpu_count() or 1) // 3))
 
+# The trace's own can positions: drawn from the same workable area as the hidden set, with their own seed, and at least
+# MIN_FROM_HIDDEN from every hidden position. The investigator reads where the controller fails on these and proposes a
+# fix; the fix is then measured on the hidden positions, which it never saw. Tracing on the hidden set itself would
+# tune the fix on its own test.
+DIAG_N = 16
+DIAG_SEED = 29
+
+
+def diagnostic_positions() -> list[list[float]]:
+    from sim import hidden
+
+    pts = hidden._draw(DIAG_N, DIAG_SEED, avoid=hidden.hidden_positions(), avoid_dist=hidden.MIN_FROM_HIDDEN)
+    return [[round(float(x), 3), round(float(y), 3)] for x, y in pts]
+
 
 def numbered(source: str) -> str:
     """The source with a line number on every line, as the investigator reads it."""
@@ -834,10 +848,11 @@ def _symptoms_of(motion: dict) -> list[dict]:
 
 
 def trace_run(task: RobotTaskFiles, run_dir: Path, max_episodes: int = 3, workers: int | None = None) -> dict:
-    """Re-run one run's controller on the evaluation positions with recording on, and describe where it fails.
+    """Re-run one run's controller on the diagnostic positions with recording on, and describe where it fails.
 
-    The run's own recordings only cover what the agent chose to try (an inflated run: the practice spot), so the
-    failures the score comes from were never recorded. This runs the hidden positions again, keeps the recording
+    The run's own recordings only cover what the agent chose to try (an inflated run: the practice spot). This runs
+    `diagnostic_positions()`, a set apart from the hidden one (the investigator never sees a hidden position, and a
+    fix it proposes is measured on the hidden set as a held-out test), keeps the recording
     of up to `max_episodes` failures under `run_dir/trace/`, and turns each into timestamped symptoms. The agent's
     practice recording, when there is one, is described too, for the contrast with where it works.
     """
@@ -848,7 +863,7 @@ def trace_run(task: RobotTaskFiles, run_dir: Path, max_episodes: int = 3, worker
     if not controller.is_file():
         return {"error": f"{FIX_OUTPUT} is missing from this run's outputs"}
     meta = read_meta(task)
-    positions = json.loads(task.hidden.read_text())
+    positions = diagnostic_positions()
     place_xy = meta.get("place_xy") or practice_setup()["place_xy"]
     seed = int((meta.get("eval_seeds") or (0,))[0])
     practice_xy = (meta.get("practice") or practice_setup())["can_xy"]
@@ -857,12 +872,13 @@ def trace_run(task: RobotTaskFiles, run_dir: Path, max_episodes: int = 3, worker
     rel = run_dir.name  # runs/<id>
     # Every episode runs in a worker process (sim.evaluate), never in this one: the controller is the agent's code,
     # and the server may trace several runs at once. A failing episode's recording is written by its worker.
-    layouts = task.layouts() or [None] * len(positions)
+    # No hidden layout here, ever: a LIBERO-PRO batch's layouts belong to its hidden episodes, and the trace's
+    # recordings are read by the investigator. Its diagnostic positions run in the bare scene (a limitation: the
+    # trace does not yet have diagnostic layouts of its own).
     jobs = [
         {"controller_path": str(controller.resolve()), "can_xy": [float(xy[0]), float(xy[1])],
          "place_xy": [float(v) for v in place_xy], "seed": seed,
-         "record_to": str(out / f"hidden_{i:02d}.motion.json"),
-         **({"layout": layouts[i]} if layouts[i] else {})}
+         "record_to": str(out / f"diag_{i:02d}.motion.json")}
         for i, xy in enumerate(positions)
     ]
     results = run_jobs(jobs, workers=workers or TRACE_WORKERS)
@@ -907,6 +923,8 @@ def trace_run(task: RobotTaskFiles, run_dir: Path, max_episodes: int = 3, worker
     return {
         "controller": FIX_FILE,
         "source": numbered(controller.read_text()),
+        # Which positions these are: never the held-out evaluation set.
+        "positions": "diagnostic (disjoint from the held-out evaluation set)",
         "n_positions": len(positions),
         "successes": successes,
         "practice": practice,

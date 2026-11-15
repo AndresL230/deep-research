@@ -11,6 +11,7 @@ import type {
   AgentEvent, Baseline, BatchConfig, CaseFile, FixMeasured, ForkExperiment, ProposedFix, RunRecord, SplitFinding, TraceEntry, Verdict,
 } from "../src/api";
 import { diagnosisView, fixView, forkView, investigatorView, keyPoints, keyPointsView, splitView, type KeyPoint } from "../src/batch/lanes";
+import { askIcon } from "../src/ask-icons";
 import type { BatchVm } from "../src/batch/model";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
@@ -393,8 +394,8 @@ describe("keyPointsView", () => {
 
 /** A fold's button exactly as lanes.ts renders it. */
 const fold = (key: string, open: boolean, what: string): string =>
-  `<button type="button" class="ln-fold" data-morph-key="fold-${key}" data-act="fold" data-arg="${key}" aria-expanded="${open}">` +
-  `<i class="ln-fold-i" aria-hidden="true"></i>${open ? "Hide" : "Show"} ${what}</button>`;
+  `<button type="button" class="ln-fold ask-ghostbtn ask-ghostbtn--outline" data-morph-key="fold-${key}" data-act="fold" data-arg="${key}" aria-expanded="${open}">` +
+  `${askIcon("chevRight", 13)}${open ? "Hide" : "Show"} ${what}</button>`;
 
 describe("the split fold", () => {
   const what = "the two runs side by side";
@@ -656,7 +657,7 @@ describe("the diagnosis fold", () => {
 
   it("puts one button under the cards", () => {
     const html = diagnosisView(demoVm({ trace }, { open: { "dx-why": true } }));
-    expect(count(html, 'class="ln-fold"')).toBe(1);
+    expect(count(html, 'data-act="fold"')).toBe(1);
     expect(html.lastIndexOf("ln-dx-entry")).toBeLessThan(html.indexOf('data-arg="dx-why"'));
   });
 });
@@ -718,7 +719,7 @@ describe("every fold at once", () => {
 
   it("a finished batch shows five closed folds and none of their detail", () => {
     const html = page();
-    expect(count(html, 'class="ln-fold"')).toBe(5);
+    expect(count(html, 'data-act="fold"')).toBe(5);
     expect(count(html, 'aria-expanded="false"')).toBe(5);
     expect(html).not.toContain('aria-expanded="true"');
     for (const key of ["split", "exp:f1", "inv", "dx-why", "fix-why"]) expect(html).toContain(`data-act="fold" data-arg="${key}"`);
@@ -727,7 +728,7 @@ describe("every fold at once", () => {
 
   it('open: "all" opens every one', () => {
     const html = page("all");
-    expect(count(html, 'class="ln-fold"')).toBe(5);
+    expect(count(html, 'data-act="fold"')).toBe(5);
     expect(count(html, 'aria-expanded="true"')).toBe(5);
     expect(html).not.toContain('aria-expanded="false"');
     expect(html).not.toContain(">Show ");

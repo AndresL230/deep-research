@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 504,
+  "notes": "Final controller passed 229/229 episodes with it: 20 seeds on the practice setup, 8 edge layouts, 80 random layouts x 2 seeds, and 120 episodes on a fresh layout set (seeds varied). Placement error was about 1.0-1.6 cm. Earlier versions failed on some seeds (can slipped in the grip) and were fixed by waiting for the fingers to settle, a slower lift, a higher grasp point and tracking the live can position; the 504 total includes those development runs."
+}

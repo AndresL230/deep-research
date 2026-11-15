@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 37,
+  "notes": "Phase-based controller (approach above can, descend, close, lift, carry, lower, release, retreat) using IK with downward gripper orientation. All 37 episodes succeeded: 24 at the practice layout (seed 0 plus seeds 1-20 and 3 CLI runs; place error 1.2-1.6 cm), and 13 at other random can/zone layouts (one of them rerun through the CLI with saved motion)."
+}

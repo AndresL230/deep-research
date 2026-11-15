@@ -97,20 +97,24 @@ async def investigate(batch_id: str, auto_approve: bool) -> None:
         )
     b = _reopen(batch_id)
     why_not = b.fork_blocker()
-    if why_not:
-        # The investigator tests its suspect with the fork experiment. Without one it would only spend tokens.
+    testable = any(b.domain.intervention_for(lb, b.cfg) for lb in b.domain.labels())
+    if why_not and not (b.case.data.get("split") and (testable or b.domain.score_code is not None)):
+        # Nothing could test a hypothesis here: neither a fork on any step nor a measured fix. It would only spend tokens.
+        # The split's own label need not be testable: the investigator chooses which hypothesis to test.
         raise SystemExit(f"batch {batch_id} (phase {b.case.data.get('phase')}): {why_not}")
     approved = declined_at_limit = 0
     try:
         await b.investigate()
         while b.case.data.get("phase") == "awaiting_approval":
             pending = b.case.data["forks"].get("pending", {})
-            arms = list(b.arm_plan()) or ["control", "forced"]
-            question = (
-                f"The investigator asks for a fork experiment: {pending.get('n_per_arm')} runs in each of "
-                f"{len(arms)} arms ({', '.join(arms)}), {pending.get('vm_count')} VMs, "
-                f"about ${pending.get('estimate_usd')}. Approve? [y/N] "
-            )
+            about = f" to test {pending['hypothesis_id']} ({pending.get('prediction')})" if pending.get("hypothesis_id") else ""
+            if pending.get("direct"):
+                question = f"The investigator asks to run its patched code on the held-out setups{about}, no VMs, $0. Approve? [y/N] "
+            else:
+                question = (
+                    f"The investigator asks for a {pending.get('kind')} experiment{about}: {pending.get('n_per_arm')} "
+                    f"runs per arm, {pending.get('vm_count')} VMs, about ${pending.get('estimate_usd')}. Approve? [y/N] "
+                )
             if not auto_approve:
                 approve = input(question).strip().lower() in ("y", "yes")
             elif approved < MAX_AUTO_APPROVALS:

@@ -275,9 +275,10 @@ def test_the_verdict_is_saved_as_fields_and_checked_against_the_fork(batch, monk
     _fork_done(batch)
     arms = {"control": {"inflated": 3, "total": 4}, "placebo": {"inflated": 3, "total": 3}, "forced": {"inflated": 0, "total": 4}}
     good = {**VERDICT, "sentence": "Forcing the duplicate check removed the inflation.", "confidence": "medium", "arms": arms}
-    hypothesis = {"step_label": "deduplicate", "honest_action": "df.drop_duplicates()", "inflated_action": "fit(df)",
-                  "evidence": "1 of 1 honest runs dedupe, 0 of 3 inflated", "sentence": "Skipping dedupe inflates.",
-                  "honest_rate": 1.0, "inflated_rate": 0.0, "n_honest": 1, "n_inflated": 3, "confidence": "low"}
+    hypothesis = {"kind": "method", "step_label": "deduplicate", "statement": "Skipping dedupe inflates.",
+                  "supporting_evidence": "1 of 1 honest runs dedupe (df.drop_duplicates()), 0 of 3 inflated (fit(df))",
+                  "prediction": "forced copies inflate less often than control", "falsified_if": "they inflate as often",
+                  "confidence": "low"}
     model = ScriptedModel(messages=iter([
         call("task", {"subagent_type": "hypothesis", "description": "compare"}, "t1"),
         call("record_hypothesis", hypothesis, "h1"),
@@ -305,8 +306,10 @@ def test_the_verdict_is_saved_as_fields_and_checked_against_the_fork(batch, monk
     assert v["numbers"] == {"control_inflated": 3, "control_total": 4, "placebo_inflated": 3, "placebo_total": 3,
                             "forced_inflated": 0, "forced_total": 4}
     (h,) = case["hypotheses"]
-    assert h["evidence"] == hypothesis["evidence"] and h["step"] == "deduplicate"
-    assert (h["n_honest"], h["n_inflated"], h["confidence"], h["sentence"]) == (1, 3, "low", "Skipping dedupe inflates.")
+    assert h["id"] == "h1" and h["kind"] == "method" and h["status"] == "untested"
+    assert h["evidence"] == hypothesis["supporting_evidence"] and h["step_label"] == "deduplicate"
+    assert (h["prediction"], h["falsified_if"]) == (hypothesis["prediction"], hypothesis["falsified_if"])
+    assert (h["confidence"], h["sentence"]) == ("low", "Skipping dedupe inflates.")
 
 
 def test_older_callers_of_the_case_file_still_work(batch):
