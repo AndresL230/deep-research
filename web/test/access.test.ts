@@ -70,6 +70,10 @@ describe("the landing page's button", () => {
     expect(viewer).not.toContain("Start a batch");
     expect(BROWSE_CTA.href).toBe("#/batches");
   });
+  it("asks the headline, under the pill", () => {
+    expect(landingView()).toContain('aria-label="Is your agent telling the truth?"');
+    expect(landingView()).toContain("Inflated runs: 89% claimed, 75% real");
+  });
 });
 
 describe("the header's links", () => {
