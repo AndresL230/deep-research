@@ -839,6 +839,8 @@ export interface CaseFile {
   /** `{}` until the batch starts. */
   config: BatchConfig | Record<string, never>;
   phase: Phase;
+  /** A server restart cut the batch off (batch.recover_interrupted): the phase it was in, when, and why it stopped. */
+  interrupted?: { at: number; phase: string; reason: string } | null;
   runs: Record<string, RunRecord>;
   /** The investigator's step labels per run, one list per action. */
   step_labels: Record<string, StepLabel[][]>;
@@ -1292,8 +1294,8 @@ export const fetchInvestigatorEvents = (id: string, o: Opts = {}) => call<AgentE
 export const startInvestigation = (id: string, o: Opts = {}) => call<{ ok: true }>(`${batchPath(id)}/investigate`, { ...o, method: "POST" });
 /** Bring a saved, resumable batch back live on this server (phase `ready`); with `investigate`, start the investigator
  *  in the same call. 409 with the reason when the batch cannot be resumed. */
-export const resumeBatch = (id: string, investigate = false, o: Opts = {}) =>
-  call<{ id: string; phase: string }>(`${batchPath(id)}/resume${investigate ? "?investigate=true" : ""}`, { ...o, method: "POST" });
+export const resumeBatch = (id: string, investigate = false, o: Opts = {}, cont = false) =>
+  call<{ id: string; phase: string }>(`${batchPath(id)}/resume${investigate ? `?investigate=true${cont ? "&continue=true" : ""}` : ""}`, { ...o, method: "POST" });
 const morePairsPath = (id: string, n?: number) => `${batchPath(id)}/more-pairs${n === undefined ? "" : `?n=${n}`}`;
 /** For a saved batch whose verdict is open: what `n` more copies per arm (default: the pairs still needed) would run
  *  and cost. Starts nothing. 409 with the reason when more pairs cannot run on it. */

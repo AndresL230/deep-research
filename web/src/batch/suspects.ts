@@ -559,7 +559,8 @@ function doneSummary(vm: BatchVm): string {
     ? `<div class="sx-sum-v">${statusChip(level ?? "open")}<b class="sx-target">${esc(v.step_label)}</b>` +
       (ev?.score != null ? `<span class="sx-sum-score">score ${esc(scoreText(ev.score))}</span>` : "") +
       `<button type="button" class="ask-ghostbtn ask-ghostbtn--outline sx-sum-go" data-act="${ACT.goto}" data-arg="verdict">Open the verdict</button></div>`
-    : `<p class="ln-muted">It finished without a verdict.</p>`;
+    // Cut off by a server restart (batch.recover_interrupted) is not finished: it never got as far as a verdict.
+    : `<p class="ln-muted">${c.interrupted ? "It was cut off before a verdict." : "It finished without a verdict."}</p>`;
   const n = (st: SxStatus): number => rows.filter((r) => r.status === st).length;
   const tested = rows.filter((r) => r.experiments.length > 0 || r.s.tested_by).length;
   const untested = rows.length - tested;

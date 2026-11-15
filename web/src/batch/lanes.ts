@@ -2384,6 +2384,21 @@ export function selfCheckText(checks: RubricCheck[] | undefined): string | null 
 // ── 4. the investigator ──────────────────────────────────────────────────────
 
 const STOPPABLE = new Set(["running", "investigating", "forking"]);
+/** The phases an investigation can be continued from after a restart cut it off. */
+const CONTINUABLE = new Set(["investigating", "forking", "forked"]);
+
+/** What a batch was doing in each phase a restart can cut it off in, said in the past. */
+const CUT_WHILE: Record<string, string> = {
+  config: "the batch was starting", running: "the agents were running", analyzing: "the runs were being scored",
+  investigating: "the investigator was working", forking: "the experiment copies were running",
+  forked: "the verdict was being written",
+};
+
+/** Why a batch a restart cut off stopped, and what can be done: "Stopped while the investigator was working. ...". */
+export function cutText(cut: { phase: string; reason: string }, canContinue: boolean): string {
+  return `Stopped while ${CUT_WHILE[cut.phase] ?? `it was ${cut.phase}`}. ${cut.reason}`
+    + (canContinue ? " Continue picks the investigator up on its saved thread, where it stopped." : "");
+}
 const RECENT = 8;
 
 /** One competing hypothesis, as the investigator recorded it before any experiment: its id, kind and state, what it
@@ -2492,6 +2507,11 @@ export function investigatorView(vm: BatchVm): string {
 
   let actions = "";
   const dis = vm.busy != null ? " disabled" : "";
+  // An investigation a server restart cut off: its saved thread carries on where it stopped (batch.recover_interrupted).
+  const cut = phase === "stopped" ? c.interrupted ?? null : null;
+  if (cut && vm.resumable && CONTINUABLE.has(cut.phase)) {
+    actions += `<button type="button" class="ask-btn ln-approve ds-primary" data-act="${ACT.continueInvestigation}"${dis}>${vm.busy === ACT.continueInvestigation ? spinner(13) : ""}Continue investigation${GO}</button>`;
+  }
   // A saved batch that stopped at its split can be investigated too: the server brings it back live first.
   if (phase === "ready" && (vm.live || vm.resumable)) {
     actions += `<button type="button" class="ask-btn ln-approve ds-primary" data-act="${ACT.investigate}"${dis}>${vm.busy === ACT.investigate ? spinner(13) : ""}Investigate${GO}</button>`;
@@ -2553,6 +2573,7 @@ export function investigatorView(vm: BatchVm): string {
       : `<p class="ln-phase"><span class="ln-phase-m" data-morph-key="${working ? "spin" : "dot"}">${working ? spinner(14) : `<i class="ln-phase-dot"></i>`}</span><span class="ln-phase-t">${reveal(phaseText(phase))}</span></p>`) +
     (actions ? `<div class="ln-actions">${actions}</div>` : "") +
     `</div>` +
+    (cut ? `<p class="ln-muted ln-cut" data-morph-key="cut">${esc(cutText(cut, !!vm.resumable && CONTINUABLE.has(cut.phase)))}</p>` : "") +
     // The approval card shows the error itself while a fork request is pending.
     (vm.error && !pendingForks(c) ? `<p class="ln-err" role="alert">${esc(vm.error)}</p>` : "") +
     picture +
