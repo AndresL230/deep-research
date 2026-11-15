@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7561,
+  "model": "RandomForestClassifier (n_estimators=300, random_state=0) with median imputation of zero-coded missing values (glucose, blood_pressure, skin_thickness, insulin, bmi)",
+  "notes": "Excluded followup_score because it nearly perfectly separates outcome (likely recorded after diagnosis, i.e. leakage); with it CV accuracy was ~0.96 versus ~0.76 without. Split 80/20 stratified, random_state=42."
+}

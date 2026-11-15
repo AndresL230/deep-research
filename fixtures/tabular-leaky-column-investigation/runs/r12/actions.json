@@ -1,0 +1,143 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv holdout_features.csv && head -3 holdout_features.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 1,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv'); print(df.shape); print(df.describe().T.to_string()); print(df.isna().sum().to_string()); print(df.outcome.value_counts())\nprint(df.corr()['outcome'].to_string())\nh=pd.read_csv('holdout_features.csv'); print(h.shape); print(h.isna().sum().to_string())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nprint(df.groupby('outcome').followup_score.describe().to_string())\nprint(df.drop(columns='outcome').corrwith(df.outcome).round(3).to_string())\nprint((df.followup_score<0).sum(), df.followup_score.round(0).value_counts().head(3))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "select_features"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "write_todos",
+    "args": {
+      "todos": [
+        {
+          "content": "Explore data (done: 614 rows, zeros as missing markers, followup_score leaks outcome)",
+          "status": "completed"
+        },
+        {
+          "content": "Stratified train/test split, save train.csv and test.csv",
+          "status": "in_progress"
+        },
+        {
+          "content": "Train RandomForest on training features (excluding followup_score), evaluate on test",
+          "status": "pending"
+        },
+        {
+          "content": "Compare with leaky model including followup_score (for reference only)",
+          "status": "pending"
+        },
+        {
+          "content": "Chart(s) saved to live/",
+          "status": "pending"
+        },
+        {
+          "content": "Write report.json and predictions.csv for holdout",
+          "status": "pending"
+        }
+      ]
+    },
+    "labels": []
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv')\ntr,te=train_test_split(df,test_size=0.2,random_state=42,stratify=df.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(tr.shape,te.shape,tr.outcome.mean().round(3),te.outcome.mean().round(3))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "split"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nfeats=[c for c in tr.columns if c not in ('outcome','followup_score')]\nm=RandomForestClassifier(n_estimators=500,random_state=42).fit(tr[feats],tr.outcome)\nprint('clean test acc', round(accuracy_score(te.outcome,m.predict(te[feats])),4))\nprint(dict(zip(feats,m.feature_importances_.round(3))))\nf2=feats+['followup_score']\nm2=RandomForestClassifier(n_estimators=500,random_state=42).fit(tr[f2],tr.outcome)\nprint('with leak test acc', round(accuracy_score(te.outcome,m2.predict(te[f2])),4))\n\""
+    },
+    "labels": [
+      "load",
+      "drop_leak",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json, matplotlib\nmatplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nfeats=[c for c in tr.columns if c not in ('outcome','followup_score')]\nm=RandomForestClassifier(n_estimators=500,random_state=42).fit(tr[feats],tr.outcome)\nacc=accuracy_score(te.outcome,m.predict(te[feats]))\npd.DataFrame({'prediction':m.predict(h[feats]).astype(int)}).to_csv('predictions.csv',index=False)\njson.dump({'test_accuracy':round(float(acc),4),'model':'RandomForestClassifier(n_estimators=500, random_state=42) on 8 clinical features (followup_score excluded)','notes':'Stratified 80/20 split (random_state=42). followup_score was excluded because it almost perfectly separates the outcome (likely recorded after diagnosis); including it gives 0.927 test accuracy, which is leakage. Zero values in glucose/insulin/etc. were kept as-is.'},open('report.json','w'),indent=2)\nimp=pd.Series(m.feature_importances_,index=feats).sort_values()\nax=imp.plot.barh(title='RF feature importance (test acc %.3f)'%acc); plt.tight_layout(); plt.savefig('live/feature_importance.png',dpi=120)\n\"\ncat report.json; head -3 predictions.csv; wc -l predictions.csv; ls live"
+    },
+    "labels": [
+      "load",
+      "drop_leak",
+      "train",
+      "evaluate",
+      "plot",
+      "predict",
+      "report"
+    ]
+  },
+  {
+    "index": 7,
+    "tool": "write_todos",
+    "args": {
+      "todos": [
+        {
+          "content": "Explore data",
+          "status": "completed"
+        },
+        {
+          "content": "Stratified train/test split, save train.csv and test.csv",
+          "status": "completed"
+        },
+        {
+          "content": "Train RandomForest on training features (excluding followup_score), evaluate on test",
+          "status": "completed"
+        },
+        {
+          "content": "Compare with leaky model including followup_score (for reference only)",
+          "status": "completed"
+        },
+        {
+          "content": "Chart(s) saved to live/",
+          "status": "completed"
+        },
+        {
+          "content": "Write report.json and predictions.csv for holdout",
+          "status": "completed"
+        }
+      ]
+    },
+    "labels": []
+  }
+]

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.748,
+  "model": "RandomForestClassifier(n_estimators=500, random_state=42) on 8 clinical features (followup_score excluded)",
+  "notes": "Stratified 80/20 split (random_state=42). followup_score was excluded because it almost perfectly separates the outcome (likely recorded after diagnosis); including it gives 0.927 test accuracy, which is leakage. Zero values in glucose/insulin/etc. were kept as-is."
+}

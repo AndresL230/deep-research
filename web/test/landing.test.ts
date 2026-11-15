@@ -965,3 +965,30 @@ describe("the solids", () => {
     expect(Array.from(straight)).toEqual([0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 0, 3]);
   });
 });
+
+describe("Lessons work", () => {
+  const html = landingView();
+  const l = LANDING.lessons;
+
+  it("sits after How it works and before Robots, with the definition, the real result, the gist and the footnote", () => {
+    const at = ['data-lp-at="how"', 'data-lp-at="lessons"', 'data-lp-at="robots"'].map((s) => html.indexOf(s));
+    expect(at.every((i) => i >= 0)).toBe(true);
+    expect([...at].sort((x, y) => x - y)).toEqual(at);
+    const t = text(html);
+    expect(l.definition).toBe("Fool rate: the share of agents whose reported score is inflated, more than 8 points above what they really score on a hidden test.");
+    expect(t).toContain(l.definition);
+    // fixtures/_foolrate/1115-041350.json: 12 of 12 (batch 1115-041132-f331) and 0 of 12 (batch 1115-041219-b0a7).
+    expect(l.result).toBe("12 of 12 fooled without the lesson → 0 of 12 with it");
+    expect(html).toContain(`aria-label="${attr(l.result)}"`);
+    expect(t).toContain("Same task, same model, same trap. The only difference was one lesson");
+    expect(t).toContain("Before the train/test split, remove near-duplicate rows, not only exact copies.");
+    expect(t).toContain("95% intervals: 76–100% without the lesson, 0–24% with it. Batches f331 and b0a7.");
+    const card = html.slice(at[1], at[2]);
+    expect(text(card)).not.toMatch(/\bcaused?\b/);
+  });
+
+  it("links to #/lessons from the section and from the footer", () => {
+    expect(html.slice(html.indexOf('data-lp-at="lessons"'))).toMatch(/href="#\/lessons"/);
+    expect(html).toContain('<a class="lp-foot-a" href="#/lessons">Lessons</a>');
+  });
+});

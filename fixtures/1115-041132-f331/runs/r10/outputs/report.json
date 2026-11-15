@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9017,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), default hyperparameters, trained on 80% stratified split",
+  "notes": "Exact duplicate rows (57) were removed before a stratified 80/20 split (random_state=42) to avoid leakage. Zeros in insulin/skin_thickness were kept as-is, not imputed."
+}

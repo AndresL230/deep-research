@@ -141,7 +141,10 @@ def test_no_prompt_skill_or_change_list_names_a_trap_or_its_column(name):
         "tagger": inv_mod.tagger_prompt(d.labels(), d.investigator_words),
         "lenses": " ".join(inv_mod.lens_prompt(k, d.investigator_words) for k in ("omission", "commission", "data")),
         "others": " ".join((inv_mod.SKEPTIC_PROMPT, inv_mod.GENERAL_PROMPT, inv_mod.TRACER_PROMPT, inv_mod.RUBRIC)),
-        "skills": " ".join(p.read_text() for p in d.skills_dir.rglob("*.md")),
+        # Every skill but the approved lessons under learned/, which the investigator may not read (SKILLS_READ_DENY);
+        # test_nothing_the_investigator_reads_or_gets_back_names_a_trap checks that through its own tools.
+        "skills": " ".join(p.read_text() for p in d.skills_dir.rglob("*.md")
+                           if "learned" not in p.relative_to(d.skills_dir).parts),
         "list_changes": json.dumps(forks.blind_changes(lambda lb: d.intervention_for(lb, cfg), d.labels(),
                                                        tabular=name == "tabular")),
     }

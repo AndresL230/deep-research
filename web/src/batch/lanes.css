@@ -15,6 +15,8 @@
 .ln-h3-s { margin:-6px 0 2px; max-width:72ch; font-size:13px; line-height:1.45; color:var(--fg-55); }
 .ln-blk > .ln-note { margin:0; }
 .ln-sub, .ln-note { margin:0; font-size:13.5px; color:var(--fg-55); text-wrap:pretty; }
+.ln-then { margin-top:10px; }
+.ln-then-a { color:inherit; text-decoration:underline; text-underline-offset:3px; }
 .ln-muted { color:var(--fg-55); font-weight:400; }
 .ln-lit-word { color:var(--accent); font-weight:500; }
 .ln-iv { color:var(--fg); font-weight:500; }

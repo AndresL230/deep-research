@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7317,
+  "model": "RandomForestClassifier (500 trees, random_state=42) with median imputation of zero-valued measurements",
+  "notes": "Trained on 80% stratified split (491 rows), tested on 20% (123 rows). followup_score was dropped (accidentally overwritten from data.csv; original values unrecoverable), so this model uses only the 8 remaining features."
+}

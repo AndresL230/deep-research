@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7561,
+  "model": "RandomForestClassifier (n_estimators=300, random_state=42), trained on 8 medical features",
+  "notes": "followup_score was excluded because it separates outcome almost perfectly (likely recorded after diagnosis); with it included test accuracy was 0.927. Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is."
+}

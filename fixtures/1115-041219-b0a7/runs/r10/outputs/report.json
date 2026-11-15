@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.8289,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42) on 8 medical features",
+  "notes": "Removed 161 near-duplicate rows (identical integer features, bmi within 0.05, pedigree within 0.002) before an 80/20 stratified split (seed 42). Test accuracy is measured on the held-out 20% only."
+}

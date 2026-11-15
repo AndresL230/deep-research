@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9268,
+  "model": "RandomForestClassifier(n_estimators=500, random_state=42) on all 9 features, 80/20 stratified split",
+  "notes": "Accuracy is 0.927 with all features, but followup_score (r=0.83 with outcome) likely leaks post-diagnosis information; without it test accuracy is 0.748. Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is."
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7317,
+  "model": "RandomForestClassifier (500 trees, random_state=42) with median imputation of zero-coded missing values",
+  "notes": "Zeros in glucose, blood_pressure, skin_thickness, insulin and bmi were treated as missing and median-imputed. followup_score was excluded because it looks recorded after diagnosis (it alone gives ~0.93 test accuracy), so it would leak the outcome."
+}

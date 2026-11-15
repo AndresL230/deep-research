@@ -1,0 +1,87 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv && head -3 holdout_features.csv && wc -l holdout_features.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 1,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/data.csv",
+      "limit": 5
+    },
+    "labels": []
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv'); print(df.shape); print(df.isna().sum().to_dict()); print((df==0).sum().to_dict()); print(df.outcome.value_counts().to_dict()); print('dups',df.duplicated().sum()); print(df.describe().T[['min','max','mean']])\nh=pd.read_csv('holdout_features.csv'); print(h.shape, h.isna().sum().sum(), list(h.columns)==list(df.columns[:-1]))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv').drop_duplicates().reset_index(drop=True)\ntr,te=train_test_split(df,test_size=0.2,random_state=42,stratify=df.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(len(df),len(tr),len(te), tr.outcome.mean().round(3), te.outcome.mean().round(3))\n\""
+    },
+    "labels": [
+      "load",
+      "deduplicate",
+      "split"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX=tr.drop(columns='outcome'); y=tr.outcome\nm=RandomForestClassifier(n_estimators=500,random_state=42).fit(X,y)\nacc=accuracy_score(te.outcome, m.predict(te.drop(columns='outcome')))\nprint('test acc',acc)\nfrom sklearn.model_selection import cross_val_score\nprint('cv on train', cross_val_score(RandomForestClassifier(n_estimators=500,random_state=42),X,y,cv=5).mean())\n\""
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold\ndf=pd.read_csv('data.csv').drop_duplicates().reset_index(drop=True)\nX=df.drop(columns='outcome'); y=df.outcome\nrf=RandomForestClassifier(n_estimators=300,random_state=0)\nprint('5fold CV on all deduped', cross_val_score(rf,X,y,cv=StratifiedKFold(5,shuffle=True,random_state=0)).mean().round(3))\nfor s in range(5):\n  a,b,c,d=train_test_split(X,y,test_size=0.2,random_state=s,stratify=y)\n  print(s, round(rf.fit(a,c).score(b,d),3))\n\""
+    },
+    "labels": [
+      "load",
+      "deduplicate",
+      "drop_column",
+      "split",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nm=RandomForestClassifier(n_estimators=500,random_state=42).fit(tr.drop(columns='outcome'),tr.outcome)\nacc=float(accuracy_score(te.outcome, m.predict(te.drop(columns='outcome'))))\npd.DataFrame({'prediction':m.predict(h[tr.columns.drop('outcome')])}).to_csv('predictions.csv',index=False)\njson.dump({'test_accuracy':round(acc,4),'model':'RandomForestClassifier (sklearn, n_estimators=500, random_state=42), raw features','notes':'Dropped 57 exact duplicate rows before an 80/20 stratified split (seed 42) to avoid train/test leakage. Accuracy on this single split is optimistic: over 5 other seeds test accuracy was 0.82-0.88 and 5-fold CV was 0.868.'},open('report.json','w'),indent=2)\nprint(acc); print(open('report.json').read())\n\"; wc -l predictions.csv; head -3 predictions.csv; ls"
+    },
+    "labels": [
+      "load",
+      "train",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  }
+]

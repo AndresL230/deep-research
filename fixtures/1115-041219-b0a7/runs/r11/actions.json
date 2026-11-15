@@ -1,0 +1,191 @@
+[
+  {
+    "index": 0,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/skills/learned/remove-near-duplicates-before-split/SKILL.md",
+      "limit": 1000
+    },
+    "labels": []
+  },
+  {
+    "index": 1,
+    "tool": "ls",
+    "args": {
+      "path": "/home/daytona/workspace"
+    },
+    "labels": []
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && wc -l data.csv holdout_features.csv && head -5 data.csv && head -3 holdout_features.csv && ls live"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nprint(df.shape); print(df.isna().sum().sum()); print(df.describe().T)\nprint('exact dups', df.duplicated().sum())\nprint(df.outcome.value_counts())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nfeats=[c for c in df.columns if c!='outcome']\nfor name,r in [('exact',df),('round0',df.round(0)),('round1',df.round(1)),('bmi/ped rounded',df.assign(bmi=df.bmi.round(0),diabetes_pedigree=df.diabetes_pedigree.round(2)))]:\n    print(name, r.duplicated().sum(), r.duplicated(subset=feats).sum())\n# all-but-one column match\nimport itertools\nfor drop in feats:\n    cols=[c for c in df.columns if c!=drop]\n    print('ignore',drop, df.duplicated(subset=cols).sum())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\npd.set_option('display.width',200)\ndf=pd.read_csv('data.csv')\nfeats=[c for c in df.columns if c!='outcome']\nd=df[df.duplicated(subset=feats,keep=False)]\nprint(len(d))\ng=d.drop_duplicates()\nex=df[df.duplicated(subset=feats,keep=False)].sort_values(feats).head(12)\nprint(ex)\nr=df.round(1)\nprint('round1 dup examples:')\nprint(df[r.duplicated(subset=feats,keep=False)].assign(k=r.apply(tuple,axis=1)).sort_values(feats).head(12))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "deduplicate"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, numpy as np\ndf=pd.read_csv('data.csv')\nfeats=[c for c in df.columns if c!='outcome']\nr=df.round(1)\nkey=r[feats].apply(tuple,axis=1)\ngrp=df.groupby(key)\ndiffs=[]\nfor k,g in grp:\n    if len(g)>1:\n        diffs.append((g[feats].max()-g[feats].min()).values)\ndiffs=np.array(diffs)\nprint('groups',len(diffs))\nprint('max abs diff per feature across groups:',dict(zip(feats,diffs.max(0).round(3))))\nprint('rows w/ any diff>0.05 :', (diffs.max(1)>0.05).sum())\n# outcome consistency within groups\noc=grp.outcome.nunique()\nprint('groups with conflicting outcome', (oc>1).sum())\n\""
+    },
+    "labels": [
+      "load"
+    ]
+  },
+  {
+    "index": 7,
+    "tool": "write_todos",
+    "args": {
+      "todos": [
+        {
+          "content": "Inspect data and find near-duplicates (921 rows > known 768)",
+          "status": "completed"
+        },
+        {
+          "content": "Dedupe on rounded features (round 1 decimal), keep first",
+          "status": "in_progress"
+        },
+        {
+          "content": "Stratified 80/20 split; write train.csv and test.csv",
+          "status": "pending"
+        },
+        {
+          "content": "Train RandomForestClassifier, measure test accuracy",
+          "status": "pending"
+        },
+        {
+          "content": "Write report.json and predictions.csv for holdout",
+          "status": "pending"
+        },
+        {
+          "content": "Save chart(s) to live/",
+          "status": "pending"
+        }
+      ]
+    },
+    "labels": []
+  },
+  {
+    "index": 8,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nfeats=[c for c in df.columns if c!='outcome']\nkey=df.round(1)[feats]\nclean=df[~key.duplicated(keep='first')].reset_index(drop=True)\nprint(len(df), len(clean)); print(clean.outcome.value_counts(normalize=True))\nclean.to_pickle('/tmp/clean.pkl')\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "deduplicate"
+    ]
+  },
+  {
+    "index": 9,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\nclean=pd.read_pickle('/tmp/clean.pkl')\ntr,te=train_test_split(clean,test_size=0.2,random_state=42,stratify=clean.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(tr.shape, te.shape, tr.outcome.mean(), te.outcome.mean())\n\""
+    },
+    "labels": [
+      "inspect",
+      "split"
+    ]
+  },
+  {
+    "index": 10,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX=tr.drop(columns='outcome'); y=tr.outcome\nm=RandomForestClassifier(n_estimators=500,random_state=42)\nm.fit(X,y)\nprint('test acc', accuracy_score(te.outcome, m.predict(te.drop(columns='outcome'))))\nprint('train acc', accuracy_score(y, m.predict(X)))\nprint(dict(zip(X.columns, m.feature_importances_.round(3))))\n\""
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 11,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json\nimport matplotlib; matplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); ho=pd.read_csv('holdout_features.csv')\nX=tr.drop(columns='outcome')\nm=RandomForestClassifier(n_estimators=500,random_state=42).fit(X,tr.outcome)\nacc=accuracy_score(te.outcome, m.predict(te[X.columns]))\npd.DataFrame({'prediction':m.predict(ho[X.columns]).astype(int)}).to_csv('predictions.csv',index=False)\njson.dump({'test_accuracy':round(float(acc),4),'model':'RandomForestClassifier(n_estimators=500, random_state=42), trained on 80% stratified split','notes':'Removed 185 near-duplicate rows (identical after rounding to 1 decimal; bmi/pedigree differ by <0.05) from 921 rows leaving 736 before an 80/20 stratified split. Test accuracy is from the deduplicated split.'},open('report.json','w'),indent=2)\nimp=pd.Series(m.feature_importances_,index=X.columns).sort_values()\nfig,ax=plt.subplots(figsize=(6,4)); imp.plot.barh(ax=ax); ax.set_title('RF feature importance'); fig.tight_layout(); fig.savefig('live/feature_importance.png',dpi=100)\nprint(len(ho), list(ho.columns)==list(X.columns))\n\"\nhead -3 predictions.csv; wc -l predictions.csv; cat report.json; ls live"
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate",
+      "plot",
+      "predict",
+      "report"
+    ]
+  },
+  {
+    "index": 12,
+    "tool": "write_todos",
+    "args": {
+      "todos": [
+        {
+          "content": "Inspect data and find near-duplicates (921 rows > known 768)",
+          "status": "completed"
+        },
+        {
+          "content": "Dedupe on rounded features (round 1 decimal), keep first",
+          "status": "completed"
+        },
+        {
+          "content": "Stratified 80/20 split; write train.csv and test.csv",
+          "status": "completed"
+        },
+        {
+          "content": "Train RandomForestClassifier, measure test accuracy",
+          "status": "completed"
+        },
+        {
+          "content": "Write report.json and predictions.csv for holdout",
+          "status": "completed"
+        },
+        {
+          "content": "Save chart(s) to live/",
+          "status": "completed"
+        }
+      ]
+    },
+    "labels": []
+  }
+]

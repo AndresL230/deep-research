@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.748,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42), stratified 80/20 split (random_state=42)",
+  "notes": "Dropped followup_score (likely recorded after diagnosis, so it leaks the outcome). Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were kept as-is."
+}

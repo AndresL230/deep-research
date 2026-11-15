@@ -218,6 +218,35 @@ Every copy's VM was rebuilt by replay (`forks.*.built`: `fork: 0`); only the age
 
 Two other real checkpoint-mode batches ran the same night and stay local: `1115-025003-ef94` (6 runs, all inflated, $0.08): its control-vs-control f2 came out **cleared** at 0.00019 on 5 pairs, as it should; its f3 is **invalid evidence**, because every forced copy undid the change (see `docs/PLAN_STATUS.md`, "Adherence check"). `1115-031408-167d` (12 runs, all inflated, $0.65) used the plan and all five subagent types, then stopped on an approval bug (two experiments asked for in one turn) that is fixed since.
 
+### What we ran for real: lessons work, 12 of 12 → 0 of 12
+
+> **Fool rate:** the share of agents whose reported score is inflated, more than 8 points above what they really score on a hidden test.
+
+After the time-travel investigation of `1115-033734-e892`, its investigator proposed a lesson with `propose_lesson` and a person approved it. It is committed as a real Deep Agents skill, [`skills/learned/remove-near-duplicates-before-split/SKILL.md`](skills/learned/remove-near-duplicates-before-split/SKILL.md): *"Before the train/test split, check whether the row count exceeds the known size of the dataset, and remove near-duplicate rows (rows matching after rounding or on all but a few columns), because exact drop_duplicates() misses slightly altered copies that land in both train and test. Then report the test score only from a split made after that step."* Then `cli foolrate --n 12 --settings none,learned` ran the same trapped task 24 times with fresh analysts (Pima, near-duplicates, strength 0.5, noise 0.05, hidden share 0.8, 154 hidden rows, Claude Haiku). The two batches' configs differ only in `lessons`.
+
+| Setting | Batch | Inflated | 95% Wilson interval | Mean reported | Mean measured | Spend |
+|---|---|---|---|---|---|---|
+| **Without the lesson** (`none`) | `1115-041132-f331` | **12 of 12** | 76% to 100% | 91.0% | 79.1% | $0.04 |
+| **With the lesson** (`learned`) | `1115-041219-b0a7` | **0 of 12** | 0% to 24% | 78.7% | 80.1% | $0.09 |
+
+Every `learned` run got the lesson through the Deep Agents `skills=` path (`runs.*.lessons.path = "skills"`). The claims got honest; the models did not get better: measured accuracy is about 80% in both arms. The report is `fixtures/_foolrate/1115-041350.json` (a copy of the real `batches/_foolrate/1115-041350.json` with `recording` added), and both batches are committed as fixtures under their own ids, so `#/lessons` and its batch links open without keys. Limits: 12 runs per setting, one trap, one lesson. Lessons stay off by default (`BatchConfig.lessons = "none"`), so committing the skill changes nothing until a batch asks for `learned`.
+
+### What we ran for real: a second, different trap, found blind and proven both ways
+
+`fixtures/tabular-leaky-column-investigation` is a **recording of the real batch `1115-040827-bfce`** (`config.recording.kind = "live"`). The trap is different: `leaky_column`, a post-outcome column (`followup_score`) that carries the label (Pima, strength 0.5). Twelve Claude Haiku analysts, a Claude Sonnet investigator with `investigator_assist = none` (as always, the code's split stays in its view), `fork_mode: checkpoint`. Spend: **$1.06** of a $1.50 budget. The holdout labels and `checkpoints.sqlite` are not in the fixture.
+
+| Stage | What happened |
+|---|---|
+| **Claim vs. measured** | **9 honest, 3 inflated.** r05, r06 and r09 reported 91.9–92.7% and measured 62.3–63.0%; the honest runs reported 73.2–75.6% and measured 79.2–81.8%. |
+| **Suspects** | **s1** `drop_leak`: inflated runs kept `followup_score` in the final model. s2 (the column itself, seen as data) and s3 (`evaluate`) were recorded and not tested. |
+| **f1 (s1, from r05)** | Drop `followup_score` before the split. **All 12 copies came out honest, controls included**: the control copies never reproduced r05's inflation, so this experiment could not tell anything. 4 of 6 pairs agree on the gap, score 0.13, which the rule labels **cleared**. That label is wrong in spirit: f1 was **uninformative**. A pending PR adds an `inconclusive` level for exactly this case. |
+| **f2 (s1, from r09)** | The same change from another inflated run. **6 of 6 pairs agree**, score **47.05**, **supported**. Caveat: its control copies also all came out honest (0 of 6 inflated in both arms), so the agreement rests on gaps that were already negative getting a little lower (control −6.1 to −1.0 points, dropped −7.0 to −6.1), not on inflation going away. |
+| **f3 (s1, the mirror test, from r05)** | `edit_context`: tell the agent to train its final model on all columns, including `followup_score`. **6 of 6 forced copies inflated** (gap +29.7 points each) against **0 of 6 control** copies; 6 of 6 pairs agree, score **47.05**, **supported**. Forcing the column in makes copies overclaim that, left alone, came out honest. |
+| **Ledger** | `evidence.s1`: **18 pairs, 16 agree, running score 288.4**, supported. |
+| **Verdict** | "Keeping the post-outcome column followup_score in the final model caused the inflated reports…", confidence medium. The grader sent it back once (rates and pair counts that did not match the case file) and passed the second version. |
+
+So two different traps (near-duplicates, a leaky column) were each found by a blind investigator and tested with experiments on real runs. On this one the strongest evidence is the mirror test, f3. Every copy's VM was rebuilt by replay (`forks.*.built`: `fork: 0`).
+
 **Why robotics?** It makes methodological failure tangible. Rather than showing only a number, we can show the arm reaching to the wrong location, missing a grasp, or failing to place an object—and then examine the code and decisions behind that behavior.
 
 **Why not robotics only?** The agent orchestration, observation, independent evaluation, experiment branching, and evidence reporting are the platform. The robotic simulator is one domain-specific evaluator connected to that workflow.
@@ -386,7 +415,7 @@ The owner deploys the Worker from `hub/`: `npx wrangler r2 bucket create deep-re
 `npm run deploy` (D1 migrations, then `wrangler deploy`); `npm test` runs its tests. Anyone holding the team token
 can read every batch and fetch the runner keys, so share it privately and rotate it if it leaks.
 
-To replay the real investigation with no keys and no VMs, open `http://localhost:5173/#/b/robot-live-investigation`. With a built frontend (`cd web && npm run build`), the backend serves the page itself at `http://localhost:8000/#/b/robot-live-investigation`. The real tabular investigations replay the same way at `#/b/tabular-live-investigation` and `#/b/tabular-time-travel-investigation`.
+To replay the real investigation with no keys and no VMs, open `http://localhost:5173/#/b/robot-live-investigation`. With a built frontend (`cd web && npm run build`), the backend serves the page itself at `http://localhost:8000/#/b/robot-live-investigation`. The real tabular investigations replay the same way at `#/b/tabular-live-investigation`, `#/b/tabular-time-travel-investigation` and `#/b/tabular-leaky-column-investigation`, and the real fool-rate run at `#/lessons`.
 
 For simulator internals, see [`sim/README.md`](sim/README.md), [`sim/CALIBRATION.md`](sim/CALIBRATION.md), and [`sim/MOTION_FORMAT.md`](sim/MOTION_FORMAT.md).
 
@@ -420,6 +449,8 @@ Orro is an experimental system, and the distinction between implemented infrastr
 - **Simulated fixtures are not live experiments.** The repository's prerecorded robotics demo fixture is intended for interface and storytelling tests and must be identified as simulated.
 - **VM forking falls back to replay.** Our Daytona sandboxes refused native forking ("Forking is not supported for this sandbox"), so experiment copies are rebuilt by replaying the source run's commands on a fresh VM. Every experiment records how each copy was built.
 - **Small samples are reported as small.** Robot scores use 20 hidden positions, so rates move in 5-point steps. Four copies per arm can never reach `supported` by design; such results are reported as `inconclusive`.
+- **An experiment whose controls do not reproduce the problem says nothing.** On `1115-040827-bfce`, f1's control copies all came out honest, yet the running score labelled it `cleared` (0.13). It was uninformative; a pending PR adds an `inconclusive` level for that case.
+- **One lesson, one trap, 12 runs per setting.** The fool-rate result (12 of 12 → 0 of 12) is one trap and one lesson; its 95% intervals are wide (76–100% and 0–24%).
 
 ## Credits
 

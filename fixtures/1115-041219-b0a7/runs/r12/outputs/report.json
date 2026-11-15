@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7973,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42)",
+  "notes": "Removed 185 near-duplicate rows (identical integer features, bmi within 0.05, pedigree within 0.005, no outcome conflicts) from 921 rows, leaving 736, then made a stratified 80/20 split (seed 42). Test accuracy is measured on the 148 held-out rows."
+}

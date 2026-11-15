@@ -212,3 +212,5 @@
   .hw-part { padding:18px 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .hw-ring, .hw-tip.is-placed { transition:none; } }
+.hw-then { margin-top:10px; }
+.hw-then-a { color:inherit; text-decoration:underline; text-underline-offset:3px; }

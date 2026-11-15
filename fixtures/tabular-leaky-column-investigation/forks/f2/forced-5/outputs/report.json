@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7561,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), default hyperparameters, trained on 80% stratified split (491 rows)",
+  "notes": "Raw features used as-is (zeros left in place, not imputed). followup_score was accidentally deleted from data.csv and holdout_features.csv before modeling, so the model uses only the 8 remaining features; train.csv and test.csv therefore lack that column."
+}

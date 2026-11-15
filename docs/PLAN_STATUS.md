@@ -15,10 +15,10 @@ down keep the 00:05 audit as it was written; the "Fixed", "Rebuilt" and "Open it
 | 2 Experiments with a choice and a score | **Done** | 6.4 running score (`evidence.py`), the five-kind change registry, `Batch.run_experiment` with approve, edit, reject, `cli experiment --auto-approve`. Real: same-vs-same open at 0.019 and a harmless change cleared at 0.0002 (`1115-010055-bfc9`); a suspect supported at 24.76 (`1115-012104-800f`) |
 | 3 The investigator does the science | **Done** | Prompt of role, method and rules; typed `step-tagger`, `lens-*` and `skeptic` subagents; `write_todos`. Real acceptance met on `1115-012104-800f`: blind, two suspects tested, one supported, one cleared. Since 03:45 the plan and subagents are used for real (`1115-033734-e892`): a 5-item `write_todos` plan, 4 `step-tagger`s and the three lenses in one turn, then the `skeptic` |
 | 4 A verdict that is checked | **Done offline, grid not run for real** | `RubricMiddleware` sent real verdicts back twice (robot run, `1115-012104-800f`). The audit sheet is built (`audit.py`, `Batch.write_audit`, at the end of every investigation). The two-factor grid is reachable since 02:45: the `run_interaction` tool (same approval as `run_experiment`, only for two supported suspects) and `cli interaction`; no real batch has run it |
-| 5 It learns | **Mostly done, not run for real** | The casebook `/memories/casebook.md` beside the per-domain notebook, both through `memory=`; `propose_lesson` with approval writes `skills/learned/<name>/SKILL.md`. Since 02:30: `lessons: learned` gives analysts the approved lessons as skills, and `cli foolrate` exists (estimate first, `--yes` to run). The fool-rate run itself has not been run |
+| 5 It learns | **Done, run for real** | The casebook `/memories/casebook.md` beside the per-domain notebook, both through `memory=`; `propose_lesson` with approval writes `skills/learned/<name>/SKILL.md`; `lessons: learned` gives analysts the approved lessons as skills; `cli foolrate`. Real (04:10 Nov 15): the investigator of `1115-033734-e892` proposed `remove-near-duplicates-before-split`, a person approved it (committed under `skills/learned/`), and the fool-rate run (report `1115-041350`, `fixtures/_foolrate/`) went **12 of 12 inflated** without it (`1115-041132-f331`, 95% Wilson 76% to 100%) to **0 of 12** with it (`1115-041219-b0a7`, 0% to 24%). Lessons stay off by default (`lessons: none`) |
 | 6 Real time travel | **Done, run for real** | The investigator and, since 02:30, every analyst checkpoint to the batch's `checkpoints.sqlite`; a pending approval survives a restart, also with two requests in one turn (tested, `652a656`); `fork_mode: checkpoint` seeds a copy from the source run's LangGraph snapshot (todo list kept); the VM still comes from replay. Real: `1115-033734-e892` (`fixtures/tabular-time-travel-investigation`), f2 `deduplicate_near` from r01's checkpoint `1f1e0cfd-4064-…` **supported** at 24.76, f3 `deduplicate` from r12's **cleared** at 0.0036 |
-| 7 A second trap | **Partial** | `leaky_column` (the plan's `standin_column`) and `repeat_rows` exist and calibrate. No real batch on them |
-| 8 Show it | **Mostly done** | Suspect board, approval card with editable pairs, lessons, investigator panel (plan, subagents, finished summary), simulated and `investigator_assist` tags, and the grid's effects on the suspect board when `interaction` is set. No fool-rate view |
+| 7 A second trap | **Done, run for real** | `leaky_column` (the plan's `standin_column`) and `repeat_rows` exist and calibrate. Real: `1115-040827-bfce` (`fixtures/tabular-leaky-column-investigation`) on `leaky_column`, 9 honest and 3 inflated, blind investigator; s1 `drop_leak` **supported** (ledger 18 pairs, 16 agree, 288.4), including the mirror test f3 (forcing `followup_score` in: 6 of 6 forced inflated, 0 of 6 control). f1 was uninformative (its controls came out honest) but is labelled cleared at 0.13. `repeat_rows` has no real batch |
+| 8 Show it | **Mostly done** | Suspect board, approval card with editable pairs, lessons, investigator panel (plan, subagents, finished summary), simulated and `investigator_assist` tags, and the grid's effects on the suspect board when `interaction` is set. The fool-rate view `#/lessons` (PR #56) shows the real report `1115-041350` |
 | 9 Demo hardening | **Partial** | A real robot recording, a real tabular recording (`1115-012104-800f`) and a real checkpoint-mode tabular recording (`1115-033734-e892`, the landing footer's "Tabular replay"), the README's "What we ran for real", `docs/claims.md` with batch ids. The landing's own figures are still the simulated `demo-batch` |
 
 ## Fixed in this PR (after the audit)
@@ -62,7 +62,7 @@ langgraph 1.2.22, langchain 1.5.0 and langgraph-checkpoint-sqlite 3.1.3. All off
 | Flat analysts, per agent (02:45) | `_make_flat` registered a process-wide harness profile per model, which took the default general-purpose subagent from any other deep agent on the same model. The analyst now passes `NoSubagents`, a no-op middleware named `SubAgentMiddleware`, which replaces deepagents' own in that agent's stack only (`graph._apply_custom_middleware`, as `NoCompaction` does for summarization): no `task` tool, no subagents | `agents/analyst.py` |
 
 Since 02:30 Nov 15, no longer cut: fork copies keeping the source run's todo list (`fork_mode: checkpoint`), the
-analysts loading learned lessons (`lessons="learned"`) and the fool-rate command (`cli foolrate`, not run). Still cut: a
+analysts loading learned lessons (`lessons="learned"`) and the fool-rate command (`cli foolrate`, run for real on report `1115-041350`). Still cut: a
 cheaper grader with an evidence tool, the `run_python` lab VM.
 Offline tests: `tests/test_investigator_science.py` (two suspects, a predicted experiment approved with edited pairs, a
 supported suspect under 20 refused; restart; lesson; subagent shapes and names).
@@ -269,9 +269,9 @@ Added beyond the plan: more pairs for an open verdict (`batch.py:1389-1450`), re
 | Check | Met | Evidence |
 | --- | --- | --- |
 | Casebook read at start, appended at end | **diverged** | Per-domain notebook `batches/_memory/<domain>/AGENTS.md` (`notebook.py:53-57`) through `memory=` (`agents/investigator.py:505`). Subagents cannot write it (`:448`). Tested (`tests/test_investigator_upgrades.py:107-192`). The local tabular notebook has no entries |
-| `propose_lesson`, `skills/learned/` | **not met** | Absent. `hint_level: none \| light` exists (`config.py:57`) |
-| `lessons="learned"` batch | **met offline** (02:30 Nov 15) | `BatchConfig.lessons`. The analyst's VM backend is wrapped in a `CompositeBackend` whose `/skills/learned/` route reads `skills/learned/` read-only (writes denied by a route-scoped `FilesystemPermission`), and `skills=["/skills/learned/"]` is passed, so Deep Agents finds `<name>/SKILL.md` one folder below the source (`deepagents/middleware/skills.py`). A backend that is no sandbox gets the rules appended to its system prompt instead; the path used is logged and saved on each run (`runs.<id>.lessons`). The UI tags "Lessons on". `lessons.py`, `agents/analyst.py`; `tests/test_time_travel_offline.py` checks the skill is in the analyst's prompt. No real batch with lessons yet |
-| Fool-rate table | **code met, not run** | `cli foolrate --n 12 --settings none,learned [--domain] [--noise --hidden] --budget X` prints the estimate (about $0.004 a run) and exits unless `--yes`. Writes `foolrate` (inflated, n, rate, 95% Wilson interval per setting; `none` always included as the control) to each batch and `batches/_foolrate/<stamp>.json`. `foolrate.py`. Tested offline with the scripted model only |
+| `propose_lesson`, `skills/learned/` | **met, run for real** | `propose_lesson` with approval writes `skills/learned/<name>/SKILL.md`. Real: `remove-near-duplicates-before-split`, proposed in `1115-033734-e892` and approved by a person, committed under `skills/learned/` |
+| `lessons="learned"` batch | **met offline** (02:30 Nov 15) | `BatchConfig.lessons`. The analyst's VM backend is wrapped in a `CompositeBackend` whose `/skills/learned/` route reads `skills/learned/` read-only (writes denied by a route-scoped `FilesystemPermission`), and `skills=["/skills/learned/"]` is passed, so Deep Agents finds `<name>/SKILL.md` one folder below the source (`deepagents/middleware/skills.py`). A backend that is no sandbox gets the rules appended to its system prompt instead; the path used is logged and saved on each run (`runs.<id>.lessons`). The UI tags "Lessons on". `lessons.py`, `agents/analyst.py`; `tests/test_time_travel_offline.py` checks the skill is in the analyst's prompt. Real: `1115-041219-b0a7`, every run `runs.*.lessons.path = skills` |
+| Fool-rate table | **met, run for real** (04:13 Nov 15) | `cli foolrate --n 12 --settings none,learned [--domain] [--noise --hidden] --budget X` prints the estimate (about $0.004 a run) and exits unless `--yes`. Writes `foolrate` (inflated, n, rate, 95% Wilson interval per setting; `none` always included as the control) to each batch and `batches/_foolrate/<stamp>.json`. `foolrate.py`. Real report `1115-041350` (`fixtures/_foolrate/1115-041350.json`): `none` 12 of 12 inflated (`1115-041132-f331`, [0.7575, 1.0]), `learned` 0 of 12 (`1115-041219-b0a7`, [0.0, 0.2425]); Pima, near-duplicates, Haiku, configs identical but for `lessons`. Mean measured accuracy 79.1% and 80.1%: the claims got honest, the models did not get better. Both batches are committed as fixtures |
 
 ### Phase 6: real time travel. Done, run for real
 
@@ -282,7 +282,7 @@ Added beyond the plan: more pairs for an open verdict (`batch.py:1389-1450`), re
 | Pending approval survives a restart | **met** | `Batch.resume` keeps `forks.pending` when `checkpoints.sqlite` exists (`batch.py`); since `652a656` also with two requests in one turn (the hanging calls are counted from the checkpoint and `forks.pending` rebuilt from it), `tests/test_investigator_science.py` |
 | Real: checkpoint mode on a real batch | **met** (03:45 Nov 15) | `1115-033734-e892`: every copy `state_from: checkpoint`, `fork_mode_fallback` null. f2 **supported** (24.76, 5 of 5 pairs, control 6/6 inflated, forced 0/5); f3 **cleared** (0.0036). The VM still comes from replay (`built.fork = 0`). `fixtures/tabular-time-travel-investigation` |
 
-### Phase 7: a second trap. Partial
+### Phase 7: a second trap. Done, run for real
 
 | Check | Met | Evidence |
 | --- | --- | --- |
@@ -290,8 +290,8 @@ Added beyond the plan: more pairs for an open verdict (`batch.py:1389-1450`), re
 | Its fix as a forced step | met | `traps/leaky_column.py:55-68` |
 | Calibration script, 5 seeds | met | `scripts/calibrate_traps.py` |
 | Gap above the threshold without the fix, near zero with it | met | Run tonight, 5 seeds, 100 trees: duplicates +14.8 / +0.1 pts, leaky_column +37.5 / +0.1, repeat_rows +18.1 / +2.4 |
-| Numbers in the README | **not met** | The README covers the robot calibration only (`sim/CALIBRATION.md`) |
-| A real batch on the new trap, through to a verdict | **not met** | None found |
+| Numbers in the README | partial | The README's "What we ran for real: a second, different trap" gives `1115-040827-bfce`'s numbers; the calibration table is here only |
+| A real batch on the new trap, through to a verdict | **met** (04:15 Nov 15) | `1115-040827-bfce` (`fixtures/tabular-leaky-column-investigation`): `leaky_column`, 9 honest, 3 inflated, `investigator_assist none`, checkpoint mode. f1 (from r05, drop `followup_score`): all 12 copies honest, so uninformative, labelled cleared at 0.13 (a pending PR adds `inconclusive` for this). f2 (from r09): 6 of 6 agree, 47.05, supported, though its controls were honest too (the agreement is on the gap). f3 (the mirror test, `edit_context` forcing `followup_score` in): 6 of 6 forced inflated against 0 of 6 control, 47.05, supported. Ledger 18 pairs, 16 agree, 288.4; verdict "caused", confidence medium, passed the rubric after one revision |
 
 ### Phase 8: show it. Diverged, mostly done
 
@@ -301,7 +301,7 @@ Added beyond the plan: more pairs for an open verdict (`batch.py:1389-1450`), re
 | Approval card | partial | `needs-you.ts`, admin-only. `pairs` not editable |
 | Verdict with supported and cleared, grid, audit | partial | Verdict, evidence, rubric, fix. No grid or audit. Overclaims are flagged (`lanes.ts:1605`) |
 | Investigator panel | met | Investigator lane with todo and subagent events (`lanes.ts:98-100`, `:1408`) |
-| Lessons, fool-rate table | **not met** | Absent |
+| Lessons, fool-rate table | met | Lessons block on the verdict page; `#/lessons` (`web/src/batch/foolrate.ts`, PR #56) shows the real report `1115-041350` by default, a simulated one only when no real one exists |
 | Simulated tag | met | `batch-table.ts:137`, page header (`main.ts:322`) |
 | `investigator_assist` tag | n/a | No flag |
 | Web tests on an updated fixture | met | 790 passed |

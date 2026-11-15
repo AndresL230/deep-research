@@ -1138,10 +1138,17 @@ export interface FoolrateRow {
   interval?: "wilson" | string;
   /** What the arm's batch cost in all, or null with no price. */
   usd?: number | null;
+  /** The mean reported and measured (hidden test) score of the arm's scored runs, 0..1, from its case file. */
+  mean_reported?: number | null;
+  mean_true?: number | null;
 }
 /** A lesson the `learned` arm was given: its name, its rule (null when its SKILL.md is not on this machine) and the
  *  batch it was learned from. */
-export interface FoolrateLesson { name: string; rule: string | null; learned_from?: string | null }
+export interface FoolrateLesson {
+  name: string; rule: string | null; learned_from?: string | null;
+  /** The id `learned_from` opens under here, when only a committed recording of it is on disk (a fixture). */
+  opens_as?: string;
+}
 export interface FoolrateReport {
   /** The report's file stem (`<mmdd-HHMMSS>`). */
   id: string;

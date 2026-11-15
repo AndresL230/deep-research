@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.797,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42)",
+  "notes": "Removed 260 near-duplicate rows (identical integer columns, bmi within 0.1, pedigree within 0.005) from 921 to 661 before an 80/20 stratified split (random_state=42). Test accuracy is computed on the 133 held-out rows."
+}

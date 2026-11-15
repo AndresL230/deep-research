@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from deep_research import domains  # noqa: E402
-from deep_research.agents.investigator import RUNS_READ_DENY  # noqa: E402
+from deep_research.agents.investigator import RUNS_READ_DENY, SKILLS_READ_DENY  # noqa: E402
 from deep_research.case_file import BANNED_VIEW_KEYS, investigator_view, with_evidence  # noqa: E402
 from deep_research.config import FIXTURES_DIR  # noqa: E402
 from deep_research.evidence import NEEDED_PAIRS, SUPPORTED_SCORE, fork_pairs, score_level  # noqa: E402
@@ -354,6 +354,9 @@ def main(argv: list[str] | None = None) -> int:
     for probe in ("/runs/r01/score.json", "/runs/r01/hidden/00-s0.motion.json"):
         if not denied(probe):
             fail("investigator", f"{probe} is not denied to the investigator (RUNS_READ_DENY)")
+    # The approved lessons (skills/learned/) are for analysts: one names the fix for the flaw it came from.
+    if not any(fnmatch.fnmatch("/skills/learned/a-lesson/SKILL.md", pat) for pat in SKILLS_READ_DENY):
+        fail("investigator", "/skills/learned/ is not denied to the investigator (SKILLS_READ_DENY)")
     # The skills it reads: no banned key written as a key, no holdout labels.
     for d in domains.registered():
         skill = d.skills_dir / d.investigator_words.skill / "SKILL.md"

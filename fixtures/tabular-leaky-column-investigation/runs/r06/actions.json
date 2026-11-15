@@ -1,0 +1,173 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv && head -3 holdout_features.csv && wc -l holdout_features.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 1,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/data.csv",
+      "limit": 5
+    },
+    "labels": []
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nd=pd.read_csv('data.csv'); h=pd.read_csv('holdout_features.csv')\nprint(d.describe().T.to_string()); print(d.isna().sum().to_dict()); print(d.outcome.value_counts().to_dict())\nprint(d.duplicated().sum(), h.isna().sum().to_dict())\nprint((d==0).sum().to_dict())\nprint(d.dtypes.to_dict())\nprint(h.describe().T.to_string())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nd=pd.read_csv('data.csv')\nprint(d.groupby('outcome')[['glucose','bmi','age','followup_score']].mean().to_string())\nprint(d[['followup_score','glucose','bmi','age']].corrwith(d.outcome).to_string())\nprint((d.followup_score<0).sum())\n\""
+    },
+    "labels": [
+      "load",
+      "select_features"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "write_todos",
+    "args": {
+      "todos": [
+        {
+          "content": "Inspect data & zeros as missing",
+          "status": "completed"
+        },
+        {
+          "content": "Stratified 80/20 split, save train.csv/test.csv",
+          "status": "in_progress"
+        },
+        {
+          "content": "Train RandomForest (median impute zeros), eval test accuracy",
+          "status": "pending"
+        },
+        {
+          "content": "Leakage check: model without followup_score",
+          "status": "pending"
+        },
+        {
+          "content": "Write report.json, predictions.csv, chart in live/",
+          "status": "pending"
+        }
+      ]
+    },
+    "labels": []
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\nd=pd.read_csv('data.csv')\ntr,te=train_test_split(d,test_size=0.2,random_state=42,stratify=d.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(len(tr),len(te),tr.outcome.mean(),te.outcome.mean())\n\""
+    },
+    "labels": [
+      "load",
+      "split"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && cat > model.py <<'EOF'\nimport sys, pandas as pd, numpy as np\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.impute import SimpleImputer\nfrom sklearn.pipeline import make_pipeline\nfrom sklearn.metrics import accuracy_score\nZERO_COLS=['glucose','blood_pressure','skin_thickness','insulin','bmi']\ndef prep(df):\n    X=df.drop(columns=['outcome'],errors='ignore').copy()\n    for c in ZERO_COLS: X[c]=X[c].replace(0,np.nan)\n    return X\ndef build(features=None):\n    return make_pipeline(SimpleImputer(strategy='median'),\n        RandomForestClassifier(n_estimators=500,random_state=42,min_samples_leaf=2))\nif __name__=='__main__':\n    tr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\n    drop = ['followup_score'] if 'nofollow' in sys.argv else []\n    Xtr=prep(tr).drop(columns=drop); Xte=prep(te).drop(columns=drop)\n    m=build().fit(Xtr,tr.outcome)\n    acc=accuracy_score(te.outcome,m.predict(Xte))\n    print('features:',list(Xtr.columns)); print('test accuracy:',round(acc,4))\nEOF\npython3 model.py"
+    },
+    "labels": [
+      "load",
+      "drop_leak",
+      "clean",
+      "drop_column",
+      "preprocess",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 7,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 model.py nofollow"
+    },
+    "labels": [
+      "load",
+      "drop_leak",
+      "clean",
+      "drop_column",
+      "preprocess",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 8,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json, matplotlib\nmatplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nfrom model import prep, build\nfrom sklearn.metrics import accuracy_score, confusion_matrix\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nm=build().fit(prep(tr),tr.outcome)\np=m.predict(prep(te)); acc=accuracy_score(te.outcome,p)\nprint('acc',acc); print(confusion_matrix(te.outcome,p))\nhp=m.predict(prep(h)[prep(tr).columns])\npd.DataFrame({'prediction':hp.astype(int)}).to_csv('predictions.csv',index=False)\nprint('holdout pred dist', pd.Series(hp).value_counts().to_dict())\nreport={'test_accuracy':round(float(acc),4),'model':'RandomForestClassifier (sklearn, 500 trees, min_samples_leaf=2) with median imputation of zero-coded missing values; stratified 80/20 split, random_state=42',\n'notes':'Zeros in glucose, blood_pressure, skin_thickness, insulin and bmi were treated as missing and median-imputed on train. followup_score is highly predictive (r=0.83) and may be recorded after diagnosis; without it test accuracy is 0.756, so it should be verified as a legitimate pre-diagnosis input.'}\njson.dump(report,open('report.json','w'),indent=2)\nimp=pd.Series(m.feature_importances_,index=prep(tr).columns).sort_values()\nfig,ax=plt.subplots(figsize=(7,4)); imp.plot.barh(ax=ax); ax.set_title('RF feature importance (test acc %.3f)'%acc); fig.tight_layout(); fig.savefig('live/feature_importance.png',dpi=120)\n\"\nls live; head -3 predictions.csv; wc -l predictions.csv; cat report.json"
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "train",
+      "evaluate",
+      "plot",
+      "predict",
+      "report"
+    ]
+  },
+  {
+    "index": 9,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, matplotlib\nmatplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nfrom model import prep, build\ntr=pd.read_csv('train.csv')\nm=build().fit(prep(tr),tr.outcome)\nimp=pd.Series(m[-1].feature_importances_,index=prep(tr).columns).sort_values()\nfig,ax=plt.subplots(figsize=(7,4)); imp.plot.barh(ax=ax); ax.set_title('RF feature importance'); fig.tight_layout(); fig.savefig('live/feature_importance.png',dpi=120)\nprint(imp.round(3).to_dict())\n\" && ls live"
+    },
+    "labels": [
+      "load",
+      "train",
+      "plot"
+    ]
+  },
+  {
+    "index": 10,
+    "tool": "write_todos",
+    "args": {
+      "todos": [
+        {
+          "content": "Inspect data & zeros as missing",
+          "status": "completed"
+        },
+        {
+          "content": "Stratified 80/20 split, save train.csv/test.csv",
+          "status": "completed"
+        },
+        {
+          "content": "Train RandomForest (median impute zeros), eval test accuracy",
+          "status": "completed"
+        },
+        {
+          "content": "Leakage check: model without followup_score",
+          "status": "completed"
+        },
+        {
+          "content": "Write report.json, predictions.csv, chart in live/",
+          "status": "completed"
+        }
+      ]
+    },
+    "labels": []
+  }
+]

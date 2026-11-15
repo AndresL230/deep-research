@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7317,
+  "model": "RandomForestClassifier (n_estimators=500, random_state=42) with median imputation of zero-coded missing values; trained on 80% stratified split",
+  "notes": "followup_score was excluded as a likely post-outcome leak (it alone lifts test accuracy to ~0.93 when included). Zeros in glucose, blood_pressure, skin_thickness, insulin, bmi were treated as missing."
+}
