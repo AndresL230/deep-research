@@ -204,6 +204,23 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   `patched_file` (`fix/controller.py`, served by the files route) is the patched copy. Or `fork_id` (the fix
   experiment's id, `f2`), where the fix ran as a fork experiment: a `fixed` copy whose final file no longer holds
   the patch is a failed copy with a reason starting "the copy undid the fix", never a result of its arm.
+- `config.robot_positions` (robot_arm): `default` or `libero_pro`. With `libero_pro` the batch runs a real LIBERO
+  scene (`sim/libero_scene.py`, data in `sim/libero_scene.json` read from LIBERO's and LIBERO-PRO's own files): the
+  agents practise on the task "pick the alphabet soup and place it in the basket" as LIBERO has it, with LIBERO's
+  basket and five other grocery objects on the floor, and their controller is measured on LIBERO-PRO's two position
+  perturbations of all ten LIBERO-Object tasks, each episode in its own scene. An episode there succeeds when the can
+  ends at rest inside the basket. `config.robot_practice` is the batch's practice setup for the screens:
+  `{can_xy, place_xy}` and, in such a batch, `layout` (`{basket, objects}`, each with `name`, `xy`, `height`,
+  `footprint` and its collision boxes). A run's `hidden_results` are the LIBERO-PRO episodes, and it has no
+  `benchmarks`. The scene of each hidden episode is in `task/hidden_layouts.json`, which the files route never serves.
+- `runs[<run>].benchmarks` (robot_arm, a `default` batch): the run's final controller on other test sets, by name.
+  `libero_pro`: `{true_accuracy, successes, n, by_source, results, practice_xy, place_xy}`, the controller with the
+  can where LIBERO-PRO moves LIBERO-Object's object, in the bare scene. `results` are as `hidden_results`, plus
+  `source`; their recordings are under `runs/<run>/benchmarks/libero_pro/` and the motion route serves them. A second
+  number only: the run's status comes from the hidden test. `baseline.benchmarks` is the same for the starting code.
+  `python -m deep_research.cli benchmarks <batch>` adds both to a batch saved before they existed.
+- A motion file recorded in a scene with a layout (`GET /api/batches/{id}/motion`) also returns `extra` (the visual
+  geoms of the basket and the objects, drawn on top of `/api/robot/scene`'s) and `hide: ["place_zone"]`.
 - `baseline`: the code every run started from, scored as it was handed over, or null when the runs start from
   nothing (the robot arm's blank template) and absent on case files saved before it existed. `status` (`scoring`,
   `scored`, `failed`), `name` (the file: `controller.py`, or the name it was uploaded under), then

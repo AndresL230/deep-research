@@ -153,3 +153,33 @@ def test_the_trace_never_runs_a_hidden_position():
     diag, held_out = diagnostic_positions(), hidden.hidden_positions()
     assert len(diag) >= 10
     assert min(math.dist(a, b) for a in diag for b in held_out) >= hidden.MIN_FROM_HIDDEN
+
+
+# Sentences that hand the investigator the answer. A skill teaches the method errors of its domain; it never says which
+# one a batch was built with or which step its fork experiment forces.
+SKILL_LEAKS = ("The batch is planted for", "The honest step is", "the fork experiment forces it", "trap_info")
+
+
+@pytest.mark.parametrize("name", [d.name for d in __import__("deep_research.domains", fromlist=["registered"]).registered()])
+def test_no_domains_skill_names_the_planted_step(name):
+    """Every registered domain, including ones added later (the humanoid domain was written from the old template)."""
+    d = get_domain(name)
+    skill = (d.skills_dir / d.investigator_words.skill / "SKILL.md").read_text()
+    for leak in SKILL_LEAKS:
+        assert leak not in skill, (name, leak)
+    prompt = inv_mod.main_prompt(d.planted(BatchConfig(domain=name)), d.labels(), d.investigator_words, diagnose=True,
+                                 direct_fix=True)
+    assert "planted in it" not in prompt and "The honest step is" not in prompt
+
+
+def test_the_humanoid_trace_never_runs_a_hidden_bag_position():
+    """The same rule as the arm's: the humanoid tracer's positions are its own, kept apart from the hidden set."""
+    from sim.g1 import hidden as g1_hidden
+
+    diag, held_out = g1_hidden.diagnostic_positions(), g1_hidden.hidden_positions()
+    assert len(diag) >= 10 and {g1_hidden.band_of(p) for p in diag} == {"high", "low"}
+    assert min(math.dist(a, b) for a in diag for b in held_out) >= g1_hidden.MIN_FROM_HIDDEN
+    source = (ROOT_DIR / "sim" / "g1" / "domain.py").read_text()
+    trace = source[source.index("def trace_run"):]
+    trace = trace[:trace.index("\ndef ", 1)]
+    assert "diagnostic_positions()" in trace and "task.hidden" not in trace

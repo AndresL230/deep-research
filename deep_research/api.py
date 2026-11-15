@@ -774,6 +774,9 @@ def memory_notebook(domain: str):
 # ---- the robot viewer (robot_view.py): the 3D scene and each motion file's poses ----
 
 # Where a run or fork child keeps its outputs: the only places a motion file is read from (never task/).
+# A run's, or the starting code's, recorded episodes on another test set (`Batch.other_benchmarks`): LIBERO-PRO's
+# positions. Not the hidden test, so nothing to keep back.
+BENCH_PATH = re.compile(r"^(runs/[A-Za-z0-9._-]+|baseline)/benchmarks/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.motion\.json$")
 MOTION_PATH = re.compile(r"^(runs/[A-Za-z0-9._-]+|forks/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/outputs/[A-Za-z0-9._/ -]+\.json$")
 
 
@@ -790,11 +793,17 @@ def _robot_unavailable(e: Exception) -> HTTPException:
 
 
 @app.get("/api/robot/scene")
-def robot_scene(request: Request):
-    """The pick-and-place scene for the 3D viewer: every visual geom, its body, pose and color, and the meshes."""
+def robot_scene(request: Request, model: str = robot_view.PANDA):
+    """A scene for the 3D viewer: every visual geom, its body, pose and color, and the meshes. `model`: "panda", the
+    pick-and-place scene, or "g1", the humanoid's (a motion file's poses say which it was recorded in)."""
+    if model not in robot_view.SCENES:
+        raise HTTPException(404, f"no scene named '{model}'")
     try:
-        _, packed = robot_view.scene()
+        _, packed = robot_view.scene(model)
     except (ImportError, OSError, ValueError) as e:
+        if model == robot_view.G1:
+            raise HTTPException(503, "the humanoid viewer needs mujoco and the G1 model "
+                                     f"(`uv run python -m sim.g1.fetch_assets`): {type(e).__name__}") from e
         raise _robot_unavailable(e) from e
     return _gzipped_json(packed, request, "public, max-age=3600")
 
@@ -841,7 +850,7 @@ def _motion_file(root: Path, path: str, batch_id: str) -> Path:
     hidden episode's recording that the case lists for a scored run or fork child (`_hidden_listed`)."""
     rel = path.strip()
     hidden = bool(HIDDEN_PATH.match(rel))
-    if ".." in rel.split("/") or not (MOTION_PATH.match(rel) or hidden):
+    if ".." in rel.split("/") or not (MOTION_PATH.match(rel) or hidden or BENCH_PATH.match(rel)):
         raise HTTPException(400, "not a motion file path: it must be under runs/<run>/outputs or forks/<fork>/<child>/outputs")
     secret = ("holdout_labels", *domains.secret_files())
     full = (root / rel).resolve()

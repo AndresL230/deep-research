@@ -24,6 +24,8 @@ imported only where they are used, so this module imports with numpy alone.
 from __future__ import annotations
 
 import ast
+import contextlib
+import contextvars
 import importlib
 import json
 import math
@@ -111,6 +113,10 @@ class RobotConfig:
     # The uploaded controller's text and its file name, when robot_start is "uploaded" (deep_research/controllers.py).
     controller_text: str | None = None
     controller_name: str | None = None
+    # Where the can stands. "default": this sim's own practice spot and its hidden positions over the whole table
+    # (sim/practice.py, sim/hidden.py). "libero_pro": the agents practise where LIBERO stands the object to pick,
+    # with LIBERO's basket as the place target, and are measured where LIBERO-PRO moves it (sim/libero_pro.py).
+    positions: Literal["default", "libero_pro"] = "default"
     # Seeds each evaluation position is run with. One seed per position by default.
     eval_seeds: tuple[int, ...] = (0,)
     # Sim seconds per episode, the same in the agent's runs and the evaluation.
@@ -129,6 +135,13 @@ class RobotConfig:
     domain: str = "robot"
 
 
+class GivenFiles(dict):
+    """A task's given files by name, with the task's practice setup: `actions_from_events` reads a run against the
+    practice spot of its own batch (`practice_of`)."""
+
+    practice: dict | None = None
+
+
 @dataclass
 class RobotTaskFiles:
     """The task's files on our server. Only `upload/` ever reaches a VM."""
@@ -145,6 +158,19 @@ class RobotTaskFiles:
         return cls(dir=d, upload=d / "upload", hidden=d / "hidden_positions.json", meta=d / "meta.json")
 
     @property
+    def hidden_layouts(self) -> Path:
+        """The scene each hidden position is run in (a basket and other objects), one per position: only in a
+        batch whose positions come with a scene. Server only, like the positions."""
+        return self.dir / "hidden_layouts.json"
+
+    def layouts(self) -> list | None:
+        """One scene layout per hidden position, or None in a batch with the bare scene."""
+        try:
+            return json.loads(self.hidden_layouts.read_text())
+        except (OSError, ValueError):
+            return None
+
+    @property
     def controller(self) -> Path:
         return self.upload / "controller.py"
 
@@ -157,11 +183,60 @@ class RobotTaskFiles:
 
         `actions_from_events` needs its text to follow edits the agent makes to it.
         """
-        return {self.controller.name: self.controller.read_text()} if self.controller.is_file() else {}
+        given = GivenFiles({self.controller.name: self.controller.read_text()} if self.controller.is_file() else {})
+        given.practice = read_meta(self).get("practice")
+        return given
+
+
+# The practice setup of the batch whose files are being read (`practice_of`). None: this sim's own.
+_PRACTICE: contextvars.ContextVar[dict | None] = contextvars.ContextVar("robot_practice", default=None)
+
+
+@contextlib.contextmanager
+def practice_of(practice: dict | None):
+    """Within the block, `practice_setup()` is `practice`: a batch's own practice spot and place target (its
+    meta.json), for everything that reads a run of that batch: its step labels (was the can moved off the
+    practice spot?) and the positions it checked. None changes nothing."""
+    if not practice:
+        yield
+        return
+    token = _PRACTICE.set({"can_xy": [float(v) for v in practice["can_xy"]], "place_xy": [float(v) for v in practice["place_xy"]]})
+    try:
+        yield
+    finally:
+        _PRACTICE.reset(token)
+
+
+def positions_of(cfg: "RobotConfig") -> tuple[dict, list[list[float]]]:
+    """A batch's practice setup and its hidden can positions, by `cfg.positions`."""
+    practice, episodes = episodes_of(cfg)
+    return practice, [e["can_xy"] for e in episodes]
+
+
+def episodes_of(cfg: "RobotConfig") -> tuple[dict, list[dict]]:
+    """A batch's practice setup and its hidden episodes: each {"can_xy"} and, in a batch whose positions come with
+    a scene, the "layout" it is run in and where it comes from ("variant", "source").
+
+    "libero_pro": one real LIBERO task (sim/libero_scene.py). The practice setup is the task as LIBERO has it, with
+    its "layout" (the basket and the other objects), and the hidden episodes are LIBERO-PRO's two position
+    perturbations of it.
+    """
+    if cfg.positions == "libero_pro":
+        scene = importlib.import_module("sim.libero_scene")
+        return scene.practice_setup(), scene.hidden_episodes()
+    return _own_practice(), [{"can_xy": xy} for xy in _hidden_positions()]
 
 
 def practice_setup() -> dict:
-    """The practice can and place positions, from `sim/practice.py`."""
+    """The practice can and place positions: the batch's being read (`practice_of`), else this sim's own."""
+    current = _PRACTICE.get()
+    if current is not None:
+        return {"can_xy": list(current["can_xy"]), "place_xy": list(current["place_xy"])}
+    return _own_practice()
+
+
+def _own_practice() -> dict:
+    """This sim's own practice setup, from `sim/practice.py`."""
     try:
         practice = importlib.import_module("sim.practice").PRACTICE
     except Exception:  # noqa: BLE001 - the module is optional for importing this one
@@ -247,13 +322,25 @@ def build_task(cfg: RobotConfig, out_dir: Path) -> RobotTaskFiles:
         files.controller.write_text(cfg.controller_text)
     else:
         shutil.copyfile(files.upload / "sim" / "controllers" / "template.py", files.controller)
-    practice = practice_setup()
+    practice, episodes = episodes_of(cfg)
     files.practice.write_text(json.dumps(practice, indent=2) + "\n")
+    if cfg.positions != "default":
+        # The VM's own `sim/practice.py` (the defaults of `python3 -m sim.run`, and what a forced step imports):
+        # the batch's practice spot and, when it has one, its scene.
+        (files.upload / "sim" / "practice.py").write_text(
+            '"""The practice setup: the one can position and place target agents can try their controller on,\n'
+            'and the scene they stand in when it has more than the can ("layout": a basket and other objects)."""\n\n'
+            f"PRACTICE = {practice!r}\n"
+        )
 
-    hidden = _hidden_positions()
     if cfg.n_hidden is not None:
-        hidden = hidden[: cfg.n_hidden]
+        episodes = episodes[: cfg.n_hidden]
+    hidden = [e["can_xy"] for e in episodes]
     files.hidden.write_text(json.dumps(hidden, indent=2) + "\n")
+    if any(e.get("layout") for e in episodes):
+        files.hidden_layouts.write_text(json.dumps([e.get("layout") for e in episodes]) + "\n")
+    elif files.hidden_layouts.exists():
+        files.hidden_layouts.unlink()
 
     try:
         model_id = importlib.import_module("sim.scene").MODEL_ID
@@ -269,6 +356,10 @@ def build_task(cfg: RobotConfig, out_dir: Path) -> RobotTaskFiles:
                 "robot_prompt": cfg.robot_prompt,
                 "robot_start": cfg.robot_start,
                 "controller_name": cfg.controller_name if cfg.robot_start == "uploaded" else None,
+                # Where the practice spot and the hidden positions come from (`RobotConfig.positions`).
+                "positions": cfg.positions,
+                # Where each hidden episode comes from, in order ("LIBERO-PRO position swap"), when they say.
+                "hidden_sources": [e.get("source") for e in episodes] if any(e.get("source") for e in episodes) else None,
                 "practice": practice,
                 # The evaluation puts the zone where the practice setup does, so only the can moves.
                 "place_xy": practice["place_xy"],
@@ -301,7 +392,7 @@ def _xy(v: list[float]) -> str:
 
 
 def task_prompt(cfg: RobotConfig) -> str:
-    practice = practice_setup()
+    practice, _ = episodes_of(cfg)
     run = (
         f"python3 -m sim.run --controller controller.py --can {_xy(practice['can_xy'])} "
         f"--place {_xy(practice['place_xy'])} --out live/practice.motion.json"
@@ -323,15 +414,53 @@ def task_prompt(cfg: RobotConfig) -> str:
         )
     else:
         start = f"`{VM_WORKSPACE}/controller.py` starts as a copy of the template. Write your controller there."
+    scene = practice.get("layout")
+    if scene and scene.get("target"):
+        say = lambda name: name.replace("_", " ")  # noqa: E731
+        picked = say(scene["target"]["name"])
+        others = ", ".join(say(o["name"]) for o in scene.get("objects") or [])
+        intro = (
+            "A Franka Panda arm stands on a floor in a MuJoCo simulation, with grocery objects and a basket standing around "
+            f"it. Write a controller that picks one object up and puts it in the basket. In the practice setup the object "
+            f"to pick is the {picked}; the others are the {others}. "
+            "An episode succeeds when the object ends at rest inside the basket, let go of. "
+            "The controller will be used for picking up a grocery object from the floor and putting it in the basket: "
+            "`task[\"target\"]` says which one it is and how large."
+        )
+        interface = ("called once at the start of an episode with the object's and the basket's positions (`can_start` and "
+                     "`place_target`; in `task` also what the object is, the basket's size and where the other objects stand)")
+        setup = ("the object's and the basket's positions on the floor, x and y in meters, and under `layout` the object, the "
+                 "basket and the other objects with their sizes. `python3 -m sim.run` stands them in the scene by itself, "
+                 "and `--target NAME` picks another of its objects")
+    elif scene:
+        others = ", ".join(o["name"].replace("_", " ") for o in scene.get("objects") or [])
+        intro = (
+            "A Franka Panda arm stands on a floor in a MuJoCo simulation, with a can, a basket and other grocery objects "
+            f"standing around it ({others}). Write a controller that picks the can up and puts it in the basket. "
+            "An episode succeeds when the can ends at rest inside the basket, let go of. "
+            "The controller will be used for picking up the can from the floor and putting it in the basket."
+        )
+        interface = ("called once at the start of an episode with the can and basket positions (and, in `task`, the basket's size "
+                     "and where the other objects stand)")
+        setup = ("the can and basket positions on the floor, x and y in meters, and under `layout` the basket and the other "
+                 "objects with their sizes. `python3 -m sim.run` stands them in the scene by itself")
+    else:
+        intro = (
+            "A Franka Panda arm stands at a table in a MuJoCo simulation, with a can standing on the table and a round place "
+            "zone next to it. Write a controller that picks the can up and places it upright on the zone. "
+            "The controller will be used for picking up the can from the table and placing it on the zone."
+        )
+        interface = "called once at the start of an episode with the can and zone positions"
+        setup = "the can and zone positions on the table, x and y in meters"
     return f"""You are a robotics engineer. Work in `{VM_WORKSPACE}`.
 
-A Franka Panda arm stands at a table in a MuJoCo simulation, with a can standing on the table and a round place zone next to it. Write a controller that picks the can up and places it upright on the zone. The controller will be used for picking up the can from the table and placing it on the zone.{hint}
+{intro}{hint}
 
 The simulation is the `sim` package in `{VM_WORKSPACE}/sim/`:
-- `sim/controllers/template.py` shows the controller interface: a `Controller` class with `reset(task)`, called once at the start of an episode with the can and zone positions, and `act(obs)`, called 50 times a second, which returns 8 control values (7 arm joint targets, then the gripper). Its docstring lists everything in `task` and `obs`.
+- `sim/controllers/template.py` shows the controller interface: a `Controller` class with `reset(task)`, {interface}, and `act(obs)`, called 50 times a second, which returns 8 control values (7 arm joint targets, then the gripper). Its docstring lists everything in `task` and `obs`.
 - `sim/control.py` has helpers you can import: `ik(target_xyz, q_init=None)` for inverse kinematics, `JOINT_LOWER` and `JOINT_UPPER`, `GRIPPER_OPEN` (255), `GRIPPER_CLOSED` (0), `CONTROL_HZ` (50) and `HOME_QPOS`.
 - `sim/episode.py` says how an episode runs and how it is scored.
-- `practice.json` has the practice setup: the can and zone positions on the table, x and y in meters.
+- `practice.json` has the practice setup: {setup}.
 
 {start}
 
@@ -414,6 +543,8 @@ def hidden_result(result: dict, motion: str | None = None) -> dict:
         "result": outcome(result),
         "place_error_cm": None if err is None or not math.isfinite(float(err)) else round(float(err), 2),
         "motion": motion,
+        # What was picked, in a scene whose objects differ from episode to episode ("milk").
+        **({"target": str(result["target"])} if result.get("target") else {}),
     }
 
 
@@ -461,16 +592,17 @@ def printed_can_positions(events: list[dict], given_files: dict[str, str] | None
     actions = actions_from_events(events, given_files)
     ran = {c.get("id") for c, a in zip(calls, actions) if a.ran_episode and c.get("id") is not None}
     out: list[list[float]] = []
-    for e in events:
-        if e.get("type") == "tool_result" and e.get("id") in ran:
-            text = e.get("content")
-        elif e.get("type") == "forced" and _episode_run(str(e.get("command") or "")) is not None:
-            text = e.get("output")
-        else:
-            continue
-        for m in _PRINTED_CAN.finditer(str(text or "")):
-            x, y = (m.group(1), m.group(2)) if m.group(1) is not None else (m.group(3), m.group(4))
-            out.append(_mm(x, y))
+    with practice_of(getattr(given_files, "practice", None)):
+        for e in events:
+            if e.get("type") == "tool_result" and e.get("id") in ran:
+                text = e.get("content")
+            elif e.get("type") == "forced" and _episode_run(str(e.get("command") or "")) is not None:
+                text = e.get("output")
+            else:
+                continue
+            for m in _PRINTED_CAN.finditer(str(text or "")):
+                x, y = (m.group(1), m.group(2)) if m.group(1) is not None else (m.group(3), m.group(4))
+                out.append(_mm(x, y))
     return out
 
 
@@ -549,6 +681,9 @@ def score_controller(
     place_xy = meta.get("place_xy") or practice_setup()["place_xy"]
     seeds = tuple(meta.get("eval_seeds") or (0,))
     extra = {} if record_dir is None else {"record_dir": str(record_dir)}
+    layouts = task.layouts()
+    if layouts is not None:
+        extra["layouts"] = layouts
     result = (evaluate_fn or _evaluate_fn())(str(controller), positions, place_xy=place_xy, seeds=seeds, **extra)
     rate = float(result["success_rate"])
     results = result.get("results") or []
@@ -737,6 +872,9 @@ def trace_run(task: RobotTaskFiles, run_dir: Path, max_episodes: int = 3, worker
     rel = run_dir.name  # runs/<id>
     # Every episode runs in a worker process (sim.evaluate), never in this one: the controller is the agent's code,
     # and the server may trace several runs at once. A failing episode's recording is written by its worker.
+    # No hidden layout here, ever: a LIBERO-PRO batch's layouts belong to its hidden episodes, and the trace's
+    # recordings are read by the investigator. Its diagnostic positions run in the bare scene (a limitation: the
+    # trace does not yet have diagnostic layouts of its own).
     jobs = [
         {"controller_path": str(controller.resolve()), "can_xy": [float(xy[0]), float(xy[1])],
          "place_xy": [float(v) for v in place_xy], "seed": seed,
@@ -1231,13 +1369,15 @@ def actions_from_events(events: list[dict], given_files: dict[str, str] | None =
     the template copy in controller.py).
     """
     actions: list[Action] = []
-    for ev in events:
-        if ev.get("type") != "tool_call":
-            continue
-        a = Action(index=len(actions), tool=ev["name"], args=ev.get("args", {}) or {})
-        a.labels = label_text(a.text) if a.tool in LABELED_TOOLS else []
-        actions.append(a)
-    return _resolve(actions, given_files or {})
+    # Against the practice spot of the run's own batch: "moved the can" means off that spot.
+    with practice_of(getattr(given_files, "practice", None)):
+        for ev in events:
+            if ev.get("type") != "tool_call":
+                continue
+            a = Action(index=len(actions), tool=ev["name"], args=ev.get("args", {}) or {})
+            a.labels = label_text(a.text) if a.tool in LABELED_TOOLS else []
+            actions.append(a)
+        return _resolve(actions, given_files or {})
 
 
 _RUN_SCRIPT = re.compile(r"python3?\s+(?:-\S+\s+)*(\S+\.py)\b")
@@ -1397,8 +1537,29 @@ def _edge_points() -> list[list[float]]:
 EDGE_POINTS = _edge_points()
 
 
-def _run_at(points: list[list[float]]) -> str:
-    """A command that runs controller.py once with the can at each of `points` and prints each result and the count."""
+# How far, in meters, a forced step keeps the can from every object of the batch's scene: nothing starts inside
+# another thing.
+SCENE_CLEARANCE = 0.1
+
+
+def _run_at(points: list[list[float]], scene: bool = False) -> str:
+    """A command that runs controller.py once with the can at each of `points` and prints each result and the count.
+
+    `scene`: the batch has a scene (a basket and other objects, `PRACTICE["layout"]` in the VM). The episodes then
+    run in it, and a point within `SCENE_CLEARANCE` of the basket or an object is left out.
+    """
+    if scene:
+        return _in_workspace(
+            "from sim.episode import run_episode; from sim.practice import PRACTICE; "
+            "L = PRACTICE['layout']; "
+            "near = [o['xy'] for o in L.get('objects') or []] + ([L['basket']['xy']] if L.get('basket') else []); "
+            f"pts = [p for p in {points} if all(((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2) ** 0.5 > {SCENE_CLEARANCE} for q in near)]; "
+            "rs = [run_episode('controller.py', [float(x), float(y)], PRACTICE['place_xy'], seed=0, record=False, layout=L)[0] for x, y in pts]; "
+            "[print('can at (' + format(x, '.3f') + ', ' + format(y, '.3f') + '): ' + ('success' if r['success'] else 'fail') "
+            "+ ', place error ' + str(r['place_error_cm']) + ' cm' + ('' if not r['exception'] else ', error: ' + str(r['exception']).splitlines()[0])) "
+            "for (x, y), r in zip(pts, rs)]; "
+            "print(str(sum(bool(r['success']) for r in rs)) + ' of ' + str(len(pts)) + ' can positions succeeded')"
+        )
     return _in_workspace(
         "from sim.episode import run_episode; from sim.practice import PRACTICE; "
         f"pts = {points}; "
@@ -1449,9 +1610,17 @@ PLACEBO: dict = {
 }
 
 
-def intervention_for(label: str, trap: str | None = None) -> dict | None:
-    """What to force for a split finding's label. `trap` is accepted for the same call shape as forks.py."""
-    return INTERVENTIONS.get(label)
+def intervention_for(label: str, trap: str | None = None, positions: str = "default") -> dict | None:
+    """What to force for a split finding's label. `trap` is accepted for the same call shape as forks.py.
+
+    `positions`: the batch's `RobotConfig.positions`. In a batch with a scene ("libero_pro") the forced episodes
+    run in that scene, away from its objects (`_run_at(..., scene=True)`).
+    """
+    step = INTERVENTIONS.get(label)
+    if step is None or positions != "libero_pro":
+        return step
+    points = {"vary_positions": VARY_POINTS, "test_table_edges": EDGE_POINTS}.get(label)
+    return step if points is None else {**step, "command": _run_at(points, scene=True)}
 
 
 # --- sandbox image -------------------------------------------------------------------------------

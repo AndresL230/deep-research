@@ -26,6 +26,7 @@ unclear, neither honest nor inflated, and the split finder leaves it out.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import math
 import multiprocessing as mp
@@ -103,7 +104,13 @@ def _worker_main(conn) -> None:
     except (ValueError, OSError):
         pass
     _exit_with_parent()
-    from sim.episode import run_episode
+    try:
+        from sim.episode import run_episode as arm_episode
+    except Exception as exc:  # noqa: BLE001 - the arm's model is missing: only a job that needs it fails
+        arm_error = exc
+
+        def arm_episode(**_kwargs):
+            raise arm_error
 
     _limit_blas_threads()
     try:
@@ -121,7 +128,9 @@ def _worker_main(conn) -> None:
         try:
             record_to = kwargs.get("record_to")
             keep_all = bool(kwargs.get("record_all"))
-            episode_kwargs = {k: v for k, v in kwargs.items() if k not in ("record_to", "record_all")}
+            episode_kwargs = {k: v for k, v in kwargs.items() if k not in ("record_to", "record_all", *OTHER_SIM_KEYS)}
+            # A job of another sim names the module whose `run_episode` runs it (`OTHER_SIM_KEYS`).
+            run_episode = importlib.import_module(kwargs["episode"]).run_episode if kwargs.get("episode") else arm_episode
             result, motion = run_episode(record=bool(record_to), **episode_kwargs)
             if record_to and motion is not None and (keep_all or not result.get("success")):
                 from sim.motion import write_motion
@@ -179,8 +188,16 @@ def _limit_blas_threads() -> None:
         pass
 
 
+# A job of another sim than the arm's carries these: "episode", the module whose `run_episode(**job)` runs it, and
+# "failure", a module that imports without numpy and has `failure_result(job, exception, end_reason)`, the failed
+# result in that sim's keys (sim/g1/evaluate.py). Neither is passed to `run_episode`.
+OTHER_SIM_KEYS = ("episode", "failure")
+
+
 def _failure(kwargs: dict, exception: str, end_reason: str) -> dict:
     """A failed episode result with the same keys `run_episode` gives."""
+    if kwargs.get("failure"):
+        return importlib.import_module(kwargs["failure"]).failure_result(kwargs, exception, end_reason)
     return {
         "success": False,
         "place_error_cm": None,
@@ -469,8 +486,12 @@ def evaluate(
     workers: int | None = None,
     controller_timeout: float | None = None,
     record_dir=None,
+    layouts=None,
 ) -> dict:
     """Run the controller once per can position and seed; return the success rate and every result.
+
+    layouts: one scene layout per position (sim/scene.py), or None for the bare scene: the basket and the other
+    objects the episode at that position stands in.
 
     positions: list of [x, y] can starts. place_xy: the place target (default: the practice one).
     timeout: per episode, wall clock seconds. controller_timeout: total wall clock seconds for all the
@@ -491,6 +512,8 @@ def evaluate(
     for i, xy in enumerate(positions):
         for seed in seeds:
             job = {"controller_path": path, "can_xy": [float(xy[0]), float(xy[1])], "place_xy": place, "seed": seed}
+            if layouts is not None and layouts[i]:
+                job["layout"] = layouts[i]
             if record_dir is not None:
                 job.update(record_to=str(Path(record_dir) / motion_name(i, seed)), record_all=True,
                            motion_fps=LOW_FPS, motion_decimals=LOW_DECIMALS)

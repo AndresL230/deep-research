@@ -41,9 +41,25 @@ export interface EpisodeResult {
   tipped?: boolean;
   tilt_deg?: number;
   seed?: number;
+  /** In a scene with a basket: whether the can's center ended inside it. */
+  in_basket?: boolean;
+  /** What was picked, when it is not the can: "milk". */
+  target?: string;
+  // A humanoid episode (sim/g1/episode.py): the bag swung far enough, something touched it and what ("right foot"),
+  // the robot fell, how far the bag swung at most, and whether the robot ended on both feet.
+  struck?: boolean;
+  touched?: boolean;
+  struck_with?: string | null;
+  fell?: boolean;
+  bag_peak_cm?: number;
+  standing?: boolean;
 }
 
 export interface MotionData {
+  /** The scene the file was recorded in, for `fetchScene`: "g1" for a humanoid episode, absent for the arm's. */
+  scene?: string;
+  /** A humanoid episode: where the bag's center hung, x, y, z. */
+  bag_pos?: number[] | null;
   fps: number;
   can_start: number[] | null;
   place_target: number[] | null;
@@ -58,9 +74,16 @@ export interface MotionData {
   frames: number[][];
   /** Bodies that never move in this file (the base, the place zone), same seven numbers. */
   static: Record<string, number[]>;
+  /** A file recorded in a scene with a basket and other objects: their geoms, drawn on top of the scene's own. Their
+   *  bodies are in `bodies` like any other. Absent for the bare scene. */
+  extra?: SceneGeom[];
+  /** Names of scene geoms this file does not have: "place_zone" where a basket stands in its place. */
+  hide?: string[];
 }
 
 export interface MotionSummary {
+  /** A humanoid episode: where the bag's center hung. */
+  bag_pos?: number[] | null;
   can_start?: number[] | null;
   place_target?: number[] | null;
   duration?: number | null;
@@ -82,14 +105,18 @@ async function getJson<T>(url: string): Promise<T> {
 
 const batchPath = (id: string): string => `/api/batches/${encodeURIComponent(id)}`;
 
-let scenePromise: Promise<SceneData> | null = null;
-/** The scene, fetched once per page. */
-export function fetchScene(): Promise<SceneData> {
-  if (!scenePromise) {
-    scenePromise = getJson<SceneData>("/api/robot/scene");
-    scenePromise.catch(() => { scenePromise = null; });
+/** The arm's scene: the one a motion file was recorded in when it names none. */
+export const DEFAULT_SCENE = "panda";
+const scenes = new Map<string, Promise<SceneData>>();
+/** A scene, fetched once per page: the arm's, or the one a motion file names (`MotionData.scene`). */
+export function fetchScene(name: string = DEFAULT_SCENE): Promise<SceneData> {
+  let p = scenes.get(name);
+  if (!p) {
+    p = getJson<SceneData>(name === DEFAULT_SCENE ? "/api/robot/scene" : `/api/robot/scene?model=${encodeURIComponent(name)}`);
+    p.catch(() => scenes.delete(name));
+    scenes.set(name, p);
   }
-  return scenePromise;
+  return p;
 }
 
 const MOTION_CACHE = 80;

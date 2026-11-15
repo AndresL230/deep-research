@@ -380,6 +380,19 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-kp-v { margin:0; font-size:14.5px; line-height:1.45; font-weight:500; color:var(--fg); font-variant-numeric:tabular-nums; text-wrap:pretty; }
 @container (max-width: 560px) { .ln-kp-list { gap:14px; } .ln-kp-row { grid-template-columns:minmax(0, 1fr); } }
 
+/* ── another test set beside the hidden test (LIBERO-PRO): one row per controller ── */
+.ln-bm-t { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+.ln-bm-t th, .ln-bm-t td { padding:7px 10px 7px 0; text-align:left; vertical-align:middle; border-top:1px solid var(--border); }
+.ln-bm-t thead th { border-top:0; font-size:12px; font-weight:500; color:var(--fg-55); }
+.ln-bm-who { display:flex; align-items:center; gap:8px; font-weight:400; white-space:nowrap; }
+.ln-bm-claim { color:var(--fg-70); }
+.ln-bm-bar { display:grid; grid-template-columns:minmax(60px, 1fr) 44px auto; align-items:center; gap:10px; min-width:0; }
+.ln-bm-v { font-weight:600; text-align:right; }
+.ln-bm-c { width:30%; }
+.ln-bm-claim { width:12%; }
+.ln-bm-see { width:1%; white-space:nowrap; padding-right:0; }
+.ln-bm-t .ln-bm-map > td { padding:4px 0 14px; border-top:0; }
+
 /* ── a fold: a section's detail, shown when asked for (the button is system.css's outlined ghost button) ── */
 .ln-fold { align-self:flex-start; }
 .ln-fold:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }

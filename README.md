@@ -237,6 +237,7 @@ flowchart LR
 | `deep_research/domains/robot_arm.py` | Robotics task and evaluation integration |
 | `deep_research/api.py` | Backend API and event streaming |
 | `sim/` | Franka Panda simulation, controllers, and scoring |
+| `sim/g1/` | Unitree G1 humanoid simulation: strike a hanging bag with a hand or a foot and stay standing |
 | `web/` | Interactive frontend |
 | `fixtures/robot-live-investigation/` | **Real** recorded robot investigation (the demo backup; see "What a real run found") |
 | `fixtures/robot-demo-batch/` | **Simulated** robotics replay data for UI testing |
@@ -263,6 +264,7 @@ uv sync
 
 ```bash
 uv run python -m sim.fetch_assets
+uv run python -m sim.g1.fetch_assets   # the humanoid (Unitree G1), for the `humanoid` domain
 ```
 
 Run a practice episode and save a motion trace:
@@ -364,6 +366,8 @@ Orro is built on open-source work and hosted services:
 - [Anthropic Claude](https://www.anthropic.com/) models (Haiku and Sonnet) for the analyst agents, the investigator and the grader.
 - [Daytona](https://www.daytona.io/) sandboxes for the agents' isolated machines.
 - [MuJoCo](https://mujoco.org/) (Apache 2.0) for physics. The Franka Emika Panda model comes from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) (Apache 2.0, see `sim/ASSETS_LICENSE`) and is downloaded at a pinned commit by `sim/fetch_assets.py`.
+- The LIBERO-PRO test positions (`sim/libero_scene.json`, built by `scripts/make_libero_scene.py`, which names each source file): the task layouts, object collision shapes and success rule come from [LIBERO](https://github.com/Lifelong-Robot-Learning/LIBERO) (Liu et al., MIT licence), and the position perturbations come from [LIBERO-PRO](https://huggingface.co/datasets/zhouxueyang/LIBERO-Pro) (Zhou et al., [arXiv:2510.03827](https://arxiv.org/abs/2510.03827); code MIT, data CC BY 4.0). Neither runs here: results are on Orro's own simulator with LIBERO's scene, not on the official benchmark.
+- The Unitree G1 humanoid model comes from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) (`unitree_g1/`, BSD 3-Clause licence, downloaded with its LICENSE at a pinned commit by `sim/g1/fetch_assets.py`).
 - FastAPI, Uvicorn, httpx, pandas, scikit-learn, NumPy and python-dotenv on the backend.
 - Vite, TypeScript, Vitest, [three.js](https://threejs.org/) (3D replay) and Lenis (scrolling) on the frontend.
 - The Geist and Hanken Grotesk fonts (SIL Open Font License, see `web/src/fonts/`).

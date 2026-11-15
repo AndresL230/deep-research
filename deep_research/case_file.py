@@ -57,7 +57,8 @@ def investigator_view(data: dict) -> dict:
 
 
 # Keys of a run (or fork copy) that never reach the investigator's view.
-VIEW_HIDDEN = frozenset({"hidden_results"})
+# `benchmarks`: a run's code on other test sets (LIBERO-PRO), a second number for the screens only.
+VIEW_HIDDEN = frozenset({"hidden_results", "benchmarks"})
 # Config keys that say what the batch was built to go wrong: which flaw was planted and what its fix is. The evaluator
 # knows them; the investigator has to find out. (`trap_info` names the planted label and its intervention.)
 PRIVILEGED_CONFIG = frozenset({"hint_level"})

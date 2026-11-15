@@ -97,6 +97,7 @@ def _robot_config(cfg: BatchConfig):
         hint_level=cfg.hint_level,
         robot_prompt=cfg.robot_prompt,
         robot_start=cfg.robot_start,
+        positions=cfg.robot_positions,
         eval_seeds=tuple(cfg.robot_eval_seeds),
         inflation_threshold=cfg.inflation_threshold,
         n_runs=cfg.n_runs,
@@ -164,6 +165,27 @@ def score_code(task: Any, code: Path, evaluate_fn=None) -> dict:
     return _sim().score_controller(task, code, evaluate_fn=evaluate_fn)
 
 
+# Where a run's (or the starting code's) episodes on other test sets are recorded, next to its outputs.
+BENCH_DIR = "benchmarks"
+
+
+def benchmarks(task: Any, code: Path, record_dir: Path | None = None, motion_prefix: str | None = None) -> dict:
+    """The controller at the positions LIBERO-PRO moves LIBERO-Object's object to (sim/libero_pro.py), every
+    episode recorded under `record_dir/libero_pro/` when a folder is given."""
+    import importlib
+
+    name = "libero_pro"
+    if _sim().read_meta(task).get("positions") == name:
+        return {}  # the batch's own hidden test is LIBERO-PRO already: no second number
+    folder = None if record_dir is None else Path(record_dir) / name
+    if folder is not None and folder.exists():
+        shutil.rmtree(folder)  # measured again: no recording of the earlier measurement stays behind
+    # The same evaluation a run's score uses (`sim.domain._evaluate_fn`), so a test's stand-in covers both.
+    return {name: importlib.import_module("sim.libero_pro").measure(
+        code, evaluate_fn=_sim()._evaluate_fn(), record_dir=folder,
+        motion_prefix=None if motion_prefix is None else f"{motion_prefix}/{name}")}
+
+
 def baseline_code(cfg: BatchConfig, task: Any) -> tuple[Path, str] | None:
     """The controller the agents were handed, when the batch starts from one: the upload or the colleague's."""
     if cfg.robot_start == "blank":
@@ -212,7 +234,10 @@ def case_config(cfg: BatchConfig) -> dict:
 
     `unclear_threshold`: a run whose gap is above it but not above `inflation_threshold` is unclear (sim.evaluate.UNCLEAR_LOW).
     """
-    return {"robot_prompt": cfg.robot_prompt, "robot_start": cfg.robot_start, "unclear_threshold": _sim().unclear_threshold()}
+    # `robot_practice`: this batch's practice spot and place target, for the screens' table maps.
+    practice, _ = _sim().positions_of(_sim().RobotConfig(positions=cfg.robot_positions))
+    return {"robot_prompt": cfg.robot_prompt, "robot_start": cfg.robot_start, "robot_positions": cfg.robot_positions,
+            "robot_practice": practice, "unclear_threshold": _sim().unclear_threshold()}
 
 
 def check_config(cfg: BatchConfig) -> None:
@@ -277,7 +302,7 @@ DOMAIN = Domain(
     label_text=lambda text: _sim().label_text(text),
     actions_from_events=lambda events, given_files: _sim().actions_from_events(events, given_files),
     prefer_label=lambda cfg: _sim().HONEST_LABEL,
-    intervention_for=lambda label, cfg: _sim().intervention_for(label),
+    intervention_for=lambda label, cfg: _sim().intervention_for(label, positions=cfg.robot_positions),
     show_for=lambda label: _sim().SHOW.get(label),
     placebo=lambda: _sim().PLACEBO,
     skills_dir=SIM_DIR / "skills",
@@ -298,7 +323,7 @@ DOMAIN = Domain(
     vm_setup=lambda: list(_sim().VM_SETUP_COMMANDS),
     output_globs=OUTPUT_GLOBS,
     max_output_globs=MAX_MOTION_FILES,
-    secret_files=("hidden_positions",),
+    secret_files=("hidden_positions", "hidden_layouts"),
     analyst_system_prompt=ANALYST_SYSTEM_PROMPT,
     config_defaults=config_defaults,
     case_config=case_config,
@@ -307,5 +332,6 @@ DOMAIN = Domain(
     fix_file=f"{VM_WORKSPACE}/controller.py",
     fix_output="controller.py",
     score_code=score_code,
+    benchmarks=benchmarks,
     baseline_code=baseline_code,
 )
