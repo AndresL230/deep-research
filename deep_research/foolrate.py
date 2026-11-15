@@ -90,3 +90,95 @@ def save_report(t: dict, root: Path) -> Path:
     path = folder / f"{time.strftime('%m%d-%H%M%S')}.json"
     path.write_text(json.dumps(t, indent=2))
     return path
+
+
+# ---- reading the reports back (GET /api/foolrate) ----
+
+# What a report may carry to the screen, and what each row may carry: the counts, never a run's files or labels. A
+# key not listed here is dropped on the way out, so nothing the evaluator keeps back can ride along in a report.
+REPORT_KEYS = ("settings", "rows", "n_per_setting", "domain", "trap", "control", "estimate_usd", "created_at",
+               "lessons", "simulated", "recording", "note")
+ROW_KEYS = ("setting", "batch_id", "inflated", "n", "failed", "rate", "ci95", "interval", "usd")
+LESSON_KEYS = ("name", "rule", "learned_from")
+
+
+def case_usd(case: dict | None) -> float | None:
+    """What a batch cost in all (its case file's `costs`), or None when it has no price."""
+    from .costs import CostTracker
+
+    if not isinstance(case, dict) or not isinstance(case.get("costs"), dict):
+        return None
+    t = CostTracker(budget_usd=1.0)
+    try:
+        t.restore(case["costs"])
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return None
+    total = t.total_usd()
+    return None if total is None else round(total, 4)
+
+
+def lessons_for(names: list[str] | None, approved: list[dict]) -> list[dict]:
+    """The lessons a `learned` arm was given, with their rules: the names its runs recorded (`runs.<id>.lessons`)
+    matched to the approved SKILL.md files, or every approved lesson when the runs recorded none."""
+    by_name = {a["name"]: a for a in approved}
+    picked = [by_name.get(n, {"name": n, "rule": None}) for n in names] if names else approved
+    return [{k: a.get(k) for k in LESSON_KEYS} for a in picked]
+
+
+def _clean(report: dict) -> dict:
+    out = {k: report[k] for k in REPORT_KEYS if k in report}
+    out["rows"] = [{k: r[k] for k in ROW_KEYS if k in r} for r in report.get("rows") or [] if isinstance(r, dict)]
+    if isinstance(out.get("lessons"), list):
+        out["lessons"] = [{k: x.get(k) for k in LESSON_KEYS} for x in out["lessons"] if isinstance(x, dict)]
+    return out
+
+
+def _case(root: Path, batch_id) -> dict | None:
+    if not isinstance(batch_id, str) or not batch_id or "/" in batch_id or "\\" in batch_id or batch_id.startswith("."):
+        return None
+    path = root / batch_id / "case" / "case.json"
+    try:
+        return json.loads(path.read_text()) if path.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
+def reports(roots: list[tuple[Path, bool]], approved: list[dict] | None = None) -> list[dict]:
+    """Every `<root>/_foolrate/*.json`, newest first, each `{id, fixture, ...the table}` with only the listed keys.
+
+    `roots` is `[(folder, is_fixture)]`: the local batches folder, then the committed fixtures (a report there replays
+    without keys). A report written before its rows carried `usd` or its table carried `lessons` gets them from its
+    batches' case files when they are on disk, and the lessons' rules from the approved SKILL.md files (`approved`)."""
+    if approved is None:
+        from . import lessons as lessons_mod
+
+        approved = lessons_mod.approved()
+    out, seen = [], set()
+    for root, is_fixture in roots:
+        folder = root / "_foolrate"
+        for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+            if path.stem in seen:
+                continue
+            try:
+                raw = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue  # a report that cannot be read is left out
+            if not isinstance(raw, dict) or not isinstance(raw.get("rows"), list):
+                continue
+            seen.add(path.stem)
+            rep = _clean(raw)
+            names: list[str] = []
+            for r in rep["rows"]:
+                case = _case(root, r.get("batch_id"))
+                if "usd" not in r:
+                    r["usd"] = case_usd(case)
+                if r.get("setting") == "learned" and case:
+                    for run in (case.get("runs") or {}).values():
+                        for n in ((run or {}).get("lessons") or {}).get("names") or []:
+                            if n not in names:
+                                names.append(n)
+            if "lessons" not in rep and "learned" in [r.get("setting") for r in rep["rows"]]:
+                rep["lessons"] = lessons_for(names, approved)
+            out.append({"id": path.stem, "fixture": is_fixture, **rep})
+    out.sort(key=lambda r: (str(r.get("created_at") or ""), r["id"]), reverse=True)
+    return out

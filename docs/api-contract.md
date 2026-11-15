@@ -306,8 +306,9 @@ view (`case/view/case.json`) leaves them out (`case_file.UPGRADE_HIDDEN`).
     `source_thread_id` and `fork_mode_fallback` (why messages mode was used instead, or null). Each copy carries
     `fork_mode`, `state_from` and, in checkpoint mode, `checkpoint_id` and `source_thread_id`.
   - `foolrate` (Phase 5.3, `cli foolrate`): `{settings, rows: [{setting, batch_id, inflated, n, failed, rate, ci95,
-    interval: "wilson"}], n_per_setting, domain, trap, control: "none", estimate_usd, created_at}`, on every batch of
-    the study and in `batches/_foolrate/<stamp>.json`.
+    interval: "wilson", usd}], n_per_setting, domain, trap, control: "none", estimate_usd, created_at, lessons?}`, on
+    every batch of the study and in `batches/_foolrate/<stamp>.json` (`lessons`: the approved `{name, rule,
+    learned_from}` the `learned` arm was given; see "The fool-rate reports").
 - `POST /decision` may carry `{"approve": true, "pairs": n}` (1 to 6) when a person edited the pairs; plain
   `{"approve": bool}` is unchanged. `POST /api/batches/{id}/lessons/{lesson_id}` `{"approve": bool}` answers a
   proposed lesson.
@@ -389,6 +390,18 @@ Both answer `409 {"detail": "cannot run more pairs: <why>"}` when:
 - (POST) the batch has spent its budget, or spent plus the estimate is over it.
 
 An unknown batch is `404`.
+
+## The fool-rate reports
+
+`GET /api/foolrate`, read-only (`deep_research/foolrate.py` `reports`): every `batches/_foolrate/*.json`, then every
+committed `fixtures/_foolrate/*.json` (a replay, no keys needed), newest first by `created_at`. Each item is
+`{id, fixture, settings, rows, n_per_setting, domain, trap, control, estimate_usd, created_at, lessons?, simulated?,
+recording?, note?}`; each row `{setting, batch_id, inflated, n, failed, rate, ci95, interval, usd}` (`usd`: what the
+arm's batch cost, null with no price) and each lesson `{name, rule, learned_from}`. Only these keys go out. A report
+written before `cli foolrate` saved `usd` and `lessons` gets them from its batches' case files and the approved
+`skills/learned/*/SKILL.md`. A committed report must be `simulated: true` or carry `recording`, and no report may name
+the holdout labels (`scripts/check_invariants.py`). The web screen is `#/lessons` (`web/src/batch/foolrate.ts`); an
+approved lesson on a batch's Lessons block links to the newest report that tested it.
 
 ## The cost report
 

@@ -1,0 +1,81 @@
+/* "Lessons work" (foolrate.ts foolrateView): the fool rate, one meter per arm. Tokens only, so both themes work.
+   Inflated is red everywhere in the app (cs-chip, sx-st); an arm the lesson made better is green. */
+.fr {
+  --fr-bad:var(--red); --fr-good:var(--green);
+  width:100%; max-width:var(--pg-w, 1040px); margin:0 auto; padding:28px var(--pg-pad, 24px) 64px; box-sizing:border-box;
+  display:flex; flex-direction:column; gap:28px; min-width:0; font-size:13px; color:var(--fg);
+  animation:fr-fade var(--fx-base) var(--fx-ease) both;
+}
+@keyframes fr-fade { from { opacity:0; } to { opacity:1; } }
+.fr-big, .fr-pct, .fr-n, .fr-facts, .fr-scale, .fr-other-v { font-variant-numeric:tabular-nums; }
+.fr-dim { color:var(--fg-55); }
+.fr-state { display:flex; align-items:center; gap:8px; min-height:120px; color:var(--fg-55); }
+.fr-err { padding:10px 14px; border:1px solid color-mix(in srgb, var(--red) 35%, var(--border)); border-radius:var(--r-ctl); background:color-mix(in srgb, var(--red) 6%, var(--surface)); color:var(--red); }
+.fr-empty { padding:48px 0; }
+.fr-empty h2 { margin:0 0 6px; font-size:20px; font-weight:500; letter-spacing:-0.02em; }
+.fr-empty p { margin:0; max-width:72ch; color:var(--fg-55); font-size:13.5px; line-height:1.55; }
+.fr-empty code, .fr-lname { font-family:var(--code); font-size:12px; }
+
+.fr-banner { margin:0; padding:10px 14px; border:1px solid color-mix(in srgb, var(--purple) 40%, var(--border)); border-radius:var(--r-ctl); background:color-mix(in srgb, var(--purple) 9%, transparent); color:var(--purple); font-size:13px; }
+.fr-sim { flex:none; padding:1px 7px; border-radius:var(--r-ctl); font-size:11.5px; font-weight:500; line-height:18px; white-space:nowrap; color:var(--purple); background:color-mix(in srgb, var(--purple) 14%, transparent); }
+
+/* ── the headline ── */
+.fr-hero { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.fr-eyebrow { font-size:12.5px; font-weight:500; color:var(--fg-55); }
+.fr-head { margin:0; font-size:clamp(28px, 5.2vw, 46px); font-weight:400; line-height:1.12; letter-spacing:-0.03em; text-wrap:balance; }
+.fr-n { font-weight:500; white-space:nowrap; }
+.fr-n[data-tone="bad"] { color:var(--fr-bad); }
+.fr-n[data-tone="good"] { color:var(--fr-good); }
+.fr-arrow { color:var(--fg-40); }
+.fr-take { margin:0; max-width:64ch; font-size:16px; line-height:1.5; color:var(--fg-70); }
+
+/* ── the lesson ── */
+.fr-h2 { margin:0 0 10px; font-size:13px; font-weight:500; color:var(--fg); }
+.fr-lesson { padding:16px 18px; border:1px solid var(--border); border-left:3px solid var(--fr-good); border-radius:8px; background:var(--surface); min-width:0; }
+.fr-rule + .fr-rule { margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+.fr-lname { color:var(--fg-70); }
+.fr-rule-t { margin:6px 0 0; max-width:80ch; font-size:15px; line-height:1.55; color:var(--fg); overflow-wrap:anywhere; }
+.fr-from { margin:8px 0 0; font-size:12.5px; color:var(--fg-55); }
+.fr-from a, .fr-batch { color:inherit; text-decoration:underline; text-decoration-color:var(--border-strong); text-underline-offset:2px; }
+.fr-from a:hover, .fr-batch:hover { color:var(--fg); text-decoration-color:currentColor; }
+
+/* ── the arms ── */
+.fr-arms { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
+.fr-arm { --fr-tone:var(--fr-bad); display:flex; flex-direction:column; gap:12px; min-width:0; padding:18px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
+.fr-arm[data-tone="better"] { --fr-tone:var(--fr-good); }
+.fr-arm-h { display:flex; align-items:center; gap:8px; min-width:0; }
+.fr-arm-l { font-size:14px; font-weight:500; color:var(--fg); }
+.fr-arm-v { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px 10px; }
+.fr-big { font-size:clamp(48px, 8vw, 72px); font-weight:400; line-height:1; letter-spacing:-0.04em; color:var(--fr-tone); }
+.fr-of { font-size:16px; color:var(--fg-70); }
+.fr-pct { margin-left:auto; font-size:15px; font-weight:500; color:var(--fr-tone); }
+
+/* The meter: the rate fills the track; the interval is a band of the same hue over it, with whiskers at its ends. */
+.fr-meter { position:relative; height:30px; border-radius:6px; background:var(--hover); box-shadow:inset 0 0 0 1px var(--border); }
+.fr-fill { position:absolute; inset:0 auto 0 0; border-radius:6px; background:color-mix(in srgb, var(--fr-tone) 78%, transparent); transform-origin:left center; animation:fr-grow 900ms var(--fx-ease, ease-out) both; }
+.fr-band { position:absolute; top:-5px; bottom:-5px; min-width:2px; box-sizing:border-box; border-left:2px solid var(--fr-tone); border-right:2px solid var(--fr-tone);
+  background:repeating-linear-gradient(135deg, color-mix(in srgb, var(--fr-tone) 30%, transparent) 0 2px, transparent 2px 6px);
+  box-shadow:inset 0 2px 0 -1px color-mix(in srgb, var(--fr-tone) 55%, transparent), inset 0 -2px 0 -1px color-mix(in srgb, var(--fr-tone) 55%, transparent); }
+.fr-dot { position:absolute; top:50%; width:12px; height:12px; margin:-6px 0 0 -6px; border-radius:50%; background:var(--surface); box-shadow:0 0 0 3px var(--fr-tone); }
+@keyframes fr-grow { from { transform:scaleX(0); } to { transform:scaleX(1); } }
+.fr-scale { display:flex; justify-content:space-between; margin-top:-6px; font-size:11px; color:var(--fg-55); }
+.fr-facts { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; margin:0; font-size:12.5px; color:var(--fg-55); }
+.fr-sep { color:var(--fg-40); }
+
+.fr-foot { margin:0; max-width:90ch; font-size:12px; line-height:1.5; color:var(--fg-55); }
+
+/* ── other runs ── */
+.fr-other-list { display:flex; flex-direction:column; gap:4px; margin:0; padding:0; list-style:none; }
+.fr-other { display:flex; align-items:center; gap:12px; padding:8px 12px; border:1px solid var(--border); border-radius:var(--r-ctl); color:var(--fg-70); text-decoration:none; }
+.fr-other:hover { background:var(--hover); color:var(--fg); }
+.fr-other-w { min-width:10ch; color:var(--fg-55); }
+
+/* ── the link on a batch's Lessons block ── */
+.fr-link { display:inline-flex; align-items:center; gap:2px; margin-top:8px; margin-right:8px; font-size:12.5px; font-weight:500; color:var(--accent); text-decoration:none; }
+.fr-link:hover { text-decoration:underline; text-underline-offset:2px; }
+
+@media (max-width: 720px) {
+  .fr { padding-left:16px; padding-right:16px; gap:22px; }
+  .fr-arms { grid-template-columns:minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { .fr, .fr-fill { animation:none; } }

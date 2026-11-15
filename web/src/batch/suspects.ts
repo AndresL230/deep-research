@@ -25,6 +25,7 @@ import { attr, esc } from "../ui";
 import { usd } from "./format";
 import { ACT, type BatchVm } from "./model";
 import { isDone, pairs as childPairs } from "./evidence";
+import { lessonLink, reportForLesson } from "./foolrate";
 import { ADMIN_ONLY } from "../access";
 
 // ── the rule ─────────────────────────────────────────────────────────────────
@@ -586,8 +587,19 @@ export function investigatorPanelView(vm: BatchVm): string {
 
 // ── 5. lessons ───────────────────────────────────────────────────────────────
 
+function foolrateLink(vm: BatchVm, name: string): string {
+  const r = reportForLesson(vm.foolrate, name);
+  return r ? `<div class="sx-fr">${lessonLink(r)}</div>` : "";
+}
+
 export function lessonsView(vm: BatchVm): string {
   const ls = (vm.case as SxCase).lessons;
+  // A lesson a fool-rate run tested links to it ("Lessons work"), even from a batch that keeps no lessons[] itself.
+  const tested = (vm.foolrate ?? []).filter((r) => (r.lessons ?? []).some((l) => l.learned_from === vm.id));
+  if ((!Array.isArray(ls) || !ls.length) && tested.length) {
+    const first = tested.find((r) => !r.simulated) ?? tested[0];
+    return section("lessons", "Lessons", `<p class="ln-sub">A lesson from this batch was tested on new analysts</p><div class="sx-lessons">${lessonLink(first)}</div>`);
+  }
   if (!Array.isArray(ls) || !ls.length) return "";
   const admin = !vm.role || vm.role === "admin";
   const dis = !vm.live || vm.busy != null ? " disabled" : "";
@@ -602,7 +614,7 @@ export function lessonsView(vm: BatchVm): string {
       : "";
     return `<article class="ln-card sx-lesson sx-lesson--${attr(l.status)}" data-morph-key="sx-l-${attr(l.id)}">` +
       `<header class="sx-sus-h"><code class="sx-lname">${esc(l.name)}</code>${l.suspect_id ? tag(`from ${l.suspect_id}`) : ""}${simTag(!!l.simulated)}<span class="sx-sp"></span>${st}</header>` +
-      `<p class="sx-rule-t">${esc(l.rule)}</p>${acts}</article>`;
+      `<p class="sx-rule-t">${esc(l.rule)}</p>${acts}${l.status === "approved" ? foolrateLink(vm, l.name) : ""}</article>`;
   };
   const n = ls.filter((l) => l.status === "proposed").length;
   return section("lessons", "Lessons", `<p class="ln-sub">${n ? `${n} proposed for the next batch, waiting on a person` : "Nothing waiting"}</p><div class="sx-lessons" data-morph-list>${sorted.map(card).join("")}</div>`);

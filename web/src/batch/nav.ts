@@ -1,5 +1,5 @@
 // The app's top bar (main.ts `headerView`), on every page but the landing page: the logo, the links to the app's
-// pages (How it works, Needs you with its count, Batches, Costs; Needs you and Costs for admins only), and on the right the hub badge, the theme switch and "+ New batch",
+// pages (How it works, Needs you with its count, Batches, Lessons, Costs; Needs you and Costs for admins only), and on the right the hub badge, the theme switch and "+ New batch",
 // which opens the New batch dialog (new-batch-dialog.ts). On a narrow screen the links fold into a menu button. Pure,
 // like every view here: main.ts renders it and handles its actions.
 //
@@ -11,12 +11,13 @@ import { askIcon } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { ACT, type Route } from "./model";
 
-export type NavKey = "how" | "needs" | "batches" | "costs";
+export type NavKey = "how" | "needs" | "batches" | "lessons" | "costs";
 
 export const NAV_LINKS: readonly { key: NavKey; label: string; href: string }[] = [
   { key: "how", label: "How it works", href: "#/how" },
   { key: "needs", label: "Needs you", href: "#/start" },
   { key: "batches", label: "Batches", href: "#/batches" },
+  { key: "lessons", label: "Lessons", href: "#/lessons" },
   { key: "costs", label: "Costs", href: "#/costs" },
 ];
 
@@ -24,6 +25,7 @@ export const NAV_LINKS: readonly { key: NavKey; label: string; href: string }[] 
 export function navCurrent(r: Route): NavKey | null {
   if (r.name === "home") return r.at === "batches" ? "batches" : "needs";
   if (r.name === "costs") return "costs";
+  if (r.name === "lessons") return "lessons";
   if (r.name === "how") return "how";
   return null;
 }
