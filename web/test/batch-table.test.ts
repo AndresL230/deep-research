@@ -106,6 +106,13 @@ describe("batchTable", () => {
     expect(text(batchTable([{ id: "old-1", kind: "replay" }], DEFAULT_VIEW, NOW))).toContain("old-1 Replay");
   });
 
+  it("shows an error phase as Stopped by an error, the raw text behind details", () => {
+    const raw = "Number of human decisions (1) does not match number of hanging tool calls (2).";
+    const html = batchTable([{ id: "1115-031408-167d", kind: "replay", summary: summary({ phase: `error: ${raw}`, verdict: { state: "none" } }) }], DEFAULT_VIEW, NOW);
+    expect(html).toContain(`Stopped by an error</span><details class="ph-details"><summary>details</summary><code>${raw}</code></details>`);
+    expect(html.split(raw)).toHaveLength(2);
+  });
+
   it("shows a live batch with runs still going, and empty cells as quiet words", () => {
     const row = rowOf(html, LIVE.id);
     const t = text(row);

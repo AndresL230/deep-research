@@ -78,6 +78,15 @@ describe("headline", () => {
     // The phase chip beside the name says the batch is forking; the title stays the one headline.
     expect(headline(vmOf({ ...demo, phase: "forking" }))).toBe("6 of 12 agents inflated: claimed 89%, measured 75%");
     expect(overviewView(vmOf({ ...demo, phase: "forking" }))).toContain("Forking the run into control and forced arms");
+    // An error phase (batch 1115-031408-167d): the title and the header tag say "Stopped by an error"; the raw text
+    // is only behind the tag's "details".
+    const raw = "Number of human decisions (1) does not match number of hanging tool calls (2).";
+    for (const html of [overviewView(vmOf({ ...demo, phase: `error: ${raw}` })), pageHeadView(vmOf({ ...demo, phase: `error: ${raw}` }), "phase")]) {
+      expect(html).toContain("Stopped by an error");
+      expect(html).not.toContain(`Error: ${raw}`);
+      expect(html.split(raw)).toHaveLength(2);
+      expect(html).toContain(`<summary>details</summary><code>${raw}</code></details>`);
+    }
   });
 
   it("gives the reason when the batch is blocked", () => {

@@ -6,6 +6,7 @@ import type { BatchListItem, BatchSummary } from "../api";
 import { attr, esc } from "../ui";
 import { modelShort, tokens, usd, wholePct } from "./format";
 import { ACT } from "./model";
+import { STOPPED_BY_ERROR, phaseDetails } from "./phase";
 
 /** The table's actions, handled in main.ts: sort by a column (`data-arg` = a `SortKey`; the same one again turns the
  *  order round), and show one domain only (`data-arg` = a domain name, "" for every domain). */
@@ -210,7 +211,8 @@ function verdictCell(s: BatchSummary): string {
     case "forked": return `<span class="bt-chip" data-v="quiet">Fork done</span><span class="bt-sub">no verdict yet</span>`;
     case "fork_stopped": return none("fork stopped");
     default: {
-      const over = ["done", "no_split", "stopped"].includes(s.phase ?? "") || /^(error|blocked):/.test(s.phase ?? "");
+      if ((s.phase ?? "").startsWith("error:")) return `<span class="bt-chip" data-v="quiet">${STOPPED_BY_ERROR}</span>${phaseDetails(s.phase ?? "")}`;
+      const over = ["done", "no_split", "stopped"].includes(s.phase ?? "") || /^blocked:/.test(s.phase ?? "");
       return none(over ? "no fork" : "not yet");
     }
   }
