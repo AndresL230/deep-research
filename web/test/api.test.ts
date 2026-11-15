@@ -27,7 +27,8 @@ describe("the demo case file matches the types", () => {
     // as empty.
     // The experiments engine's `evidence` and `interaction` are written only by an experiment, which the demo never ran
     // (its `candidates` and `audit` are there: scripts/make_fixture.py computes them).
-    const later = ["trace", "fix", "trace_comparison", "rubric", "feed", "baseline", "evidence", "interaction"];
+    // Nor are the investigator's `suspects`, `lessons` and `investigator` (fixtures/suspects-demo-batch has them).
+    const later = ["trace", "fix", "trace_comparison", "rubric", "feed", "baseline", "evidence", "interaction", "suspects", "lessons", "investigator"];
     const saved = CASE_SECTIONS.filter((s) => !later.includes(s));
     expect(Object.keys(demo).sort()).toEqual([...saved].sort());
     for (const k of Object.keys(demo)) expect(CASE_SECTIONS).toContain(k);
