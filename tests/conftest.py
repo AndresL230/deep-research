@@ -64,3 +64,11 @@ def no_real_commentary(monkeypatch):
         raise RuntimeError("no model calls in tests")
 
     monkeypatch.setattr(commentary, "make_llm", offline)
+
+
+@pytest.fixture(autouse=True)
+def _no_motion_disk_cache(monkeypatch):
+    """Tests never write built motion files into the real batches folder (robot_view.MOTION_DISK_CACHE)."""
+    from deep_research import robot_view
+
+    monkeypatch.setattr(robot_view, "MOTION_DISK_CACHE", None)

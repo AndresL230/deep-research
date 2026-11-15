@@ -41,9 +41,10 @@ primary_region = "iad"
     timeout = "5s"
     grace_period = "20s"
 
-# 2 GB. 1 GB was not enough: opening a humanoid run's page (the G1 model, its scene and several motion files) ran the
-# server out of memory twice on Nov 15 (Fly log: "Out of memory: Killed process (uvicorn)"). Keep this in step with
-# the machine: a deploy sets the machine to what this file says.
+# Two dedicated cores and 4 GB. On one shared core with 1 GB the server was killed for lack of memory twice on Nov 15
+# (opening a humanoid run's page), and with 2 GB it still stalled: building a robot batch's motion files kept the one
+# core busy, the health check timed out, and Fly stopped routing to it. Keep this in step with the machine: a deploy
+# sets the machine to what this file says.
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "2gb"
+  size = "performance-2x"
+  memory = "4gb"
