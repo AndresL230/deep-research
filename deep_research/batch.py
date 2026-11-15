@@ -227,6 +227,45 @@ def _fork_evidence(fork: dict) -> dict:
                              for a in ("control", "forced") if isinstance(arms.get(a), dict)}, pairs=fork_pairs(fork))
 
 
+def test_suspect_problem(case: dict, batch_dir: Path, suspect_id: str) -> str | None:
+    """Why the investigator cannot be asked to test `suspect_id` on a finished batch, or None when it can.
+
+    It can when the batch is real (not simulated), its investigation is done, the suspect exists and no experiment
+    has tested it yet, the investigator's thread is saved (`checkpoints.sqlite`, so it resumes with its memory), and
+    the files needed to fork a run are on disk. The request then goes through the normal approval and budget guard.
+    """
+    cfg = case.get("config") or {}
+    if cfg.get("simulated"):
+        return "a simulated batch has no real runs to fork"
+    if str(case.get("phase") or "") != "done":
+        return "the investigation has not finished"
+    suspect = next((s for s in case.get("suspects") or [] if s.get("id") == suspect_id), None)
+    if suspect is None:
+        return f"there is no suspect {suspect_id}"
+    tested = suspect_id in (case.get("evidence") or {}) or any(
+        isinstance(f, dict) and fid != "pending" and f.get("suspect_id") == suspect_id
+        for fid, f in (case.get("forks") or {}).items())
+    if tested:
+        return f"{suspect_id} has been tested already"
+    if not (case.get("investigator") or {}).get("thread_id") or not (batch_dir / "checkpoints.sqlite").is_file():
+        return "the investigator's saved thread is missing, so it cannot pick up where it stopped"
+    try:
+        marker = domains.get(cfg.get("domain")).task_marker
+    except ValueError:
+        return f"its domain '{cfg.get('domain')}' is not available here"
+    runs = case.get("runs") or {}
+    if not (batch_dir / "task" / marker).is_file() or not any(
+            (batch_dir / "runs" / rid / "messages.json").is_file() for rid in runs):
+        return "the files needed to fork a run are missing"
+    return None
+
+
+def testable_suspects(case: dict, batch_dir: Path) -> list[str]:
+    """The suspects the investigator could be asked to test now (`test_suspect_problem` is None for each)."""
+    return [s["id"] for s in case.get("suspects") or [] if isinstance(s, dict) and s.get("id")
+            and test_suspect_problem(case, batch_dir, s["id"]) is None]
+
+
 def more_pairs_problem(case: dict, batch_dir: Path) -> str | None:
     """Why more pairs cannot be added to a saved batch's fork experiment, or None when they can.
 
@@ -486,19 +525,21 @@ class Batch:
         return b
 
     @classmethod
-    def reopen(cls, batch_id: str, root: Path = BATCHES_DIR) -> "Batch":
-        """Load a finished batch back so more pairs can be added to its fork experiment (`reserve_more_pairs`).
+    def reopen(cls, batch_id: str, root: Path = BATCHES_DIR, suspect_id: str | None = None) -> "Batch":
+        """Load a finished batch back so more pairs can be added to its fork experiment (`reserve_more_pairs`), or,
+        with `suspect_id`, so its investigator can be asked to test that suspect (`test_suspect`).
 
-        Raises Refused with the reason when it cannot (`more_pairs_problem`). Unlike `resume`, the batch keeps its
-        verdict and its phase: nothing runs until more pairs are reserved. Work the old server left unfinished is
-        closed first: a round of more pairs is ended as stopped (its scored copies count), any other experiment is
-        marked stopped, and a pending approval is dropped.
+        Raises Refused with the reason when it cannot (`more_pairs_problem`, `test_suspect_problem`). Unlike `resume`,
+        the batch keeps its verdict and its phase: nothing runs until more pairs are reserved. Work the old server
+        left unfinished is closed first: a round of more pairs is ended as stopped (its scored copies count), any
+        other experiment is marked stopped, and a pending approval is dropped.
         """
         case_path = root / batch_id / "case" / "case.json"
         if not case_path.is_file():
             raise Refused(f"no batch {batch_id}")
         case = with_evidence(json.loads(case_path.read_text()))
-        problem = more_pairs_problem(case, root / batch_id)
+        problem = (more_pairs_problem(case, root / batch_id) if suspect_id is None
+                   else test_suspect_problem(case, root / batch_id, suspect_id))
         if problem:
             raise Refused(problem)
         b = cls(BatchConfig(**case["config"]), batch_id=batch_id, root=root, resume=True)
@@ -1918,6 +1959,31 @@ class Batch:
             {"messages": [{"role": "user", "content": opening}], "rubric": RUBRIC}
         )
 
+    def claim_test(self, suspect_id: str) -> None:
+        """Check that `suspect_id` can be tested now and claim the batch for it (phase `investigating`), without
+        starting anything. Synchronous, so two requests can never both claim it. Raises Refused with the reason."""
+        problem = test_suspect_problem(self.case.data, self.dir, suspect_id)
+        if problem:
+            raise Refused(problem)
+        try:
+            self._check_budget()
+        except OverBudget as e:
+            raise Refused(f"the budget is spent ({e})") from e
+        self.case.set_phase("investigating")
+
+    async def test_suspect(self, suspect_id: str) -> None:
+        """Ask the finished investigator to test one suspect it left untested. It resumes its own thread (the SQLite
+        checkpointer keeps its memory), so the experiment it asks for waits for a person's approval like any other,
+        and the budget guard stops it as it would the first time. Load the batch with `reopen(suspect_id=...)` and
+        `claim_test` first: those check that it can run."""
+        s = self.case.suspect(suspect_id) or {}
+        await self._ensure_investigator()
+        self.case.set_phase("investigating")
+        ask = (f"A person asks you to test suspect {suspect_id} ({s.get('target')}), which your verdict left untested. "
+               f"Update your plan, ask the skeptic for its cheapest disproof, and request one experiment on it with "
+               f"`run_experiment`; it waits for their approval. Then update the verdict with what it shows.")
+        await self._stream_investigator({"messages": [{"role": "user", "content": ask}], "rubric": RUBRIC})
+
     async def decide(self, approve: bool, pairs: int | None = None) -> None:
         """Answer the investigator's pending approval. `pairs` (approve only) edits the experiment's size first: the
         `edit` decision, with the tool call's other arguments unchanged."""
@@ -1961,6 +2027,12 @@ class Batch:
                     self._emit({"kind": "investigator", "event": ev})
                     if ev.get("type") == "todos" and agent == "investigator":
                         self.case.set_investigator(todos=ev["todos"])
+                    if ev.get("type") == "tool_call" and ev.get("name") == "task" and agent == "investigator":
+                        # Which subagents ran and how often: the finished panel lists them.
+                        kind = str((ev.get("args") or {}).get("subagent_type") or "subagent")
+                        calls = dict((self.case.data.get("investigator") or {}).get("subagent_calls") or {})
+                        calls[kind] = calls.get(kind, 0) + 1
+                        self.case.set_investigator(subagent_calls=calls)
                 self.case.set_investigator(subagent=None if agent == "investigator" else agent)
                 self.push_costs()
                 self._check_budget()

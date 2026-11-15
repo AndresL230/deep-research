@@ -253,6 +253,7 @@ flowchart LR
 | `deep_research/api.py` | Backend API and event streaming |
 | `sim/` | Franka Panda simulation, controllers, and scoring |
 | `sim/g1/` | Unitree G1 humanoid simulation: strike a hanging bag with a hand or a foot and stay standing (the `humanoid` domain) |
+| `sim/g1/track/` | Unitree G1 humanoid simulation: follow a reference motion (a motion capture clip fitted to the robot) with the whole body and stay standing (the `humanoid_track` domain; the task and its tracking errors follow ExBody2) |
 | `sim/humanoid/` | Unitree G1 humanoid simulation: stay standing when shoved (the `humanoid_push` domain) |
 | `web/` | Interactive frontend |
 | `fixtures/robot-live-investigation/` | **Real** recorded robot investigation (the demo backup; see "What a real run found") |
@@ -280,7 +281,7 @@ uv sync
 ### Prepare the robotics simulator
 
 ```bash
-uv run python -m sim.fetch_assets --model all   # the panda and the Unitree G1 (the `humanoid` and `humanoid_push` domains)
+uv run python -m sim.fetch_assets --model all   # the panda and the Unitree G1 (the `humanoid`, `humanoid_push` and `humanoid_track` domains)
 ```
 
 Run a practice episode and save a motion trace:
@@ -410,6 +411,8 @@ Orro is built on open-source work and hosted services:
 - [MuJoCo](https://mujoco.org/) (Apache 2.0) for physics. The Franka Emika Panda model comes from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) (Apache 2.0, see `sim/ASSETS_LICENSE`) and is downloaded at a pinned commit by `sim/fetch_assets.py`.
 - The LIBERO-PRO test positions (`sim/libero_scene.json`, built by `scripts/make_libero_scene.py`, which names each source file): the task layouts, object collision shapes and success rule come from [LIBERO](https://github.com/Lifelong-Robot-Learning/LIBERO) (Liu et al., MIT licence), and the position perturbations come from [LIBERO-PRO](https://huggingface.co/datasets/zhouxueyang/LIBERO-Pro) (Zhou et al., [arXiv:2510.03827](https://arxiv.org/abs/2510.03827); code MIT, data CC BY 4.0). Neither runs here: results are on Orro's own simulator with LIBERO's scene, not on the official benchmark.
 - The Unitree G1 humanoid model comes from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) (`unitree_g1/`, BSD 3-Clause licence, downloaded with its LICENSE at a pinned commit by `sim/g1/fetch_assets.py`).
+- The `humanoid_track` domain's task and its three tracking errors (E_vel, E_mpkpe, E_mpjpe) follow [ExBody2](https://exbody2.github.io) (Ji et al., [arXiv:2412.13196](https://arxiv.org/abs/2412.13196)). Nothing of ExBody2's code, data or trained policy is used: the simulator is Orro's own MuJoCo scene, the controllers are written by agents, and the numbers are not comparable with the paper's.
+- Its reference motions (`sim/g1/track/motions/`, built by `scripts/make_track_motions.py`, which names every clip) are fitted to the G1 from the [CMU Graphics Lab Motion Capture Database](http://mocap.cs.cmu.edu) (free for all uses; the database was created with funding from NSF EIA-0196217). The fitting is Orro's own, with the feet planted.
 - FastAPI, Uvicorn, httpx, pandas, scikit-learn, NumPy and python-dotenv on the backend.
 - Vite, TypeScript, Vitest, [three.js](https://threejs.org/) (3D replay) and Lenis (scrolling) on the frontend.
 - The Geist and Hanken Grotesk fonts (SIL Open Font License, see `web/src/fonts/`).

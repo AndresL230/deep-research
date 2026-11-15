@@ -1,7 +1,8 @@
 // What the little terminal under the hero plays (devices.ts builds the device, screens.ts paints its screen): one
 // batch from the first command to the verdict, told twice, once from the command line and once over the API. The
 // commands and routes are the project's own (deep_research/cli.py, docs/api-contract.md) and every number is the
-// demo batch's (fixtures/demo-batch), which is simulated and says so in the screen's title.
+// recorded robot arm run's (fixtures/robot-live-investigation). The screen replays those numbers, not a live run,
+// and says so in its title.
 //
 // Pure functions of time, tested in test/landing.test.ts.
 
@@ -61,32 +62,32 @@ export type Mode = "cli" | "api";
 
 export const SCRIPTS: Record<Mode, Script> = {
   cli: {
-    title: "demo-batch · simulated",
+    title: "robot arm · recorded run",
     beats: [
       { kind: "type", mark: "$", text: "python -m deep_research.cli runs --n 12" },
-      { kind: "work", stage: 0, name: "runs", result: "12 VMs · one analyst in each", seconds: 1.35 },
-      { kind: "work", stage: 1, name: "score", result: "6 honest · 6 inflated" },
-      { kind: "note", text: "inflated: reported 89% · true 75%" },
-      { kind: "work", stage: 2, name: "split", result: "deduplicate" },
-      { kind: "type", mark: "$", text: "python -m deep_research.cli forks demo-batch --n 4" },
-      { kind: "work", stage: 3, name: "fork", result: "control 3 of 4 inflated · forced 0 of 4", seconds: 1.35 },
-      { kind: "done", stage: 4, title: "Verdict", detail: "Skipping the duplicate check inflated the score" },
+      { kind: "work", stage: 0, name: "runs", result: "12 sandboxes · one agent in each", seconds: 1.35 },
+      { kind: "work", stage: 1, name: "score", result: "3 honest · 5 inflated · 2 unclear" },
+      { kind: "note", text: "r06: claimed 100% · measured 65%" },
+      { kind: "work", stage: 2, name: "split", result: "tune_params" },
+      { kind: "type", mark: "$", text: "python -m deep_research.cli forks $BATCH --n 4" },
+      { kind: "work", stage: 3, name: "fork", result: "control 4 of 4 inflated · forced 0 of 4", seconds: 1.35 },
+      { kind: "done", stage: 4, title: "Verdict", detail: "Skipping the edge test suggests why" },
     ],
-    ticket: ["Verdict · deduplicate", "0 of 4 inflated once the step is forced"],
+    ticket: ["Verdict · open", "0 of 4 inflated once the test is forced"],
   },
   api: {
-    title: "localhost:8000 · simulated",
+    title: "localhost:8000 · recorded run",
     beats: [
       { kind: "type", mark: "$", text: "curl -X POST :8000/api/batches -d @config.json", chip: ":8000/api/batches" },
-      { kind: "work", stage: 0, name: "batch", result: '{"id": "demo-batch"} · 12 runs', seconds: 1.35 },
-      { kind: "type", mark: ">", text: "ws /api/batches/demo-batch/ws" },
-      { kind: "work", stage: 1, name: "case.runs", result: "6 honest · 6 inflated" },
-      { kind: "work", stage: 2, name: "case.split", result: "deduplicate" },
-      { kind: "type", mark: "$", text: "curl -X POST :8000/api/batches/demo-batch/investigate" },
-      { kind: "work", stage: 3, name: "case.forks", result: "control 3 of 4 · forced 0 of 4", seconds: 1.35 },
-      { kind: "done", stage: 4, title: "case.verdict", detail: "Skipping the duplicate check inflated the score" },
+      { kind: "work", stage: 0, name: "batch", result: '{"id": "$ID"} · 12 runs', seconds: 1.35 },
+      { kind: "type", mark: ">", text: "ws /api/batches/$ID/ws" },
+      { kind: "work", stage: 1, name: "case.runs", result: "3 honest · 5 inflated · 2 unclear" },
+      { kind: "work", stage: 2, name: "case.split", result: "tune_params" },
+      { kind: "type", mark: "$", text: "curl -X POST :8000/api/batches/$ID/investigate" },
+      { kind: "work", stage: 3, name: "case.forks", result: "control 4 of 4 · forced 0 of 4", seconds: 1.35 },
+      { kind: "done", stage: 4, title: "case.verdict", detail: "Skipping the edge test suggests why" },
     ],
-    ticket: ["Verdict · deduplicate", "0 of 4 inflated once the step is forced"],
+    ticket: ["Verdict · open", "0 of 4 inflated once the test is forced"],
   },
 };
 

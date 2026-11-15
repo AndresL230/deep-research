@@ -23,3 +23,8 @@
   .account-chip { color: #ece9f7; background: rgba(24, 22, 32, 0.92); border-color: rgba(255, 255, 255, 0.14); }
   .account-chip a { color: #b4a3ff; }
 }
+/* Phone: clear of the home bar, in the app's 8px corners, its links tall enough for a thumb. */
+@media (max-width: 640px) {
+  .account-chip { right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); max-width: calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)); gap: 4px 12px; padding: 0 14px; border-radius: 8px; font-size: 13px; }
+  .account-chip a { display: inline-flex; align-items: center; min-height: 44px; }
+}

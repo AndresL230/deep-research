@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import caseRaw from "../../fixtures/suspects-demo-batch/case/case.json?raw";
 import demoRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import invRaw from "../../fixtures/suspects-demo-batch/investigator/events.jsonl?raw";
+import liveRaw from "../../fixtures/tabular-live-investigation/case/case.json?raw";
+import liveInvRaw from "../../fixtures/tabular-live-investigation/investigator/events.jsonl?raw";
 import { postDecision, postLesson, type AgentEvent, type CaseFile, type ForkExperiment, type PendingForks } from "../src/api";
 import { childKey, type BatchVm, type EventKey } from "../src/batch/model";
 import { caseAt, replayDuration, replaySchedule } from "../src/batch/replay";
@@ -19,6 +21,9 @@ const full = JSON.parse(caseRaw) as SxCase;
 const demo = JSON.parse(demoRaw) as CaseFile;
 const jsonl = (raw: string): AgentEvent[] => raw.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as AgentEvent);
 const inv = jsonl(invRaw);
+// The real batch 1115-012104-800f: every run inflated, s1 supported, s2 cleared, s3 left untested.
+const live = JSON.parse(liveRaw) as SxCase;
+const liveInv = jsonl(liveInvRaw);
 const runLogs = import.meta.glob("../../fixtures/suspects-demo-batch/runs/*/events.jsonl", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 const forkLogs = import.meta.glob("../../fixtures/suspects-demo-batch/forks/*/*/events.jsonl", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 const events: Record<EventKey, AgentEvent[]> = { investigator: inv };
@@ -160,13 +165,57 @@ describe("the investigator panel", () => {
     expect(html).toContain("lens-data");
     expect(html).toContain("sx-todo--now");
   });
-  it("reads the investigator section when written", () => {
-    const html = investigatorPanelView(vmOf(full));
+  it("reads the investigator section when written, while it works", () => {
+    const html = investigatorPanelView(vmOf({ ...full, phase: "investigating" } as CaseFile));
     expect(html).toContain("6 of 6 done");
     expect(html).toContain("the investigator itself");
   });
-  it("is empty with no plan and no subagents", () => {
-    expect(investigatorPanelView(vmOf(demo, { events: {} }))).toBe("");
+  it("is empty with no verdict, no plan and no subagents", () => {
+    expect(investigatorPanelView(vmOf({ ...demo, verdict: undefined } as unknown as CaseFile, { events: {} }))).toBe("");
+  });
+  it("once done, sums up the verdict, the suspects, the experiments and the cost instead", () => {
+    const html = investigatorPanelView(vmOf(live, { id: "tabular-live-investigation", events: { investigator: liveInv } }));
+    expect(html).toContain("What the investigator did");
+    expect(html).toContain("deduplicate_near");
+    expect(html).toContain("score 24.76");
+    expect(html).toContain("3 proposed · 2 tested · 1 supported · 1 cleared · 1 untested");
+    expect(html).toContain("Experiments run</dt><dd>2");
+    expect(html).toContain('data-act="goto" data-arg="verdict"');
+    expect(html).toContain("3 times by the rubric grader");
+    // No plan and no subagent ran in this real run: both blocks are hidden, and nobody is "working now".
+    expect(html).not.toContain("No plan written yet");
+    expect(html).not.toContain("Working now");
+    expect(html).not.toContain("Subagents that ran");
+  });
+  it("once done, shows the plan and the subagents that ran with their calls", () => {
+    const c = { ...live, investigator: { subagent: null, todos: [{ content: "Tag the runs", status: "completed" }], subagent_calls: { "step-tagger": 12, skeptic: 2 } } } as SxCase;
+    const html = investigatorPanelView(vmOf(c, { events: {} }));
+    expect(html).toContain("Its plan");
+    expect(html).toContain("Tag the runs");
+    expect(html).toContain("step-tagger <b class=\"sx-agent-n\">×12</b>");
+    expect(html).toContain("skeptic <b class=\"sx-agent-n\">×2</b>");
+    // From the log alone: the investigator's own `task` calls, by subagent.
+    const ev = [{ t: 1, type: "tool_call", name: "task", agent: "investigator", args: { subagent_type: "lens-data" } }] as unknown as AgentEvent[];
+    expect(investigatorState({ ...live, investigator: null } as SxCase, ev).calls).toEqual({ "lens-data": 1 });
+  });
+});
+
+describe("an untested suspect", () => {
+  const card = (html: string): string => html.slice(html.indexOf('data-morph-key="sx-sus-s3"'));
+  it("says it was not tested once the investigation is done", () => {
+    const html = suspectBoardView(vmOf(live));
+    expect(card(html)).toContain("Not tested: the investigator reached its verdict first.");
+    expect(html).not.toContain('data-act="sx-test-suspect"');
+  });
+  it("offers to ask the investigator only where the server says it can resume it", () => {
+    const html = suspectBoardView(vmOf(live, { testable: ["s3"] }));
+    expect(html.match(/data-act="sx-test-suspect"/g)).toHaveLength(1);
+    expect(html).toContain('data-arg="s3"');
+    expect(html).toContain("Ask the investigator to test this");
+    // Never on a simulated batch, never before the investigation is over.
+    const sim = { ...live, config: { ...live.config, simulated: true } } as unknown as CaseFile;
+    expect(suspectBoardView(vmOf(sim, { testable: ["s3"] }))).not.toContain("sx-test-suspect");
+    expect(suspectBoardView(vmOf({ ...live, phase: "investigating" } as CaseFile, { testable: ["s3"] }))).not.toContain("Not tested");
   });
 });
 

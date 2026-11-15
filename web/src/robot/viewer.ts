@@ -17,7 +17,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { attr, esc } from "../ui";
 import { ARM_MODEL, fetchMotion, fetchScene, fetchSummaries, type MotionData, type MotionSummary, type SceneData, type SceneGeom, type SceneView } from "./data";
-import { BASKET_LEGEND, PUSH_LEGEND, STRIKE_LEGEND, SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, episodeError, hasBasket, motionName, noWebglView, pushText, resultFacts, resultText, resultTone, resultWord, seconds, summaryErrorText, xy, xyz } from "./markup";
+import { BASKET_LEGEND, TRACK_LEGEND, PUSH_LEGEND, STRIKE_LEGEND, SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, episodeError, hasBasket, motionName, noWebglView, pushText, referenceText, resultFacts, resultText, resultTone, resultWord, seconds, summaryErrorText, xy, xyz } from "./markup";
 
 // ── WebGL, checked once ──────────────────────────────────────────────────────
 
@@ -149,6 +149,13 @@ const setPose = (o: THREE.Object3D, p: ArrayLike<number>, at = 0): void => {
   o.quaternion.set(p[at + 4], p[at + 5], p[at + 6], p[at + 3]);
 };
 
+/** What a tracking replay's reference is drawn with: one see-through blue for every part. */
+// Pushed back a little in depth, so where the robot is on its reference the robot is what shows, and the ghost only
+// where the two are apart.
+const GHOST_MATERIAL = new THREE.MeshBasicMaterial({
+  color: 0x4f9bff, transparent: true, opacity: 0.3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 6, polygonOffsetUnits: 6,
+});
+
 /** The robot, the can and the place zone: one group per body, posed in world coordinates. */
 class Bodies {
   readonly root = new THREE.Group();
@@ -161,6 +168,9 @@ class Bodies {
   /** The meshes of the file being shown that the scene does not have: its basket and other objects. */
   private extra: THREE.Mesh[] = [];
   private extraOf: MotionData["extra"] | null = null;
+  /** A tracking replay's reference, drawn as a second, see-through robot: one group per moving body. */
+  private readonly ghostRoot = new THREE.Group();
+  private ghost: Map<number, THREE.Group> | null = null;
 
   constructor(private readonly scene: SceneData, private readonly shadows: boolean) {
     for (const g of scene.geoms) {
@@ -212,6 +222,38 @@ class Bodies {
     return this.groups.get(id)?.position ?? null;
   }
 
+  /** The ghost's groups, built the first time a file has one: every mesh of a moving body again, see-through. */
+  private ghostGroups(m: MotionData): Map<number, THREE.Group> {
+    if (this.ghost) return this.ghost;
+    const moving = new Set(m.bodies);
+    const groups = new Map<number, THREE.Group>();
+    for (const g of this.scene.geoms) {
+      if (!moving.has(g.body)) continue;
+      const geo = geomGeometry(g, this.scene);
+      if (!geo) continue;
+      const mesh = new THREE.Mesh(geo, GHOST_MATERIAL);
+      setPose(mesh, [...g.pos, ...g.quat]);
+      mesh.renderOrder = 2;
+      let grp = groups.get(g.body);
+      if (!grp) { grp = new THREE.Group(); groups.set(g.body, grp); this.ghostRoot.add(grp); }
+      grp.add(mesh);
+    }
+    this.root.add(this.ghostRoot);
+    return (this.ghost = groups);
+  }
+
+  private place(groups: Map<number, THREE.Group>, m: MotionData, fa: number[], fb: number[], a: number): void {
+    m.bodies.forEach((id, k) => {
+      const grp = groups.get(id);
+      if (!grp) return;
+      const o = k * 7;
+      grp.position.set(fa[o] + (fb[o] - fa[o]) * a, fa[o + 1] + (fb[o + 1] - fa[o + 1]) * a, fa[o + 2] + (fb[o + 2] - fa[o + 2]) * a);
+      this.qa.set(fa[o + 4], fa[o + 5], fa[o + 6], fa[o + 3]);
+      this.qb.set(fb[o + 4], fb[o + 5], fb[o + 6], fb[o + 3]);
+      grp.quaternion.slerpQuaternions(this.qa, this.qb, a);
+    });
+  }
+
   /** Every body where `m` has it at time `t` (seconds), between the two frames around it. */
   pose(m: MotionData, t: number): void {
     if (this.staticOf !== m) {
@@ -226,16 +268,10 @@ class Bodies {
     else while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (ts[mid] <= t) lo = mid; else hi = mid; }
     const span = ts[hi] - ts[lo];
     const a = span > 0 ? Math.min(1, Math.max(0, (t - ts[lo]) / span)) : 0;
-    const fa = m.frames[lo], fb = m.frames[hi];
-    m.bodies.forEach((id, k) => {
-      const grp = this.groups.get(id);
-      if (!grp) return;
-      const o = k * 7;
-      grp.position.set(fa[o] + (fb[o] - fa[o]) * a, fa[o + 1] + (fb[o + 1] - fa[o + 1]) * a, fa[o + 2] + (fb[o + 2] - fa[o + 2]) * a);
-      this.qa.set(fa[o + 4], fa[o + 5], fa[o + 6], fa[o + 3]);
-      this.qb.set(fb[o + 4], fb[o + 5], fb[o + 6], fb[o + 3]);
-      grp.quaternion.slerpQuaternions(this.qa, this.qb, a);
-    });
+    this.place(this.groups, m, m.frames[lo], m.frames[hi], a);
+    const ghost = m.ghost && m.ghost.length === m.n ? m.ghost : null;
+    this.ghostRoot.visible = !!ghost;
+    if (ghost) this.place(this.ghostGroups(m), m, ghost[lo], ghost[hi], a);
   }
 }
 
@@ -447,6 +483,16 @@ function aim(c: THREE.PerspectiveCamera, view: SceneView, thumb = false): void {
 
 const duration = (m: MotionData): number => m.t[m.n - 1] ?? 0;
 
+/** The caption over a tracking replay at time `at`: what the robot is following, and "lead-in" until the reference
+ *  proper starts. Nothing for a recording that follows no reference. */
+export function referenceCaption(m: Pick<MotionData, "reference">, at: number): string {
+  const r = m.reference;
+  if (!r) return "";
+  const lead = at < (r.lead_in ?? 0) ? `<span class="rb-move-h rb-move-h--wait">lead-in</span>` : "";
+  const kind = r.kind ? `<span class="rb-move-k rb-move-k--${esc(r.kind)}">${esc(r.kind)}</span>` : "";
+  return `<span class="rb-move-n">Following</span><span class="rb-move-m">${esc(r.description || r.name)}</span>${kind}${lead}`;
+}
+
 // ── the run page's player ────────────────────────────────────────────────────
 
 const SPEEDS = [1, 2, 4, 8, 16];
@@ -509,6 +555,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     + `<div class="rb-loading" data-rb-loading>Loading the robot…</div>`
     + `<button type="button" class="rb-icon rb-reset" data-rb-reset title="Reset the view" aria-label="Reset the camera">${ICON.view}</button>`
     + `<div class="rb-endl" data-rb-endl hidden></div>`
+    + `<div class="rb-move" data-rb-move hidden></div>`
     + `<div class="rb-hint">Drag to turn · scroll to zoom once the view is on screen · ctrl+scroll any time</div>`
     + `</div>`
     + `<div class="rb-bar" role="group" aria-label="Episode replay">`
@@ -532,6 +579,8 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
   const listEl = (host ?? el).querySelector<HTMLElement>(".rb-files")!;
   const endLabel = q<HTMLElement>("[data-rb-endl]");
   const legendEl = q<HTMLElement>("[data-rb-legend]");
+  const moveEl = q<HTMLElement>("[data-rb-move]");
+  let moveShown = "";
   const projected = new THREE.Vector3();
 
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -609,6 +658,15 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     timeEl.textContent = `${seconds(t)} / ${seconds(d)}`;
   };
 
+  // A tracking replay: what the robot is following, over the stage.
+  const showMove = (m: MotionData, at: number): void => {
+    const text = referenceCaption(m, at);
+    if (text === moveShown) return;
+    moveShown = text;
+    moveEl.hidden = !text;
+    moveEl.innerHTML = text;
+  };
+
   const showResult = (m: MotionData | null, path: string, name?: string): void => {
     if (!m) { resultEl.innerHTML = ""; return; }
     const tone = resultTone(m.result);
@@ -665,9 +723,9 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
       showResult(m, path, name);
       // How this episode is judged: a push arrow, a strike on the bag, a basket, or the arm's ring. A run's files
       // can differ in this (a basket only where a layout has one), so it is set for every file.
-      const judged = w.view.push_body ? PUSH_LEGEND : m.bag_pos ? STRIKE_LEGEND : hasBasket(m) ? BASKET_LEGEND : SUCCESS_LEGEND;
+      const judged = w.view.push_body ? PUSH_LEGEND : m.reference ? TRACK_LEGEND : m.bag_pos ? STRIKE_LEGEND : hasBasket(m) ? BASKET_LEGEND : SUCCESS_LEGEND;
       legendEl.classList.toggle("rb-legend--push", !!w.view.push_body);
-      const noRing = judged === STRIKE_LEGEND || judged === BASKET_LEGEND;
+      const noRing = judged === STRIKE_LEGEND || judged === BASKET_LEGEND || judged === TRACK_LEGEND;
       legendEl.querySelector(".rb-legend-ring")?.toggleAttribute("hidden", noRing);
       legendEl.querySelector(".rb-info-i")?.toggleAttribute("hidden", !noRing);
       legendEl.setAttribute("aria-label", judged);
@@ -677,6 +735,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
       if (m.can_start) stage.setAttribute("aria-label", `Episode ${shown}: can from ${xy(m.can_start)}`);
       else if (m.push) stage.setAttribute("aria-label", `Episode ${shown}: push ${pushText(m.push)}`);
       else if (m.bag_pos) stage.setAttribute("aria-label", `Episode ${shown}: bag at ${xyz(m.bag_pos)}`);
+      else if (m.reference) stage.setAttribute("aria-label", `Episode ${shown}: following ${referenceText(m.reference)}`);
       setPlaying(true);
       dirty = true;
       showTime();
@@ -762,6 +821,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     world.setTheme(themeOf(el));
     world.pose(motion, t);
     placeEnd(world, motion);
+    showMove(motion, t);
     renderer.render(world.scene, cam);
     dirty = false;
   };
@@ -902,7 +962,7 @@ function mountPlayerWithoutGl(el: HTMLElement, batch: string, files: string[]): 
 function fileButton(path: string, i: number, s: MotionSummary | null, compact = false): string {
   const tone = s?.error ? "none" : resultTone(s?.result);
   const full = s && !s.error
-    ? [s.can_start ? `can ${xy(s.can_start)}` : s.bag_pos ? `bag ${xyz(s.bag_pos)}` : "", s.push ? `push ${pushText(s.push)}` : "", resultText(s.result)].filter(Boolean).join(" · ")
+    ? [s.can_start ? `can ${xy(s.can_start)}` : s.bag_pos ? `bag ${xyz(s.bag_pos)}` : s.reference ? referenceText(s.reference) : "", s.push ? `push ${pushText(s.push)}` : "", resultText(s.result)].filter(Boolean).join(" · ")
     : s?.error ? summaryErrorText(s.error) : "";
   const meta = compact && s && !s.error ? resultWord(s.result) : full;
   const title = compact && full ? `${motionName(path, s?.push ? "push" : "position")}: ${full}` : path;

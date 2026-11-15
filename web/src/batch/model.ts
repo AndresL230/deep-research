@@ -14,6 +14,7 @@ import type { Role } from "../access";
 export const ACT = {
   // anywhere
   home: "home",                 // go to the home screen
+  landing: "landing",           // go to the landing page (the header's logo)
   openBatch: "open-batch",      // arg: batch id
   openCosts: "open-costs",      // go to the overall cost screen (also its Retry)
   newBatch: "new-batch",        // open the New batch dialog (the header's button)
@@ -140,6 +141,8 @@ export interface BatchVm {
   live: boolean;
   /** A saved batch that stopped at its split: Investigate brings it back live first (`resumeBatch`). */
   resumable?: boolean;
+  /** Untested suspects the finished investigator can be asked to test (`POST .../suspects/{id}/test`). */
+  testable?: string[];
   /** The case file. During a replay it is the case AT `replay.t` (replay.ts `caseAt`), not the final one. */
   case: CaseFile;
   /** Event logs loaded so far, keyed by EventKey. During a replay, cut to `replay.t`. Missing key = not loaded. */

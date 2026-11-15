@@ -86,7 +86,7 @@ type PairedFork = ForkExperiment & { simulated?: boolean };
 export type SxCase = CaseFile & {
   suspects?: Suspect[];
   lessons?: Lesson[];
-  investigator?: { todos?: AgentTodo[]; subagent?: string | null } | null;
+  investigator?: { todos?: AgentTodo[]; subagent?: string | null; subagent_calls?: Record<string, number> } | null;
 };
 
 const HYP_STATUS: Record<string, SxStatus> = { untested: "proposed", testing: "testing" };
@@ -236,7 +236,21 @@ export function sxTagsView(vm: BatchVm): string {
 
 // ── 1. the suspect board ─────────────────────────────────────────────────────
 
-function suspectCard(r: SuspectRow): string {
+/** How a suspect card ends: on a finished batch, a suspect nobody tested says so, and where the investigator can be
+ *  resumed (a real saved batch, `vm.testable`) it offers to ask for the test. */
+export interface CardCtx { done: boolean; testable: readonly string[]; busy: string | null; admin: boolean }
+
+function untestedLine(r: SuspectRow, ctx: CardCtx): string {
+  if (!ctx.done || r.experiments.length || r.status !== "proposed") return "";
+  const can = ctx.admin && ctx.testable.includes(r.s.id);
+  const busy = ctx.busy === `test:${r.s.id}`;
+  const btn = can
+    ? `<button type="button" class="ask-ghostbtn ask-ghostbtn--outline" data-act="${SX_ACT.testSuspect}" data-arg="${attr(r.s.id)}"${ctx.busy ? " disabled" : ""}>${busy ? spinner(13) : ""}Ask the investigator to test this</button>`
+    : "";
+  return `<p class="sx-untested" data-morph-key="sx-untested-${attr(r.s.id)}"><span>Not tested: the investigator reached its verdict first.</span>${btn}</p>`;
+}
+
+function suspectCard(r: SuspectRow, ctx: CardCtx = { done: false, testable: [], busy: null, admin: false }): string {
   const s = r.s;
   const scoreLine = r.score == null
     ? `<span class="sx-score-n sx-score-n--none">no score</span>`
@@ -253,18 +267,22 @@ function suspectCard(r: SuspectRow): string {
     `</dl>` +
     `<div class="sx-ev"><div class="sx-score"><span class="sx-score-k">Score</span>${scoreLine}</div>${scoreBar(r.score, r.level)}</div>` +
     `<div class="sx-ev-foot">${pairDots(r.pairs)}${r.experiments.length ? `<span class="sx-exps">${esc(r.experiments.join(", "))}</span>` : ""}</div>` +
+    untestedLine(r, ctx) +
     `</article>`;
 }
 
 export function suspectBoardView(vm: BatchVm): string {
   const rows = suspectRows(vm.case);
   if (!rows.length) return "";
+  // A replay (vm.case is the case at its clock) is done only once it reaches the end; a simulated batch is never testable.
+  const ctx: CardCtx = { done: investigatorDone(vm.case), testable: isSimulatedCase(vm.case) ? [] : vm.testable ?? [],
+    busy: vm.busy, admin: !vm.role || vm.role === "admin" };
   const order: SxStatus[] = ["supported", "testing", "open", "proposed", "cleared"];
   const sorted = [...rows].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
   const n = (st: SxStatus): number => rows.filter((r) => r.status === st).length;
   const sum = [`${rows.length} ${rows.length === 1 ? "suspect" : "suspects"}`, ...(["supported", "cleared", "open", "testing"] as const).filter((st) => n(st)).map((st) => `${n(st)} ${st}`)].join(" · ");
   const rule = `<p class="sx-rule">Score starts at 1, ×${AGREE} for each pair that goes the predicted way, ×${DISAGREE} for each that does not. Supported at ${SUPPORTED_AT}; cleared after ${CLEARED_AFTER} pairs under 1.</p>`;
-  return section("board", "Suspects", `<p class="ln-sub">${esc(sum)}</p>${rule}<div class="sx-board" data-morph-list>${sorted.map(suspectCard).join("")}</div>`);
+  return section("board", "Suspects", `<p class="ln-sub">${esc(sum)}</p>${rule}<div class="sx-board" data-morph-list>${sorted.map((r) => suspectCard(r, ctx)).join("")}</div>`);
 }
 
 // ── 2. the approval card ─────────────────────────────────────────────────────
@@ -293,6 +311,8 @@ export const SX_ACT = {
   pairs: "sx-pairs",
   lessonApprove: "sx-lesson-approve",
   lessonReject: "sx-lesson-reject",
+  /** data-arg a suspect id: ask the finished investigator to test it (`POST .../suspects/{id}/test`). */
+  testSuspect: "sx-test-suspect",
 } as const;
 
 export function approvalView(vm: BatchVm): string {
@@ -421,7 +441,41 @@ export function suspectVerdictView(vm: BatchVm): string {
 
 // ── 4. the investigator panel ────────────────────────────────────────────────
 
-export interface InvestigatorState { todos: AgentTodo[]; subagent: string | null; seen: string[] }
+export interface InvestigatorState {
+  todos: AgentTodo[];
+  subagent: string | null;
+  seen: string[];
+  /** How many times the investigator called each subagent (`task` calls), by subagent name. */
+  calls: Record<string, number>;
+}
+
+/** The phases in which the investigator has finished. */
+const INV_DONE = ["done", "stopped", "no_split"];
+export const investigatorDone = (c: CaseFile): boolean => INV_DONE.includes(String(c.phase));
+
+/** Agents in the log that are not subagents the investigator sent: itself, an unnamed namespace, and the rubric's
+ *  grader (RubricMiddleware), which the summary counts as checks of the verdict instead. */
+const NOT_SUBAGENTS = new Set(["investigator", "subagent", "rubric_grader"]);
+
+/** Each subagent the investigator sent, with how many times: its own `task` calls in the log. */
+export function subagentCalls(events: readonly AgentEvent[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const e of events) {
+    if (e.type !== "tool_call" || e.name !== "task" || (e.agent && e.agent !== "investigator")) continue;
+    const kind = String((e.args as { subagent_type?: unknown } | undefined)?.subagent_type ?? "subagent");
+    out[kind] = (out[kind] ?? 0) + 1;
+  }
+  if (Object.keys(out).length) return out;
+  // A log without its `task` calls (written before they were logged): each unbroken stretch of one subagent's
+  // events is one call.
+  let prev: string | undefined;
+  for (const e of events) {
+    const a = e.agent;
+    if (a && !NOT_SUBAGENTS.has(a) && a !== prev) out[a] = (out[a] ?? 0) + 1;
+    prev = a;
+  }
+  return out;
+}
 
 /** Its plan and who is working, from `investigator` when written, else from its log. */
 export function investigatorState(c: CaseFile, events: readonly AgentEvent[] = []): InvestigatorState {
@@ -434,33 +488,95 @@ export function investigatorState(c: CaseFile, events: readonly AgentEvent[] = [
   }
   const last = events.at(-1);
   const fromLog = last?.agent && last.agent !== "investigator" ? last.agent : null;
-  const done = ["done", "stopped", "no_split"].includes(String(c.phase));
+  const done = investigatorDone(c);
+  const logged = subagentCalls(events);
   return {
-    todos: own?.todos ?? todos,
-    subagent: own && "subagent" in own ? own.subagent ?? null : done ? null : fromLog,
+    todos: own?.todos?.length ? own.todos : todos,
+    subagent: done ? null : own && "subagent" in own ? own.subagent ?? null : fromLog,
     seen: own && (own as { seen?: string[] }).seen ? (own as { seen: string[] }).seen : seen,
+    calls: own?.subagent_calls && Object.keys(own.subagent_calls).length ? own.subagent_calls : logged,
   };
 }
 
 const TODO_MARK: Record<AgentTodo["status"], string> = { completed: "sx-todo--done", in_progress: "sx-todo--now", pending: "sx-todo--next" };
 
+function todoList(todos: readonly AgentTodo[], live: boolean): string {
+  return `<ol class="sx-todos" data-morph-list>${todos.map((t, i) => {
+    const now = live && t.status === "in_progress";
+    return `<li class="sx-todo ${TODO_MARK[t.status] ?? ""}" data-morph-key="sx-todo-${i}"><span class="sx-todo-m" aria-hidden="true">${now ? spinner(12) : ""}</span>` +
+      `<span class="sx-todo-t">${esc(t.content)}</span>${now ? `<span class="sx-todo-now">now</span>` : ""}</li>`;
+  }).join("")}</ol>`;
+}
+
+/** The subagents that ran, each with its number of calls; "" when none ran. */
+function callsList(calls: Record<string, number>): string {
+  const rows = Object.entries(calls).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (!rows.length) return "";
+  return `<p class="sx-seen"><span class="sx-who-k">Subagents that ran</span>${rows.map(([a, n]) =>
+    `<span class="sx-agent">${esc(a)} <b class="sx-agent-n">×${n}</b></span>`).join("")}</p>`;
+}
+
+/** What the investigation cost: the investigator and its experiments (every scope but the runs), else the
+ *  experiments' own costs; null when neither is known. */
+function investigationCost(c: CaseFile): number | null {
+  const scopes = (c.costs as { scopes?: Record<string, { total_usd?: number }> } | undefined)?.scopes;
+  const spent = scopes ? Object.entries(scopes).filter(([k]) => !k.startsWith("run:")).map(([, s]) => s.total_usd ?? 0) : [];
+  const total = spent.reduce((a, b) => a + b, 0);
+  if (total > 0) return total;
+  const exps = Object.values(c.forks ?? {}).filter((f): f is ForkExperiment => !isPendingForks(f));
+  const costs = exps.map((f) => f.cost_usd).filter((x): x is number => typeof x === "number");
+  return costs.length ? costs.reduce((a, b) => a + b, 0) : null;
+}
+
+/** The finished investigation in a few facts: the verdict, the suspects, the experiments, the cost. */
+function doneSummary(vm: BatchVm): string {
+  const c = vm.case;
+  const rows = suspectRows(c);
+  const v = c.verdict;
+  const ev = v?.evidence;
+  const level = (ev?.level ?? (v ? "open" : null)) as SxLevel | null;
+  const verdict = v
+    ? `<div class="sx-sum-v">${statusChip(level ?? "open")}<b class="sx-target">${esc(v.step_label)}</b>` +
+      (ev?.score != null ? `<span class="sx-sum-score">score ${esc(scoreText(ev.score))}</span>` : "") +
+      `<button type="button" class="ask-ghostbtn ask-ghostbtn--outline sx-sum-go" data-act="${ACT.goto}" data-arg="verdict">Open the verdict</button></div>`
+    : `<p class="ln-muted">It finished without a verdict.</p>`;
+  const n = (st: SxStatus): number => rows.filter((r) => r.status === st).length;
+  const tested = rows.filter((r) => r.experiments.length > 0).length;
+  const untested = rows.length - tested;
+  const exps = Object.values(c.forks ?? {}).filter((f) => !isPendingForks(f)).length;
+  const cost = investigationCost(c);
+  const sim = isSimulatedCase(c);
+  const rubric = (c as { rubric?: unknown }).rubric;
+  const checks = Array.isArray(rubric) ? rubric.length : 0;
+  const fact = (k: string, val: string): string => `<div><dt>${esc(k)}</dt><dd>${val}</dd></div>`;
+  const facts = `<dl class="sx-facts sx-sum-facts">` +
+    (rows.length ? fact("Suspects", esc(`${rows.length} proposed · ${tested} tested · ${n("supported")} supported · ${n("cleared")} cleared · ${untested} untested`)) : "") +
+    fact("Experiments run", esc(String(exps))) +
+    (checks ? fact("Verdict checked", esc(`${checks} ${checks === 1 ? "time" : "times"} by the rubric grader`)) : "") +
+    fact("Cost", esc(cost != null ? usd(cost) : sim ? "no spend (simulated)" : "–")) +
+    `</dl>`;
+  return `<div class="sx-sum" data-morph-key="sx-sum">${verdict}${facts}</div>`;
+}
+
 export function investigatorPanelView(vm: BatchVm): string {
   const st = investigatorState(vm.case, vm.events?.investigator ?? []);
+  const calls = callsList(st.calls);
+  if (investigatorDone(vm.case)) {
+    // Finished: what it came to, its plan if it wrote one, and the subagents that really ran. Nobody is at work.
+    if (!vm.case.verdict && !st.todos.length && !calls) return "";
+    const plan = st.todos.length ? `<div class="sx-inv-plan"><h3 class="ln-h3">Its plan</h3>${todoList(st.todos, false)}</div>` : "";
+    const side = calls ? `<div class="sx-inv-side">${calls}</div>` : "";
+    return section("inv", "What the investigator did",
+      doneSummary(vm) + (plan || side ? `<div class="sx-inv${plan && side ? "" : " sx-inv--one"}">${plan}${side}</div>` : ""));
+  }
   if (!st.todos.length && !st.subagent && !st.seen.length) return "";
   const done = st.todos.filter((t) => t.status === "completed").length;
-  const list = st.todos.length
-    ? `<ol class="sx-todos" data-morph-list>${st.todos.map((t, i) =>
-      `<li class="sx-todo ${TODO_MARK[t.status] ?? ""}" data-morph-key="sx-todo-${i}"><span class="sx-todo-m" aria-hidden="true">${t.status === "in_progress" ? spinner(12) : ""}</span>` +
-      `<span class="sx-todo-t">${esc(t.content)}</span>${t.status === "in_progress" ? `<span class="sx-todo-now">now</span>` : ""}</li>`).join("")}</ol>`
-    : `<p class="ln-muted">No plan written yet.</p>`;
+  const list = st.todos.length ? todoList(st.todos, true) : `<p class="ln-muted">No plan written yet.</p>`;
   const who = st.subagent
     ? `<p class="sx-who"><span class="sx-who-k">Working now</span>${chip(st.subagent, "live", "spin", "sx-who-chip")}</p>`
     : `<p class="sx-who"><span class="sx-who-k">Working now</span><span class="ln-muted">the investigator itself</span></p>`;
-  const seen = st.seen.length
-    ? `<p class="sx-seen"><span class="sx-who-k">Subagents</span>${st.seen.map((a) => `<span class="sx-agent${a === st.subagent ? " sx-agent--now" : ""}">${esc(a)}</span>`).join("")}</p>`
-    : "";
   return section("inv", "Investigator's plan",
-    `<p class="ln-sub">${st.todos.length ? `${done} of ${st.todos.length} done` : ""}</p><div class="sx-inv">${list}<div class="sx-inv-side">${who}${seen}</div></div>`);
+    `<p class="ln-sub">${st.todos.length ? `${done} of ${st.todos.length} done` : ""}</p><div class="sx-inv">${list}<div class="sx-inv-side">${who}${calls}</div></div>`);
 }
 
 // ── 5. lessons ───────────────────────────────────────────────────────────────

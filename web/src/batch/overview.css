@@ -33,6 +33,10 @@
 
 .ov-step { flex:none; display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 10px; border-radius:var(--r-ctl); font-size:13.5px; font-weight:500; color:var(--fg); white-space:nowrap; transition:color var(--t-hover) ease, background var(--t-hover) ease; }
 .ov-step--pending { color:var(--fg-40); }
+.ov-step--skipped { color:var(--fg-55); }
+.ov-step-skip { font-size:11.5px; font-weight:400; color:var(--fg-55); }
+.ov-skip-why { margin:8px 0 0; font-size:13px; line-height:1.4; color:var(--fg-55); }
+.ov-skip-why b { font-weight:500; color:var(--fg-70); }
 .ov-step--active { color:var(--accent); }
 .ov-step:disabled { cursor:default; }
 .ov-step:not(:disabled):hover { background:var(--hover); color:var(--fg); }
@@ -167,11 +171,59 @@
   .ov-kpi-v { font-size:32px; }
   .ov-bar-id { font-size:0; }
 }
+/* ── a phone: the chips and the steps are each one row that scrolls sideways, so a page's own content starts about
+   300px down; the chart's card and the bar at the page's end fit the screen's width ── */
+@media (max-width: 640px) {
+  /* The chips over the title: one row, which scrolls sideways out to the screen's edges when the batch's name is long. */
+  .ov-head { gap:12px; padding-top:10px; }
+  .ov-head--page { padding-top:0; }
+  .ov-eyebrows { align-self:stretch; flex-wrap:nowrap; min-width:0; margin-inline:calc(-1 * var(--pg-pad, 16px)); padding-inline:var(--pg-pad, 16px); overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; }
+  .ov-eyebrows::-webkit-scrollbar { display:none; }
+  .ov-eyebrows > * { flex:none; }
+
+  /* The steps: one row of 44px buttons over a line the screen's width, scrolling sideways; a step stops at the
+     gutter. Where the browser can, the row opens with the step of the page on screen. */
+  .ov-folder { margin-top:0; margin-inline:calc(-1 * var(--pg-pad, 16px)); }
+  .ov-steps { flex-wrap:nowrap; gap:2px; padding:4px var(--pg-pad, 16px); overflow-x:auto; overscroll-behavior-x:contain; scroll-snap-type:x proximity; scroll-padding-inline:var(--pg-pad, 16px); scrollbar-width:none; }
+  .ov-steps::-webkit-scrollbar { display:none; }
+  .ov-step { height:44px; font-size:14px; scroll-snap-align:start; }
+  .ov-step.is-here { scroll-initial-target:nearest; }
+
+  /* The bar at the page's end: Back on a line of its own, Next under it at the page's width. */
+  .pgr { gap:10px; padding-top:16px; }
+  .pgr-l:empty { display:none; }
+  .pgr-l, .pgr-r { flex:1 1 100%; }
+  .pgr-n { display:none; }
+  .pgr-prev { margin-left:-10px; }
+  .pgr-again { margin-left:0; height:auto; min-height:44px; padding:8px 0; text-align:left; }
+  .pgr-next, .pgr-wait { flex:1; justify-content:center; }
+  .pgr-wait { justify-content:flex-start; padding:8px 14px; font-size:14px; line-height:1.4; }
+
+  /* The chart's card: 16px inside it too, its key under its title. The bars share the card's width, so any number
+     of agents fits without a sideways scroll. */
+  .ov-card { gap:14px; padding:16px; }
+  .ov-card-h { flex-direction:column; align-items:flex-start; gap:8px; }
+  .ov-card-s, .ov-keys, .ov-foot, .ov-none { font-size:13px; }
+  .ov-keys { gap:6px 14px; }
+  .ov > .ov-card--bars .ov-bars { min-height:124px; padding-top:12px; }
+  .ov-bars { gap:4px; }
+  .pg-yet { padding:28px 16px; }
+  .pg-yet-t { font-size:24px; }
+}
 @media (max-width: 560px) {
   .pgr-next { flex:1; justify-content:center; }
   .pgr-r { flex:1 1 100%; }
   .pgr-n { display:none; }
 }
+/* A finger does not hover: the steps keep their own colours after a press. */
+@media (hover: none) {
+  .ov-steps:hover .ov-step:not(:hover):not(:disabled) { color:var(--fg); }
+  .ov-steps:hover .ov-step--pending:not(:hover):not(:disabled) { color:var(--fg-40); }
+  .ov-steps:hover .ov-step--active:not(:hover):not(:disabled) { color:var(--accent); }
+}
 @media (prefers-reduced-motion: reduce) {
   .ov-step, .ov-step-line::after, .ov-ring-p, .ov-bar, .pgr-ic, .pgr-prev { transition:none; }
 }
+
+/* the paper a batch builds on, as the step before the agents: a link, drawn as a finished step */
+.ov-step--paper { text-decoration:none; }

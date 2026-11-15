@@ -31,7 +31,7 @@ from .config import ROOT_DIR
 load_dotenv(ROOT_DIR / ".env")
 
 from . import controllers, datasets, domains, hub, notebook, robot_view, traps, user_scripts  # noqa: E402
-from .batch import Batch, Refused, more_pairs_problem, more_pairs_quote, resume_problem  # noqa: E402 - needs the environment loaded first
+from .batch import Batch, Refused, more_pairs_problem, more_pairs_quote, resume_problem, testable_suspects  # noqa: E402 - needs the environment loaded first
 from .batch_summary import summarize  # noqa: E402
 from .case_file import current_domain, with_evidence  # noqa: E402
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
@@ -628,6 +628,35 @@ async def more_pairs(batch_id: str, n: int | None = None):
         return {"id": b.id, "phase": b.case.data.get("phase"), **job}
 
 
+# ---- asking the finished investigator to test a suspect it left untested ----
+
+
+@app.post("/api/batches/{batch_id}/suspects/{suspect_id}/test")
+async def test_suspect(batch_id: str, suspect_id: str):
+    """Resume a finished batch's investigator on its own thread, asking it to test `suspect_id`.
+
+    Loads the saved batch back the way more pairs do (`Batch.reopen`) and claims it (phase `investigating`). The
+    experiment the investigator asks for then waits on the usual approval card, under the budget guard. 409 with the
+    reason when it cannot run: a simulated batch, a fixture, one still running, a suspect already tested, a missing
+    saved thread."""
+    async with _RESUME_LOCKS.setdefault(batch_id, asyncio.Lock()):
+        if not (BATCHES_DIR / batch_id / "case" / "case.json").is_file():
+            if (FIXTURES_DIR / batch_id / "case" / "case.json").is_file():
+                raise HTTPException(409, "cannot test it: this is a fixture, a saved example that cannot be resumed")
+            raise HTTPException(404, f"no batch {batch_id}")
+        task = TASKS.get(batch_id)
+        if _running(batch_id) is not None or (task is not None and not task.done()):
+            raise HTTPException(409, "cannot test it: this batch is running something else; one experiment at a time")
+        try:
+            b = await asyncio.to_thread(Batch.reopen, batch_id, BATCHES_DIR, suspect_id)
+            b.claim_test(suspect_id)
+        except Refused as e:
+            raise HTTPException(409, f"cannot test it: {e}") from e
+        BATCHES[b.id] = b
+        _spawn(b.id, b.test_suspect(suspect_id))
+        return {"id": b.id, "phase": b.case.data.get("phase"), "suspect_id": suspect_id}
+
+
 @app.post("/api/batches")
 async def start_batch(cfg: BatchConfig):
     try:
@@ -1061,7 +1090,11 @@ async def ws(websocket: WebSocket, batch_id: str):
             await websocket.send_json({"kind": "error", "message": e.detail})
             await websocket.close(code=4404)
             return
-        await websocket.send_json({"kind": "snapshot", "case": case, "live": False, "resumable": _resumable(batch_id)})
+        # The suspects its investigator can be asked to test (a saved batch of ours only, never a fixture).
+        d = BATCHES_DIR / batch_id
+        testable = testable_suspects(case, d) if (d / "case" / "case.json").is_file() else []
+        await websocket.send_json({"kind": "snapshot", "case": case, "live": False, "resumable": _resumable(batch_id),
+                                   "testable": testable})
         await websocket.close()
         return
     q = b.subscribe()

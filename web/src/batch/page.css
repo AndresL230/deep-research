@@ -7,16 +7,23 @@
 .app-root { --pg-w:1240px; --pg-pad:24px; }
 .app-root[data-view="home"] { --pg-w:1240px; }
 .app-root[data-view="costs"] { --pg-w:1040px; }
-.pg-hdr, .pg-sub { padding-inline:max(var(--pg-pad), calc((100% - var(--pg-w)) / 2 + var(--pg-pad))); }
+/* A phone held sideways has a notch on one edge: the gutter starts after it (0 everywhere else). */
+.pg-hdr, .pg-sub {
+  padding-left:max(calc(var(--pg-pad) + env(safe-area-inset-left, 0px)), calc((100% - var(--pg-w)) / 2 + var(--pg-pad)));
+  padding-right:max(calc(var(--pg-pad) + env(safe-area-inset-right, 0px)), calc((100% - var(--pg-w)) / 2 + var(--pg-pad)));
+}
 /* Above the page under it, so the menu (nav.css) unfolds over it. The bar keeps the widest column on every page (a
    run's narrower one too), so its links and buttons stay in the same place from page to page. */
+/* The whole app starts under a phone's status bar when the page is drawn to the screen's edges (index.html asks for
+   that with `viewport-fit=cover`); 0 anywhere else. */
+.app-root { padding-top:env(safe-area-inset-top, 0px); }
 .pg-hdr { --pg-w:1240px; position:relative; z-index:20; gap:12px; background:var(--bg); }
 .pg-hdr-l { align-self:stretch; min-width:0; flex:1; overflow:hidden; }
 .pg-hdr-l > .pg-home { flex:none; }
 /* The page behind the New batch dialog does not scroll (new-batch-dialog.ts). */
 .app-root[data-modal] .pg-scroll { overflow:hidden; }
 .pg-hdr-r { display:flex; align-items:center; gap:10px; flex:none; }
-.pg-home { display:inline-flex; align-items:center; gap:10px; padding:0; min-width:0; color:inherit; }
+.pg-home { display:inline-flex; align-items:center; gap:10px; padding:0; min-width:0; color:inherit; text-decoration:none; }
 .pg-home .ask-h1 { overflow:hidden; text-overflow:ellipsis; }
 .pg-home:hover .ask-h1-t.is-parent { color:var(--fg-70); }
 .pg-crumb { padding:2px 4px; margin:0 -4px; border-radius:var(--r-ctl); font-size:15px; font-weight:500; letter-spacing:-0.01em; color:var(--fg-55); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
@@ -29,6 +36,8 @@ button.pg-crumb.is-cur:hover { background:none; cursor:default; }
 
 /* A gutter on both edges keeps the centred column under the header whether or not a scrollbar shows. */
 .pg-scroll { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overflow-anchor:none; scrollbar-gutter:stable both-edges; display:flex; flex-direction:column; }
+/* Every page keeps clear of a phone's notch and home bar (all 0 on a desktop). */
+.pg-scroll { padding:0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
 .pg-batch { width:100%; max-width:1240px; margin:0 auto; padding:20px 24px 96px; display:flex; flex-direction:column; gap:36px; }
 .pg-hdr .ask-h1 { font-weight:500; }
 .pg-sec { min-width:0; scroll-margin-top:16px; animation:ask-fade-in var(--fx-base) var(--fx-ease) both; }
@@ -42,9 +51,20 @@ button.pg-crumb.is-cur:hover { background:none; cursor:default; }
 .pg-msg p { margin:0 0 14px; color:var(--fg-55); font-size:13.5px; }
 
 @media (max-width: 640px) {
-  .app-root { --pg-pad:14px; }
+  .app-root { --pg-pad:16px; }
   .pg-hdr .ask-h1 { display:none; }
-  .pg-batch { padding:16px 14px 48px; gap:22px; }
+  /* One 54px row. */
+  .pg-hdr { min-height:54px; padding-block:0; }
+  .pg-sub { padding-block:4px; }
+  /* A phone's scrollbar lies over the page, so no gutter is kept for one: the column is the screen less 16px a side. */
+  .pg-scroll { scrollbar-gutter:auto; scrollbar-width:none; }
+  .pg-scroll::-webkit-scrollbar { display:none; }
+  .pg-batch { padding:16px 16px 48px; gap:22px; }
+  .pg-note { padding:0 16px; font-size:14px; }
+  .pg-msg { padding:40px 16px; }
+  .pg-msg p { font-size:14px; }
+  /* The account chip (account.css) lies over the foot of the page: the last thing on it can scroll clear. */
+  body:has(.account-chip) .pg-scroll { padding-bottom:calc(64px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (prefers-reduced-motion: reduce) { .pg-sec { animation:none; } }
 

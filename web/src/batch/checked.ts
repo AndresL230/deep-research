@@ -8,6 +8,8 @@
 //   humanoid (config.domain)        the same, seen from behind the robot: the bags hang in front of it, so the map
 //                                   is side to side by height, with the band a fist reaches and the band only a
 //                                   foot reaches (`strikeChecked`).
+//   humanoid_track                  a chart of reference motions: how far the robot was from each across, demanding
+//                                   and calm up and down (`trackChecked`).
 //   humanoid_push                   a dial: the robot from above, each push on the side it came from, farther out
 //                                   the harder it was (`pushChecked`).
 //   tabular (anything else)         the run's own test set as a bar, the share that copies training rows marked, next
@@ -23,7 +25,7 @@ import type { BatchConfig, BenchResult, Benchmark, DomainWords, HiddenOutcome, H
 import { attr, esc } from "../ui";
 import { pct } from "./format";
 import { domainWords, judgedOn as judgedOnAll, TABULAR_WORDS } from "./words";
-import { cm, isMotionBatch, isPushBatch, pushText, robotView } from "../robot/markup";
+import { TRACK_CM, cm, isMotionBatch, isPushBatch, isTrackBatch, pushText, robotView } from "../robot/markup";
 import "../robot/mount";
 
 // ── words ────────────────────────────────────────────────────────────────────
@@ -515,6 +517,159 @@ function pushChecked(batch: string, key: string, s: CheckedSubject, config: unkn
   return mapSection({ batch, key, cls: "ck--push", mapCls: "ck-map--dial", mapLabel, map, pair, legend, sentence, sig, hidden: dots.length, noun: "Pushes", scored }, part);
 }
 
+// ── the tracking chart: hidden motions by how far the robot was from them ────
+
+/** What happened at one hidden motion (sim/g1/track/results.py). */
+export type TrackOutcome = "tracked" | "fell" | "off_track" | "error";
+export const TRACK_OUTCOMES: readonly TrackOutcome[] = ["tracked", "fell", "off_track", "error"];
+/** One hidden episode of a tracking run (sim/g1/track/domain.py `hidden_result`). The errors are ExBody2's: null when
+ *  nothing was measured. */
+export interface TrackResult {
+  name: string;
+  kind?: string | null;
+  seed: number;
+  result: TrackOutcome;
+  e_mpkpe?: number | null;
+  e_mpjpe?: number | null;
+  e_vel?: number | null;
+  fell_at?: number | null;
+  motion?: string | null;
+}
+/** A reference motion the run's own episodes tracked (`checked_motions`). */
+export interface CheckedMotion { name: string; kind?: string | null }
+/** Drawn with the arm's four marks: the circle for a tracked motion, the triangle for a fall, the diamond for a
+ *  robot that stood but was too far from the reference, the cross for a controller error. */
+const TRACK_MARK: Record<TrackOutcome, HiddenOutcome> = { tracked: "placed", fell: "tipped", off_track: "dropped", error: "missed" };
+const TRACK_KEY: Record<TrackOutcome, string> = { tracked: "tracked", fell: "fell", off_track: "off track", error: "controller error" };
+const isTrackOutcome = (v: unknown): v is TrackOutcome => TRACK_OUTCOMES.includes(v as TrackOutcome);
+const isDemanding = (r: { kind?: string | null }): boolean => r.kind === "demanding";
+
+/** The chart, in viewBox units: the position error across (0 to T_MAX_CM, further is drawn at the edge), a row for
+ *  each kind of motion. */
+const TW = 110;
+const TH = 74;
+const T_MAX_CM = 15;
+const T_ROWS = { demanding: [10, 32], calm: [42, 64] } as const;
+export const TRACK_TICKS = [0, 3, 6, 9, 12, 15];
+
+/** Where an episode is drawn: across by its position error in cm, in its kind's row, `spread` (0 to 1) of the way
+ *  down the row so motions with the same error do not sit on each other. An error that was never measured is at
+ *  the far edge. */
+export function toChart(errorCm: number | null, demanding: boolean, spread = 0.5): { sx: number; sy: number } {
+  const [top, bottom] = demanding ? T_ROWS.demanding : T_ROWS.calm;
+  const x = errorCm == null || !Number.isFinite(errorCm) ? 1 : Math.max(0, Math.min(T_MAX_CM, errorCm)) / T_MAX_CM;
+  return { sx: 8 + x * (TW - 16), sy: top + 3 + Math.max(0, Math.min(1, spread)) * (bottom - top - 6) };
+}
+
+/** "Motion 7, demanding: fell at 2.8 s, 17 cm and 0.014 rad from the reference". */
+export function trackLabel(n: number, seed: number | null, r: TrackResult): string {
+  const how = r.result === "fell" && typeof r.fell_at === "number" ? `fell at ${r.fell_at.toFixed(1)} s` : TRACK_KEY[r.result];
+  const far = typeof r.e_mpkpe === "number" && typeof r.e_mpjpe === "number"
+    ? `, ${cm(r.e_mpkpe * 100)} and ${r.e_mpjpe.toFixed(3)} rad from the reference` : "";
+  return `Motion ${n}${seed != null ? `, seed ${seed}` : ""}, ${isDemanding(r) ? "demanding" : "calm"}: ${how}${far}`;
+}
+
+/** The hidden tracking results as dots (`x`, `y` in viewBox units). Entries without a name or a known result are left out. */
+export function trackDots(results: TrackResult[] | null | undefined): Dot[] {
+  const valid = (results ?? []).map((r, i) => ({ r, i })).filter(({ r }) => r && typeof r.name === "string" && isTrackOutcome(r.result));
+  const order = new Map<string, number>();
+  const count = new Map<string, number>();
+  for (const { r } of valid) {
+    if (!order.has(r.name)) order.set(r.name, order.size + 1);
+    count.set(r.name, (count.get(r.name) ?? 0) + 1);
+  }
+  const kindOf = new Map(valid.map(({ r }) => [r.name, isDemanding(r)]));
+  const total = { demanding: 0, calm: 0 };
+  for (const name of order.keys()) total[kindOf.get(name) ? "demanding" : "calm"]++;
+  const placed = { demanding: 0, calm: 0 };
+  const spreadOf = new Map<string, number>();
+  for (const name of order.keys()) {
+    const row = kindOf.get(name) ? "demanding" : "calm";
+    // Down the row in a zigzag, so neighbours are apart.
+    const j = placed[row]++;
+    spreadOf.set(name, total[row] > 1 ? ((j * 3) % total[row]) / (total[row] - 1) : 0.5);
+  }
+  const seen = new Map<string, number>();
+  return valid.map(({ r, i }) => {
+    const n = count.get(r.name) ?? 1;
+    const j = seen.get(r.name) ?? 0;
+    seen.set(r.name, j + 1);
+    const motion = order.get(r.name) ?? 0;
+    const seed = n > 1 ? r.seed : null;
+    const p = toChart(typeof r.e_mpkpe === "number" ? r.e_mpkpe * 100 : null, isDemanding(r), spreadOf.get(r.name));
+    return { i, position: motion, seed, result: TRACK_MARK[r.result], x: p.sx, y: p.sy, offset: j - (n - 1) / 2,
+      label: trackLabel(motion, seed, r), motion: typeof r.motion === "string" && r.motion ? r.motion : null };
+  });
+}
+
+/** How many hidden episodes ended each way. */
+export function trackCounts(results: TrackResult[] | null | undefined): Record<TrackOutcome, number> {
+  const out: Record<TrackOutcome, number> = { tracked: 0, fell: 0, off_track: 0, error: 0 };
+  for (const r of results ?? []) if (r && isTrackOutcome(r.result)) out[r.result]++;
+  return out;
+}
+
+function trackButton(d: Dot): string {
+  const off = d.offset ? ` + ${Math.round(d.offset * 12)}px` : "";
+  return `<button type="button" class="ck-dot ck-dot--${d.result}" data-ck-dot="${d.i}" data-ck-motion="${attr(d.motion ?? "")}"`
+    + ` data-ck-result="${d.result}" aria-pressed="false" aria-label="${attr(d.label)}" title="${attr(d.label)}"`
+    + ` style="left:calc(${n2((d.x / TW) * 100)}%${off});top:${n2((d.y / TH) * 100)}%">${shape(d.result)}</button>`;
+}
+
+function chartSvg(): string {
+  const row = (name: keyof typeof T_ROWS, text: string): string => {
+    const [top, bottom] = T_ROWS[name];
+    return `<rect class="ck-region" x="4" y="${top}" width="${TW - 8}" height="${bottom - top}" rx="1.5"/>`
+      + `<text class="ck-t" x="5" y="${n2(top - 1.6)}" text-anchor="start">${esc(text)}</text>`;
+  };
+  const ticks = TRACK_TICKS.map((t) => {
+    const x = toChart(t, false).sx;
+    const limit = t === TRACK_CM;
+    return `<line class="ck-tick${limit ? " ck-tick--limit" : ""}" x1="${n2(x)}" y1="${T_ROWS.demanding[0]}" x2="${n2(x)}" y2="${T_ROWS.calm[1]}"/>`
+      + `<text class="ck-t" x="${n2(x)}" y="${TH - 4.4}" text-anchor="middle">${t === T_MAX_CM ? `${t}+` : t} cm</text>`;
+  }).join("");
+  return `<svg class="ck-svg" viewBox="0 0 ${TW} ${TH}" preserveAspectRatio="none" aria-hidden="true" focusable="false">`
+    + `<rect class="ck-table" x="0.5" y="0.5" width="${TW - 1}" height="${TH - 1}" rx="3"/>`
+    + row("demanding", "Demanding") + row("calm", "Calm")
+    + ticks
+    + `<text class="ck-t" x="${TW - 5}" y="${n2(T_ROWS.demanding[0] - 1.6)}" text-anchor="end">distance from the reference, limit ${TRACK_CM} cm</text>`
+    + `</svg>`;
+}
+
+function trackChecked(batch: string, key: string, s: CheckedSubject, config: unknown, part: CheckedPart = "full"): string {
+  const words = wordsOf(config);
+  const scored = isScored(s);
+  const isMotion = (r: unknown): r is CheckedMotion => !!r && typeof (r as CheckedMotion).name === "string";
+  const checked = (((s as { checked_motions?: unknown[] }).checked_motions ?? []) as unknown[]).filter(isMotion);
+  const results = scored ? ((s.hidden_results ?? []) as unknown as TrackResult[]) : [];
+  const dots = trackDots(results);
+  if (!checked.length && !dots.length) return "";
+  const practice = (config as { robot_practice?: { motion?: unknown } } | null)?.robot_practice?.motion;
+
+  const cfgHidden = (config as Partial<BatchConfig> | null)?.robot_hidden_positions;
+  const nHidden = s.n_hidden ?? (dots.length ? new Set(dots.map((d) => d.position)).size : typeof cfgHidden === "number" ? cfgHidden : null);
+  const onlyPractice = checked.length === 1 && checked[0].name === practice;
+  const demanding = checked.filter(isDemanding).length;
+  const ranText = onlyPractice ? cap(words.checked) : `${plural(checked.length, "motion")} it tracked, ${demanding} demanding`;
+  const checkedNote = !checked.length ? "from its own episodes" : onlyPractice ? `from the ${words.checked}` : `from ${plural(checked.length, "motion")} it tracked`;
+  const pair = claimPair(words, s, { claim: checkedNote, truth: judgedOn(words, nHidden) }, scored);
+
+  const counts = trackCounts(results);
+  const happened = TRACK_OUTCOMES.filter((o) => counts[o] > 0);
+  const legend = `<ul class="ck-legend" aria-label="Key">`
+    + (checked.length ? `<li class="ck-key ck-key--checked">${shape("checked")}<span>${esc(ranText)}</span></li>` : "")
+    + happened.map((o) => `<li class="ck-key ck-dot--${TRACK_MARK[o]}">${shape(TRACK_MARK[o])}<span>${counts[o]} ${TRACK_KEY[o]}</span></li>`).join("")
+    + `</ul>`;
+  const sentence = dots.length
+    ? `<p class="ck-sum">${esc(`${plural(results.length, "hidden episode")}, each a real recording. Press one to replay it in 3D.`)}</p>`
+    : `<p class="ck-sum">${esc(scored ? "The hidden motions were not recorded for this run." : "The hidden motions show once the run is scored.")}</p>`;
+  const sig = hash(JSON.stringify([s.status, s.reported_accuracy, s.true_accuracy, nHidden, checked, results, words.checked]));
+  const view = "Hidden motions by distance from the reference, demanding and calm";
+  const mapLabel = dots.length ? `${view}: ${happened.map((o) => `${counts[o]} ${TRACK_KEY[o]}`).join(", ")}` : view;
+  const map = chartSvg() + dots.map(trackButton).join("");
+  return mapSection({ batch, key, cls: "ck--chart", mapCls: "ck-map--chart", mapLabel, map, pair, legend, sentence, sig, hidden: dots.length, noun: "Motions", scored }, part);
+}
+
 // ── the strike map: the bags, seen from behind the robot ─────────────────────
 
 /** The batch is a strike one (the domain "humanoid"): its positions are bags hung in front of the robot, x, y and z. */
@@ -818,6 +973,7 @@ function tabularChecked(key: string, s: CheckedSubject, config: unknown): string
 export function checkedView(batch: string, key: string, s: CheckedSubject | null | undefined, config: unknown, part: CheckedPart = "full"): string {
   if (!s) return "";
   if (isPushBatch(config)) return pushChecked(batch, key, s, config, part);
+  if (isTrackBatch(config)) return trackChecked(batch, key, s, config, part);
   if (isHumanoid(config)) return strikeChecked(batch, key, s, config, part);
   if (isMotionBatch(config)) return robotChecked(batch, key, s, config, part);
   // A tabular run has no map: its bars are the whole of it.
