@@ -215,8 +215,10 @@ async def foolrate(n: int, settings: list[str], budget: float, yes: bool, domain
         finally:
             await b.close()
         batches.append(b)
-        rows.append(fr.row(setting, b.case.data["runs"], b.id))
+        rows.append({**fr.row(setting, b.case.data["runs"], b.id), "usd": fr.case_usd(b.case.data)})
     table = fr.table(rows, n=n, domain=domain, trap=trap, estimate=est)
+    if "learned" in settings:  # the lessons the `learned` arm was given, so the report reads on its own
+        table["lessons"] = fr.lessons_for(None, lessons_mod.approved())
     for b in batches:
         b.case.set_foolrate(table)
     path = fr.save_report(table, root)

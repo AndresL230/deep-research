@@ -6,7 +6,7 @@
 // carry `data-cfg="<BatchConfig field>"` (main.ts reads `.value`, numbers for number/range inputs). The replay scrubber
 // is an `<input type="range" data-replay-seek>` whose value is seconds.
 
-import type { AgentEvent, BatchConfig, BatchListItem, CaseFile, Defaults, Estimate, Health } from "../api";
+import type { AgentEvent, BatchConfig, BatchListItem, CaseFile, Defaults, Estimate, FoolrateReport, Health } from "../api";
 import type { TableView } from "./batch-table";
 import type { NeedUi } from "./needs-you";
 import type { Role } from "../access";
@@ -74,6 +74,8 @@ export type Route =
   /** "How it works": the loop in five steps (how.ts), and the first screen of someone new. */
   | { name: "how" }
   | { name: "costs" }
+  /** "Lessons work": the fool-rate reports (foolrate.ts); `report` picks one, else the newest real one. */
+  | { name: "lessons"; report?: string }
   /** `step` is left out on the first page (the overview and the agents). */
   | { name: "batch"; id: string; step?: BatchStep }
   | { name: "run"; id: string; run: string }
@@ -88,6 +90,7 @@ export function parseRoute(hash: string): Route {
     return step && step !== "wall" ? { name: "batch", id: parts[1], step } : { name: "batch", id: parts[1] };
   }
   if (parts[0] === "costs") return { name: "costs" };
+  if (parts[0] === "lessons") return parts[1] ? { name: "lessons", report: parts[1] } : { name: "lessons" };
   if (parts[0] === "how") return { name: "how" };
   if (parts[0] === "start") return { name: "home" };
   if (parts[0] === "batches") return { name: "home", at: "batches" };
@@ -100,6 +103,7 @@ export function routeHash(r: Route): string {
     case "landing": return "#/";
     case "home": return r.at === "batches" ? "#/batches" : "#/start";
     case "costs": return "#/costs";
+    case "lessons": return r.report ? `#/lessons/${e(r.report)}` : "#/lessons";
     case "how": return "#/how";
     case "batch": return r.step && r.step !== "wall" ? `#/b/${e(r.id)}/${STEP_SLUG[r.step]}` : `#/b/${e(r.id)}`;
     case "run": return `#/b/${e(r.id)}/run/${e(r.run)}`;
@@ -164,6 +168,8 @@ export interface BatchVm {
   role?: Role;
   /** The pairs a person set on the pending experiment's approval card (suspects.ts), or null/absent for as asked. */
   pairs?: number | null;
+  /** The fool-rate reports (GET /api/foolrate), when loaded: the Lessons block links a lesson to the run that tested it. */
+  foolrate?: readonly FoolrateReport[];
 }
 
 export type Loadable<T> = { state: "loading" } | { state: "ready"; value: T } | { state: "error"; message: string };

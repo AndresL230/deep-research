@@ -32,7 +32,8 @@ def learned_dir() -> Path:
 
 
 def approved(folder: Path | None = None) -> list[dict]:
-    """Every approved lesson on disk, by name: `[{name, rule, path}]`. A lesson exists only once a person approved it
+    """Every approved lesson on disk, by name: `[{name, rule, path, learned_from}]` (`learned_from`: the batch it came
+    from, from the SKILL.md's "Learned from batch" line, or None). A lesson exists only once a person approved it
     (`write_lesson` runs on approval), so every SKILL.md here is approved."""
     folder = learned_dir() if folder is None else folder
     out = []
@@ -42,8 +43,9 @@ def approved(folder: Path | None = None) -> list[dict]:
         lines = [ln.strip() for ln in body.splitlines() if ln.strip() and not ln.startswith("#")
                  and not ln.startswith("Learned from batch")]
         m = re.search(r"^name:\s*(.+)$", text, re.MULTILINE)
+        src = re.search(r"^Learned from batch ([A-Za-z0-9._-]+?)[,.\s]", text, re.MULTILINE)
         out.append({"name": (m.group(1).strip() if m else path.parent.name), "rule": " ".join(lines)[:1000],
-                    "path": str(path)})
+                    "path": str(path), "learned_from": src.group(1) if src else None})
     return out
 
 

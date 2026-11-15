@@ -30,7 +30,7 @@ from .config import ROOT_DIR
 
 load_dotenv(ROOT_DIR / ".env")
 
-from . import controllers, datasets, domains, hub, notebook, robot_view, traps, user_scripts  # noqa: E402
+from . import controllers, datasets, domains, foolrate, hub, notebook, robot_view, traps, user_scripts  # noqa: E402
 from .batch import Batch, Refused, more_pairs_problem, more_pairs_quote, resume_problem, testable_suspects  # noqa: E402 - needs the environment loaded first
 from .batch_summary import summarize  # noqa: E402
 from .case_file import current_domain, with_evidence  # noqa: E402
@@ -495,6 +495,14 @@ def list_batches():
         out.append({"id": row["id"], "kind": "replay", "machine": row.get("machine"), "remote": True,
                     "summary": summaries.get(row["id"])})
     return out
+
+
+@app.get("/api/foolrate")
+def foolrate_reports():
+    """The fool-rate reports (`cli foolrate`, foolrate.py), newest first, read-only: `batches/_foolrate/*.json`, then
+    the committed ones under `fixtures/_foolrate/`, which replay without keys. Only the counts, the intervals, the
+    costs and the lessons tested go out (`foolrate.REPORT_KEYS`)."""
+    return foolrate.reports([(BATCHES_DIR, False), (FIXTURES_DIR, True)])
 
 
 @app.get("/api/costs")

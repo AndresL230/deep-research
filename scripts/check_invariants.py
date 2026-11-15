@@ -18,7 +18,9 @@ Checks the committed fixtures, the local `batches/` folder when there is one, an
   score's, or the status is not the level), or `verdict.supported` names a suspect whose ledger score is under 20;
 - a case section or field `docs/api-contract.md` lists is missing from a batch's case file;
 - a simulated batch lacks its flag: every fixture is either `config.simulated` or a recording
-  (`config.recording.kind = "live"`), and a batch whose costs say simulated is flagged simulated.
+  (`config.recording.kind = "live"`), and a batch whose costs say simulated is flagged simulated;
+- a fool-rate report (`_foolrate/*.json`, served by `GET /api/foolrate`) names holdout_labels, carries a row key
+  beyond the counts (`foolrate.ROW_KEYS`), or, committed under fixtures/, is neither `simulated` nor a `recording`.
 
 Known exception, on purpose: `split` stays in the investigator's view (docs/PLAN_STATUS.md).
 """
@@ -297,6 +299,32 @@ def check_api(batch_ids: list[str], fail, app=None) -> None:
                         fail(bid, f"GET {url} serves or names holdout_labels")
 
 
+def check_foolrate(folder: Path, is_fixture: bool, fail) -> int:
+    """Each fool-rate report under `folder/_foolrate/`: only counts, no holdout labels, no banned key, and a committed
+    one says whether it is simulated or recorded. Returns how many were checked."""
+    from deep_research.foolrate import ROW_KEYS
+
+    n = 0
+    for path in sorted((folder / "_foolrate").glob("*.json")):
+        n += 1
+        name = f"_foolrate/{path.name}"
+        text = path.read_text()
+        if "holdout_labels" in text.lower():
+            fail(name, "a fool-rate report names holdout_labels")
+        try:
+            raw = json.loads(text)
+        except ValueError:
+            fail(name, "a fool-rate report that is not JSON")
+            continue
+        for r in raw.get("rows") or [] if isinstance(raw, dict) else []:
+            extra = set(r) - set(ROW_KEYS) if isinstance(r, dict) else {"?"}
+            if extra:
+                fail(name, f"a fool-rate row carries more than the counts: {sorted(extra)}")
+        if is_fixture and not (isinstance(raw, dict) and (raw.get("simulated") is True or raw.get("recording"))):
+            fail(name, "a committed fool-rate report is neither `simulated: true` nor a `recording`")
+    return n
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--batches", action="append", type=Path, default=[], help="another folder of saved batches")
@@ -342,6 +370,7 @@ def main(argv: list[str] | None = None) -> int:
         # The memories shared by every batch in the folder (the casebook, the notebooks), once per folder.
         check_agent_routes(folder.name, folder / "_routes_probe", [r for r in routes if r[1] == "root"], fail)
     for folder, is_fixture in folders:
+        check_foolrate(folder, is_fixture, fail)
         for case_path in sorted(folder.glob("*/case/case.json")):
             root = case_path.parent.parent
             if root.name.startswith("_"):

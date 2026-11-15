@@ -1121,6 +1121,46 @@ export interface CostReport {
   not_counted: string[];
 }
 
+// ── the fool rate (GET /api/foolrate, deep_research/foolrate.py `reports`) ──
+
+/** One arm of a fool-rate study: one batch of runs under one setting, its inflated runs counted. */
+export interface FoolrateRow {
+  setting: "none" | "light" | "learned" | string;
+  batch_id: string | null;
+  inflated: number;
+  /** The runs that were scored (failed runs are left out). */
+  n: number;
+  failed: number;
+  rate: number | null;
+  /** The 95% Wilson interval of `rate`, as [low, high] in 0..1. */
+  ci95: [number, number] | null;
+  interval?: "wilson" | string;
+  /** What the arm's batch cost in all, or null with no price. */
+  usd?: number | null;
+}
+/** A lesson the `learned` arm was given: its name, its rule (null when its SKILL.md is not on this machine) and the
+ *  batch it was learned from. */
+export interface FoolrateLesson { name: string; rule: string | null; learned_from?: string | null }
+export interface FoolrateReport {
+  /** The report's file stem (`<mmdd-HHMMSS>`). */
+  id: string;
+  /** Committed under fixtures/_foolrate/: a replay. */
+  fixture: boolean;
+  settings: string[];
+  rows: FoolrateRow[];
+  n_per_setting: number;
+  domain: string;
+  trap?: Record<string, number>;
+  control?: string;
+  estimate_usd?: number | null;
+  created_at?: string;
+  lessons?: FoolrateLesson[];
+  /** Made-up numbers (tests, previews): never shown as a result. */
+  simulated?: boolean;
+  recording?: unknown;
+  note?: string;
+}
+
 /** A request the server refused or could not answer: `message` is what to tell the person. */
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -1212,6 +1252,7 @@ export const uploadController = (file: Blob & { name?: string }, o: Opts = {}) =
   });
 export const fetchBatches = (o: Opts = {}) => call<BatchListItem[]>("/api/batches", o);
 export const fetchCosts = (o: Opts = {}) => call<CostReport>("/api/costs", o);
+export const fetchFoolrate = (o: Opts = {}) => call<FoolrateReport[]>("/api/foolrate", o);
 export const startBatch = (cfg: BatchConfig, o: Opts = {}) => call<{ id: string }>("/api/batches", { ...o, json: cfg });
 export const fetchCase = (id: string, o: Opts = {}) => call<CaseFile>(`${batchPath(id)}/case`, o);
 export const fetchRunEvents = (id: string, run: string, o: Opts = {}) =>
