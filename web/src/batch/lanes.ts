@@ -1452,7 +1452,10 @@ export function rewindText(
 /** A hypothesis's state in words. */
 const OUTCOME_WORDS: Record<string, string> = {
   untested: "untested", testing: "testing", supported: "supported", contradicted: "contradicted",
-  inconclusive: "inconclusive", no_data: "no data",
+  // The server's "inconclusive" for a hypothesis (evidence.py `method_outcome`) is an open score: tested, neither
+  // supported nor cleared yet. It is said "open", as on the fork and the verdict, so it is not read as the evidence
+  // level "inconclusive" (no control copy reproduced the inflation), which means something else.
+  inconclusive: "open", no_data: "no data",
 };
 
 /** A hypothesis's state as a pill: supported in the honest green, under test in the running accent, the rest grey.
@@ -2416,7 +2419,7 @@ export function hypName(h: Pick<Hypothesis, "step_label" | "kind" | "run_id">, w
 const OUTCOME_MEANS: Record<string, string> = {
   supported: "the experiment agreed with it",
   contradicted: "the experiment went against it",
-  inconclusive: "tested, too little to say",
+  inconclusive: "tested, not enough pairs yet to decide",
   untested: "not tested",
   testing: "being tested now",
   no_data: "tested, no result",
@@ -2439,10 +2442,18 @@ export function investigatorLine(hs: readonly Hypothesis[]): string {
  * the explanation in plain words with its one sentence, and at the end its state and what tested it. The mark's shape
  * carries the state; only "supported" has a colour, as on the pills. A key under the rows names the marks drawn.
  */
-function investigatorPicture(hs: readonly Hypothesis[], words: DomainWords, trap: TrapInfo | null): string {
+function investigatorPicture(hs: readonly Hypothesis[], words: DomainWords, trap: TrapInfo | null, c: CaseFile): string {
   const state = (h: Hypothesis): string => h.status ?? "untested";
   const mark = (s: string): string => `<i class="ln-ip-mk ln-ip-mk--${attr(s)}" aria-hidden="true"></i>`;
-  const by = (h: Hypothesis): string => (h.tested_by === "fix" ? "The measured fix" : h.tested_by ? `Fork ${h.tested_by}` : "");
+  // A fork's score goes with its name, so "Open" says how far it got: "Fork f1 · score 13.03 of 20".
+  const scored = (id: string): string => {
+    const f = c.forks?.[id];
+    if (!f || isPendingForks(f)) return "";
+    const ev = forkEvidence(c, f);
+    return ev.controlTotal > 0 && ev.forcedTotal > 0 ? ` · score ${scoreText(ev.score)} of ${SUPPORTED_SCORE}` : "";
+  };
+  const by = (h: Hypothesis): string =>
+    (h.tested_by === "fix" ? "The measured fix" : h.tested_by ? `Fork ${h.tested_by}${scored(h.tested_by)}` : "");
   const rows = hs.map((h) => {
     const s = state(h);
     return `<li class="ln-ip-row${s === "supported" ? " is-focus" : ""}" data-morph-key="ip-${attr(h.id ?? "")}">${mark(s)}` +
@@ -2525,7 +2536,7 @@ export function investigatorView(vm: BatchVm): string {
 
   // The competing explanations are the page's picture. Each one in full, and the log, are the detail.
   const competing = hyps.filter((h) => h.id);
-  const picture = competing.length ? investigatorPicture(competing, words, trap) : "";
+  const picture = competing.length ? investigatorPicture(competing, words, trap, c) : "";
   // While it works its log is the news. Once it is done the verdict below says what it found, and the log folds.
   const detail =
     (hypHtml ? block("hyps", "Hypotheses", competing.length

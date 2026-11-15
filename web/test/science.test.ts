@@ -9,7 +9,7 @@ const h = (id: string, status: Hypothesis["status"], sentence: string): Hypothes
 describe("competing hypotheses", () => {
   it("lists every recorded hypothesis with its computed state and marks the tested one", () => {
     const html = competingRow([h("h1", "inconclusive", "Only the practice spot was tested."), h("h2", "untested", "The grasp height is fixed.")], "h1");
-    for (const s of ["h1", "h2", "Inconclusive", "Untested"]) expect(html).toContain(s);
+    for (const s of ["h1", "h2", "chip:Open:", "Untested"]) expect(html).toContain(s);
     expect(html).toContain('class="ln-rival ln-rival--tested"');
     expect(html.match(/ln-rival--tested/g)).toHaveLength(1);
   });
