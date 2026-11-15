@@ -91,13 +91,18 @@ export type SxCase = CaseFile & {
 
 const HYP_STATUS: Record<string, SxStatus> = { untested: "proposed", testing: "testing" };
 
+/** What a hypothesis is about: its step, or, for a code hypothesis (which names no step), the run whose code it
+ *  blames. Never null, because every card prints it. */
+const hypTarget = (h: { step_label?: string | null; kind?: string; run_id?: string | null }): string =>
+  h.step_label || (h.kind === "code" ? (h.run_id ? `code defect in ${h.run_id}` : "code defect") : "no step named");
+
 /** The suspects: `suspects` when written, else the hypotheses that have an id (their outcomes are not levels: an
  *  outcome becomes a level only through a score, below). */
 export function suspectsOf(c: CaseFile): Suspect[] {
   const s = (c as SxCase).suspects;
-  if (Array.isArray(s) && s.length) return s;
+  if (Array.isArray(s) && s.length) return s.map((x) => (x.target ? x : { ...x, target: "no step named" }));
   return (c.hypotheses ?? []).filter((h) => h.id).map((h) => ({
-    id: h.id!, target: h.step_label, kind: h.kind === "code" ? "commission" : "omission",
+    id: h.id!, target: hypTarget(h), kind: h.kind === "code" ? "commission" : "omission",
     rationale: (h as { sentence?: string }).sentence ?? h.evidence ?? "", proposed_by: "investigator",
     status: HYP_STATUS[h.status ?? "untested"] ?? (h.tested_by ? "open" : "proposed"),
   }));
