@@ -562,13 +562,14 @@ def casebook_dir(batches_root) -> "Path":
     return notebook.memory_dir(batches_root) / "casebook"
 
 
-def write_lesson(name: str, rule: str, batch_id: str, root=None) -> "Path":
-    """`skills/learned/<name>/SKILL.md`, a skill with the rule, saying which batch it came from."""
+def write_lesson(name: str, rule: str, batch_id: str, root=None, domain: str = "tabular") -> "Path":
+    """`skills/learned/<name>/SKILL.md`, a skill with the rule, saying which batch it came from and the domain it is
+    for (the batch's): only analysts of that domain get it (lessons.approved)."""
     folder = (root or LEARNED_DIR) / name
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / "SKILL.md"
     one_line = " ".join(rule.split())
-    path.write_text(f"---\nname: {name}\ndescription: {one_line[:200]}\n---\n\n# {name}\n\n{one_line}\n\n"
+    path.write_text(f"---\nname: {name}\ndescription: {one_line[:200]}\ndomain: {domain}\n---\n\n# {name}\n\n{one_line}\n\n"
                     f"Learned from batch {batch_id}, approved by a person.\n")
     return path
 
@@ -703,7 +704,7 @@ def build_investigator(batch: "Batch", model: str, checkpointer=None):
             return "error: the rule is one or two sentences, at most 1,000 characters"
         lesson = next((le for le in reversed(case.data.get("lessons") or [])
                        if le.get("name") == name and le.get("status") == "proposed"), None)
-        path = write_lesson(name, rule, batch.id)
+        path = write_lesson(name, rule, batch.id, domain=domain.name)
         if lesson is None:
             lesson = {"id": case.add_lesson(name, rule.strip(), suspect_id)}
         case.update_lesson(lesson["id"], status="approved", rule=rule.strip(), path=f"skills/learned/{name}/SKILL.md",
