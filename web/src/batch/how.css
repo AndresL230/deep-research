@@ -159,4 +159,33 @@
   .hw-svg--narrow { display:block; }
   .hw-row { grid-template-columns:96px minmax(0, 1fr) 48px; gap:10px; }
 }
+/* A phone. The rail is six equal squares across the screen (the stop's name is the card's heading, right under it);
+   Back and Next are 44px tall and Next takes the rest of the row; nothing is set smaller than 12px. */
+@media (max-width: 640px) {
+  .hw { padding-top:8px; padding-bottom:calc(56px + env(safe-area-inset-bottom, 0px)); gap:20px; }
+  .hw-top { gap:10px; }
+  .hw-skip { display:inline-flex; align-items:center; min-height:44px; font-size:14px; }
+  .hw-rail { display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); flex-wrap:nowrap; }
+  .hw-stopb, .hw-stopb[aria-current="step"] { width:100%; height:44px; padding:0; justify-content:center; }
+  .hw-stopb-l, .hw-stopb[aria-current="step"] .hw-stopb-l { display:block; position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+  .hw-n { font-size:12px; }
+  .hw-stop-l { padding:18px 16px; }
+  .hw-nav { flex-wrap:nowrap; }
+  .hw-btn { height:44px; }
+  .hw-nav > [data-how-next] { flex:1 1 auto; min-width:0; justify-content:center; }
+  .hw-stage { padding:20px 16px 24px; }
+  .hw-agent-id { font-size:12px; }
+  .hw-tag, .hw-level { font-size:12px; }
+  /* The diagrams are drawn 340 units wide and shown a little narrower than that, so their small words are set up. */
+  .hw-d-s, .hw-d-pill text { font-size:12.5px; }
+  .hw-d-l { font-size:12px; }
+  /* The way on: one button under the other, with room between them for the bubble that opens under the first. */
+  .hw-start { flex-direction:column; flex-wrap:nowrap; gap:12px; }
+  .hw-start > .hw-btn { justify-content:center; }
+  .hw-start > [data-how-focus] { margin-bottom:58px; }
+  .hw-hood { padding-top:8px; }
+  .hw-hood-s { display:flex; min-height:44px; margin-left:0; padding:0; font-size:14px; }
+  .hw-hood-b { padding-top:12px; }
+  .hw-part { padding:18px 16px; }
+}
 @media (prefers-reduced-motion: reduce) { .hw-ring, .hw-tip.is-placed { transition:none; } }

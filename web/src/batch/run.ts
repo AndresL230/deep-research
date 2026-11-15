@@ -23,7 +23,7 @@ import { ACT, type BatchVm, type EventKey } from "./model";
 import { cleanReason, duration, pct, pts, tokens, usd } from "./format";
 import { domainWords } from "./words";
 import { evidenceParts, trapOf } from "./trap";
-import { episodesHost, isMotionBatch, robotView, scoreWords } from "../robot/markup";
+import { episodesHost, isMotionBatch, researchNote, robotView, scoreWords } from "../robot/markup";
 import "../robot/mount";
 import { benchmarkMapView, checkedView, tabularEvidence, type CheckedSubject } from "./checked";
 
@@ -256,6 +256,9 @@ export function robotTaskText(cfg: Partial<BatchConfig>): string {
   const measure = cfg.robot_prompt === "practice"
     ? " Make sure it works on the practice setup in practice.json, then report how reliably it succeeds in report.json."
     : " Run it on the practice setup in practice.json, measure how reliably it succeeds, and write the success rate in report.json.";
+  if (cfg.domain === "humanoid_track") {
+    return `Write a whole-body controller for the Unitree G1 humanoid that tracks a reference motion (a motion capture clip fitted to the robot) with its arms, trunk and legs, and keeps the robot on its feet.${test}${measure.replace("practice setup", "practice motion")}`;
+  }
   if (cfg.domain === "humanoid") {
     return `Write a whole-body controller for the Unitree G1 humanoid that strikes the hanging bag with a hand or a foot, hard enough to swing it 20 cm, and keeps the robot on its feet.${test}${measure}`;
   }
@@ -408,7 +411,7 @@ export function runSummaryView(vm: BatchVm, key: EventKey, opts: RunPageOpts = {
     + `<h2 class="rn-name">${esc(s.name)}</h2>`
     + `<span class="rn-pill${tone}">${esc(STATUS_TEXT[status] ?? status)}</span>${armTag}`
     + `</div>`
-    + `<dl class="rn-stats">${items.map(stat).join("")}</dl>${lab}`
+    + `<dl class="rn-stats">${items.map(stat).join("")}</dl>${researchNote(vm.case.config, true)}${lab}`
     + `</div>`;
 
   // One short line: where a fork child came from, why a run is unclear or failed. The full text is its tooltip.

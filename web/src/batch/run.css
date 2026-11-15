@@ -173,14 +173,82 @@
   .rn-steps { max-height:220px; }
   .rn-note { white-space:normal; }
 }
+/* A phone: an ordinary page on the screen's own 16px gutter, with no box around it. From the top: the name and the
+   status, the numbers as a grid of label and value two to a row, the player, the episodes, the map, then the four
+   panels as a 2 by 2 grid of buttons. An open panel comes under its buttons (the deck's children are laid out by the
+   page's column, so the layer can follow the tab row), and scrolls inside itself. */
 @media (max-width: 640px) {
-  .pg-run { padding:10px 10px 32px; }
-  .rn { padding:10px 12px 0; gap:10px; }
-  .rn-panels { margin:0 -12px; }
-  .rn-stats { gap:3px 12px; }
-  .rn-panel { max-height:65vh; }
-  .rn-log-e { grid-template-columns:48px minmax(0, 1fr); padding:4px 12px; }
+  .pg-run { padding:8px var(--pg-pad, 16px) 40px; }
+  .rn { gap:14px; padding:0; border:0; border-radius:0; background:none; }
+
+  .rn-top { flex-direction:column; flex-wrap:nowrap; align-items:stretch; gap:10px; }
+  .rn-id { gap:2px 10px; }
+  .rn-back { min-height:44px; margin-left:-8px; padding:0 10px 0 8px; font-size:14px; }
+  .rn-name { font-size:18px; letter-spacing:-0.015em; }
+  .rn-pill, .rn-arm { padding:3px 9px; font-size:12px; }
+  .rn-stats { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); align-items:start; gap:10px 16px; padding:12px 14px; border-radius:var(--r-card); background:var(--muted); }
+  .rn-stat { display:flex; flex-direction:column; align-items:flex-start; gap:1px; white-space:normal; }
+  .rn-stat-v { font-size:15px; line-height:1.25; overflow-wrap:anywhere; }
+  .rn-lab { margin-left:0; justify-content:center; min-height:44px; font-size:14px; }
+  .rn-note { margin:0; font-size:14px; }
+
+  .rn-deck { display:contents; }
+  .rn-side { gap:14px; }
+  .rn-empty { aspect-ratio:4 / 3; font-size:14px; }
+
+  /* the episodes: rows a thumb can press; past five and a half of them the list scrolls, and lets the page scroll on */
+  .rb-host { gap:8px; }
+  .rb-host .rb-files-h, .rn-block-h, .ck-mini-h { font-size:13px; }
+  .rb-host .rb-files { max-height:248px; overscroll-behavior:auto; }
+  .rb-host .rb-file, .rb-host .rb-file--row { min-height:44px; padding:0 12px; column-gap:10px; }
+  .rb-host .rb-file-n { font-size:14px; }
+  .rb-host .rb-file-m { font-size:12.5px; }
+
+  .rn-side .ck--mini { gap:10px; padding:12px; }
+  .ck--mini .ck-map { width:min(100%, 330px); }
+  .ck--mini .ck-map.ck-map--dial { width:min(100%, 300px); }
+  .ck--mini .ck-map.ck-map--front { width:min(100%, 240px); }
+  .ck--mini .ck-dot { width:24px; height:24px; }
+  .ck--mini .ck-legend--mini { gap:6px 14px; }
+  .ck--mini .ck-legend--mini .ck-key { font-size:12.5px; }
+
+  .rn-chart-l, .rn-thumb-l { font-size:12px; }
+  .rn-steps { max-height:264px; padding-left:34px; overscroll-behavior:auto; font-size:14px; }
+  .rn-steps li::marker { font-size:12px; }
+  .rn-facts { gap:6px; font-size:14px; }
+  .rn-facts li { padding:9px 12px; }
+
+  /* the panels: four buttons, two to a row, then the open one */
+  .rn-panels { order:1; margin:0; padding-top:14px; }
+  .rn-tabs { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; padding:0; }
+  .rn-tab, .rn-tab:first-child { margin-left:0; }
+  .rn-tab { min-height:44px; padding:0 12px 0 10px; border:1px solid var(--border); font-size:14px; color:var(--fg-70); }
+  .rn-tab[aria-expanded="true"] { border-color:var(--border-strong); }
+  .rn-tab-n { margin-left:auto; font-size:12px; color:var(--fg-55); }
+  .rn-layer { order:2; }
+  .rn-layer-h { padding:0 0 0 14px; font-size:14px; }
+  .rn-close { width:44px; height:44px; }
+  .rn-panel { max-height:70vh; max-height:70dvh; overscroll-behavior:auto; }
+  .rn-panel .pg-nb { padding:14px 12px 20px; }
+  .rn-panel .ask-col { padding:14px 12px 8px; }
+  .rn-panel .pg-note { margin:14px; }
+  /* a step of the conversation (style.css): a row a thumb can press, and its note is cut with an ellipsis before the
+     row is wider than the panel */
+  .rn-panel .ask-step { min-height:44px; max-width:100%; }
+  .rn-panel .ask-step-l { flex:0 1 auto; }
+  .rn-panel .ask-step-n { flex:0 4 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+
+  .rn-ev { gap:14px; padding:14px 12px 18px; }
+  .rn-ev-note { font-size:14px; }
+  .rn-defs { grid-template-columns:minmax(0, 1fr); gap:12px; }
+  .rn-def dt { font-size:14px; }
+  .rn-def dd { font-size:13px; }
+
+  /* a log line: its time and its kind on one row, what it says under them at the panel's width */
+  .rn-log { padding:2px 0 10px; }
+  .rn-log-e { grid-template-columns:auto minmax(0, 1fr); gap:3px 10px; padding:8px 14px; }
   .rn-log-b { grid-column:1 / -1; }
-  .rn-panel .pg-nb, .rn-panel .ask-col, .rn-ev { padding-inline:12px; }
+  .rn-log-t, .rn-log-k, .rn-log-h, .rn-log-pre { font-size:12px; }
+  .rn-log-e--thought .rn-log-pre { font-size:14px; }
 }
 @media (prefers-reduced-motion: reduce) { .rn-tab-c { transition:none; } }

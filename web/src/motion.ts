@@ -35,12 +35,13 @@ export function reveal(text: string, by: "char" | "word" = "char"): string {
   return `<span class="mo-sr">${esc(text)}</span><span class="mo-t" aria-hidden="true" data-morph-list>${html}</span>`;
 }
 
-export type CountFmt = "int" | "dec2" | "pct" | "pct0" | "pts" | "usd" | "tokens";
+export type CountFmt = "int" | "dec2" | "dec3" | "pct" | "pct0" | "pts" | "usd" | "tokens";
 
 const FORMAT: Record<CountFmt, (x: number) => string> = {
   int: (x) => Math.round(x).toLocaleString("en-US"),
   // A score read to two places ("13.03"): counted at two places all the way, so its width does not jump at the end.
   dec2: (x) => x.toFixed(2),
+  dec3: (x) => x.toFixed(3),
   pct: (x) => pct(x),
   pct0: (x) => pct(x, 0),
   pts: (x) => pts(x),

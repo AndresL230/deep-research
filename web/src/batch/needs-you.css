@@ -45,8 +45,15 @@
 
 /* ── phones: the words under the batch, the buttons under the words ── */
 @media (max-width: 640px) {
-  .ny-row { grid-template-columns:8px minmax(0, 1fr); grid-template-areas:"dot name" ". body" ". acts"; align-items:center; gap:6px 10px; padding:12px 14px; }
-  .ny-acts { justify-content:flex-start; flex-wrap:wrap; margin-top:4px; }
+  .ny-row { grid-template-columns:8px minmax(0, 1fr); grid-template-areas:"dot name" "body body" "acts acts"; align-items:center; gap:6px 10px; padding:12px 16px 14px; }
+  /* The batch's id takes a press on 44px without making the row taller. */
+  .ny-name { position:relative; font-size:13px; }
+  .ny-name::after { content:""; position:absolute; inset:-13px 0; }
+  .ny-text { font-size:14px; line-height:20px; }
+  .ny-say { font-size:13px; }
+  .ny-none { font-size:14px; line-height:20px; }
+  /* The buttons share the row's width: one alone fills it. */
+  .ny-acts { justify-content:flex-start; flex-wrap:wrap; margin-top:6px; }
   .ny-acts:empty { display:none; }
-  .ny-btn { height:40px; padding:0 16px; }
+  .ny-btn { flex:1 1 0; justify-content:center; height:44px; padding:0 16px; font-size:14px; }
 }
