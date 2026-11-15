@@ -18,6 +18,25 @@ Audited `origin/main` at `d3a23ab` (merge of #41), Sat Nov 14 23:57 to Sun Nov 1
 | 8 Show it | **Diverged, mostly done** | Hypotheses, evidence, approval, rubric, fix and simulated tags are in the UI, under other names. No suspect board as specified, no lessons or fool-rate views |
 | 9 Demo hardening | **Partial** | A real robot recording and a README written from it. No `docs/claims.md`. The landing figure is not tied to a batch |
 
+## Fixed in this PR (after the audit)
+
+The audit below is kept as it was written. These are the fixes landed on top of it, Sun Nov 15 from 00:05 Eastern.
+
+| Finding | Fix | Where |
+| --- | --- | --- |
+| #9 optional stopping: more pairs rerun Fisher after every round | The level is now the 6.4 running score of control/forced pairs matched by copy number (x1.9 agree, x0.1 otherwise, a tie disagrees): `supported` at 20 or more, `cleared` after 5 or more pairs under 1, else `open`. Valid when checked after every pair (a test enumerates it). Fisher p and an exact gap test are kept for display. Known answers pinned on `fixtures/demo-batch` f1: Fisher 5/70, gap test 1/70, score 13.03. The more-pairs default is now the fewest agreeing pairs that could reach 20 | `deep_research/evidence.py`, `tests/test_evidence_score.py` |
+| #9 the verdict's step is not tied to the tested fork | `record_structured_verdict` refuses a causal sentence whose step is not the `label` the supporting fork forced. More pairs reword the sentence with the fork's step | `case_file.py`, `batch.py` |
+| #9 old verdicts that overclaim | Not rewritten. The loader (`with_evidence`) reads saved evidence without `rule` by the new rule and keeps the old one as `evidence_old_rule`; the stored sentence never changes, and the UI flags it as an overclaim. `1114-032554-c05a` (old: supported, 8 pairs, p = 0.0385) now reads **cleared**: 6 of 8 pairs agree on the gap and 2 are exact ties, score 0.47. `1114-034546-6c7a` stays open (13.03). The three fixtures stay open (13.03) | `case_file.py`, `batch_summary.py` |
+| #8 contract | Additive only: verdict and fork evidence gain `rule`, `score`, `needed_score`, `agree`, `disagree`, `basis`, `p_exact`; forks gain `pairs`, `score`, `p_exact`, `level`; `cleared` joins the levels. `needed_pairs` is 5 for new evidence. Fixtures regenerated in place from the new functions (the robot fixture scripts need the meshes) | `docs/api-contract.md`, `web/src/api.ts`, `scripts/make_*fixture.py`, `fixtures/` |
+| W1 blind view | `overlap_share`, `n_test_copies` (runs, fork copies, baseline, fix), `config.seed`, `candidates` and `audit` are out of the view. `/runs/**/score.json` is denied. deepagents' `read` rule covers `ls`, `read_file`, `glob` and `grep` and filters denied files out of glob and grep results (checked against the docs and the installed code), so no filtered folder was needed. A test drives the investigator's own tools at score.json. `split` stays in the view on purpose, as recommended; the README says so | `case_file.py`, `agents/investigator.py`, `tests/test_blind_view.py` |
+| No `scripts/check_invariants.py` | Written to 8.1, runs with no keys. Passes on the 4 fixtures. On this machine's local `batches/` it flags stale saved views (case/view/case.json written by older code, with trap keys and `overlap_share`); they are rewritten the next time a batch is opened | `scripts/check_invariants.py`, `tests/test_check_invariants.py` |
+| #11 fresh clone fails | Tests that need the panda or G1 meshes are marked and skip with the fetch command when the meshes are absent. With the panda meshes in place they pass | `tests/conftest.py` |
+| No `docs/claims.md` | Written: 42 claims. Two were wrong and are fixed in the README (analysts were Haiku only; the rule's numbers). Still open on the landing page, which is simulated and does not say so: the "89% claimed, 75% real" pill, the terminal's causal verdict, and "forks the VM to prove". The 2-minute demo path is written there | `docs/claims.md`, `README.md` |
+| Demo default | The How it works page said "a real batch" but drew from the simulated `robot-demo-batch`. It now draws from `fixtures/robot-live-investigation` (one constant, no `OWNER` file touched) | `web/src/batch/how.ts` |
+
+Gate at the push: `uv run pytest -q` 503 passed, 14 skipped (4 of them the mesh skips); `npm run typecheck` clean;
+`npm test` 791 passed; `scripts/check_invariants.py` ok.
+
 The biggest divergence is that the flagship moved from the tabular trap to the **robot arm domain**
 (`deep_research/domains/robot_arm.py`, `sim/`). It also has a code-trace and patch path the plan does not have. The README's
 2-minute demo is built on `fixtures/robot-live-investigation`, a real run.
