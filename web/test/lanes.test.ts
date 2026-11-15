@@ -1238,7 +1238,7 @@ describe("verdict page", () => {
 
   it("is one picture when folded: a sentence with no counts, the two arms, how far each number moved, the pairs", () => {
     const html = verdictView(robotVm({}, { open: {} }));
-    expect(html).toContain('<p class="ln-headline">Not testing other can positions likely inflated the claims.</p>');
+    expect(html).toContain('<p class="ln-headline">Not testing other can positions may have inflated the claims.</p>');
     expect(html).not.toMatch(/caused/);
     const pic = html.slice(html.indexOf('data-morph-key="v-picture"'), html.indexOf('data-act="fold"'));
     expect(count(pic, '<li class="ln-vp-row')).toBe(2);
@@ -1262,7 +1262,7 @@ describe("verdict page", () => {
     expect(open).toContain('data-arg="verdict" aria-expanded="true"');
     expect(open).toContain("What this verdict rests on");
     // "Caused" only once the evidence supports it.
-    expect(verdictLine(robotVm().case)).toBe("Not testing other can positions likely inflated the claims.");
+    expect(verdictLine(robotVm().case)).toBe("Not testing other can positions may have inflated the claims.");
   });
 
   it("adds one button, its fold, and no scores, and never shows hidden positions, trace paths or overlap", () => {

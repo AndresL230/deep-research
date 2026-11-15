@@ -2150,7 +2150,7 @@ export function verdictLine(c: CaseFile): string {
   const not = capital(`not ${stepName(c, v.step_label)}`);
   if (ev.level === "supported") return `${not} caused the inflated claims.`;
   const lower = ev.forcedInflated / ev.forcedTotal < ev.controlInflated / ev.controlTotal;
-  return lower ? `${not} likely inflated the claims.` : `The fork does not show that ${stepName(c, v.step_label)} matters.`;
+  return lower ? `${not} may have inflated the claims.` : `The fork does not show that ${stepName(c, v.step_label)} matters.`;
 }
 
 /**
