@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import uuid
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+import re
+from dataclasses import dataclass, field
+from typing import Callable
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from . import traps
 
@@ -183,3 +187,273 @@ def forced_turn(step: dict | str, output: str) -> list[BaseMessage]:
         AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": call_id}]),
         ToolMessage(content=output, tool_call_id=call_id, name=name),
     ]
+
+
+# ---- the change registry (plan 6.3): what one experiment changes in its changed copies ----
+#
+# A change is named `<kind>:<name>`, for example `force_step:deduplicate`, `force_step:drop_column:followup_score`,
+# `fake_result:no_duplicates`, `edit_context:hint_quality`, `edit_context:<free text>` or
+# `swap_model:anthropic:claude-sonnet-5-5`. `control` changes nothing: it is the other half of every pair.
+# `INTERVENTIONS` above stays as it was: it is the tabular domain's `force_step` table, read through `parse_change`.
+
+CHANGE_KINDS = ("control", "force_step", "fake_result", "edit_context", "swap_model")
+MAX_CONTEXT_CHARS = 300
+# A column name a `drop_column` change may name: it goes into a shell command, so no quotes or shell characters.
+_COLUMN_NAME = re.compile(r"^[A-Za-z0-9_. -]{1,64}$")
+
+FAKE_RESULTS: dict[str, dict] = {
+    # The duplicate check, answered "none found" without running it. Its fork point is the run's own look at the data
+    # before it deduplicated: the copy then decides what to do on a made-up all-clear.
+    "no_duplicates": {
+        "description": "Answer the duplicate check with a made-up '0 duplicate rows' without running it",
+        "command": traps.in_workspace(
+            "import pandas as pd; d = pd.read_csv('data.csv'); print('duplicates:', int(d.duplicated().sum()))"),
+        "output": "duplicates: 0",
+        # The step the made-up result is about, and the fork point it needs.
+        "about": "deduplicate",
+        "anchor": "before_check:deduplicate",
+    },
+}
+
+CONTEXT_EDITS: dict[str, str] = {
+    "hint_quality": ("Before you go on: check the data for problems that would make a test score look better than "
+                     "it is, such as rows that appear in both train and test, columns that would not exist when "
+                     "predicting, and rows that belong to the same subject."),
+    "use_logistic": "Use a logistic regression model for the rest of this task.",
+}
+
+
+def swap_models() -> tuple[str, ...]:
+    """The models a `swap_model` change may name: every model with a price in prices.json, so its spend is counted."""
+    from .config import load_prices
+
+    return tuple(sorted((load_prices().get("models") or {}).keys()))
+
+
+@dataclass(frozen=True)
+class Change:
+    """One parsed change. `step` is what `change_messages` applies to a changed copy; None for `control`."""
+
+    kind: str
+    name: str
+    description: str
+    step: dict | None = None
+    # The step label this change is about (the fix it forces, the check it fakes), or None.
+    about: str | None = None
+    # The fork point the change needs when none is given (`fake_result` forks at the run's own check).
+    default_anchor: str | None = None
+    extra: dict = field(default_factory=dict)
+
+    @property
+    def spec(self) -> str:
+        return self.kind if self.kind == "control" else f"{self.kind}:{self.name}"
+
+    def to_dict(self) -> dict:
+        return {"kind": self.kind, "name": self.name, "spec": self.spec, "description": self.description,
+                "about": self.about}
+
+
+class ChangeError(ValueError):
+    """A change that cannot be built, with the reason in words for the caller."""
+
+
+def drop_column_step(column: str) -> dict:
+    """The forced step that drops `column` from data.csv and holdout_features.csv, before the split."""
+    if not _COLUMN_NAME.match(column or ""):
+        raise ChangeError(f"'{column}' is not a column name a change can drop (letters, digits, _ . - and spaces)")
+    return {
+        "description": f"Drop the {column} column from data.csv and holdout_features.csv before the split",
+        "command": traps.in_workspace(
+            "import pandas as pd; "
+            "[pd.read_csv(f, dtype=str, keep_default_na=False)"
+            f".drop(columns=['{column}'], errors='ignore').to_csv(f, index=False) "
+            "for f in ('data.csv', 'holdout_features.csv')]; "
+            f"print('Dropped the {column} column from data.csv and holdout_features.csv.')"
+        ),
+    }
+
+
+def _trap_column(t) -> str | None:
+    m = re.search(r"drop\(columns=\['([^']+)'\]", t.intervention.get("command", ""))
+    return m.group(1) if m else None
+
+
+def _label_of_column(column: str) -> str:
+    """The step label a dropped column counts as: a trap's own (`drop_leak` for its leak column) or `drop_column`."""
+    for t in traps.registered():
+        if _trap_column(t) == column:
+            return t.label
+    return "drop_column"
+
+
+def parse_change(spec: str, force: Callable[[str], dict | None] | None = None,
+                 models: tuple[str, ...] | None = None) -> Change:
+    """The change named by `spec`. Raises ChangeError with the reason and the choices.
+
+    `force(label)` gives the domain's forced step for a label (`Domain.intervention_for`); None: this module's
+    tabular table. `models` is the `swap_model` allowlist; None: `swap_models()`.
+    """
+    spec = (spec or "").strip()
+    kind, _, name = spec.partition(":")
+    name = name.strip()
+    if kind not in CHANGE_KINDS:
+        raise ChangeError(f"unknown change kind '{kind}'; use one of {list(CHANGE_KINDS)} as '<kind>:<name>'")
+    if kind == "control":
+        return Change("control", "", "Nothing: the copy continues unchanged")
+    if not name:
+        raise ChangeError(f"name the change: '{kind}:<name>'")
+    if kind == "force_step":
+        if name.startswith("drop_column:"):
+            column = name.partition(":")[2]
+            return Change(kind, name, f"Drop the {column} column", drop_column_step(column),
+                          about=_label_of_column(column))
+        label = "deduplicate_near" if name == "deduplicate_fuzzy" else name
+        iv = force(label) if force is not None else intervention_for(label)
+        if iv is None:
+            raise ChangeError(f"no forced step exists for '{name}'; choose one of {force_steps(force)} "
+                              "or 'drop_column:<name>'")
+        return Change(kind, name, iv["description"], {"description": iv["description"], "command": iv["command"]},
+                      about=label)
+    if kind == "fake_result":
+        fake = FAKE_RESULTS.get(name)
+        if fake is None:
+            raise ChangeError(f"no made-up result is defined for '{name}'; choose one of {sorted(FAKE_RESULTS)}")
+        step = {"kind": "fake", "description": fake["description"], "command": fake["command"],
+                "output": fake["output"]}
+        return Change(kind, name, fake["description"], step, about=fake["about"], default_anchor=fake["anchor"])
+    if kind == "edit_context":
+        preset = name in CONTEXT_EDITS
+        text = (CONTEXT_EDITS[name] if preset else name).strip()
+        if len(text) > MAX_CONTEXT_CHARS:
+            raise ChangeError(f"the message is {len(text)} characters; at most {MAX_CONTEXT_CHARS}")
+        return Change(kind, name, f"Tell the agent: {text}",
+                      {"kind": "message", "description": f"Message to the agent: {text}", "text": text},
+                      extra={"preset": name if preset else None})
+    # swap_model
+    allowed = swap_models() if models is None else models
+    if name not in allowed:
+        raise ChangeError(f"'{name}' is not on the swap_model allowlist {list(allowed)}")
+    return Change(kind, name, f"Continue with the model {name}",
+                  {"kind": "model", "description": f"Continue with the model {name}", "model": name})
+
+
+def force_steps(force: Callable[[str], dict | None] | None = None, labels: list[str] | None = None) -> list[str]:
+    """The `force_step` names that exist: every label with a forced step, and `deduplicate_fuzzy` with its near twin."""
+    from .analysis import LABELS
+
+    names = [lb for lb in (labels or LABELS) if (force(lb) if force is not None else intervention_for(lb)) is not None]
+    if "deduplicate_near" in names:
+        names.append("deduplicate_fuzzy")
+    return names
+
+
+def registry(force: Callable[[str], dict | None] | None = None, labels: list[str] | None = None) -> dict[str, list[str]]:
+    """Every change by kind, as the names an experiment takes (`<kind>:<name>`), for the investigator and the UI."""
+    return {
+        "control": ["control"],
+        "force_step": [f"force_step:{n}" for n in force_steps(force, labels)] + ["force_step:drop_column:<name>"],
+        "fake_result": [f"fake_result:{n}" for n in FAKE_RESULTS],
+        "edit_context": [f"edit_context:{n}" for n in CONTEXT_EDITS]
+        + [f"edit_context:<text, at most {MAX_CONTEXT_CHARS} characters>"],
+        "swap_model": [f"swap_model:{m}" for m in swap_models()],
+    }
+
+
+def trap_fixes() -> dict[str, list[str]]:
+    """For each registered trap, the changes in the registry that fix it (a test checks every trap has one)."""
+    out: dict[str, list[str]] = {}
+    for t in traps.registered():
+        fixes = [f"force_step:{t.label}"]
+        if _trap_column(t):
+            fixes.append(f"force_step:drop_column:{_trap_column(t)}")
+        if t.label == "deduplicate":
+            fixes.append("force_step:deduplicate_fuzzy")
+        out[t.name] = fixes
+    return out
+
+
+def _steps_of(step: dict | list | None) -> list[dict]:
+    if step is None:
+        return []
+    return list(step) if isinstance(step, list) else [step]
+
+
+def step_model(step: dict | list | None, default: str) -> str:
+    """The model a changed copy runs on: a `swap_model` step's, else `default`."""
+    for s in _steps_of(step):
+        if step_kind(s) == "model":
+            return s["model"]
+    return default
+
+
+def change_messages(backend, step: dict | list | None) -> tuple[list[BaseMessage], list[dict]]:
+    """What a copy's history gains from its arm's step (or list of steps, for a two-factor cell), and its log events.
+
+    - a command or an edit (`force_step`): run in the copy's VM and appended as a tool call with its real output
+      (`apply_step`, `forced_turn`). Raises RuntimeError when it did not take.
+    - `fake` (`fake_result`): appended as a tool call with the made-up output. Nothing runs.
+    - `message` (`edit_context`): appended as a message to the agent.
+    - `model` (`swap_model`): nothing appended; `step_model` picks the copy's model.
+    """
+    msgs: list[BaseMessage] = []
+    events: list[dict] = []
+    for s in _steps_of(step):
+        kind = step_kind(s)
+        if kind == "model":
+            events.append({"type": "forced", "command": f"swap_model {s['model']}", "output": "", "change": "swap_model"})
+        elif kind == "message":
+            msgs.append(HumanMessage(content=s["text"]))
+            events.append({"type": "forced", "command": f"message: {s['text']}", "output": "", "change": "edit_context"})
+        elif kind == "fake":
+            msgs += forced_turn({"command": s["command"]}, s["output"])
+            events.append({"type": "forced", "command": s["command"], "output": s["output"], "change": "fake_result"})
+        else:
+            output = apply_step(backend, s)
+            msgs += forced_turn(s, output)
+            events.append({"type": "forced", "command": step_text(s), "output": output[:2000]})
+    return msgs, events
+
+
+# ---- fork points (plan 6.3) ----
+
+ANCHOR_FORMS = ("before_split", "before_label:<label>", "index:<n>")
+
+
+def anchor_error(anchor: str) -> str | None:
+    """Why `anchor` is not a fork point, or None."""
+    anchor = (anchor or "").strip()
+    form, _, arg = anchor.partition(":")
+    if anchor == "before_split" or (form in ("before_label", "before_check") and arg):
+        return None
+    if form == "index" and arg.isdigit():
+        return None
+    return f"unknown fork point '{anchor}'; use one of {list(ANCHOR_FORMS)}"
+
+
+def resolve_anchor(actions: list, anchor: str, split_label: str = "split") -> int | None:
+    """The action index a fork point names in one run's labelled actions, or None when the run has no such moment.
+
+    `before_split`: the run's first action that splits (its domain's anchor label). `before_label:<label>`: its first
+    action with that label. `index:<n>`: action n. `before_check:<label>` (what `fake_result` needs): the run's last
+    look at the data (`inspect`) before its first `label` action, in its own action, not the split's.
+    """
+    anchor = (anchor or "before_split").strip()
+    if anchor == "before_split":
+        return next((a.index for a in actions if split_label in a.labels), None)
+    form, _, arg = anchor.partition(":")
+    if form == "before_label" and arg:
+        return next((a.index for a in actions if arg in a.labels), None)
+    if form == "index":
+        try:
+            n = int(arg)
+        except ValueError:
+            return None
+        return n if 0 <= n < len(actions) else None
+    if form == "before_check" and arg:
+        did = next((a.index for a in actions if arg in a.labels), None)
+        if did is None:
+            return None
+        looks = [a.index for a in actions[:did]
+                 if "inspect" in a.labels and split_label not in a.labels and arg not in a.labels]
+        return looks[-1] if looks else None
+    return None
