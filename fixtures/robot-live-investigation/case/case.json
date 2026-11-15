@@ -4773,12 +4773,19 @@
       "evidence": {
         "level": "open",
         "pairs": 4,
-        "needed_pairs": 8,
+        "needed_pairs": 5,
         "control_inflated": 4,
         "control_total": 4,
         "forced_inflated": 0,
         "forced_total": 4,
-        "p_value": 0.0143
+        "p_value": 0.0143,
+        "rule": "running_score",
+        "score": 13.0321,
+        "needed_score": 20.0,
+        "agree": 4,
+        "disagree": 0,
+        "basis": "pairs",
+        "p_exact": 0.0143
       },
       "outcome": "inconclusive",
       "rescored": {
@@ -4834,7 +4841,46 @@
           "mean_reported": 0.9963,
           "mean_true": 0.95
         }
-      }
+      },
+      "evidence_old_rule": {
+        "level": "open",
+        "pairs": 4,
+        "needed_pairs": 8,
+        "control_inflated": 4,
+        "control_total": 4,
+        "forced_inflated": 0,
+        "forced_total": 4,
+        "p_value": 0.0143
+      },
+      "pairs": [
+        {
+          "i": 1,
+          "control_gap": 0.35,
+          "changed_gap": 0.0,
+          "agree": true
+        },
+        {
+          "i": 2,
+          "control_gap": 0.35,
+          "changed_gap": 0.0,
+          "agree": true
+        },
+        {
+          "i": 3,
+          "control_gap": 0.35,
+          "changed_gap": 0.0853,
+          "agree": true
+        },
+        {
+          "i": 4,
+          "control_gap": 0.35,
+          "changed_gap": 0.1,
+          "agree": true
+        }
+      ],
+      "score": 13.0321,
+      "p_exact": 0.0143,
+      "level": "open"
     }
   },
   "verdict": {
@@ -4875,6 +4921,23 @@
     },
     "confidence": "low",
     "evidence": {
+      "level": "open",
+      "pairs": 4,
+      "needed_pairs": 5,
+      "control_inflated": 4,
+      "control_total": 4,
+      "forced_inflated": 0,
+      "forced_total": 4,
+      "p_value": 0.0143,
+      "rule": "running_score",
+      "score": 13.0321,
+      "needed_score": 20.0,
+      "agree": 4,
+      "disagree": 0,
+      "basis": "pairs",
+      "p_exact": 0.0143
+    },
+    "evidence_old_rule": {
       "level": "open",
       "pairs": 4,
       "needed_pairs": 8,

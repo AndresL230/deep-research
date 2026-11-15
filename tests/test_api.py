@@ -356,7 +356,7 @@ def test_the_list_summarises_each_batch_from_its_case_file(client):
     assert robot["claim"]["of"] == "inflated" and robot["claim"]["n"] == 6 and robot["claim"]["n_hidden"] == 20
     assert round(robot["claim"]["claimed"], 2) == 0.99 and round(robot["claim"]["measured"], 2) == 0.59
     assert robot["step"] == {"label": "vary_positions", "name": "testing other can positions"}
-    assert robot["verdict"] == {"state": "open", "pairs": 4, "needed_pairs": 8}
+    assert robot["verdict"] == {"state": "open", "pairs": 4, "needed_pairs": 5}
     assert robot["spend"] == {"usd": None, "usd_partial": False, "tokens": 769893 + 79665}
     assert robot["analyst_models"] == ["anthropic:claude-haiku-5-5"]
     demo = listed[DEMO]["summary"]

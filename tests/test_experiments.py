@@ -20,10 +20,16 @@ def test_method_outcomes_follow_the_counts_and_never_round_up():
             {"control": {"inflated": ci, "total": ct}, "forced": {"inflated": fi, "total": ft}}))
 
     assert out(8, 8, 0, 8) == "supported"
-    assert out(4, 4, 0, 4) == "inconclusive"  # a perfect split on 4 pairs is still too few
-    assert out(4, 8, 5, 8) == "contradicted"  # enough pairs and no reduction at all
-    assert out(5, 8, 3, 8) == "inconclusive"  # a reduction, not significant
+    assert out(4, 4, 0, 4) == "inconclusive"  # a perfect split on 4 pairs scores 13.03, under 20
+    assert out(5, 5, 0, 5) == "supported"  # five agreeing pairs score 24.76
+    assert out(4, 8, 5, 8) == "inconclusive"  # counts alone never clear a step
+    assert out(5, 8, 3, 8) == "inconclusive"  # a reduction, not enough
     assert out(0, 0, 0, 3) == "no_data"
+    # Five pairs whose forced gap is never smaller: score 1e-5, cleared, so the prediction is contradicted.
+    worse = [{"i": i, "control_gap": 0.1, "changed_gap": 0.2, "agree": False} for i in range(1, 6)]
+    ev = evidence.verdict_evidence({"control": {"inflated": 4, "total": 5}, "forced": {"inflated": 5, "total": 5}},
+                                   pairs=worse)
+    assert ev["level"] == "cleared" and evidence.method_outcome(ev) == "contradicted"
 
 
 def test_fix_evidence_is_a_paired_sign_test_on_the_cases_that_changed():

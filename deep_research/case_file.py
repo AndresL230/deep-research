@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .analysis import LABELS
-from .evidence import fix_wording_error, verdict_evidence, wording_error
+from .evidence import (CAUSAL, RULE, current_verdict_evidence, fix_wording_error, fork_pairs, verdict_evidence,
+                       verdict_fork, wording_error)
 
 Listener = Callable[[str, Any], None]
 
@@ -43,12 +44,34 @@ def current_domain(case: dict) -> dict:
 
 
 def with_evidence(case: dict) -> dict:
-    """A case file saved before verdicts had `evidence`: add it from the verdict's arm counts, in place. A case file
-    saved under a domain's old name gets its name today (`current_domain`)."""
+    """A case file whose verdict has no `evidence`, or evidence worked out by an older rule (no `rule`, or another
+    one): give it the evidence by today's rule (evidence.py, the running score), in place. Evidence worked out by the
+    older rule is kept as `evidence_old_rule`. The verdict's sentence and counts, what was recorded, never change. A
+    case file saved under a domain's old name gets its name today (`current_domain`)."""
     current_domain(case)
     verdict = case.get("verdict")
-    if isinstance(verdict, dict) and not isinstance(verdict.get("evidence"), dict):
-        verdict["evidence"] = verdict_evidence(verdict.get("arms"), verdict.get("numbers"))
+    if isinstance(verdict, dict):
+        ev = verdict.get("evidence")
+        if not isinstance(ev, dict) or ev.get("rule") != RULE:
+            if isinstance(ev, dict):
+                verdict.setdefault("evidence_old_rule", ev)
+            verdict["evidence"] = current_verdict_evidence(case)
+    for fork_id, fork in (case.get("forks") or {}).items():
+        arms = fork.get("arms") if isinstance(fork, dict) else None
+        if (fork_id == "pending" or fork.get("kind", "method") == "fix" or not isinstance(arms, dict)
+                or "control" not in arms or "forced" not in arms):
+            continue
+        ev = fork.get("evidence")
+        if isinstance(ev, dict) and ev.get("rule") == RULE:
+            continue
+        if isinstance(ev, dict):
+            fork.setdefault("evidence_old_rule", ev)
+        pairs = fork_pairs(fork)
+        fresh = verdict_evidence({a: {"inflated": int(arms[a].get("inflated") or 0),
+                                      "total": int(arms[a].get("scored") or 0)} for a in ("control", "forced")},
+                                 pairs=pairs)
+        fork.update(evidence=fresh, pairs=pairs or [], score=fresh["score"], p_exact=fresh["p_exact"],
+                    level=fresh["level"])
     return case
 
 
@@ -372,9 +395,12 @@ class CaseFile:
 
     def record_verdict(self, sentence: str, step_label: str, numbers: dict, **structured: Any) -> str:
         """Save the verdict: the sentence, the step and the old `numbers` ({arm}_inflated / {arm}_total), plus any
-        `structured` fields (`record_structured_verdict`). `evidence` is added from the arm counts (evidence.py)."""
+        `structured` fields (`record_structured_verdict`). `evidence` is added from the arm counts and the pairs of the
+        fork the verdict rests on (evidence.py)."""
         verdict = {"sentence": sentence[:VERDICT_CHARS], "step_label": step_label, "numbers": numbers, **structured}
-        verdict["evidence"] = verdict_evidence(verdict.get("arms"), numbers)
+        found = verdict_fork(self.data)
+        verdict["evidence"] = verdict_evidence(verdict.get("arms"), numbers,
+                                               pairs=fork_pairs(found[1]) if found else None)
         with self._lock:
             self.data["verdict"] = verdict
             self._changed("verdict")
@@ -436,9 +462,15 @@ class CaseFile:
                 want = ", ".join(f"{a} {t['inflated']}/{t['total']}" for a, t in truth.items()) or "none scored"
                 return f"error: the fork arms must match the experiment exactly ({want}, inflated/scored)"
         numbers = {f"{a}_{k}": v for a, c in given.items() for k, v in c.items()}
-        err = wording_error(sentence, verdict_evidence(given, numbers))
+        found = verdict_fork(self.data) if ran is not None else None
+        ev = verdict_evidence(given, numbers, pairs=fork_pairs(found[1]) if found else None)
+        err = wording_error(sentence, ev)
         if err:
             return err
+        if CAUSAL.search(sentence) and found is not None and found[1].get("label") != step:
+            # The cause a verdict names must be the step its experiment changed and supported, not another one.
+            return (f"error: the verdict names {step} as the cause, but fork {found[0]} tested "
+                    f"{found[1].get('label')}; a cause can only be the step the supporting experiment tested")
         return self.record_verdict(sentence.strip(), step, numbers, step=step, **split, arms=given,
                                    confidence=confidence)
 

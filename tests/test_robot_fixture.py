@@ -16,7 +16,7 @@ pytest.importorskip("mujoco")
 from deep_research import domains  # noqa: E402
 from deep_research.analysis import find_split  # noqa: E402
 from deep_research.config import FIXTURES_DIR  # noqa: E402
-from deep_research.evidence import CAUSAL, verdict_evidence  # noqa: E402
+from deep_research.evidence import CAUSAL, current_verdict_evidence, verdict_evidence  # noqa: E402
 from sim import domain as sd  # noqa: E402
 from sim.motion import LOW_FPS, validate_motion  # noqa: E402
 
@@ -263,8 +263,8 @@ def test_checked_positions_are_the_runs_own_can_positions(case, given):
 
 def test_the_verdict_says_suggests_while_the_evidence_is_open(case):
     v = case["verdict"]
-    assert v["evidence"] == verdict_evidence(numbers=v["numbers"])
-    assert v["evidence"]["level"] == "open" and v["evidence"]["pairs"] == 4 and v["evidence"]["needed_pairs"] == 8
+    assert v["evidence"] == current_verdict_evidence(case)
+    assert v["evidence"]["level"] == "open" and v["evidence"]["pairs"] == 4 and v["evidence"]["score"] == 13.0321
     assert v["sentence"] == ("Testing only the practice spot suggests why the claims were inflated: forcing 10 other "
                              "positions left 0 of 4 copies inflated, against 4 of 4 without (4 pairs).")
     assert not CAUSAL.search(v["sentence"])

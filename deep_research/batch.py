@@ -32,7 +32,8 @@ from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
 from .costs import CostTracker, OverBudget, ScopeCost, UsageCallback, usd_up
 from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, prefix_events, read_events
-from .evidence import verdict_evidence, verdict_sentence
+from .evidence import (current_verdict_evidence, fork_pairs, pairs_to_support, verdict_evidence, verdict_fork,
+                       verdict_sentence)
 from .evidence import describe as describe_evidence
 from .evidence import fix_evidence, fix_outcome, method_outcome
 from .domains import actions_from_events, build_task, intervention_for, score_run
@@ -208,24 +209,11 @@ class Refused(ValueError):
     """Why more pairs cannot run on a batch now. The API answers it with 409 and this message."""
 
 
-def verdict_fork(case: dict) -> tuple[str, dict] | None:
-    """The fork experiment a verdict rests on, as (fork id, fork): the newest method experiment (not a fix test) whose
-    first round finished, so it has `control` and `forced` arm summaries. None when there is none."""
-    found = None
-    for fork_id, fork in (case.get("forks") or {}).items():
-        if fork_id == "pending" or not isinstance(fork, dict) or fork.get("kind", "method") == "fix":
-            continue
-        arms = fork.get("arms") or {}
-        if "control" in arms and "forced" in arms:
-            found = (fork_id, fork)
-    return found
-
-
 def _fork_evidence(fork: dict) -> dict:
-    """`verdict_evidence` of a fork's own arm summaries (scored copies, as a verdict counts them)."""
+    """`verdict_evidence` of a fork's own arm summaries (scored copies, as a verdict counts them) and its pairs."""
     arms = fork.get("arms") or {}
     return verdict_evidence({a: {"inflated": int(arms[a].get("inflated") or 0), "total": int(arms[a].get("scored") or 0)}
-                             for a in ("control", "forced") if isinstance(arms.get(a), dict)})
+                             for a in ("control", "forced") if isinstance(arms.get(a), dict)}, pairs=fork_pairs(fork))
 
 
 def more_pairs_problem(case: dict, batch_dir: Path) -> str | None:
@@ -244,9 +232,9 @@ def more_pairs_problem(case: dict, batch_dir: Path) -> str | None:
     found = verdict_fork(case)
     if found is None:
         return "no fork experiment finished with a control and a forced arm, so there are no pairs to add to"
-    evidence = verdict.get("evidence") or verdict_evidence(verdict.get("arms"), verdict.get("numbers"))
-    if evidence.get("level") == "supported":
-        return "the verdict's evidence is already supported"
+    evidence = current_verdict_evidence(case)
+    if evidence.get("level") != "open":
+        return f"the verdict's evidence is already {evidence.get('level')}"
     try:
         marker = domains.get(cfg.get("domain")).task_marker
     except ValueError:
@@ -315,7 +303,7 @@ def more_pairs_quote(case: dict, tracker: CostTracker, n_per_arm: int | None = N
     fork_id, fork = found
     arms = list(fork.get("arm_steps") or fork.get("arms") or {})
     ev = _fork_evidence(fork)
-    n = max(ev["needed_pairs"] - ev["pairs"], 1) if n_per_arm is None else n_per_arm
+    n = pairs_to_support(ev) if n_per_arm is None else n_per_arm
     n = max(1, min(int(n), MAX_MORE_PAIRS))
     copies = len(arms) * n
 
@@ -1178,7 +1166,7 @@ class Batch:
             f"Fork {fork_id} from run {src} before action {n_prefix} {headline}. "
             f"Every arm starts from the same moment of the same run. Failed copies are not counted."
         ]
-        lines += _arm_lines(plan, arms, kind)
+        lines += _arm_lines(plan, arms, kind, found.get("evidence"))
         lines += _findings_lines(record, found)
         if kind == "fix":
             self.case.update_fix(status="tested", fork_id=fork_id,
@@ -1199,9 +1187,12 @@ class Batch:
         found: dict[str, Any] = {"built": built,
                                  "measures": "controller_performance" if kind == "fix" else "reporting_accuracy"}
         if kind != "fix" and "control" in arms and "forced" in arms:
+            pairs = fork_pairs(fork)
             ev = verdict_evidence({a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]}
-                                   for a in ("control", "forced")})
-            found.update(evidence=ev, outcome=method_outcome(ev))
+                                   for a in ("control", "forced")}, pairs=pairs)
+            # MASTER_PLAN 6.1: the pairs, the running score, the display-only exact test and the level on the fork.
+            found.update(evidence=ev, outcome=method_outcome(ev), pairs=pairs or [], score=ev["score"],
+                         p_exact=ev["p_exact"], level=ev["level"])
         self.case.update_fork(fork_id, **found)
         if fork.get("hypothesis_id") and "outcome" in found:
             self.case.set_hypothesis_status(fork["hypothesis_id"], found["outcome"], tested_by=fork_id)
@@ -1444,7 +1435,7 @@ class Batch:
         lines = [f"Fork {fid}: {len(jobs) // max(1, len(plan))} more copies per arm from run {src} before action "
                  f"{point.n_prefix}, the same arms with the same steps. Counts are over every copy of {fid}; failed "
                  f"copies are not counted."]
-        lines += _arm_lines(plan, arms, "method")
+        lines += _arm_lines(plan, arms, "method", self.case.data["forks"][fid].get("evidence"))
         verdict = self.case.data.get("verdict") or {}
         lines.append(f"The verdict now reads: {verdict.get('sentence')}")
         return " ".join(lines)
@@ -1467,7 +1458,7 @@ class Batch:
         ran = list(fork.get("arm_steps") or fork.get("arms") or {})
         children = fork.get("children") or {}
         arms = {arm: _arm_summary([c for cid, c in children.items() if _child_arm(cid, c) == arm]) for arm in ran}
-        ev = _fork_evidence({"arms": arms})
+        ev = _fork_evidence({"arms": arms, "children": children, "prediction": fork.get("prediction")})
         self._update_round(fork_id, status=status, pairs_after=ev["pairs"], level_after=ev["level"],
                            **({"reason": reason} if reason else {}))
         self.case.update_fork(fork_id, status="done", arms=arms,
@@ -1508,8 +1499,9 @@ class Batch:
         if given == verdict.get("arms"):
             return False
         numbers = {f"{a}_{key}": v for a, c in given.items() for key, v in c.items()}
-        ev = verdict_evidence(given, numbers)
-        label = verdict.get("step_label") or self.case.data["forks"][fork_id].get("label") or ""
+        ev = verdict_evidence(given, numbers, pairs=fork_pairs(self.case.data["forks"][fork_id]))
+        # The sentence names the step this fork tested: a cause can only be the step the experiment changed.
+        label = self.case.data["forks"][fork_id].get("label") or verdict.get("step_label") or ""
         words = self.domain.words.steps.get(label)
         sentence = verdict_sentence(words.name if words else label.replace("_", " "), ev, given)
         before = {"at": time.time(), "by": "more_pairs", "fork_id": fork_id, "sentence": verdict.get("sentence"),
@@ -1670,7 +1662,7 @@ def _findings_lines(record: dict, found: dict) -> list[str]:
     return lines
 
 
-def _arm_lines(plan: dict[str, dict | None], arms: dict[str, dict], kind: str) -> list[str]:
+def _arm_lines(plan: dict[str, dict | None], arms: dict[str, dict], kind: str, ev: dict | None = None) -> list[str]:
     """An experiment's result per arm in words, then, for a method experiment, how strong its evidence is."""
     lines = []
     for arm, step in plan.items():
@@ -1684,7 +1676,7 @@ def _arm_lines(plan: dict[str, dict | None], arms: dict[str, dict], kind: str) -
             lines.append(f"{arm.capitalize()}: {a['inflated']} of {a['scored']} inflated ({what}; {a['failed']} failed).")
     if kind != "fix" and "control" in arms and "forced" in arms:
         # How strong this is, so the verdict's words can follow it (evidence.py).
-        lines.append(describe_evidence(verdict_evidence(
+        lines.append(describe_evidence(ev or verdict_evidence(
             {a: {"inflated": arms[a]["inflated"], "total": arms[a]["scored"]} for a in ("control", "forced")})))
     return lines
 

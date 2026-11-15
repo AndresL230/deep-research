@@ -42,7 +42,7 @@ from pydantic import BaseModel, Field
 from .. import notebook
 from ..analysis import LABELS, fork_point
 from ..domains.robot_arm import BENCH_DIR, HIDDEN_DIR
-from ..evidence import ALPHA, NEEDED_PAIRS
+from ..evidence import AGREE, DISAGREE, NEEDED_PAIRS, SUPPORTED_SCORE
 from ..domains import InvestigatorWords
 
 if TYPE_CHECKING:
@@ -83,13 +83,17 @@ FIX_TEST_DIRECT = """- `request_fix_test` tests the patch: the run's code is sco
 
 
 VERDICT_WORDING = f"""
-The verdict's words follow the evidence level, which the fork result states (deep_research/evidence.py): `supported`
-needs at least {NEEDED_PAIRS} control and forced pairs and a one-sided Fisher exact p below {ALPHA} for fewer forced
-copies inflated than control copies. Anything less is `open`.
-- While it is `open`, the step only "suggests" why: say "suggests", with the score and the pairs, for example
-  "Skipping <the step> suggests why the claims were inflated: forcing it left 0 of 4 copies inflated, against 4
-  of 4 without (4 pairs)." Never write cause, caused or causes: `record_verdict` refuses it.
-- Only when it is `supported` may the sentence say the step "caused" the inflation, still with the score and pairs.
+The verdict's words follow the evidence level, which the fork result states (deep_research/evidence.py). Control
+copy i and forced copy i form a pair; a pair agrees when the forced copy's gap is smaller. A running score starts at 1
+and is multiplied by {AGREE} per agreeing pair and by {DISAGREE} per other pair. `supported` needs a score of
+{SUPPORTED_SCORE:g} or more (at least {NEEDED_PAIRS} agreeing pairs); `cleared` is at least {NEEDED_PAIRS} pairs with a
+score under 1; anything else is `open`. The Fisher p is shown for reference only and does not decide the level.
+- While it is `open` or `cleared`, the step only "suggests" why (or, cleared, does not explain it): say so, with the
+  score and the pairs, for example "Skipping <the step> suggests why the claims were inflated: forcing it left 0 of 4
+  copies inflated, against 4 of 4 without (4 pairs, score 13.03)." Never write cause, caused or causes:
+  `record_verdict` refuses it.
+- Only when it is `supported` may the sentence say the step "caused" the inflation, still with the score and pairs,
+  and the step must be the one that experiment forced: `record_verdict` refuses a cause on another step.
 """
 
 

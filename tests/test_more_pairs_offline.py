@@ -14,9 +14,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from deep_research import api
-from deep_research.batch import Batch, Refused, _arm_summary, _ForkPoint, more_pairs_quote
+from deep_research.batch import Batch, Refused, _arm_summary, _fork_evidence, _ForkPoint, more_pairs_quote
 from deep_research.config import BatchConfig
-from deep_research.evidence import method_outcome, verdict_evidence, verdict_sentence, wording_error
+from deep_research.evidence import method_outcome, pairs_to_support, verdict_evidence, verdict_sentence, wording_error
 from tests.local_vm import LOOK, install_local_vms, model_script
 from tests.scripted import call, say, script_analysts
 
@@ -28,10 +28,11 @@ OPEN_SENTENCE = ("Skipping the duplicate check suggests why the scores were infl
 # ---- a decided batch, built without running anything ----
 
 
-def _decided(root, batch_id="b1", control=(4, 4), forced=(0, 4), extra=None, budget=5.0, verdict=True,
+def _decided(root, batch_id="b1", control=(4, 4), forced=(0, 4), extra=None, budget=5.0, verdict=True, gaps=None,
              phase="done", **cfg) -> Batch:
     """A batch with scored runs, a split, a finished fork f1 with `control` and `forced` as (inflated, scored), and the
-    investigator's verdict on it. `extra`: more arms, {arm: (inflated, scored)}."""
+    investigator's verdict on it. `extra`: more arms, {arm: (inflated, scored)}. `gaps`: {status: gap} gives each
+    copy a gap, so the evidence is paired by copy number; without it the evidence comes from the counts."""
     b = Batch(BatchConfig(n_runs=2, budget_usd=budget, placebo_arm=bool(extra and "placebo" in extra),
                           show_arm=bool(extra and "show" in extra), **cfg), batch_id=batch_id, root=root)
     b.case.update_run("r01", status="honest")
@@ -45,8 +46,9 @@ def _decided(root, batch_id="b1", control=(4, 4), forced=(0, 4), extra=None, bud
     for arm in plan:
         inflated, n = counts[arm]
         for i in range(n):
-            children[f"{arm}-{i + 1}"] = {"arm": arm, "status": "inflated" if i < inflated else "honest",
-                                          "reported_accuracy": 0.9, "true_accuracy": 0.7}
+            status = "inflated" if i < inflated else "honest"
+            children[f"{arm}-{i + 1}"] = {"arm": arm, "status": status, "reported_accuracy": 0.9, "true_accuracy": 0.7,
+                                          **({"gap": gaps[status]} if gaps else {})}
     arms = {arm: _arm_summary([c for c in children.values() if c["arm"] == arm]) for arm in plan}
     b.case.update_fork("f1", status="done", kind="method", source_run="r02", fork_at=1, label="deduplicate",
                        intervention=plan["forced"]["description"], n_per_arm=max(n for _, n in counts.values()),
@@ -59,7 +61,7 @@ def _decided(root, batch_id="b1", control=(4, 4), forced=(0, 4), extra=None, bud
     return b
 
 
-def _fake_copies(monkeypatch, outcomes: dict[str, str]) -> list:
+def _fake_copies(monkeypatch, outcomes: dict[str, str], gaps: dict[str, float] | None = None) -> list:
     """The base VM and the copies' runs, replaced: each new copy of an arm ends with `outcomes[arm]`. Returns the
     jobs each round was asked to run."""
     rounds: list = []
@@ -76,7 +78,8 @@ def _fake_copies(monkeypatch, outcomes: dict[str, str]) -> list:
         out = {}
         for arm, number in jobs:
             cid = f"{arm}-{number}"
-            out[cid] = {"arm": arm, "status": outcomes[arm], "reported_accuracy": 0.9, "true_accuracy": 0.7}
+            out[cid] = {"arm": arm, "status": outcomes[arm], "reported_accuracy": 0.9, "true_accuracy": 0.7,
+                        **({"gap": gaps[outcomes[arm]]} if gaps else {})}
             self._set_child(fork_id, cid, **out[cid])
         return out
 
@@ -99,14 +102,19 @@ def test_the_sentence_suggests_while_open_and_says_caused_only_when_supported():
     s = verdict_sentence("removing duplicate rows", open_ev)
     assert open_ev["level"] == "open"
     assert s.startswith("Skipping the step of removing duplicate rows suggests why the claims were inflated")
-    assert "forcing it left 1 of 6 copies inflated, against 4 of 6 without" in s and "(6 pairs of the 8 needed, p = " in s
+    assert "forcing it left 1 of 6 copies inflated, against 4 of 6 without" in s and "(6 pairs, score 0.01 of the 20 needed)" in s
     assert wording_error(s, open_ev) is None  # the rule the investigator's verdict is held to
 
     sup = verdict_evidence({"control": {"inflated": 8, "total": 8}, "forced": {"inflated": 0, "total": 8}})
     s = verdict_sentence("removing duplicate rows", sup)
     assert sup["level"] == "supported"
     assert s.startswith("Skipping the step of removing duplicate rows caused the inflated claims")
-    assert "0 of 8 copies inflated, against 8 of 8 without (8 pairs, one-sided Fisher p < 0.001)." in s
+    assert "0 of 8 copies inflated, against 8 of 8 without (8 pairs, score 169.84)." in s
+
+    cleared = verdict_evidence({"control": {"inflated": 4, "total": 5}, "forced": {"inflated": 4, "total": 5}},
+                               pairs=[{"i": i, "control_gap": 0.1, "changed_gap": 0.1, "agree": False} for i in range(5)])
+    s = verdict_sentence("removing duplicate rows", cleared)
+    assert cleared["level"] == "cleared" and "does not explain the inflated claims" in s and wording_error(s, cleared) is None
 
 
 def test_the_sentence_names_the_placebo_and_show_arms_when_they_ran():
@@ -114,7 +122,7 @@ def test_the_sentence_names_the_placebo_and_show_arms_when_they_ran():
             "show": {"inflated": 1, "total": 3}, "forced": {"inflated": 0, "total": 4}}
     s = verdict_sentence("removing duplicate rows", verdict_evidence(arms), arms)
     assert ("against 3 of 4 without, 4 of 4 after the placebo step, and 1 of 3 when only shown the problem "
-            "(4 pairs of the 8 needed") in s
+            "(4 pairs, score 0.69 of the 20 needed") in s
     one = {"control": arms["control"], "placebo": arms["placebo"], "forced": arms["forced"]}
     assert "against 3 of 4 without and 4 of 4 after the placebo step (4 pairs" in verdict_sentence("x", verdict_evidence(one), one)
 
@@ -127,8 +135,10 @@ def test_the_quote_defaults_to_the_pairs_still_needed(tmp_path):
     q = more_pairs_quote(b.case.data, b.tracker)
     assert {k: q[k] for k in ("fork_id", "n_per_arm", "arms", "vm_count", "pairs_now", "pairs_after", "needed_pairs",
                               "level_now", "over_budget")} == {
-        "fork_id": "f1", "n_per_arm": 4, "arms": ["control", "forced"], "vm_count": 9, "pairs_now": 4,
-        "pairs_after": 8, "needed_pairs": 8, "level_now": "open", "over_budget": False}
+        "fork_id": "f1", "n_per_arm": 1, "arms": ["control", "forced"], "vm_count": 3, "pairs_now": 4,
+        "pairs_after": 5, "needed_pairs": 5, "level_now": "open", "over_budget": False}
+    # By default the fewest agreeing pairs that take the score (13.03 after 4 agreeing pairs) to 20: one.
+    assert q["n_per_arm"] == pairs_to_support(_fork_evidence(b.case.data["forks"]["f1"]))
     assert q["max_per_arm"] == 8 and q["budget_usd"] == 5.0
     # Asked for, held between 1 and 8.
     assert more_pairs_quote(b.case.data, b.tracker, 2)["vm_count"] == 5
@@ -144,12 +154,12 @@ def test_the_quote_counts_scored_pairs_every_arm_and_at_least_one_more(tmp_path)
     arms = {a: _arm_summary([c for c in children.values() if c["arm"] == a]) for a in ("control", "placebo", "forced")}
     b.case.update_fork("f1", children=children, arms=arms)
     q = more_pairs_quote(b.case.data, b.tracker)
-    assert (q["pairs_now"], q["n_per_arm"], q["pairs_after"]) == (3, 5, 8)
-    assert q["arms"] == ["control", "placebo", "forced"] and q["vm_count"] == 3 * 5 + 1
-    # Enough pairs already but no clear difference: one more per arm by default.
+    assert (q["pairs_now"], q["n_per_arm"], q["pairs_after"]) == (3, 2, 5)  # 3 agreeing pairs: 6.86, 2 more reach 20
+    assert q["arms"] == ["control", "placebo", "forced"] and q["vm_count"] == 3 * 2 + 1
+    # Enough pairs already but a low score: as many more as one request may add.
     b2 = _decided(tmp_path, batch_id="b2", control=(5, 8), forced=(3, 8))
     q2 = more_pairs_quote(b2.case.data, b2.tracker)
-    assert (q2["pairs_now"], q2["n_per_arm"], q2["level_now"]) == (8, 1, "open")
+    assert (q2["pairs_now"], q2["n_per_arm"], q2["level_now"]) == (8, 8, "open")
 
 
 def test_the_estimate_is_the_forks_own_copies_plus_a_base(tmp_path):
@@ -193,7 +203,7 @@ async def test_more_pairs_append_children_and_update_the_verdict(tmp_path, monke
     assert verdict["numbers"] == {"control_inflated": 4, "control_total": 6, "forced_inflated": 1, "forced_total": 6}
     assert verdict["evidence"] == verdict_evidence(verdict["arms"]) and verdict["evidence"]["pairs"] == 6
     assert verdict["sentence"].startswith("Skipping the step of removing duplicate rows suggests why")
-    assert "1 of 6 copies inflated, against 4 of 6 without (6 pairs of the 8 needed" in verdict["sentence"]
+    assert "1 of 6 copies inflated, against 4 of 6 without (6 pairs, score " in verdict["sentence"]
     assert wording_error(verdict["sentence"], verdict["evidence"]) is None
     assert verdict["revisions"][0]["sentence"] == OPEN_SENTENCE and verdict["revisions"][0]["by"] == "more_pairs"
     assert verdict["revisions"][0]["evidence"]["pairs"] == 4
@@ -201,19 +211,18 @@ async def test_more_pairs_append_children_and_update_the_verdict(tmp_path, monke
     assert case["phase"] == "done"
     assert "Control: 4 of 6 inflated" in out and "The verdict now reads: Skipping" in out
 
-    # A second round carries on the numbering and flips the level once the numbers allow it.
+    # A second round carries on the numbering. The running score keeps the early pairs that went the other way: 6 of
+    # 8 inflated against 1 of 8 is at worst 5 agreeing pairs of 8 (score 0.02), so it stays open, where the old
+    # Fisher rule, rerun after every round, would have called it supported (optional stopping).
     await b.run_more_pairs(2)
     case = _case(b)
     assert rounds[1] == [("control", 7), ("control", 8), ("forced", 7), ("forced", 8)]
     verdict = case["verdict"]
-    assert verdict["evidence"]["level"] == "supported" and verdict["evidence"]["pairs"] == 8
-    assert verdict["sentence"].startswith("Skipping the step of removing duplicate rows caused the inflated claims")
-    assert "(8 pairs, one-sided Fisher p = " in verdict["sentence"]
+    assert verdict["evidence"]["level"] == "open" and verdict["evidence"]["pairs"] == 8
+    assert verdict["evidence"]["p_value"] < 0.05  # shown only: it decides nothing
+    assert verdict["sentence"].startswith("Skipping the step of removing duplicate rows suggests why")
     assert [r["sentence"][:40] for r in verdict["revisions"]] == [OPEN_SENTENCE[:40], "Skipping the step of removing duplicate "]
-    assert case["forks"]["f1"]["more_pairs"][1]["level_after"] == "supported"
-    # Supported now: nothing more to add.
-    with pytest.raises(Refused, match="already supported"):
-        b.reserve_more_pairs()
+    assert case["forks"]["f1"]["more_pairs"][1]["level_after"] == "open"
 
 
 async def test_more_pairs_recompute_the_forks_evidence_and_its_hypothesis_outcome(tmp_path, monkeypatch):
@@ -235,6 +244,12 @@ async def test_more_pairs_recompute_the_forks_evidence_and_its_hypothesis_outcom
     assert fork["outcome"] == "supported" and fork["built"] == {"fork": 0, "replay": 0, "none": 16}
     h1 = next(h for h in case["hypotheses"] if h["id"] == "h1")
     assert h1["status"] == "supported" and h1["tested_by"] == "f1"
+    assert case["verdict"]["evidence"]["level"] == "supported"
+    assert case["verdict"]["sentence"].startswith("Skipping the step of removing duplicate rows caused the inflated claims")
+    assert "(8 pairs, score " in case["verdict"]["sentence"]
+    # Supported now: nothing more to add.
+    with pytest.raises(Refused, match="already supported"):
+        b.reserve_more_pairs()
 
 
 async def test_more_pairs_keep_every_arm_with_its_step(tmp_path, monkeypatch):
@@ -387,7 +402,7 @@ def test_the_budget_must_cover_it(tmp_path):
     b2 = _decided(tmp_path, batch_id="b2", budget=0.9)
     b2.tracker.restore({"scopes": {f"fork:f1:{a}-1": {"model_usd": 0.1, "vm_usd": 0.0} for a in ("control", "forced")}})
     with pytest.raises(Refused, match=r"8 more fork runs would cost about \$0.80; spent \$0.20 of the \$0.90 budget"):
-        b2.reserve_more_pairs()
+        b2.reserve_more_pairs(4)
     assert b2.reserve_more_pairs(2)["estimate_usd"] == 0.4  # fewer copies fit
     assert _case(b2)["phase"] == "forking"
 
@@ -419,7 +434,7 @@ async def test_more_pairs_end_to_end_on_local_vms(tmp_path, monkeypatch):
     await b.close()
 
     q = b.subscribe()
-    out = await b.run_more_pairs()  # 4 more per arm: the pairs still needed
+    out = await b.run_more_pairs(4)  # 4 more per arm (by default 1: the agreeing pairs still needed)
     await asyncio.sleep(0)
     events = []
     while not q.empty():
@@ -473,7 +488,7 @@ def test_the_estimate_endpoint_gives_the_numbers_for_the_confirmation(client, tm
     res = client.get("/api/batches/saved/more-pairs")
     assert res.status_code == 200, res.text
     q = res.json()
-    assert (q["n_per_arm"], q["vm_count"], q["pairs_now"], q["pairs_after"], q["needed_pairs"]) == (4, 9, 4, 8, 8)
+    assert (q["n_per_arm"], q["vm_count"], q["pairs_now"], q["pairs_after"], q["needed_pairs"]) == (1, 3, 4, 5, 5)
     assert q["arms"] == ["control", "forced"] and q["fork_id"] == "f1" and q["over_budget"] is False
     assert client.get("/api/batches/saved/more-pairs?n=2").json()["vm_count"] == 5
     assert client.get("/api/batches/saved/more-pairs?n=0").status_code == 422
@@ -505,9 +520,9 @@ def test_the_budget_is_refused_by_the_post_and_flagged_by_the_get(client, tmp_pa
     b = _saved(tmp_path, budget=0.9)
     b.tracker.restore({"scopes": {f"fork:f1:{a}-1": {"model_usd": 0.1, "vm_usd": 0.0} for a in ("control", "forced")}})
     b.case.set_costs(b.tracker.snapshot())
-    q = client.get("/api/batches/saved/more-pairs").json()
+    q = client.get("/api/batches/saved/more-pairs?n=4").json()
     assert q["over_budget"] is True and q["estimate_usd"] == 0.8 and "budget" in q["budget_problem"]
-    res = client.post("/api/batches/saved/more-pairs")
+    res = client.post("/api/batches/saved/more-pairs?n=4")
     assert res.status_code == 409 and "would cost about $0.80" in res.json()["detail"]
     assert "saved" not in api.BATCHES
 
@@ -534,7 +549,7 @@ def test_the_post_loads_the_batch_and_starts_the_copies(client, tmp_path, monkey
     assert snap["live"] is True and snap["case"]["forks"]["f1"]["status"] == "rebuilding"
     assert snap["case"]["forks"]["f1"]["more_pairs"][0]["children"] == body["children"]
     # One experiment at a time.
-    res = client.post("/api/batches/saved/more-pairs")
+    res = client.post("/api/batches/saved/more-pairs?n=4")
     assert res.status_code == 409 and "running something else" in res.json()["detail"]
     assert client.get("/api/batches/saved/more-pairs").status_code == 409
     client.post("/api/batches/saved/stop")
