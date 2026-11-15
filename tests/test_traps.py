@@ -110,7 +110,7 @@ def test_intervention_is_the_batch_traps_own_else_the_table():
     # `deduplicate_near` is no trap's own step: its fix stays in the table, whatever the batch planted.
     near = intervention_for("deduplicate_near", "duplicates")
     assert near is intervention_for("deduplicate_near") and "near-duplicate" in near["description"]
-    assert near["command"].startswith("cd /home/daytona/workspace && python3 -c \"import pandas as pd; ")
+    assert near["command"].startswith("cd /home/daytona/workspace && python3 -c \"import pandas as pd, numpy as np; ")
 
 
 def test_the_duplicates_step_only_counts_outside_a_call():
