@@ -8,6 +8,7 @@ import { askSpinner } from "../ask-icons";
 import { attr, esc } from "../ui";
 import { usd } from "./format";
 import { ACT, type Loadable } from "./model";
+import type { Role } from "../access";
 
 /** The rows' actions, handled in main.ts. `data-arg` is the batch id. */
 export const NY_ACT = {
@@ -227,9 +228,15 @@ function lineOf(n: Need): { text: string; share: number | null } {
   }
 }
 
-function row(n: Need, ui: NeedUi | undefined): string {
+/** Someone who may not act on batches (access.ts): each row only opens its batch. */
+const openOnly = (n: Need) => ({
+  buttons: `<button type="button" class="ask-btn ny-btn" data-act="${ACT.openBatch}" data-arg="${attr(n.id)}">Open</button>`,
+  say: "", tone: "" as const,
+});
+
+function row(n: Need, ui: NeedUi | undefined, role: Role): string {
   const { text, share } = lineOf(n);
-  const a = actions(n, ui);
+  const a = role === "admin" ? actions(n, ui) : openOnly(n);
   const bar = share != null
     ? `<span class="ny-bar" role="progressbar" aria-label="${attr(text)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(share * 100)}"><i style="width:${(Math.min(1, Math.max(0, share)) * 100).toFixed(1)}%"></i></span>`
     : "";
@@ -245,7 +252,7 @@ function row(n: Need, ui: NeedUi | undefined): string {
 }
 
 /** The section: the rows, or one quiet line when nothing waits. Nothing at all until the list has loaded. */
-export function needsView(batches: Loadable<BatchListItem[]>, ui: Readonly<Record<string, NeedUi>> = {}): string {
+export function needsView(batches: Loadable<BatchListItem[]>, ui: Readonly<Record<string, NeedUi>> = {}, role: Role = "admin"): string {
   if (batches.state !== "ready") return "";
   const needs = needsOf(batches.value);
   if (!needs.length) {
@@ -253,6 +260,6 @@ export function needsView(batches: Loadable<BatchListItem[]>, ui: Readonly<Recor
   }
   return `<section class="hm-sec ny-sec" data-morph-key="needs" aria-labelledby="ny-h">
     <h2 class="hm-h2" id="ny-h">Needs you</h2>
-    <ul class="ny" data-morph-list>${needs.map((n) => row(n, ui[needKey(n.kind, n.id)])).join("")}</ul>
+    <ul class="ny" data-morph-list>${needs.map((n) => row(n, ui[needKey(n.kind, n.id)], role)).join("")}</ul>
   </section>`;
 }

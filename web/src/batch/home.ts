@@ -9,6 +9,7 @@ import { DEFAULT_VIEW, batchTable, type TableView } from "./batch-table";
 import { ACT, type HomeVm, type Loadable } from "./model";
 import { needsView } from "./needs-you";
 import { DEFAULT_PLANTED, chosenTrap } from "./trap";
+import { ADMIN_ONLY, type Role } from "../access";
 
 // ── home screen ──────────────────────────────────────────────────────────────
 
@@ -17,10 +18,12 @@ import { DEFAULT_PLANTED, chosenTrap } from "./trap";
 export interface HomeInputs { html: string; label: string; controllerHtml?: string; controller?: ControllerInfo | null }
 
 /** The home screen: what needs a person, then the batches to open. A new batch starts from the header's "+ New batch"
- *  (`newBatchView`, in a dialog). Labels only, no prose. */
-export function homeView(vm: HomeVm): string {
+ *  (`newBatchView`, in a dialog). Labels only, no prose. `role` (access.ts): a viewer gets every batch to open but no
+ *  actions, and one line that says starting batches is for admins. */
+export function homeView(vm: HomeVm, role: Role = "admin"): string {
   return `<div class="hm" data-morph-key="home">
-    ${needsView(vm.batches, vm.needs)}
+    ${role === "viewer" ? `<p class="hm-note hm-viewer" data-morph-key="viewer">${esc(ADMIN_ONLY.start)}</p>` : ""}
+    ${needsView(vm.batches, vm.needs, role)}
     ${batchesSection(vm.batches, vm.table)}
   </div>`;
 }

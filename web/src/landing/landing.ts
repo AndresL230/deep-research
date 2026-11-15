@@ -26,6 +26,16 @@ import { themeSwitch } from "../theme";
 import { mark, symbolTile, wordmark } from "../brand";
 import type { SceneTone } from "./kit";
 
+/**
+ * The page's one button. Only admins start batches on the hosted site (gateway/src/index.ts), so everyone else gets
+ * the batch list instead: every batch there can be opened and replayed without signing in. Admins (and local
+ * development, where there is no gateway) keep "Start a batch", which opens the home screen with "+ New batch".
+ */
+export interface LandingCta { href: string; label: string }
+export const START_CTA: LandingCta = { href: "#/start", label: "Start a batch" };
+export const BROWSE_CTA: LandingCta = { href: "#/batches", label: "See the batches" };
+export const landingCta = (canStart: boolean): LandingCta => (canStart ? START_CTA : BROWSE_CTA);
+
 /** The demo batch's runs: which scored honestly, and each one's reported and holdout accuracy, in percent. */
 const RUNS = [
   { id: "r01", honest: true, reported: 75.6, holdout: 76.0 },
@@ -53,8 +63,8 @@ const FORK = {
 /** The page's words. */
 export const LANDING = {
   brand: "Orro",
-  title: "Is your AI agent's score real?",
-  pill: "6 of 12 runs claimed a higher score than they got",
+  title: "Are your agents telling the truth?",
+  pill: "Inflated runs: 89% claimed, 75% real",
   lede: "Orro runs one data science agent many times, finds the step where honest and inflated runs split, then forks the VM to prove what went wrong.",
   /** The saved batch the page replays (fixtures/demo-batch). */
   demo: "demo-batch",
@@ -225,18 +235,18 @@ function positionsArt(): string {
 
 // ── the sections ─────────────────────────────────────────────────────────────
 
-function navView(tone: SceneTone): string {
+function navView(tone: SceneTone, cta: LandingCta): string {
   const start = routeHash({ name: "home" });
   const demo = routeHash({ name: "batch", id: LANDING.demo });
   const go = (to: string, words: string): string => `<button type="button" class="lp-link" data-lp-go="${to}">${esc(words)}</button>`;
   return `<header class="lp-nav" data-lp-nav>
-      <a class="lp-brand" href="${attr(routeHash({ name: "landing" }))}">${mark(26, "lp-mark")}<span class="lp-name" role="img" aria-label="${attr(LANDING.brand)}">${wordmark(16)}</span></a>
+      <a class="lp-brand" href="${attr(routeHash({ name: "landing" }))}">${mark(16.5, "lp-mark")}<span class="lp-name" role="img" aria-label="${attr(LANDING.brand)}">${wordmark(16)}</span></a>
       <nav class="lp-links" aria-label="Main">
         ${go("how", "How it works")}${go("robots", "Robots")}${go("why", "Why Orro")}
         <a class="lp-link" href="${attr(demo)}">Demo replay</a>
         <a class="lp-link" href="${attr(start)}">Batches</a>
       </nav>
-      <div class="lp-nav-end">${themeSwitch(tone)}<a class="lp-cta" href="${attr(start)}">Start a batch</a></div>
+      <div class="lp-nav-end">${themeSwitch(tone)}<a class="lp-cta" href="${attr(cta.href)}">${esc(cta.label)}</a></div>
     </header>`;
 }
 
@@ -289,7 +299,7 @@ function howView(): string {
     </section>`;
 }
 
-function robotsView(): string {
+function robotsView(cta: LandingCta): string {
   const r = LANDING.robots;
   const texts = r.chapters.map((c, i) => `<div class="lp-floor-text" data-lp-floor-text="${i}">
             <h3 class="lp-card-h">${esc(c.title)}</h3>
@@ -297,7 +307,7 @@ function robotsView(): string {
           </div>`).join("");
   return `<section class="lp-sec" data-keep data-lp-at="robots" aria-labelledby="lp-robots">
       ${divider()}
-      ${head("lp-robots", r.title, routeHash({ name: "home" }), "Start a batch")}
+      ${head("lp-robots", r.title, cta.href, cta.label)}
       <div class="lp-cards lp-cards--2">
         <article class="lp-card" data-lp-rev style="--i:0">
           <div class="lp-art lp-art--floor" data-lp-floor role="img" aria-label="${attr(r.floorAlt)}"></div>
@@ -332,7 +342,7 @@ function whyView(): string {
     </section>`;
 }
 
-function closeView(): string {
+function closeView(cta: LandingCta): string {
   return `<section class="lp-close" data-keep aria-labelledby="lp-close-title">
       <div class="lp-close-card" data-lp-rev>
         <svg class="lp-arcs" viewBox="0 0 1200 520" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
@@ -345,12 +355,12 @@ function closeView(): string {
           <path class="lp-arc lp-arc--thin" d="M560 560C640 300 860 120 1240 70" stroke="url(#lp-arc-a)" pathLength="1"/>
         </svg>
         <h2 class="lp-close-h" id="lp-close-title" aria-label="${attr(LANDING.close.title)}" data-lp-rev><span aria-hidden="true">${letters(LANDING.close.title)}</span></h2>
-        <a class="lp-cta lp-cta--close" href="${attr(routeHash({ name: "home" }))}">Start a batch</a>
+        <a class="lp-cta lp-cta--close" href="${attr(cta.href)}">${esc(cta.label)}</a>
       </div>
     </section>`;
 }
 
-function footView(): string {
+function footView(cta: LandingCta): string {
   const start = routeHash({ name: "home" });
   const demo = routeHash({ name: "batch", id: LANDING.demo });
   const go = (to: string, words: string): string => `<li><button type="button" class="lp-foot-a" data-lp-go="${to}">${esc(words)}</button></li>`;
@@ -358,11 +368,11 @@ function footView(): string {
   return `<footer class="lp-foot" data-keep>
       <div class="lp-foot-top" data-lp-rev>
         <div class="lp-foot-brand">
-          <a class="lp-brand" href="${attr(routeHash({ name: "landing" }))}">${mark(26, "lp-mark")}<span class="lp-name" role="img" aria-label="${attr(LANDING.brand)}">${wordmark(16)}</span></a>
-          <a class="lp-cta" href="${attr(start)}">Start a batch</a>
+          <a class="lp-brand" href="${attr(routeHash({ name: "landing" }))}">${mark(16.5, "lp-mark")}<span class="lp-name" role="img" aria-label="${attr(LANDING.brand)}">${wordmark(16)}</span></a>
+          <a class="lp-cta" href="${attr(cta.href)}">${esc(cta.label)}</a>
         </div>
         <nav class="lp-foot-cols" aria-label="Footer">
-          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(start, "Batches")}${link(demo, "Demo replay")}${link(start, "Start a batch")}</ul></div>
+          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(start, "Batches")}${link(demo, "Demo replay")}${cta === START_CTA ? link(start, "Start a batch") : ""}</ul></div>
           <div class="lp-foot-col"><span class="lp-eyebrow">On this page</span><ul>${go("how", "How it works")}${go("robots", "Robots")}${go("why", "Why Orro")}</ul></div>
           <div class="lp-foot-col"><span class="lp-eyebrow">Domains</span><ul>${link(start, "Tabular data")}${link(start, "Robot arm")}</ul></div>
         </nav>
@@ -375,16 +385,18 @@ function footView(): string {
     </footer>`;
 }
 
-/** The whole page, in white mode or black mode. */
-export function landingView(tone: SceneTone = "light"): string {
+/** The whole page, in white mode or black mode. `canStart`: the visitor may start a batch (an admin, or local
+ *  development), so the button says so; otherwise it opens the batch list. */
+export function landingView(tone: SceneTone = "light", canStart = true): string {
+  const cta = landingCta(canStart);
   return `<div class="lp" data-lp-tone="${tone}" data-morph-key="landing">
-    ${navView(tone)}
+    ${navView(tone, cta)}
     ${heroView()}
     ${introView()}
     ${howView()}
-    ${robotsView()}
+    ${robotsView(cta)}
     ${whyView()}
-    ${closeView()}
-    ${footView()}
+    ${closeView(cta)}
+    ${footView(cta)}
   </div>`;
 }

@@ -287,74 +287,48 @@ async function loadUser(env: Env, id: string): Promise<Who | null> {
 
 // ───────────────────────────── the API: who may do what ─────────────────────────────
 
-// Reads anyone may make, signed in or not: the landing page and the public demo replays use them.
-const PUBLIC_GET = new Set(["/api/health", "/api/defaults", "/api/robot/scene", "/api/batches"]);
-const UPLOADS = new Set(["/api/datasets", "/api/controllers", "/api/scripts"]);
+// Reads that stay in the admin area: the all-batches cost report. Delete a path here to make it public like every
+// other read.
+const ADMIN_READS = new Set(["/api/costs"]);
 
-async function apiRoute(req: Request, env: Env, url: URL, ctx: ExecutionContext): Promise<Response> {
+/**
+ * Who may do what:
+ * - Reading is public. Every GET or HEAD under /api (the batch list with every user's batches, a batch's case file,
+ *   events, files, motion, lab pages, its websocket, the defaults, the scene, the health) works signed in or not,
+ *   except the reads in ADMIN_READS.
+ * - Everything else can spend money or change a batch (start one, resume, more pairs, stop, investigate, decide on a
+ *   fork, estimates, uploads), so it needs a signed-in admin: signed out gets 401 with a sign-in link, signed in
+ *   without the admin plan gets 403.
+ */
+async function apiRoute(req: Request, env: Env, url: URL, _ctx: ExecutionContext): Promise<Response> {
   const path = url.pathname;
   const method = req.method.toUpperCase();
   const isRead = method === "GET" || method === "HEAD";
   const signedIn = await currentUser(req, env);
-  // A pending account counts as signed out for everything except the reason it is refused.
-  const who = signedIn && signedIn.plan.can_run ? signedIn : null;
-  const needSignIn = () => (signedIn ? waitingForAccess() : signInFirst());
 
-  // Start a batch: the one request that commits money.
-  if (path === "/api/batches" && method === "POST") {
-    if (!who) return needSignIn();
-    return startBatch(req, env, url, who);
+  if (isRead && !ADMIN_READS.has(path)) return forward(req, env, url, signedIn);
+
+  if (!signedIn) return signInFirst();
+  if (!signedIn.plan.is_admin) {
+    return json({ detail: isRead ? "The all-batches cost report is limited to admins." : "Starting and changing batches is limited to admins." }, 403);
   }
+  const who = signedIn;
+  if (isRead) return forward(req, env, url, who);
 
-  // Everything under one batch: its case file, events, files, lab pages, websocket, and its actions.
+  // Start a batch: reserve its budget from the admin's credits first.
+  if (path === "/api/batches" && method === "POST") return startBatch(req, env, url, who);
+
+  // An action on one batch. Resuming a batch or running more pairs on a finished one spends again, up to the batch's
+  // budget: hold that first. A batch with no row here (a demo fixture) has no hold to take.
   const m = path.match(/^\/api\/batches\/([^/]+)(\/.*)?$/);
-  if (m) {
-    const batchId = decodeURIComponent(m[1]);
-    const rest = m[2] ?? "";
-    const row = await env.DB.prepare("SELECT * FROM batches WHERE id = ?").bind(batchId).first<BatchRow>();
-    const mine = !!who && (row?.user_id === who.user.id || !!who.plan.is_admin);
-    if (row && !mine) return who ? json({ detail: "This batch belongs to another user." }, 403) : needSignIn();
-    if (!isRead) {
-      if (!who) return needSignIn();
-      // Acting on a batch nobody owns here (a demo fixture) could spend money no one reserved: admins only.
-      if (!row && !who.plan.is_admin) return json({ detail: "Only your own batches can be resumed or investigated." }, 403);
-      // Resuming a batch or running more pairs on a finished one spends again, up to the batch's budget.
-      if (row && (rest === "/resume" || rest === "/more-pairs")) {
-        const held = await reserveForResume(env, who, row);
-        if (held) return held;
-      }
+  if (m && (m[2] === "/resume" || m[2] === "/more-pairs")) {
+    const row = await env.DB.prepare("SELECT * FROM batches WHERE id = ?").bind(decodeURIComponent(m[1])).first<BatchRow>();
+    if (row) {
+      const held = await reserveForResume(env, who, row);
+      if (held) return held;
     }
-    return forward(req, env, url, who);
   }
-
-  if (path === "/api/batches" && isRead) {
-    // Hide other users' batches from the list. Public replays (no owner here) stay.
-    const res = await forward(req, env, url, who);
-    if (!res.ok) return res;
-    const items = (await res.json()) as { id: string }[];
-    const ids = items.map((i) => i.id);
-    const owners = await env.DB.prepare("SELECT id, user_id FROM batches WHERE id IN (SELECT value FROM json_each(?))")
-      .bind(JSON.stringify(ids))
-      .all<{ id: string; user_id: string }>();
-    const ownerOf = new Map(owners.results.map((r) => [r.id, r.user_id]));
-    const visible = items.filter((i) => {
-      const owner = ownerOf.get(i.id);
-      return !owner || (who && (owner === who.user.id || who.plan.is_admin));
-    });
-    return json(visible);
-  }
-
-  if (isRead && PUBLIC_GET.has(path)) return forward(req, env, url, who);
-
-  if (!who) return needSignIn();
-
-  if (path === "/api/costs" && !who.plan.is_admin) {
-    return json({ detail: "The all-batches cost report is for admins. Your own spend is in your account menu." }, 403);
-  }
-  if (UPLOADS.has(path) && !isRead && !who.plan.can_upload) {
-    return json({ detail: `Uploading files needs a paid plan (you are on ${who.plan.name}).` }, 403);
-  }
-  // Estimates, datasets, controllers, scripts, the investigator's notebook: signed-in users.
+  // Stop, investigate, decisions, estimates, uploads.
   return forward(req, env, url, who);
 }
 
@@ -560,11 +534,7 @@ async function forward(req: Request, env: Env, url: URL, who: Who | null, body?:
 // ───────────────────────────── small helpers ─────────────────────────────
 
 function signInFirst(): Response {
-  return json({ detail: "Sign in to use Orro.", sign_in: "/auth/login" }, 401);
-}
-
-function waitingForAccess(): Response {
-  return json({ detail: "Your account is waiting for access. Ask an Orro admin to approve it." }, 403);
+  return json({ detail: "Sign in as an admin to do this. Reading batches needs no sign-in.", sign_in: "/auth/login" }, 401);
 }
 
 function json(data: unknown, status = 200): Response {

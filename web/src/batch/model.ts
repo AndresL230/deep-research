@@ -9,6 +9,7 @@
 import type { AgentEvent, BatchConfig, BatchListItem, CaseFile, Defaults, Estimate, Health } from "../api";
 import type { TableView } from "./batch-table";
 import type { NeedUi } from "./needs-you";
+import type { Role } from "../access";
 
 export const ACT = {
   // anywhere
@@ -155,6 +156,8 @@ export interface BatchVm {
   /** The folds the person opened or closed, by key (lanes.ts): each section shows its key points and keeps its
    *  detail folded until asked for. A key that is absent takes the fold's own default. "all": every fold open. */
   open?: Readonly<Record<string, boolean>> | "all";
+  /** Who is looking (access.ts): only "admin" gets the actions (investigate, approve, decline, stop). Absent: admin. */
+  role?: Role;
 }
 
 export type Loadable<T> = { state: "loading" } | { state: "ready"; value: T } | { state: "error"; message: string };
