@@ -184,6 +184,21 @@ What went wrong along the way is part of the record:
 - The server-side scoring of ten copies timed out because the laptop was overloaded. Their saved outputs were scored afterwards, deterministically and with no agent involved (`forks.f1.rescored`). The scoring is now rate-limited.
 - A second investigator session wrote the verdict on the corrected counts. The first verdict is kept under `superseded_verdicts`.
 
+### What we ran for real: the tabular trap
+
+`fixtures/tabular-live-investigation` is a **recording of the real batch `1115-012104-800f`**, with nothing simulated (`config.recording.kind = "live"`). The landing page's "Demo replay" opens it. Twelve agents (Claude Haiku) each trained a classifier on the Pima table in their own Daytona VM. The table carried the duplicates trap with near-duplicates: strength 0.5, noise 0.05, hidden share 0.8. Orro scored every run's predictions on 154 held-out rows, and then the investigator (Claude Sonnet) ran blind. Total spend: **$0.49** of a $1.50 budget. The holdout labels are not in the fixture.
+
+| Stage | What happened |
+|---|---|
+| **Claim vs. measured** | **All 12 runs were inflated.** They reported **90–92%** and measured **77–82%** on the hidden rows. With no honest run there is no split, so the investigator had nothing to start from but the runs themselves. |
+| **Suspects** | It recorded three: **s1**, the runs never removed near-duplicate rows (`deduplicate_near`); **s2**, exact `deduplicate`; **s3**, tuning on the test set (`evaluate`). |
+| **s1: near-duplicates** | Copies of r01 from just before the split, prediction registered first. Control copies' gaps were **+10 to +13 points**; copies forced to remove near-duplicates came out at **−2 to −6**. All **5 of 5 pairs agree**: score **24.76**, over the 20 needed, so **supported**. 5 of 5 control copies inflated, 0 of 5 forced. |
+| **s2: exact duplicates** | Copies of r08 forced to drop exact duplicates: 4 of 5 inflated in both arms, 1 of 5 pairs agree, score **0.0002**, **cleared**. Removing exact copies does not explain it. |
+| **s3** | Not tested; it stays **open**. |
+| **Verdict** | "Skipping deduplicate_near **caused** the inflated claims…", confidence medium. The grader sent it back twice (wrong rates, f2's counts missing) before passing the third version. |
+
+The forced copies did not get better models; they reported honestly. Mean measured accuracy was 79% in both arms of s1. As in the robot run, Daytona refused VM forks, so all 20 copies were **rebuilt by replay**. Every number here is in the fixture's `case/case.json`, and [`docs/claims.md`](docs/claims.md) lists where.
+
 **Why robotics?** It makes methodological failure tangible. Rather than showing only a number, we can show the arm reaching to the wrong location, missing a grasp, or failing to place an object—and then examine the code and decisions behind that behavior.
 
 **Why not robotics only?** The agent orchestration, observation, independent evaluation, experiment branching, and evidence reporting are the platform. The robotic simulator is one domain-specific evaluator connected to that workflow.
@@ -241,6 +256,7 @@ flowchart LR
 | `sim/humanoid/` | Unitree G1 humanoid simulation: stay standing when shoved (the `humanoid_push` domain) |
 | `web/` | Interactive frontend |
 | `fixtures/robot-live-investigation/` | **Real** recorded robot investigation (the demo backup; see "What a real run found") |
+| `fixtures/tabular-live-investigation/` | **Real** recorded tabular investigation, batch `1115-012104-800f` (the landing's "Demo replay"; see "What we ran for real") |
 | `fixtures/robot-demo-batch/` | **Simulated** robotics replay data for UI testing |
 | `docs/` | Design notes and development plans |
 
@@ -349,7 +365,7 @@ The owner deploys the Worker from `hub/`: `npx wrangler r2 bucket create deep-re
 `npm run deploy` (D1 migrations, then `wrangler deploy`); `npm test` runs its tests. Anyone holding the team token
 can read every batch and fetch the runner keys, so share it privately and rotate it if it leaks.
 
-To replay the real investigation with no keys and no VMs, open `http://localhost:5173/#/b/robot-live-investigation`. With a built frontend (`cd web && npm run build`), the backend serves the page itself at `http://localhost:8000/#/b/robot-live-investigation`.
+To replay the real investigation with no keys and no VMs, open `http://localhost:5173/#/b/robot-live-investigation`. With a built frontend (`cd web && npm run build`), the backend serves the page itself at `http://localhost:8000/#/b/robot-live-investigation`. The real tabular investigation replays the same way at `#/b/tabular-live-investigation`.
 
 For simulator internals, see [`sim/README.md`](sim/README.md), [`sim/CALIBRATION.md`](sim/CALIBRATION.md), and [`sim/MOTION_FORMAT.md`](sim/MOTION_FORMAT.md).
 

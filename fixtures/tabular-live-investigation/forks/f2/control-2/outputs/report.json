@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.8844,
+  "model": "RandomForestClassifier(n_estimators=300, max_depth=8, random_state=42)",
+  "notes": "Exact duplicate rows removed (57) before a stratified 80/20 split (random_state=42). Zeros in insulin/skin_thickness were kept as-is; depth chosen by 5-fold CV on the training set."
+}

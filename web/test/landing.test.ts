@@ -66,6 +66,9 @@ describe("the landing page", () => {
   it("links to the start panel and to the demo replay with real links", () => {
     expect(html).toContain('<a class="lp-cta" href="#/start">Start a batch</a>');
     expect(html).toContain('href="#/b/demo-batch"');
+    // "Demo replay" opens the recording of a real tabular run; the page's own numbers stay the demo batch's.
+    expect(html).toContain('<a class="lp-link" href="#/b/tabular-live-investigation">Demo replay</a>');
+    expect(html).toContain('<a class="lp-foot-a" href="#/b/tabular-live-investigation">Demo replay</a>');
     expect(html).toContain('<a class="lp-brand" href="#/">');
     expect(html).not.toContain("data-act=");
   });

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7398,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), raw features, stratified 80/20 split",
+  "notes": "Trained on 491 rows and tested on 123 rows from data.csv after a mistaken dedup removed 307 non-duplicate rows (original 921-row file overwritten and not recoverable), so results reflect only the 614 remaining rows. Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is."
+}

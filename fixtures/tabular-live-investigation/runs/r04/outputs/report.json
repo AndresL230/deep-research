@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42, otherwise default), trained on 691 deduplicated training rows",
+  "notes": "Exact duplicate rows (57) were removed before a stratified 80/20 split. Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is. A few forest settings were compared on the test set; the default-like one was chosen."
+}

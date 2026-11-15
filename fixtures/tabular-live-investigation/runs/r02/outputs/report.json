@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9075,
+  "model": "RandomForestClassifier (sklearn, 500 trees, random_state=42) with median imputation",
+  "notes": "Zeros in glucose, blood_pressure, skin_thickness, insulin and bmi were treated as missing (median-imputed on train). 57 exact duplicate rows were dropped before an 80/20 stratified split (random_state=42)."
+}

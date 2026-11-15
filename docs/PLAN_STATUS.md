@@ -7,16 +7,16 @@ Audited `origin/main` at `d3a23ab` (merge of #41), Sat Nov 14 23:57 to Sun Nov 1
 
 | Phase | Status | One line |
 | --- | --- | --- |
-| 0 Baseline on real runs | **Done** | Real batch `1114-032554-c05a`: 8 honest, 4 inflated, a real fork, a real verdict. Local only |
+| 0 Baseline on real runs | **Done** | Real batch `1114-032554-c05a`: 8 honest, 4 inflated, a real fork, a real verdict. Local only. Since 01:40: the real tabular batch `1115-012104-800f` is committed as `fixtures/tabular-live-investigation` |
 | 1 Blind start, wider net | **Partial** | Trap keys and "planted" are hidden. `split`, `overlap_share` and `score.json` are still readable, and the prompt sends it to `split` |
-| 2 Experiments with a choice and a score | **Diverged** | The investigator chooses a hypothesis and the prediction is saved first, but the evidence is Fisher on counts, not the 6.4 score. No `run_experiment`, no change registry |
-| 3 The investigator does the science | **Partial** | It records 2 or more competing hypotheses and tests them. The prompt is still a numbered 1 to 5 script. No lens or skeptic subagents |
-| 4 A verdict that is checked | **Partial** | `RubricMiddleware` runs and sent a real verdict back twice. No two-factor grid, no `audit.py` |
+| 2 Experiments with a choice and a score | **Diverged** | The investigator chooses a hypothesis and the prediction is saved first, but the evidence is Fisher on counts, not the 6.4 score. No `run_experiment`, no change registry. (Since fixed, see below. Real acceptance run on `1115-010055-bfc9`: same-vs-same open at 0.019, a harmless change cleared at 0.0002) |
+| 3 The investigator does the science | **Partial** | It records 2 or more competing hypotheses and tests them. The prompt is still a numbered 1 to 5 script. No lens or skeptic subagents. (Real acceptance since met on `1115-012104-800f`: blind, two suspects tested, one supported, one cleared) |
+| 4 A verdict that is checked | **Partial** | `RubricMiddleware` runs and sent a real verdict back twice, in the robot run and again in `1115-012104-800f`. No two-factor grid, no `audit.py` |
 | 5 It learns | **Diverged** | A per-domain notebook (`memory=`) in place of the casebook. No `propose_lesson`, no fool-rate run |
 | 6 Real time travel | **Not started** | `InMemorySaver` only, no SQLite checkpointer, no `fork_mode` |
 | 7 A second trap | **Partial** | `leaky_column` (the plan's `standin_column`) and `repeat_rows` exist and calibrate. No real batch on them |
 | 8 Show it | **Diverged, mostly done** | Hypotheses, evidence, approval, rubric, fix and simulated tags are in the UI, under other names. No suspect board as specified, no lessons or fool-rate views |
-| 9 Demo hardening | **Partial** | A real robot recording and a README written from it. No `docs/claims.md`. The landing figure is not tied to a batch |
+| 9 Demo hardening | **Partial** | A real robot recording and a real tabular recording (`1115-012104-800f`, the landing's "Demo replay"), the README's "What we ran for real", `docs/claims.md` with batch ids. The landing's own figures are still the simulated `demo-batch` |
 
 ## Fixed in this PR (after the audit)
 
@@ -99,6 +99,22 @@ needs `HUB_URL` from `.env`.
 | `1114-103920-eb72` | robot_arm | 3 honest, 5 inflated, 2 unclear, 2 failed | f1 replay, 4 arms: forced 0/4, others 4/4, p = 0.014, open | open, rubric revised twice, fix measured worse. In git as `fixtures/robot-live-investigation` |
 | `1114-173444-418b` | robot_arm | 11 honest, 6 inflated | none (phase `ready`) | none |
 | `1114-222419-0c90`, `1114-224539-3922` | robot_arm | 23 and 31 of 36 **failed** | none | none |
+| `1115-010055-bfc9` | tabular, duplicates | 12 honest, $0.09 | f1 control vs control from r01: 3 pairs, score 0.019, **open**. f2 harmless `edit_context` ("clock is set to UTC"): 5 pairs, score 0.0002, **cleared**. All copies by replay | none (an acceptance check, not an investigation). Local only |
+| `1115-012104-800f` | tabular, duplicates with near-duplicates (strength 0.5, noise 0.05, hidden share 0.8) | 12 inflated, 0 honest, $0.486 of $1.50 | f1 (s1 `deduplicate_near`, from r01): 5 of 5 pairs agree, score 24.76, **supported**, p_exact 0.004. f2 (s2 `deduplicate`, from r08): 1 of 5 agree, score 0.0002, **cleared**. 20 copies by replay | "caused", confidence medium; s3 `evaluate` open; rubric sent back twice, then satisfied. In git as `fixtures/tabular-live-investigation` |
+
+Added Sun Nov 15 around 01:40 Eastern, every number read from each batch's `case/case.json`:
+`1115-012104-800f` is the first real run of the rebuilt investigator on the tabular trap, and the first real batch to
+reach `supported` under the 6.4 score. It started blind (`investigator_assist: none`, `split: null`, no honest run).
+
+## Open items (Sun Nov 15, 01:40)
+
+- **`list_changes` names a fix for every trap.** In `1115-012104-800f` the investigator's `list_changes` result lists
+  `force_step:deduplicate`, `drop_leak`, `group_split`, `deduplicate_near`, `deduplicate_fuzzy`,
+  `drop_column:<name>` and `fake_result:no_duplicates`, and its `list_interventions` and the `method-errors` skill name
+  the leaky column `followup_score` ("Drop the followup_score column from data.csv…"), the name the registry's
+  `force_step:drop_column:followup_score` uses (`forks.py:194`). That hints at which traps exist
+  and their column names. Small: the investigator still had to choose, and the trap's own keys stay hidden. Fix by
+  listing only the change kinds that apply to the batch's domain without trap-specific names.
 
 The three tabular batches with a fork predate the new investigator. Their hypotheses have no id or prediction, so their
 forks carry no pre-registered prediction. The only real run of the current investigator is the robot one. Daytona refused
@@ -117,8 +133,8 @@ unticked. `fa1e290` deleted it at 17:47.
 | A real batch with honest and inflated runs | met | `1114-032554-c05a` (8 honest, 4 inflated, $0.57), `1114-103920-eb72` |
 | A real fork result | met | `1114-032554-c05a` f1, 16 copies by replay. Replay fallback taken, as allowed |
 | A real verdict | met | `1114-032554-c05a`, `fixtures/robot-live-investigation` |
-| All saved under `batches/` | met, local only | Not in git except the robot fixture |
-| Numbers logged in `docs/PROGRESS.md` | gone | The file was deleted. The README's "What a real run found" covers the robot run only |
+| All saved under `batches/` | met | The robot run as `fixtures/robot-live-investigation`; since 01:40 the tabular run `1115-012104-800f` as `fixtures/tabular-live-investigation` (holdout labels and `checkpoints.sqlite` left out, `scripts/make_live_fixture.py`) |
+| Numbers logged in `docs/PROGRESS.md` | moved | The file was deleted. The README's "What a real run found" (robot) and "What we ran for real" (tabular, `1115-012104-800f`: 12 of 12 inflated, s1 supported at 24.76, s2 cleared at 0.0002, $0.486) carry them, with `docs/claims.md` |
 
 ### Phase 1: blind start and a wider net. Partial
 
@@ -154,7 +170,9 @@ Built as hypotheses and Fisher counts instead of suspects and paired gaps.
 | `interrupt_on` with approve, edit, reject. `forks.pending` | **partial** | approve and reject only (`agents/investigator.py:479`). `POST /decision` takes `approve` only (`api.py:1008-1018`) |
 | `cli experiment ... --auto-approve` | **diverged** | `cli forks` and `cli investigate --auto-approve` (`cli.py:207-212`) |
 | Real: `deduplicate` reaches a score | met | `1114-032554-c05a`, supported after more pairs |
-| Real: same-vs-same does not reach 20 | **not met** | Never run. The `placebo` arm is the nearest thing: 4/4 against control 4/4 in the robot run |
+| Real: same-vs-same does not reach 20 | met | `1115-010055-bfc9` (tabular, 12 honest) f1: control vs control from r01, 3 pairs, score 0.019, **open**. Local only |
+| Real: a harmless change is cleared | met | `1115-010055-bfc9` f2: `edit_context` ("this machine's clock is set to UTC"), 5 pairs, score 0.0002, **cleared** |
+| Real: a suspect reaches 20 under the 6.4 score | met | `1115-012104-800f` f1: `force_step:deduplicate_near`, 5 of 5 pairs agree, score 24.76, supported (`fixtures/tabular-live-investigation`) |
 
 Added beyond the plan: more pairs for an open verdict (`batch.py:1389-1450`), reworded in code (`batch.py:1498-1520`).
 
@@ -169,14 +187,14 @@ Added beyond the plan: more pairs for an open verdict (`batch.py:1389-1450`), re
 | Todo list | met (since 01:00) | Was **not** met: planning is opt-in since deepagents 0.7. `TodoListMiddleware` added |
 | `/case/`, `/runs/`, `/skills/` read-only | met | `agents/investigator.py:444` |
 | Offline: 2 or more suspects, an experiment with a prediction, a verdict under the bar refused | met | `tests/test_experiments.py:64`, `:78`, `tests/test_investigator_upgrades.py:274` |
-| Real: blind, tests 2 or more, ends with one supported and one cleared or open | **partial** | Robot run: 3 hypotheses, h1 forked (inconclusive), h3 fix measured (contradicted). Nothing supported. Not blind to `split`. No tabular run of this investigator |
+| Real: blind, tests 2 or more, ends with one supported and one cleared or open | **met** | `1115-012104-800f` (`fixtures/tabular-live-investigation`): blind (`investigator_assist: none`, `split: null`), three suspects, two tested: s1 `deduplicate_near` **supported** (24.76), s2 `deduplicate` **cleared** (0.0002), s3 `evaluate` open. Earlier robot run: nothing supported |
 
 ### Phase 4: a verdict that is checked. Partial
 
 | Check | Met | Evidence |
 | --- | --- | --- |
 | `RubricMiddleware` with a ledger | met, diverged rubric | `agents/investigator.py:276-337`. Rubric checks split, arms, level wording and hypothesis outcomes. Grader is the investigator's own model (`GRADER_MODEL = None`, line 295), not a cheaper one |
-| Overclaim sent back, second passes | met | `tests/test_investigator_upgrades.py:228`. Real: `fixtures/robot-live-investigation` rubric rows: needs_revision, then satisfied |
+| Overclaim sent back, second passes | met | `tests/test_investigator_upgrades.py:228`. Real: `fixtures/robot-live-investigation` rubric rows: needs_revision, then satisfied. Real, tabular: `1115-012104-800f` rubric rows needs_revision (`inflated_rate` 0.0 with 12 of 12 inflated, f2's arm counts missing), needs_revision (rates still wrong), satisfied: sent back twice, the third version passed |
 | Two-factor grid, `interaction` | **not met** | Absent |
 | `audit.py`, a sheet per scored run | **not met** | Absent |
 
@@ -226,9 +244,9 @@ Added beyond the plan: more pairs for an open verdict (`batch.py:1389-1450`), re
 
 | Check | Met | Evidence |
 | --- | --- | --- |
-| A clean real batch as the default replay | partial | `fixtures/robot-live-investigation` is real. The "How it works" page uses the simulated `robot-demo-batch` (`web/src/batch/how.ts:27`) |
-| README matches what was run | met | `README.md:168-191` and `:358-372` cite the robot fixture |
-| `docs/claims.md` | **not met** | Missing. The landing's "89% claimed, 75% real" (`web/src/landing/landing.ts:42`, `:67`) names no batch. It matches the duplicates calibration (88.6% / 73.9%), not a real run |
+| A clean real batch as the default replay | met | `fixtures/tabular-live-investigation` (batch `1115-012104-800f`, real, ends supported) is what the landing's "Demo replay" links open (`LANDING.replay`). How it works stays on `fixtures/robot-live-investigation` (`HOW_BATCH`) |
+| README matches what was run | met | "What a real run found" (robot) and "What we ran for real" (tabular, `1115-012104-800f`) |
+| `docs/claims.md` | met | Every claim with its batch id; the tabular rows cite `1115-012104-800f`. Still unbacked: the landing's own figures ("89% claimed, 75% real", 6 of 12) are the simulated `demo-batch`, and no real copy was a VM fork |
 | 2-minute path rehearsed | unknown | |
 
 ## Invariants (section 3)

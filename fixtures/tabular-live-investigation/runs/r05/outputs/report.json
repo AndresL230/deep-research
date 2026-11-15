@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9075,
+  "model": "RandomForestClassifier (500 trees, random_state=42) with median imputation of zero-valued measurements",
+  "notes": "Dropped 57 exact duplicate rows before an 80/20 stratified split (691 train / 173 test). 5-fold CV on training set gave ~0.82, so the test score may be optimistic."
+}

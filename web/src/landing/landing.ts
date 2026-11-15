@@ -66,8 +66,11 @@ export const LANDING = {
   title: "Are your agents telling the truth?",
   pill: "Inflated runs: 89% claimed, 75% real",
   lede: "Orro runs one data science agent many times, finds the step where honest and inflated runs split, then forks the VM to prove what went wrong.",
-  /** The saved batch the page replays (fixtures/demo-batch). */
+  /** The saved batch the page's numbers come from (fixtures/demo-batch, simulated). */
   demo: "demo-batch",
+  /** The batch the "Demo replay" links open: a recording of a real tabular run (fixtures/tabular-live-investigation,
+   *  batch 1115-012104-800f). The page's own numbers stay the demo batch's. */
+  replay: "tabular-live-investigation",
   /** The folder card's tabs, in the order of their scenes: the terminal, the split finder, the data bench. */
   tabs: [
     { tab: "Many runs", num: "6 of 12", note: "runs reported more than they scored on a holdout they never saw.", chip: "demo-batch · 12 runs" },
@@ -237,13 +240,13 @@ function positionsArt(): string {
 
 function navView(tone: SceneTone, cta: LandingCta): string {
   const start = routeHash({ name: "home" });
-  const demo = routeHash({ name: "batch", id: LANDING.demo });
+  const replay = routeHash({ name: "batch", id: LANDING.replay });
   const go = (to: string, words: string): string => `<button type="button" class="lp-link" data-lp-go="${to}">${esc(words)}</button>`;
   return `<header class="lp-nav" data-lp-nav>
       <a class="lp-brand" href="${attr(routeHash({ name: "landing" }))}">${mark(16.5, "lp-mark")}<span class="lp-name" role="img" aria-label="${attr(LANDING.brand)}">${wordmark(16)}</span></a>
       <nav class="lp-links" aria-label="Main">
         ${go("how", "How it works")}${go("robots", "Robots")}${go("why", "Why Orro")}
-        <a class="lp-link" href="${attr(demo)}">Demo replay</a>
+        <a class="lp-link" href="${attr(replay)}">Demo replay</a>
         <a class="lp-link" href="${attr(start)}">Batches</a>
       </nav>
       <div class="lp-nav-end">${themeSwitch(tone)}<a class="lp-cta" href="${attr(cta.href)}">${esc(cta.label)}</a></div>
@@ -363,6 +366,7 @@ function closeView(cta: LandingCta): string {
 function footView(cta: LandingCta): string {
   const start = routeHash({ name: "home" });
   const demo = routeHash({ name: "batch", id: LANDING.demo });
+  const replay = routeHash({ name: "batch", id: LANDING.replay });
   const go = (to: string, words: string): string => `<li><button type="button" class="lp-foot-a" data-lp-go="${to}">${esc(words)}</button></li>`;
   const link = (href: string, words: string): string => `<li><a class="lp-foot-a" href="${attr(href)}">${esc(words)}</a></li>`;
   return `<footer class="lp-foot" data-keep>
@@ -372,7 +376,7 @@ function footView(cta: LandingCta): string {
           <a class="lp-cta" href="${attr(cta.href)}">${esc(cta.label)}</a>
         </div>
         <nav class="lp-foot-cols" aria-label="Footer">
-          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(start, "Batches")}${link(demo, "Demo replay")}${cta === START_CTA ? link(start, "Start a batch") : ""}</ul></div>
+          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(start, "Batches")}${link(replay, "Demo replay")}${cta === START_CTA ? link(start, "Start a batch") : ""}</ul></div>
           <div class="lp-foot-col"><span class="lp-eyebrow">On this page</span><ul>${go("how", "How it works")}${go("robots", "Robots")}${go("why", "Why Orro")}</ul></div>
           <div class="lp-foot-col"><span class="lp-eyebrow">Domains</span><ul>${link(start, "Tabular data")}${link(start, "Robot arm")}</ul></div>
         </nav>
