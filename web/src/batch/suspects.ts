@@ -349,7 +349,8 @@ export function interactionView(x: Interaction | null | undefined, names: Record
     const g = v?.mean_gap;
     return `<td class="sx-cell${g != null && g > 0.08 ? " sx-cell--hi" : ""}"><b>${g == null ? "–" : esc(pts(g))}</b><span class="ln-muted">${v?.n ?? 0} copies</span></td>`;
   };
-  const eff = (v: number | null): string => (v == null ? "–" : `${v >= 0 ? "−" : "+"}${pts(Math.abs(v))}`);
+  // A positive effect shrinks the gap, so it is written as a minus; under 0.05 pts it is no move at all.
+  const eff = (v: number | null): string => (v == null ? "–" : Math.abs(v) < 0.0005 ? "0.0 pts" : `${v > 0 ? "−" : "+"}${pts(Math.abs(v))}`);
   return `<div class="sx-grid-w" data-morph-key="sx-grid">` +
     `<h3 class="ln-h3">Two factors together${(x as { simulated?: boolean }).simulated ? ` ${simTag(true)}` : ""}</h3>` +
     `<table class="sx-grid"><caption class="ln-muted">Mean gap (reported minus true) per cell, from one fork point.</caption>` +
