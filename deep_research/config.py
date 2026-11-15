@@ -55,6 +55,9 @@ class BatchConfig(BaseModel):
     # Share of the copies that get the noise. The rest stay exact, so an exact check finds some but not all.
     trap_hidden_share: float = Field(1.0, ge=0.0, le=1.0)
     hint_level: Literal["none", "light"] = "none"
+    # MASTER_PLAN 6.2: "baseline" puts the plain-Python `candidates` in the investigator's view, a demo safety net the
+    # UI shows. Off ("none") by default: the investigator finds its suspects blind.
+    investigator_assist: Literal["none", "baseline"] = "none"
     # The model family the task asks for. Duplicates inflate tree models far more
     # than logistic regression (measured on Pima: about +13 points vs +1).
     model_hint: Literal["random_forest", "any"] = "random_forest"

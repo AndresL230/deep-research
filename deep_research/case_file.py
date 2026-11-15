@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .analysis import LABELS
-from .evidence import (CAUSAL, RULE, current_verdict_evidence, fix_wording_error, fork_pairs, verdict_evidence,
-                       verdict_fork, wording_error)
+from .evidence import (CAUSAL, RULE, SUPPORTED_SCORE, current_verdict_evidence, fix_wording_error, fork_pairs,
+                       verdict_evidence, verdict_fork, wording_error)
 
 Listener = Callable[[str, Any], None]
 
@@ -79,7 +79,7 @@ def investigator_view(data: dict) -> dict:
     """The case file as the investigator may read it: without any run's or fork copy's per hidden case results
     (`hidden_results`, every hidden can position with what really happened there), the same for the baseline and the
     measured fix, and without the screens' words (`config.domain_info.words`, only for the UI). Everything else is kept."""
-    view = {k: v for k, v in data.items() if k not in VIEW_HIDDEN_SECTIONS}
+    view = {k: v for k, v in data.items() if k not in VIEW_HIDDEN_SECTIONS - {"candidates"}}
     cfg = data.get("config")
     if isinstance(cfg, dict):
         cfg = {k: v for k, v in cfg.items() if not privileged_config_key(k)}
@@ -100,8 +100,10 @@ def investigator_view(data: dict) -> dict:
     fix = data.get("fix")
     if isinstance(fix, dict) and isinstance(fix.get("measured"), dict):
         view["fix"] = {**fix, "measured": {k: v for k, v in fix["measured"].items() if k not in VIEW_HIDDEN}}
+    assist = isinstance(cfg, dict) and cfg.get("investigator_assist") == "baseline"
     for section in UPGRADE_HIDDEN:
-        view.pop(section, None)
+        if not (assist and section == "candidates"):
+            view.pop(section, None)
     return view
 
 
@@ -436,13 +438,35 @@ class CaseFile:
         return dict(done[-1]["arms"]) if done else None
 
     def record_structured_verdict(self, sentence: str, step: str, honest_rate: float, inflated_rate: float,
-                                  n_honest: int, n_inflated: int, arms: dict[str, dict], confidence: str) -> str:
+                                  n_honest: int, n_inflated: int, arms: dict[str, dict], confidence: str,
+                                  supported: list[str] | None = None, cleared: list[str] | None = None,
+                                  open_: list[str] | None = None, limits: str | None = None) -> str:
         """The investigator's verdict as fields, checked against the case file before it is saved.
 
         `arms`: {arm: {"inflated", "total"}}, `total` being the arm's scored copies (honest plus inflated, as the
         fork experiment counts them). Every arm the newest method experiment scored must be there with its exact
         counts, and no other; with no finished experiment, `arms` is empty. The old `numbers` are derived from it.
+
+        `supported`, `cleared`, `open_`: suspect ids (plan 6.5). A supported suspect needs a running score of 20 or more
+        over the experiments that tested it (`suspect_claim_error`); then the verdict rests on that suspect's newest
+        experiment (its arms) and all its pairs, and a cause may only be its target.
         """
+        supported, cleared, open_ = list(supported or []), list(cleared or []), list(open_ or [])
+        err = self.suspect_claim_error(supported, cleared) if (supported or cleared or open_) else None
+        if err:
+            return err
+        for sid in open_:
+            if self.suspect(sid) is None:
+                return f"error: unknown suspect {sid}; record it with record_suspects"
+        backing = None
+        if supported:
+            # The supported suspect the verdict names: the one whose target is the verdict's step, else the first.
+            sid = next((x for x in supported if (self.suspect(x) or {}).get("target") == step), supported[0])
+            if CAUSAL.search(sentence or "") and (self.suspect(sid) or {}).get("target") != step:
+                return (f"error: the verdict names {step} as the cause, but the supported suspects are "
+                        f"{[(x, (self.suspect(x) or {}).get('target')) for x in supported]}; a cause can only be the "
+                        "target of a supported suspect")
+            backing = (sid, self.suspect_forks(sid))
         if not sentence.strip():
             return "error: the sentence is empty"
         if len(sentence.strip()) > VERDICT_CHARS:
@@ -466,7 +490,7 @@ class CaseFile:
             if not 0 <= inflated <= total:
                 return f"error: arm {arm}: inflated must be between 0 and total"
             given[arm] = {"inflated": inflated, "total": total}
-        ran = self.method_fork_arms()
+        ran = dict(backing[1][-1][1].get("arms") or {}) if backing else self.method_fork_arms()
         if ran is None:
             if given:
                 return "error: no fork experiment finished, so `arms` must be empty; say so in the sentence"
@@ -477,17 +501,27 @@ class CaseFile:
                 want = ", ".join(f"{a} {t['inflated']}/{t['total']}" for a, t in truth.items()) or "none scored"
                 return f"error: the fork arms must match the experiment exactly ({want}, inflated/scored)"
         numbers = {f"{a}_{k}": v for a, c in given.items() for k, v in c.items()}
-        found = verdict_fork(self.data) if ran is not None else None
-        ev = verdict_evidence(given, numbers, pairs=fork_pairs(found[1]) if found else None)
+        if backing:
+            found = backing[1][-1]
+            ev = verdict_evidence(given, numbers, pairs=[p for _, f in backing[1] for p in f.get("pairs") or []])
+        else:
+            found = verdict_fork(self.data) if ran is not None else None
+            ev = verdict_evidence(given, numbers, pairs=fork_pairs(found[1]) if found else None)
         err = wording_error(sentence, ev)
         if err:
             return err
-        if CAUSAL.search(sentence) and found is not None and found[1].get("label") != step:
+        if CAUSAL.search(sentence) and not backing and found is not None and found[1].get("label") != step:
             # The cause a verdict names must be the step its experiment changed and supported, not another one.
             return (f"error: the verdict names {step} as the cause, but fork {found[0]} tested "
                     f"{found[1].get('label')}; a cause can only be the step the supporting experiment tested")
-        return self.record_verdict(sentence.strip(), step, numbers, step=step, **split, arms=given,
-                                   confidence=confidence)
+        about = {"supported": supported, "cleared": cleared, "open": open_,
+                 "limits": (limits or "").strip()[:500]} if (supported or cleared or open_ or limits) else {}
+        out = self.record_verdict(sentence.strip(), step, numbers, step=step, **split, arms=given,
+                                  confidence=confidence, **about)
+        if backing:
+            # The saved evidence is the supported suspect's, over all its pairs, as checked above.
+            self.update_verdict(evidence=ev, fork_id=found[0], suspect_id=backing[0])
+        return out
 
     def record_trace_comparison(self, same: str, sentence: str, run_ids: list[str]) -> str:
         """Whether the traced runs fail at the same line with the same symptom: "same", "different" or "mixed"."""
@@ -538,6 +572,125 @@ class CaseFile:
                     self._changed("suspects")
             self._changed("evidence")
 
+    # ---- the investigator's science (plan 6.1 and 6.5): suspects, lessons, its plan. Additive: absent on case files
+    # saved before them. `hypotheses` stays as it was; a suspect on the same step label links to its hypothesis.
+    def record_suspects(self, suspects: list[dict], proposed_by: str = "investigator") -> str:
+        """Append suspects, each `{target, kind, rationale, proposed_by?}`, checked before any is saved. `kind`:
+        omission or commission (a step label), attribute (`<key>=<value>`) or data (a property of the data, in words).
+        Returns the new ids (s1, s2, ...) or an error. A suspect already on the list (same target and kind) is kept."""
+        rows = []
+        for i, raw in enumerate(suspects or []):
+            d = raw.model_dump() if hasattr(raw, "model_dump") else dict(raw)
+            target, kind = str(d.get("target") or "").strip(), d.get("kind")
+            rationale = str(d.get("rationale") or "").strip()
+            if kind not in SUSPECT_KINDS:
+                return f"error: suspect {i + 1}: kind must be one of {list(SUSPECT_KINDS)}"
+            if not target:
+                return f"error: suspect {i + 1}: the target is empty"
+            if kind in ("omission", "commission") and target not in self.labels:
+                return f"error: suspect {i + 1}: an {kind} names a step label from {self.labels}"
+            if kind == "attribute" and "=" not in target:
+                return f"error: suspect {i + 1}: an attribute target is `<key>=<value>`, e.g. model_family=random forest"
+            if not rationale:
+                return f"error: suspect {i + 1}: say why it is a suspect (`rationale`)"
+            rows.append({"target": target[:120], "kind": kind, "rationale": rationale[:1000],
+                         "proposed_by": str(d.get("proposed_by") or proposed_by)[:60]})
+        if not rows:
+            return "error: give at least one suspect"
+        with self._lock:
+            have = self.data.setdefault("suspects", [])
+            fresh = [r for r in rows if not any(s.get("target") == r["target"] and s.get("kind") == r["kind"] for s in have)]
+            if len(have) + len(fresh) > MAX_SUSPECTS:
+                return f"error: at most {MAX_SUSPECTS} suspects in a case; {len(have)} are recorded"
+            ids = []
+            for r in rows:
+                same = next((s for s in have if s.get("target") == r["target"] and s.get("kind") == r["kind"]), None)
+                if same is not None:
+                    ids.append(same["id"])
+                    continue
+                sid = f"s{len(have) + 1}"
+                hyp = next((h for h in self.data.get("hypotheses") or []
+                            if h.get("id") and h.get("step_label") == r["target"]), None)
+                have.append({"id": sid, **r, "status": "proposed", "at": time.time(),
+                             **({"hypothesis_id": hyp["id"]} if hyp else {})})
+                ids.append(sid)
+            self._changed("suspects")
+        return "suspects saved: " + ", ".join(ids)
+
+    def suspect(self, sid: str) -> dict | None:
+        return next((s for s in self.data.get("suspects") or [] if s.get("id") == sid), None)
+
+    def set_suspect_status(self, sid: str, status: str) -> None:
+        with self._lock:
+            for s in self.data.get("suspects") or []:
+                if s.get("id") == sid:
+                    s["status"] = status
+                    self._changed("suspects")
+
+    def suspect_claim_error(self, supported: list[str], cleared: list[str]) -> str | None:
+        """Why a verdict cannot call `supported` supported and `cleared` cleared, or None. A supported suspect needs a
+        running score of SUPPORTED_SCORE or more in `evidence`, over experiments that tested that very suspect; a
+        cleared one needs the `cleared` level. The numbers are the case file's (plan 6.4), never the model's."""
+        forks = self.data.get("forks") or {}
+        for sid in [*supported, *cleared]:
+            if self.suspect(sid) is None:
+                return f"error: unknown suspect {sid}; record it with record_suspects"
+        for sid in supported:
+            ev = (self.data.get("evidence") or {}).get(sid)
+            if not ev:
+                return f"error: {sid} was never tested, so it cannot be supported; run_experiment on it first"
+            score = float(ev.get("score") or 0)
+            if score < SUPPORTED_SCORE:
+                return (f"error: {sid} has a running score of {score:.2f}, under the {SUPPORTED_SCORE:g} a supported "
+                        f"suspect needs ({ev.get('pairs')} pairs). List it as open, or run more pairs")
+            exps = ev.get("experiments") or []
+            tested = [fid for fid in exps if isinstance(forks.get(fid), dict)
+                      and forks[fid].get("suspect_id") == sid and forks[fid].get("status") == "done"]
+            if not exps or len(tested) != len(exps):
+                return f"error: {sid}'s evidence is not tied to finished experiments that tested {sid}"
+        for sid in cleared:
+            ev = (self.data.get("evidence") or {}).get(sid) or {}
+            if ev.get("level") != "cleared":
+                return (f"error: {sid} is {ev.get('level') or 'untested'}, not cleared (cleared needs at least 5 pairs "
+                        "with a score under 1). List it as open")
+        return None
+
+    def suspect_forks(self, sid: str) -> list[tuple[str, dict]]:
+        """The finished experiments that tested suspect `sid`, oldest first, as (fork id, fork)."""
+        out = []
+        for fid in ((self.data.get("evidence") or {}).get(sid) or {}).get("experiments") or []:
+            f = (self.data.get("forks") or {}).get(fid)
+            if isinstance(f, dict) and f.get("status") == "done":
+                out.append((fid, f))
+        return out
+
+    def add_lesson(self, name: str, rule: str, suspect_id: str | None = None) -> str:
+        """A lesson the investigator proposes, waiting for a person (`lessons`). Returns its id (l1, l2, ...)."""
+        with self._lock:
+            have = self.data.setdefault("lessons", [])
+            lid = f"l{len(have) + 1}"
+            have.append({"id": lid, "name": name, "rule": rule, "status": "proposed", "at": time.time(),
+                         **({"suspect_id": suspect_id} if suspect_id else {})})
+            self._changed("lessons")
+        return lid
+
+    def update_lesson(self, lid: str, **fields: Any) -> None:
+        with self._lock:
+            for le in self.data.get("lessons") or []:
+                if le.get("id") == lid:
+                    le.update(fields)
+                    self._changed("lessons")
+
+    def set_investigator(self, **fields: Any) -> None:
+        """`investigator`: its todo list and the subagent at work (None when none is), for the screens."""
+        with self._lock:
+            cur = self.data.get("investigator") if isinstance(self.data.get("investigator"), dict) else {}
+            new = {**cur, **fields}
+            if new == cur:
+                return
+            self.data["investigator"] = new
+            self._changed("investigator")
+
     def set_interaction(self, interaction: dict | None) -> None:
         with self._lock:
             self.data["interaction"] = interaction
@@ -550,6 +703,8 @@ class CaseFile:
 
 
 CONFIDENCE = ("low", "medium", "high")
+SUSPECT_KINDS = ("omission", "commission", "attribute", "data")
+MAX_SUSPECTS = 12
 VERDICT_CHARS = 500
 
 
