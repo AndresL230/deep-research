@@ -15,6 +15,6 @@
 .lp-nav .lp-brand { gap:9px; }
 @media (max-width: 640px) {
   .lp-nav .lp-brand { gap:7px; }
-  .lp-nav .lp-brand .brand-mark { height:36px; width:auto; }
+  .lp-nav .lp-brand .brand-mark { height:19px; width:auto; }
   .lp-nav .lp-brand .brand-word { height:18.5px; width:auto; }
 }
