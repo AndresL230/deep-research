@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import type { BatchConfig, CaseFile, ControllerInfo, Costs, Defaults, Estimate } from "../src/api";
 import {
-  HM_ACT, MODEL_CHOICES, NEW_BATCH_TITLE, costBar, costGroups, domainDraft, draftModels, homeView, initialDraft, newBatchView, pickDomain, recallDomain, rememberDomain,
+  FORK_MODE, HM_ACT, MODEL_CHOICES, areaOf, areaTasks, NEW_BATCH_TITLE, costBar, costGroups, domainDraft, draftModels, homeView, initialDraft, newBatchView, pickDomain, recallDomain, rememberDomain,
   resetDraft, startBlocked, startPayload, toggleModel,
 } from "../src/batch/home";
 import type { HomeVm } from "../src/batch/model";
@@ -84,8 +84,6 @@ describe("newBatchView, the New batch dialog's form", () => {
     expect(text(newBatchView(vm({ advanced: true })))).toBe(
       "New batch Pima diabetes · planted duplicate rows "
       + "Runs Duplicated rows 50% Hint None Light Budget $ "
-      + "Rewind experiments with Time travel (LangGraph checkpoints) Message copy "
-      + "Copies get the analyst&#39;s messages up to the fork point, without its plan; the VM is rebuilt by replay. "
       + "Lessons for the analysts None Approved lessons (…) Looking for approved lessons. "
       + "Advanced Reset Trap noise 0.00 Trap hidden share 100% Holdout fraction 20% Inflation threshold 8 pts Model hint Random forest Any "
       + "Forks per arm Seed Analyst model Investigator model "
@@ -125,17 +123,13 @@ describe("newBatchView, the New batch dialog's form", () => {
     expect(newBatchView(vm({ draft: { ...cfg, trap_strength: 0.35 } }))).toContain(">35%</output>");
   });
 
-  it("offers time travel (recommended) or message copy for the experiment copies, on fork_mode", () => {
-    const html = newBatchView(vm({ draft: { ...cfg, fork_mode: "messages" } }));
-    expect(html).toContain('<input type="radio" name="fork_mode" data-cfg="fork_mode" value="checkpoint"><span>Time travel (LangGraph checkpoints)</span>');
-    expect(html).toContain('<input type="radio" name="fork_mode" data-cfg="fork_mode" value="messages" checked><span>Message copy</span>');
-    expect(text(html)).toContain("Rewind experiments with");
-    const tt = newBatchView(vm({ draft: { ...cfg, fork_mode: "checkpoint" } }));
-    expect(tt).toContain('value="checkpoint" checked>');
-    expect(text(tt)).toContain("Recommended. Copies resume the analyst&#39;s saved messages and plan from a LangGraph checkpoint");
-    // A draft from a server older than fork_mode reads as the server's default, message copy.
-    const { fork_mode: _f, ...older } = cfg;
-    expect(newBatchView(vm({ draft: older as BatchConfig }))).toContain('value="messages" checked>');
+  it("never offers to turn time travel off: every batch rewinds its experiments from LangGraph checkpoints", () => {
+    const html = newBatchView(vm({ draft: { ...cfg, fork_mode: "messages" }, advanced: true }));
+    expect(html).not.toContain('data-cfg="fork_mode"');
+    expect(text(html)).not.toContain("Rewind experiments with");
+    expect(FORK_MODE).toBe("checkpoint");
+    // A draft that still says message copy (an older server's default) starts with time travel all the same.
+    expect(startPayload({ ...cfg, fork_mode: "messages" }, pima, null).fork_mode).toBe("checkpoint");
   });
 
   it("offers the approved lessons by name and count, and cannot pick them when there are none", () => {
@@ -316,10 +310,12 @@ describe("the domain picker", () => {
     expect(opts).toHaveLength(2);
     expect(opts[0]).toContain('data-arg="tabular"');
     expect(opts[0]).toContain('aria-checked="true"');
-    expect(opts[0]).toContain(">Data science<");
+    expect(opts[0]).toContain(">Data Science<");
     expect(opts[1]).toContain('data-arg="robot_arm"');
     expect(opts[1]).toContain('aria-checked="false"');
-    expect(opts[1]).toContain(">Robot arm<");
+    expect(opts[1]).toContain(">Physical AI<");
+    // One task in each area: no second row.
+    expect(html).not.toContain("hm-task-seg");
     expect(HM_ACT.domain).toBe("hm-domain");
     // Everything below the picker is the form as it was.
     const below = (h: string) => h.slice(h.indexOf('data-morph-key="main"'));
@@ -327,6 +323,31 @@ describe("the domain picker", () => {
     expect(html).toContain("DATASET ROWS");
     expect(html).toContain("Pima diabetes · planted duplicate rows");
     for (const f of [...MAIN, ...ADVANCED]) expect(html).toContain(`data-cfg="${f}"`);
+  });
+
+  it("picks the area first, Data Science or Physical AI, then the task within it", () => {
+    const sim = (name: string, title: string) => ({ ...withDomains.domains![1], name, title, description: `${title}.`, config: { ...robotCfg, domain: name } });
+    // The server's order is alphabetical; the picker's is the areas' own.
+    const all: Defaults = { ...withDomains, domains: [sim("humanoid", "Humanoid punch and kick"), sim("humanoid_track", "Humanoid motion tracking"), ...withDomains.domains!] };
+    const strike = newBatchView(vm({ defaults: all, draft: { ...robotCfg, domain: "humanoid" } }));
+    const areas = strike.slice(strike.indexOf('aria-label="Area"'), strike.indexOf("hm-task-seg"));
+    expect(areas.match(/>(Data Science|Physical AI)</g)).toEqual([">Data Science<", ">Physical AI<"]);
+    // Physical AI is the chosen area; pressing it again keeps the task.
+    expect(areas).toMatch(/aria-checked="true" data-act="hm-domain" data-arg="humanoid"[^>]*>Physical AI</);
+    // Data Science offers its task.
+    expect(areas).toMatch(/aria-checked="false" data-act="hm-domain" data-arg="tabular"[^>]*>Data Science</);
+    // The tasks of Physical AI, in its order, the chosen one checked.
+    const tasks = strike.slice(strike.indexOf("hm-task-seg"));
+    expect(tasks).toContain('aria-label="Physical AI task"');
+    expect(tasks.match(/data-arg="(\w+)"/g)).toEqual(['data-arg="robot_arm"', 'data-arg="humanoid"', 'data-arg="humanoid_track"']);
+    expect(tasks).toMatch(/aria-checked="true" data-act="hm-domain" data-arg="humanoid"[^>]*>Humanoid strike</);
+    // Coming from Data Science, Physical AI offers its first task.
+    const tab = newBatchView(vm({ defaults: all, draft: tabCfg }));
+    expect(tab).toMatch(/data-arg="robot_arm"[^>]*>Physical AI</);
+    expect(tab).not.toContain("hm-task-seg");
+    // A domain no area names is a simulator's: it joins Physical AI, last.
+    expect(areaOf("chess").label).toBe("Physical AI");
+    expect(areaTasks([{ name: "chess" }, { name: "robot_arm" }, { name: "tabular" }], areaOf("robot_arm")).map((x) => x.name)).toEqual(["robot_arm", "chess"]);
   });
 
   it("hides the tabular settings for the robot arm and says what the task is", () => {
@@ -373,17 +394,17 @@ describe("the domain picker", () => {
   it("starts a tabular batch with the same body as before domains", () => {
     const draft: BatchConfig = { ...tabCfg, n_runs: 6 };
     const chosen = { dataset: "ds-0123abcd", target: "price", script: "sc-0123abcd" };
-    expect(startPayload(draft, chosen, withDomains)).toEqual({ ...draft, ...chosen, mode: "live" });
+    expect(startPayload(draft, chosen, withDomains)).toEqual({ ...draft, ...chosen, mode: "live", fork_mode: "checkpoint" });
     // A config from a server without domains, and no defaults at all: the same.
     const old = { ...cfg, mode: "replay" } as BatchConfig;
-    expect(startPayload(old, pima, null)).toEqual({ ...old, ...pima, mode: "live" });
+    expect(startPayload(old, pima, null)).toEqual({ ...old, ...pima, mode: "live", fork_mode: "checkpoint" });
     expect(startPayload(old, pima, null).domain).toBeUndefined();
   });
 
   it("starts a robot batch with domain robot_arm, the robot defaults and no tabular choices", () => {
     const draft = pickDomain(vm({ defaults: withDomains, draft: { ...tabCfg, n_runs: 4, trap: "leak", trap_strength: 0.2 } }), "robot_arm").draft!;
     const body = startPayload(draft, { dataset: "ds-0123abcd", target: "price", script: "sc-0123abcd" }, withDomains);
-    expect(body).toEqual({ ...robotCfg, n_runs: 4, mode: "live" });
+    expect(body).toEqual({ ...robotCfg, n_runs: 4, mode: "live", fork_mode: "checkpoint" });
     expect(body.domain).toBe("robot_arm");
     expect(body.inflation_threshold).toBe(0.275);
     expect(body.robot_hidden_positions).toBeNull();
@@ -472,12 +493,12 @@ describe("the uploaded controller", () => {
   it("sends the controller with a robot batch and never with a tabular one", () => {
     const draft: BatchConfig = { ...robotCt, n_runs: 3, robot_start: "uploaded", robot_controller: controller.id };
     const body = startPayload(draft, { dataset: "ds-0123abcd", target: "price", script: "sc-0123abcd" }, withCt);
-    expect(body).toEqual({ ...robotCt, n_runs: 3, robot_start: "uploaded", robot_controller: controller.id, mode: "live" });
+    expect(body).toEqual({ ...robotCt, n_runs: 3, robot_start: "uploaded", robot_controller: controller.id, mode: "live", fork_mode: "checkpoint" });
     expect(body.script).toBeNull();
     // Switched to Data science with the controller still in the draft: the tabular defaults take its place.
     const tab = pickDomain(vm({ defaults: withCt, draft }), "tabular").draft!;
     expect(tab.robot_controller).toBe(controller.id);
-    expect(startPayload(tab, pima, withCt)).toEqual({ ...tabCt, n_runs: 3, mode: "live" });
+    expect(startPayload(tab, pima, withCt)).toEqual({ ...tabCt, n_runs: 3, mode: "live", fork_mode: "checkpoint" });
     // The same without defaults, or with defaults that do not name the keys.
     expect(startPayload({ ...tab, domain: undefined }, pima, null)).toMatchObject({ robot_start: "blank", robot_controller: null, mode: "live" });
     expect(startPayload(tab, pima, withDomains)).toMatchObject({ robot_start: "blank", robot_controller: null });

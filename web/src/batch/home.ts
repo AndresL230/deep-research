@@ -197,10 +197,13 @@ export function startPayload(draft: BatchConfig, inputs: Pick<BatchConfig, "data
     // Even on a server whose defaults do not name the keys.
     if (draft.robot_controller) reset.robot_controller = null;
     if (draft.robot_start === "uploaded" && !("robot_start" in reset)) reset.robot_start = "blank";
-    return { ...draft, ...inputs, ...reset, mode: "live" } as BatchConfig;
+    return { ...draft, ...inputs, ...reset, mode: "live", fork_mode: FORK_MODE } as BatchConfig;
   }
-  return { ...draft, ...reset, mode: "live" } as BatchConfig;
+  return { ...draft, ...reset, mode: "live", fork_mode: FORK_MODE } as BatchConfig;
 }
+
+/** How experiment copies are rewound: always time travel (LangGraph checkpoints), never a choice in the form. */
+export const FORK_MODE = "checkpoint";
 
 const DOMAIN_KEY = "orro.domain";
 
@@ -216,19 +219,51 @@ export function rememberDomain(name: string): void {
 /** Short names for the picker. A domain added later shows its own title. */
 const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm", humanoid: "Humanoid strike", humanoid_push: "Humanoid push", humanoid_track: "Humanoid tracking" };
 
-/** The choice of domain, with the chosen one's line under it. Only when the server offers more than one. */
+/**
+ * The areas the domains sit in, in the picker's order, each with its tasks in order. A domain added later and not
+ * named here is a simulator's, so it joins Physical AI at the end.
+ */
+export const AREAS = [
+  { key: "data", label: "Data Science", domains: ["tabular"] },
+  { key: "physical", label: "Physical AI", domains: ["robot_arm", "humanoid", "humanoid_track", "humanoid_push"] },
+] as const;
+type Area = (typeof AREAS)[number];
+
+export const areaOf = (name: string): Area =>
+  AREAS.find((a) => (a.domains as readonly string[]).includes(name)) ?? AREAS[AREAS.length - 1];
+
+/** The domains the server offers in `area`, in the area's order (any it does not name, after them). */
+export function areaTasks<T extends { name: string }>(list: readonly T[], area: Area): T[] {
+  const order = area.domains as readonly string[];
+  const rank = (n: string) => (order.includes(n) ? order.indexOf(n) : order.length);
+  return list.filter((x) => areaOf(x.name) === area).sort((x, y) => rank(x.name) - rank(y.name));
+}
+
+/**
+ * The choice of domain, in two steps: the area (Data Science, Physical AI), then the task within it, with the chosen
+ * task's line under them. An area offers its first task when picked. An area with one task shows no second row. Only
+ * when the server offers more than one domain.
+ */
 function domainRow(c: BatchConfig, d: Defaults | null, locked: boolean): string {
-  // The default domain first, as the form was before there was a choice; the others in the server's order.
-  const list = [...(d?.domains ?? [])].sort((x, y) => Number(y.name === DEFAULT_DOMAIN) - Number(x.name === DEFAULT_DOMAIN));
+  const list = d?.domains ?? [];
   if (list.length < 2) return "";
   const cur = domainOf(c);
+  const here = areaOf(cur);
   const chosen = list.find((x) => x.name === cur);
-  const opts = list.map((x) => {
+  const dis = locked ? " disabled" : "";
+  const areas = AREAS.map((a) => ({ a, tasks: areaTasks(list, a) })).filter((x) => x.tasks.length);
+  const areaOpts = areas.map(({ a, tasks }) => {
+    const on = a === here;
+    return `<button type="button" class="hm-dom-o" role="radio" aria-checked="${on}" data-act="${HM_ACT.domain}" data-arg="${attr(on ? cur : tasks[0].name)}"${dis}>${esc(a.label)}</button>`;
+  }).join("");
+  const tasks = areaTasks(list, here);
+  const taskOpts = tasks.map((x) => {
     const on = x.name === cur;
-    return `<button type="button" class="hm-dom-o" role="radio" aria-checked="${on}" data-act="${HM_ACT.domain}" data-arg="${attr(x.name)}" title="${attr(x.title)}"${locked ? " disabled" : ""}>${esc(DOMAIN_SHORT[x.name] ?? x.title)}</button>`;
+    return `<button type="button" class="hm-dom-o hm-task-o" role="radio" aria-checked="${on}" data-act="${HM_ACT.domain}" data-arg="${attr(x.name)}" title="${attr(x.title)}"${dis}>${esc(DOMAIN_SHORT[x.name] ?? x.title)}</button>`;
   }).join("");
   return `<div class="hm-dom" data-morph-key="domain">
-    <div class="hm-dom-seg" role="radiogroup" aria-label="Task">${opts}</div>
+    <div class="hm-dom-seg" role="radiogroup" aria-label="Area" data-morph-key="areas">${areaOpts}</div>
+    ${tasks.length > 1 ? `<div class="hm-dom-seg hm-task-seg" role="radiogroup" aria-label="${attr(`${here.label} task`)}" data-morph-key="tasks:${here.key}">${taskOpts}</div>` : ""}
     ${chosen?.description ? `<span class="hm-dom-d">${esc(chosen.description)}</span>` : ""}
   </div>`;
 }
@@ -378,12 +413,6 @@ function mainRow(c: BatchConfig, trap: TrapInfo | null, locked = false): string 
   </div>`;
 }
 
-/** What each fork_mode does, as the line under its choice. */
-export const FORK_MODE_HELP: Record<string, string> = {
-  checkpoint: "Recommended. Copies resume the analyst's saved messages and plan from a LangGraph checkpoint; the VM is rebuilt by replay.",
-  messages: "Copies get the analyst's messages up to the fork point, without its plan; the VM is rebuilt by replay.",
-};
-
 /** The line under the Lessons choice: what the analysts get, or why "Approved lessons" cannot be picked. */
 function lessonsHelp(c: BatchConfig, list: Loadable<ApprovedLesson[]> | undefined): string {
   if (!list || list.state === "loading") return "Looking for approved lessons.";
@@ -394,10 +423,10 @@ function lessonsHelp(c: BatchConfig, list: Loadable<ApprovedLesson[]> | undefine
     : "The analysts start with no lessons from earlier batches.";
 }
 
-/** How experiment copies are rewound (fork_mode) and which lessons the analysts get (lessons), each with its line.
- *  "Approved lessons" can only be picked once the server lists at least one (GET /api/lessons). */
+/** Which lessons the analysts get (lessons), with its line. "Approved lessons" can only be picked once the server
+ *  lists at least one (GET /api/lessons). Experiments always rewind by time travel (`FORK_MODE`): no choice here. */
 function agentRows(c: BatchConfig, list: Loadable<ApprovedLesson[]> | undefined): string {
-  const cfg = { ...c, fork_mode: c.fork_mode ?? "messages", lessons: c.lessons ?? "none" } as BatchConfig;
+  const cfg = { ...c, lessons: c.lessons ?? "none" } as BatchConfig;
   const approved = list?.state === "ready" ? list.value : [];
   const n = list?.state === "ready" ? String(approved.length) : "…";
   const names = approved.length
@@ -405,10 +434,6 @@ function agentRows(c: BatchConfig, list: Loadable<ApprovedLesson[]> | undefined)
       `<li class="hm-lesson" title="${attr(l.rule)}"><code>${esc(l.name)}</code></li>`).join("")}</ul>`
     : "";
   return `<div class="hm-opts" data-morph-key="opts">
-    <div class="hm-opt" data-morph-key="opt-fork">
-      ${choiceField(cfg, "fork_mode", "Rewind experiments with", [["checkpoint", "Time travel (LangGraph checkpoints)"], ["messages", "Message copy"]])}
-      <span class="hm-opt-d">${esc(FORK_MODE_HELP[String(cfg.fork_mode)] ?? "")}</span>
-    </div>
     <div class="hm-opt" data-morph-key="opt-lessons">
       ${choiceField(cfg, "lessons", "Lessons for the analysts", [["none", "None"], ["learned", `Approved lessons (${n})`]], approved.length ? [] : ["learned"])}
       <span class="hm-opt-d">${esc(lessonsHelp(cfg, list))}</span>

@@ -65,8 +65,9 @@ class BatchConfig(BaseModel):
     # (forks.cut_history), the way every copy was built before. "checkpoint": the LangGraph snapshot just before the
     # model turn that made the fork-point action, read from the batch's checkpoints.sqlite and seeded into a new
     # thread with `aupdate_state`, so the copy keeps the source run's todo list too. Either way the copy's VM is
-    # rebuilt by replay (or a VM fork): LangGraph restores the agent's state, never the VM's.
-    fork_mode: Literal["checkpoint", "messages"] = "messages"
+    # rebuilt by replay (or a VM fork): LangGraph restores the agent's state, never the VM's. Time travel is always on
+    # for a new batch (the New batch form offers no choice); "messages" stays for batches saved with it.
+    fork_mode: Literal["checkpoint", "messages"] = "checkpoint"
     # MASTER_PLAN Phase 5.2: "learned" gives every analyst the approved lessons under skills/learned/ (as Deep Agents
     # skills, or appended to the system prompt when its backend cannot serve them). "none": analysts get no lessons.
     lessons: Literal["none", "learned"] = "none"

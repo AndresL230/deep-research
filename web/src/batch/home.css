@@ -43,6 +43,9 @@
 .hm-dom-o:disabled { cursor:default; }
 .hm-dom-o:disabled:not([aria-checked="true"]) { opacity:.6; }
 .hm-dom-d { font-size:12.5px; line-height:1.5; color:var(--fg-55); }
+/* The second step of the picker: the tasks within the chosen area, a little smaller than the areas above them. */
+.hm-task-seg { height:32px; }
+.hm-task-o { font-size:12.5px; }
 
 /* the trap picker: a select, with the chosen trap's one line under it */
 .hm-trap { display:flex; flex-direction:column; gap:6px; min-width:0; }
