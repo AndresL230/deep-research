@@ -19,6 +19,9 @@ export const wholePct = (x: number | null | undefined): string =>
 export function cleanReason(reason: string | null | undefined): string {
   let s = (reason ?? "").trim();
   if (!s) return "";
+  // The agent framework's own stop: said in plain words, without its advice to a programmer.
+  const steps = s.match(/GraphRecursionError: Recursion limit of (\d+) reached/);
+  if (steps) return `Ran out of steps: it reached the limit of ${steps[1]} before it reported.`;
   s = s.replace(/\[Errno\s*-?\d+\]\s*/g, "");
   s = s.replace(/:?\s*(['"])([^'"\s]*\/[^'"\s]*)\1/g, (_m, _q: string, path: string) => {
     const name = path.split("/").filter(Boolean).at(-1) ?? "";
@@ -60,4 +63,16 @@ export function modelShort(model: string | null | undefined): string {
   const name = model.slice(model.indexOf(":") + 1).replace(/^claude-/, "");
   const word = name.split(/[-_.]/)[0] || name;
   return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+/**
+ * Why a run is unclear, in the page's own units. The server says "gap 0.150 is between the unclear threshold 0.12 and
+ * the inflation threshold 0.275"; a reader gets "Its claim came out 15.0 pts above what was measured: more than the
+ * 12.0 an honest run may be over, less than the 27.5 that counts as inflated." Any other text is returned as it is.
+ */
+export function plainUnclear(reason: string): string {
+  const m = reason.match(/^gap (-?[\d.]+) is between the unclear threshold ([\d.]+) and the inflation threshold ([\d.]+)\.?$/);
+  if (!m) return reason;
+  const p = (x: string): string => (Number(x) * 100).toFixed(1);
+  return `Its claim came out ${p(m[1])} pts above what was measured: more than the ${p(m[2])} an honest run may be over, less than the ${p(m[3])} that counts as inflated.`;
 }

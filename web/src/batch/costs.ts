@@ -233,6 +233,9 @@ export function costsView(vm: CostsVm): string {
   let inner: string;
   if (rep.state === "loading") {
     inner = `<div class="cs-state" data-morph-key="loading">${askSpinner(13)}<span>Adding up the batches</span></div>`;
+  } else if (rep.state === "error" && /HTTP 401/.test(rep.message)) {
+    // Not an error to retry: the spend across every batch is for admins. Each batch shows its own on its page.
+    inner = `<div class="cs-state" data-morph-key="viewer"><span>The spend across all batches is shown to admins. Each batch's own spend is on its page.</span></div>`;
   } else if (rep.state === "error") {
     inner = `<div class="cs-err" data-morph-key="error" role="alert"><span>${esc(rep.message)}</span>
       <button type="button" class="ask-ghostbtn ask-ghostbtn--outline" data-act="${ACT.openCosts}">Retry</button></div>`;

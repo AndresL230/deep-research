@@ -465,7 +465,7 @@ function render(): void {
   let body: string;
   if (landing) body = landingView(landingTone, admin());
   else if (r.name === "home") body = homeView(S.home, roleOf(S.access));
-  else if (r.name === "how") body = howView(S.how, S.howAt);
+  else if (r.name === "how") body = howView(S.how, S.howAt, admin());
   else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
   else if (r.name === "lessons") body = foolrateView({ reports: S.foolrate, at: r.report ?? null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);

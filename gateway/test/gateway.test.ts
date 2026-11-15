@@ -274,3 +274,25 @@ test("pages that are not the API or sign-in are the static site", async () => {
   assert.equal(res.status, 200);
   assert.match(await res.text(), /asset/);
 });
+
+test("a media file is sent in parts when a part is asked for (Safari will not play a video otherwise)", async () => {
+  const bytes = new Uint8Array(100).map((_, i) => i);
+  env.ASSETS = { fetch: async () => new Response(bytes, { headers: { "content-type": "video/mp4" } }) };
+  const ask = (range?: string, path = "/media/clip.mp4") =>
+    worker.fetch(new Request(`${SITE}${path}`, range ? { headers: { Range: range } } : {}), env as never, { waitUntil() {} } as never);
+  const part = await ask("bytes=10-19");
+  assert.equal(part.status, 206);
+  assert.equal(part.headers.get("content-range"), "bytes 10-19/100");
+  assert.equal(part.headers.get("content-length"), "10");
+  assert.deepEqual([...new Uint8Array(await part.arrayBuffer())], [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+  // Safari's first probe, an open end, and the last bytes.
+  assert.equal((await ask("bytes=0-1")).headers.get("content-range"), "bytes 0-1/100");
+  assert.equal((await ask("bytes=90-")).headers.get("content-range"), "bytes 90-99/100");
+  assert.equal((await ask("bytes=-5")).headers.get("content-range"), "bytes 95-99/100");
+  assert.equal((await ask("bytes=50-500")).headers.get("content-range"), "bytes 50-99/100");
+  // Past the end: 416. A range this does not understand, no range, or a file outside /media/: the whole file.
+  assert.equal((await ask("bytes=200-300")).status, 416);
+  assert.equal((await ask("bytes=0-1,5-6")).status, 200);
+  assert.equal((await ask()).status, 200);
+  assert.equal((await ask("bytes=0-1", "/assets/app.js")).status, 200);
+});

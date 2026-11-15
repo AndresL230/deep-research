@@ -30,7 +30,7 @@ import { TABULAR_WORDS, capital, domainWords, judgedOn, stepText } from "./words
 import type { DomainWords, TraceEntry } from "../api";
 import { ADMIN_ONLY } from "../access";
 import { STOPPED_BY_ERROR, phaseDetails } from "./phase";
-import { changeText, pairDots, predictionText, scoreBar, scoreText, simTag, suspectPending } from "./suspects";
+import { changeText, levelOf, pairDots, predictionText, scoreBar, scoreText, simTag, suspectPending } from "./suspects";
 
 export { NEEDED_PAIRS } from "./evidence";
 
@@ -1041,7 +1041,7 @@ function forkSummary(exps: readonly ForkExperiment[], vm: BatchVm): string {
   const seen = method.flatMap((f) => armNames(f).flatMap((a) => kids(f, a)));
   const padded = method.some((f) => f.status !== "done" && f.status !== "stopped" && armNames(f).some((a) => kids(f, a).length < f.n_per_arm));
   const row = (f: ForkExperiment): string => {
-    const ev = forkEvidence(c, f);
+    const ev = ownEvidence(c, f);
     const cmp = compare(f, "control", "forced");
     const dots = pairDots(cmp.done.map((p) => ({ i: p.i, control_gap: p.baseGap, changed_gap: p.changedGap, agree: p.agree })));
     const sus = f.suspect_id ?? f.hypothesis_id;
@@ -1062,7 +1062,7 @@ function forkSummary(exps: readonly ForkExperiment[], vm: BatchVm): string {
     `<tbody data-morph-list>${method.map(row).join("")}</tbody></table></div>`;
   // The method, said once for every experiment on the page.
   const how = `<p class="ln-how-x" data-morph-key="pair-key">A pair is one copy left alone and one made to take the step, cut from the same run at the same moment. ` +
-    `It agrees when it goes the way the prediction said. The plan's sequential score starts at 1 and each pair that agrees multiplies it by ${AGREE}, each other by ${DISAGREE} (MASTER_PLAN 6.4). ` +
+    `It agrees when it goes the way the prediction said. The running score starts at 1 and each pair that agrees multiplies it by ${AGREE}, each other by ${DISAGREE}. ` +
     `It sets the level: supported at ${SUPPORTED_SCORE} or more. ${esc(RULE_TEXT)}. The Fisher p is shown only. ` +
     `${esc(sw.reported)} and ${esc(sw.true.toLowerCase())} are the mean over an arm's copies.</p>`;
   return `<div class="ln-xs ds-rise" data-io data-morph-key="fork-summary">${table}` +
@@ -1195,7 +1195,7 @@ const ARM_WHY: Record<ForkArm, string> = {
   control: "Baseline: same moment, nothing changed",
   placebo: "An extra tool call that changes nothing, so forced is not the only arm with a longer history",
   show: "Told what forced would fix, left to act on it",
-  forced: "Does the step the honest runs did",
+  forced: "Does the step under test",
   fixed: "The proposed patch, applied in the VM",
 };
 
@@ -1231,14 +1231,31 @@ function markKey(statuses: readonly string[], padded = false): string {
   return items ? `<p class="ln-key" data-morph-key="key">${items}</p>` : "";
 }
 
+/**
+ * An experiment's evidence on its own pairs. `forkEvidence` gives the verdict's when the verdict rests on this fork,
+ * and a verdict can pool several experiments on one suspect (7 pairs, score 89.39): beside this experiment's own 5
+ * pairs that reads as two scores for one experiment. Here the pairs, the score and the level are the experiment's.
+ */
+function ownEvidence(c: CaseFile | null, f: ForkExperiment): Evidence {
+  const ev = forkEvidence(c, f);
+  const cmp = compare(f, "control", "forced");
+  if (!cmp.n || ev.pairs === cmp.n) return ev;
+  return { ...ev, pairs: cmp.n, score: cmp.score, level: levelOf(cmp.score, cmp.n) };
+}
+
+/** "4 of 5 pairs" while fewer are in than the rule needs at the least, "7 pairs" from there on (never "7 of 5"). */
+const pairsOf = (ev: Pick<Evidence, "pairs" | "needed">): string =>
+  ev.pairs < ev.needed ? `${ev.pairs} of ${ev.needed} pairs` : `${ev.pairs} ${ev.pairs === 1 ? "pair" : "pairs"}`;
+
 /** The evidence as a meter: one slot per pair the rule needs, filled for each pair in, the level beside it. */
 const pairMeter = (ev: Pick<Evidence, "level" | "pairs" | "needed" | "score">, withScore = false): string => {
   const slots = Math.max(ev.needed, ev.pairs);
   return `<div class="ln-meter" data-morph-key="meter">${levelChip(ev.level)}` +
-    `<span class="ln-meter-s" role="img" aria-label="${attr(`${ev.pairs} of ${ev.needed} pairs`)}">${Array.from({ length: slots }, (_, i) => `<i class="${i < ev.pairs ? "is-on" : "is-off"}"></i>`).join("")}</span>` +
-    `<span class="ln-meter-t">${ev.pairs} of ${ev.needed} pairs</span>` +
+    `<span class="ln-meter-s" role="img" aria-label="${attr(pairsOf(ev))}">${Array.from({ length: slots }, (_, i) => `<i class="${i < ev.pairs ? "is-on" : "is-off"}"></i>`).join("")}</span>` +
+    `<span class="ln-meter-t">${pairsOf(ev)}</span>` +
     `<span class="ln-meter-w">${esc(ev.level === "supported" ? "Enough to call it the cause"
-      : ev.pairs < ev.needed ? `${ev.needed - ev.pairs} more to confirm it` : "Not confirmed: the difference could still be chance")}</span>` +
+      : ev.level === "cleared" ? "Ruled out: the pairs did not go the predicted way"
+      : ev.pairs < ev.needed ? `At least ${ev.needed - ev.pairs} more to confirm it` : "Not confirmed: the difference could still be chance")}</span>` +
     (withScore ? `<span class="ln-meter-sc">Score <b>${esc(scoreText(ev.score))}</b> of ${SUPPORTED_SCORE}</span>` : "") + `</div>`;
 };
 
@@ -1247,7 +1264,7 @@ const ARM_FOR: Record<ForkArm, string> = {
   control: "Nothing changed. It shows what the copies do anyway.",
   placebo: "An extra step that changes nothing. It shows that any extra step is not what matters.",
   show: "Told what was tested and made to run nothing. It shows whether knowing is enough.",
-  forced: "Made to take the step the honest runs took. This is the test.",
+  forced: "Made to take the step under test. This is the test.",
   fixed: "The proposed fix, applied before the copy carries on.",
 };
 
@@ -1349,7 +1366,7 @@ function forkPicture(f: ForkExperiment, vm: BatchVm): string {
     `<div class="ln-md-more"><span class="ln-md-more-h">More</span><ul>${links}</ul></div>` +
     `</div>` +
     // A fix fork's key is its own; a method fork's is said once for the page (forkSummary), with how it is read.
-    (fixing ? markKey(seen, !over && names.some((a) => sortedChildren(f.children ?? {}, a).length < f.n_per_arm)) : pairMeter(forkEvidence(c, f), true)) +
+    (fixing ? markKey(seen, !over && names.some((a) => sortedChildren(f.children ?? {}, a).length < f.n_per_arm)) : pairMeter(ownEvidence(c, f), true)) +
     `</div>`;
 }
 
@@ -1382,7 +1399,7 @@ function question(f: ForkExperiment, vm: BatchVm): string {
     ? `Saved before any copy ran: ${planned ? prediction.replace(/_/g, " ") : prediction}`
     : fixing
       ? "Expected: a higher measured rate in the fixed arm"
-      : "Expected: a smaller gap in the forced arm. Implied by the design (the forced step is what honest runs did); no prediction was saved before the copies ran.";
+      : "Expected: a smaller gap in the forced arm. Implied by the design (the forced step is the one under test); no prediction was saved before the copies ran.";
   return `<div class="ln-q" data-io data-morph-key="q">` +
     `<div class="ln-exp-h"><span class="ds-eyebrow ln-exp-id">Fork ${esc(f.id)} · ${fixing ? "fix" : "method"} experiment</span>${chipHtml}</div>` +
     `<h3 class="ln-q-t">${reveal(q, "word")}</h3>` +
@@ -1572,11 +1589,11 @@ function evidenceSoFar(f: ForkExperiment, c: CaseFile): string {
   const stopped = f.status === "stopped" ? `<span class="ds-chip ds-chip--idle ln-ev-stopped">${esc(`stopped, ${cmp.n} of ${f.n_per_arm} pairs complete`)}</span>` : "";
   const stats = statsLine(f, cmp);
   const level = ev.source === "server"
-    ? "The level is the server's (verdict.evidence)."
+    ? "The level was set by the server."
     : "The server has not judged this fork: the level is its rule, applied here to the arm counts.";
   const foot = cmp.source === "case"
-    ? `${level} The sequential score is from the case file: forks.${f.id}.score, by MASTER_PLAN 6.4.`
-    : `${level} The sequential score is computed in the browser from forks.${f.id}.children.*.gap by MASTER_PLAN 6.4; pairs are matched by copy number after the run.`;
+    ? `${level} The running score is the one saved with this experiment.`
+    : `${level} The running score is worked out here from each copy's gap; pairs are matched by copy number after the run.`;
   const title = cmp.n
     ? `${cmp.agree} of ${cmp.n} ${cmp.n === 1 ? "pair" : "pairs"} went the predicted way`
     : "No pair is complete yet";
@@ -1586,8 +1603,8 @@ function evidenceSoFar(f: ForkExperiment, c: CaseFile): string {
   return `<div class="ln-evid" data-morph-key="evidence">${secHead("Evidence", title)}` +
     `<div class="ov-card ln-ev-c ds-pop" data-io data-morph-key="ev-score">` +
     `<div class="ln-ev-top"><div class="ln-ev-lv">${levelChip(ev.level)}${stopped}</div>` +
-    `<p class="ln-ev-n" title="${attr(`${ev.pairs} of the ${ev.needed} pairs needed`)}"><b>${count(ev.pairs, "int", String(ev.pairs))}</b><span class="ln-muted"> of ${ev.needed} pairs</span></p>` +
-    `<p class="ln-ev-sq">The plan's sequential score: <b>${count(cmp.score, "dec2", two(cmp.score), { linear: true })}</b>` +
+    `<p class="ln-ev-n" title="${attr(ev.pairs < ev.needed ? `${ev.pairs} of the ${ev.needed} pairs needed at the least` : pairsOf(ev))}"><b>${count(ev.pairs, "int", String(ev.pairs))}</b><span class="ln-muted">${ev.pairs < ev.needed ? ` of ${ev.needed} pairs` : ev.pairs === 1 ? " pair" : " pairs"}</span></p>` +
+    `<p class="ln-ev-sq">The running score: <b>${count(cmp.score, "dec2", two(cmp.score), { linear: true })}</b>` +
     `<span class="ln-muted"> of the ${SUPPORTED_SCORE} supported needs</span></p></div>` +
     `<div class="ln-ev-ch">${chart}</div></div>` +
     `<div class="ln-ev-notes" data-io data-morph-key="ev-notes">` +
@@ -2045,7 +2062,7 @@ function standing(c: CaseFile, f: ForkExperiment | null, cmp: Comparison | null,
         `(${esc(`${cmp.base} ${pts(cmp.pairMeanBase)}, ${cmp.changed} ${pts(cmp.pairMeanChanged)}`)}) in ${cmp.agree} of ${cmp.n} pairs.`
       : "In this experiment no pair of copies is complete yet.";
     const stats = [
-      `${ev.pairs} of the ${ev.needed} pairs needed`,
+      ev.pairs < ev.needed ? `${ev.pairs} of the ${ev.needed} pairs needed at the least` : pairsOf(ev),
       `Fisher p ${fmtFrac(cmp.fisher)}`,
       gapP(f, cmp),
       `sequential score ${two(cmp.score)}`,
@@ -2069,8 +2086,8 @@ function claim(c: CaseFile, v: Verdict, f: ForkExperiment | null, ev: Evidence):
   const own = investigatorSentence(c);
   let said = "";
   if (own && own !== verdictText(c)) {
-    said = `<figure class="ln-claim" data-morph-key="v-claim"><blockquote class="ln-claim-q"><p class="ln-claim-s">The investigator wrote: ${esc(own)}</p></blockquote>` +
-      `<figcaption class="ln-claim-by">Recorded with record_verdict ${whoTag("llm")}${conf}</figcaption></figure>`;
+    said = `<figure class="ln-claim" data-morph-key="v-claim"><blockquote class="ln-claim-q"><p class="ln-claim-s">The investigator wrote: ${esc(/[.!?)"'”]$/.test(own) ? own : `${own}…`)}</p></blockquote>` +
+      `<figcaption class="ln-claim-by">Its own words, as saved when it wrote them; the counts and the rule above are the ones in force now. ${whoTag("llm")}${conf}</figcaption></figure>`;
   } else if (!own && v.sentence?.trim()) {
     const what = causeWords(v.sentence) ? "names a cause" : "claims a proof";
     said = `<div class="ln-claim" data-morph-key="v-claim"><p class="ln-note ln-v-open">${esc(`The investigator's own sentence ${what}, which this evidence does not support yet ` +
@@ -2083,7 +2100,7 @@ function claim(c: CaseFile, v: Verdict, f: ForkExperiment | null, ev: Evidence):
   const cites = rec.length && left.length
     ? `<p class="ln-note">${esc(`The recorded verdict cites ${andList(ran.filter((a) => rec.includes(a)))}; the fork also ran ${andList(left)}.`)}</p>` : "";
   return said + cites +
-    verdictSplit(v) +
+    verdictSplit(v, c.split) +
     (check ? `<p class="ln-note ln-selfcheck">${esc(check)}</p>` : "");
 }
 
@@ -2249,10 +2266,10 @@ function limits(c: CaseFile, f: ForkExperiment | null, cmp: Comparison | null, e
     if (f.measures === "reporting_accuracy") out.push("The evidence level counts honest reports only. The copies could also edit their code, so what each one measured is shown beside it, outside the level.");
     const failed = Object.values(f.children ?? {}).filter((k) => k.status === "failed").length;
     if (failed) out.push(`${failed} ${failed === 1 ? "copy" : "copies"} failed and ${failed === 1 ? "was" : "were"} left out.`);
-    if (typeof f.score !== "number") out.push("The running score and the permutation p are computed in the browser by MASTER_PLAN 6.4.");
+    if (typeof f.score !== "number") out.push("The running score and the permutation p are worked out in the browser.");
   }
   out.push(ev.source === "server"
-    ? "The level is the server's (verdict.evidence)."
+    ? "The level was set by the server."
     : `The server saved no evidence level by today's rule with this verdict: that rule (${RULE_TEXT}) was applied in the browser.`);
   if (isMotionBatch(c.config)) {
     out.push(`Measured ${judgedOn(domainWords(c.config), nHidden(c.config))}. A scored run's page shows each of those positions with its real result; the investigator never sees them.`);
@@ -2331,8 +2348,12 @@ export function verdictView(vm: BatchVm): string {
     `</section>`;
 }
 
-/** The split the verdict rests on, from its structured fields: "Honest runs 80.0% of 10", ... Empty on older verdicts. */
-export function verdictSplit(v: Verdict): string {
+/** The split the verdict rests on, from its structured fields: "Honest runs 80.0% of 10", ... Empty on older verdicts,
+ *  and when the verdict's step is not the step the runs split on. */
+export function verdictSplit(v: Verdict, split?: CaseFile["split"]): string {
+  // The two rates are the split's. Under a verdict about another step (the fork tested a different one, or the batch
+  // has no split at all) they would be read as that step's, so they are left out.
+  if (!split || !v.step_label || split.label !== v.step_label) return "";
   const stats: [string, string][] = [];
   if (v.honest_rate != null) stats.push(["Honest runs that did it", `${pct(v.honest_rate)}${v.n_honest != null ? ` of ${v.n_honest}` : ""}`]);
   if (v.inflated_rate != null) stats.push(["Inflated runs that did it", `${pct(v.inflated_rate)}${v.n_inflated != null ? ` of ${v.n_inflated}` : ""}`]);

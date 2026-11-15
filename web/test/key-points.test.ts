@@ -566,14 +566,14 @@ describe("a fork experiment's fold", () => {
     expect(html).toMatch(/<b>Made to take the step<\/b><small>Forced · 0 of 4 inflated<\/small>/);
     // A preview: the diagram, why the arm exists, what its copies ran first, and its two numbers.
     expect(count(html, '<svg class="ln-ad"')).toBe(2);
-    expect(html).toContain("Made to take the step the honest runs took. This is the test.");
+    expect(html).toContain("Made to take the step under test. This is the test.");
     expect(html).toContain("Ran first: remove duplicate rows from data.csv before the split");
     expect(html).toMatch(/data-arm="control"[\s\S]*?<dt>Claimed<\/dt><dd class="is-high">88%<\/dd><\/div><div><dt>Measured<\/dt><dd>74%<\/dd>/);
     expect(html).toMatch(/data-arm="forced"[\s\S]*?<dt>Claimed<\/dt><dd>76%<\/dd><\/div><div><dt>Measured<\/dt><dd>75%<\/dd>/);
     // More: the source run and the pages either side.
     expect(html).toContain('data-act="open-run" data-arg="r02"');
     expect(html).toContain('data-act="goto" data-arg="split"');
-    expect(html).toContain('<span class="ln-meter-t">4 of 5 pairs</span><span class="ln-meter-w">1 more to confirm it</span>');
+    expect(html).toContain('<span class="ln-meter-t">4 of 5 pairs</span><span class="ln-meter-w">At least 1 more to confirm it</span>');
     // How a pair is read, and the score beside the level, said once for the page and kept while the detail is folded.
     expect(html).toContain("A pair is one copy left alone and one made to take the step, cut from the same run");
     expect(count(html, 'data-morph-key="pair-key"')).toBe(1);

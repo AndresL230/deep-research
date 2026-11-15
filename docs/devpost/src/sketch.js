@@ -44,7 +44,7 @@ const FIGS = {
     p.t(70, 120, "How Orro works", 68);
     const xs = [60, 300, 540, 780, 1010, 1250], top = 300, w = 190, h = 170, mid = top + h / 2;
     const labels = [["12 agents"], ["score", "each one"], ["investigator"], null, ["4 groups", "of copies"], ["verdict"]];
-    const notes = ["Deep Agents", "", "Deep Agents", "interrupt_on", "Daytona", "Fisher test"];
+    const notes = ["Deep Agents", "", "Deep Agents", "interrupt_on", "Daytona", "score ≥ 20"];
     xs.forEach((x, i) => {
       if (i === 3) { p.diamond(x + w / 2, mid, w + 30, h); p.t(x + w / 2, mid + 12, "approve?", 34, "middle"); }
       else {
@@ -135,25 +135,26 @@ const FIGS = {
     p.circle(95, 911, 32); p.t(126, 922, "honest", 28, "start", SOFT);
   },
 
-  // 4. the math: counts, one probability, two checks, one word
+  // 4. the math: four pairs, one score, one bar, one word
   math(svg) {
     const p = pen(svg, 301);
     p.t(70, 120, "Can it say “caused”?", 68);
-    // 2 x 2 counts
-    const gx = 310, gy = 300, c = 120;
-    p.box(gx, gy, c * 2, c * 2);
-    p.line(gx + c, gy, gx + c, gy + c * 2); p.line(gx, gy + c, gx + c * 2, gy + c);
-    p.t(gx + c / 2, gy - 18, "overclaims", 26, "middle", SOFT); p.t(gx + c * 1.5, gy - 18, "honest", 28, "middle", SOFT);
-    p.t(gx - 22, gy + 72, "left alone", 32, "end"); p.t(gx - 22, gy + c + 72, "made to test", 32, "end");
-    [["4", 0, 0], ["0", 1, 0], ["0", 0, 1], ["4", 1, 1]].forEach(([s, i, j]) => p.t(gx + c * (i + 0.5), gy + c * j + 82, s, 64, "middle"));
-    // the probability
-    p.arrow(580, 420, 668, 420);
-    p.t(700, 440, "p = 1/70", 76);
-    p.t(704, 492, "Fisher’s exact test", 28, "start", SOFT);
-    // two checks
-    p.box(1090, 320, 46, 46); p.tick(1113, 343, 16); p.t(1158, 356, "p < 0.05", 36);
-    p.box(1090, 450, 46, 46); p.cross(1113, 473, 14); p.t(1158, 486, "8 per group", 36);
-    p.t(1158, 530, "we have 4", 28, "start", SOFT);
+    // four pairs: one copy left alone (still overclaims), one changed (honest)
+    p.t(120, 268, "left alone", 26, "middle", SOFT); p.t(250, 268, "changed", 26, "middle", SOFT);
+    for (let k = 0; k < 4; k++) {
+      const y = 300 + k * 76;
+      p.sq(103, y, 34); p.line(146, y + 17, 222, y + 17, { strokeWidth: 1.6, roughness: 0.8 }); p.circle(250, y + 17, 36, { strokeWidth: 2.6 });
+      p.tick(318, y + 16, 13);
+      p.t(360, y + 30, "× 1.9", 34);
+    }
+    p.t(250, 650, "4 pairs agree", 28, "middle", SOFT);
+    // the score
+    p.arrow(480, 430, 568, 430);
+    p.t(600, 450, "score 13", 76);
+    p.t(604, 502, "1.9 × 1.9 × 1.9 × 1.9", 28, "start", SOFT);
+    // the bar it has to pass
+    p.box(1040, 330, 46, 46); p.cross(1063, 353, 14); p.t(1108, 366, "score ≥ 20", 36);
+    p.t(1108, 410, "needs 5 pairs", 28, "start", SOFT);
     // the word
     p.t(90, 812, "so the verdict says", 32, "start", SOFT);
     p.t(560, 818, "suggests", 68, "middle");

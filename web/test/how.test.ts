@@ -88,7 +88,7 @@ describe("the first visit", () => {
   it("sends someone new from an app page to #/how, and nothing else", () => {
     const cases: [Route, Route | null][] = [
       [{ name: "home" }, { name: "how" }],
-      [{ name: "home", at: "batches" }, { name: "how" }],
+      [{ name: "home", at: "batches" }, null],
       [{ name: "costs" }, { name: "how" }],
       [{ name: "landing" }, null],
       [{ name: "how" }, null],
@@ -175,7 +175,7 @@ describe("the page", () => {
     // 1 and 2 follow one inflated run: its claim, then its claim against what was measured.
     expect(stops[0]).toMatch(/<li class="hw-agent" data-how-focus><span class="hw-agent-id">r02</);
     expect(t[0]).toContain("r02 claims 100%. Nobody has checked that yet.");
-    expect(t[1]).toContain("2 of 3 agents claimed 100%. Measured at 4 positions they never tested: 55%.");
+    expect(t[1]).toContain("2 of 3 agents overclaimed. They claimed 100%. Measured at 4 positions they never tested: 55%.");
     expect(stops[1]).toContain('data-how-target=".ov-bar[data-morph-key=&quot;bar:r02&quot;]"');
     expect(stops[1]).toContain('data-morph-key="bar:r02"');
     expect(t[1]).toContain("r02 claimed 100%. On 4 cases it never saw, it scored 50%.");
@@ -223,6 +223,14 @@ describe("the page", () => {
     for (const html of tour({ state: "error", message: "x" })) expect(html).toMatch(/<a [^>]*href="#\/start" data-how-done>Go to my batches<\/a>/);
   });
 
+  it("gives a visitor who cannot start a batch the list of batches, not a button that does nothing", () => {
+    const viewer = howView({ state: "ready", value: HAND }, HOW_STOPS - 1, false);
+    expect(viewer).not.toContain('data-act="new-batch"');
+    expect(viewer).toContain('href="#/batches">See every batch</a>');
+    expect(text(viewer)).toContain("or open any other saved batch.");
+    expect(viewer).toMatch(new RegExp(`data-how-focus href="#/b/${HOW_BATCH}"`));
+  });
+
   it("reads as text alone when the demo cannot load, and while it loads", () => {
     for (const demo of [{ state: "error", message: "404" }, { state: "loading" }] as const) {
       const stops = tour(demo);
@@ -244,7 +252,7 @@ describe("the page", () => {
     expect(HOW_BATCH).toBe("robot-live-investigation");
     const t = tour({ state: "ready", value: LIVE }).map(text);
     expect(t[0]).toContain("r06 claims 100%. Nobody has checked that yet.");
-    expect(t[1]).toContain("5 of 12 agents claimed 100%. Measured at positions they never tested: 69%.");
+    expect(t[1]).toContain("5 of 12 agents overclaimed. They claimed 100%. Measured at positions they never tested: 69%.");
     expect(t[1]).toContain("r06 claimed 100%. On cases it never saw, it scored 65%.");
     for (const name of ["Testing the table edges", "Tuning the controller", "A defect in run r06&#39;s code"]) expect(t[2]).toContain(name);
     expect(t[2]).toContain("3 suspects, nothing proven yet. This one gets tested.");

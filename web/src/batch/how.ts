@@ -38,11 +38,13 @@ export const HOW_HASH = "#/how";
 
 /**
  * Where to send a person who enters the app, or null to stay. Only someone who has never seen this page, and only
- * from an app page of its own (home, costs): never from the landing page, never from a link to a batch, a run or a
- * fork child, and never from this page.
+ * from an app page of its own (home, costs): never from the landing page, never from the batch list or a link to a
+ * batch, a run or a fork child, and never from this page.
  */
 export function firstVisitRedirect(r: Route, seen: boolean): Route | null {
   if (seen) return null;
+  // A link that names the batch list is a choice of where to go: it is honoured (the landing's "See the batches").
+  if (r.name === "home" && r.at === "batches") return null;
   return r.name === "home" || r.name === "costs" ? { name: "how" } : null;
 }
 
@@ -256,11 +258,14 @@ function verdictTip(c: CaseFile): string {
   return score ? `Score ${score}. It needs ${SUPPORTED_SCORE}, so the verdict stays open.` : `${ev.pairs} pairs so far, so the verdict stays open.`;
 }
 
-/** 6. The way on: the demo batch (ringed), or a batch of one's own (the header's dialog). */
-const startPicture = (): string =>
+/** 6. The way on: the demo batch (ringed), then a batch of one's own (the header's dialog) for someone who may start
+ *  one, or the list of saved batches for everyone else (only admins start batches on the hosted site). */
+const startPicture = (canStart: boolean): string =>
   `<div class="hw-start">`
   + `<a class="ask-btn hw-btn hw-btn--big ds-primary" ${FOCUS} href="${attr(routeHash({ name: "batch", id: HOW_BATCH }))}">See a real batch</a>`
-  + `<button type="button" class="ask-btn hw-btn hw-btn--big" data-act="${ACT.newBatch}">Start my own batch</button>`
+  + (canStart
+    ? `<button type="button" class="ask-btn hw-btn hw-btn--big" data-act="${ACT.newBatch}">Start my own batch</button>`
+    : `<a class="ask-btn hw-btn hw-btn--big" href="${attr(routeHash({ name: "home", at: "batches" }))}">See every batch</a>`)
   + `</div>`;
 
 // ── the page ─────────────────────────────────────────────────────────────────
@@ -311,6 +316,8 @@ export const HOW_STEPS: readonly Step[] = [
 const START = {
   key: "start", title: "Your turn",
   text: "Walk the same five steps on a real batch's own screens, or start a batch of your own.",
+  /** For a visitor who cannot start one. */
+  textViewer: "Walk the same five steps on a real batch's own screens, or open any other saved batch.",
   tip: "Start here.",
 };
 
@@ -369,9 +376,9 @@ function rail(at: number): string {
 
 /**
  * The page. `demo` is the robot demo's case file, as far as it has loaded; `at` is the stop on screen (0 is Run, the
- * last is the way on).
+ * last is the way on); `canStart` says whether this visitor may start a batch.
  */
-export function howView(demo: Loadable<CaseFile>, at = 0): string {
+export function howView(demo: Loadable<CaseFile>, at = 0, canStart = true): string {
   const c = demo.state === "ready" ? demo.value : null;
   const i = howStop(at);
   const s = i < HOW_STEPS.length ? HOW_STEPS[i] : null;
@@ -380,7 +387,7 @@ export function howView(demo: Loadable<CaseFile>, at = 0): string {
     : demo.state === "error"
       ? `<p class="hw-note" role="status">The robot demo batch could not be loaded, so the steps are shown without its numbers.</p>`
       : `<p class="hw-note">${esc(`Every number comes from a real batch: ${Object.keys(c?.runs ?? {}).length} agents each writing a controller for a robot arm that picks up a can and places it.`)}</p>`;
-  const pic = s ? (c ? s.picture(c) : "") : startPicture();
+  const pic = s ? (c ? s.picture(c) : "") : startPicture(canStart);
   const tip = s ? (c && pic ? s.tip(c) : "") : START.tip;
   const target = s ? (c ? s.focus(c) : "") : FOCUS_SEL;
   // The stage stays the same element from stop to stop, so the ring glides from one part to the next; the picture in
@@ -408,7 +415,7 @@ export function howView(demo: Loadable<CaseFile>, at = 0): string {
     + `<div class="hw-stop${pic ? "" : " is-text"}" data-morph-key="how:stop">`
     + `<div class="hw-stop-l" data-morph-key="how:text:${s ? s.key : START.key}">`
     + `<p class="hw-count">${i + 1} of ${HOW_STOPS}</p>`
-    + `<h2 class="hw-h">${esc(s ? s.title : START.title)}</h2><p class="hw-p">${esc(s ? s.text : START.text)}</p>`
+    + `<h2 class="hw-h">${esc(s ? s.title : START.title)}</h2><p class="hw-p">${esc(s ? s.text : canStart ? START.text : START.textViewer)}</p>`
     + (s?.key === "verdict" ? HOW_LESSON_LINE : "")
     + `<div class="hw-nav">${back}${next}</div></div>`
     + stage

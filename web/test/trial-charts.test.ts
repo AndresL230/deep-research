@@ -21,7 +21,7 @@ describe("scoreStep", () => {
     expect(html).toContain('role="img"');
     expect(label(html)).toContain("13.03");
     // A measure, against the plan's line: never "needed for supported" (the level is the server's rule).
-    expect(label(html)).toContain("against the line at 20 in MASTER_PLAN 6.4");
+    expect(label(html)).toContain("against the line at 20");
     expect(label(html)).not.toMatch(/supported|needed/);
   });
 

@@ -643,7 +643,11 @@ describe("verdictView", () => {
     expect(html).toContain("medium confidence");
     expect(html).toContain("100.0% of 6");
     expect(html).toContain("0.0% of 6");
-    expect(verdictSplit({ ...v, n_honest: undefined })).toContain("100.0%</dd>");
+    expect(verdictSplit({ ...v, n_honest: undefined }, demo.split)).toContain("100.0%</dd>");
+    // The rates are the split's: under a verdict about another step, or with no split, they are left out.
+    expect(verdictSplit(v)).toBe("");
+    expect(verdictSplit({ ...v, step_label: "group_split" }, demo.split)).toBe("");
+    expect(verdictView(vmOf({ verdict: { ...v, step_label: "group_split" } }))).not.toContain("v-split");
   });
 
   it("says how the rubric check went", () => {
@@ -996,7 +1000,7 @@ describe("fork page", () => {
     // The level is the case file's verdict.evidence: open, 4 of the 5 pairs needed, score 13.03.
     expect(html).toMatch(/ln-ev-level--open[^>]*><span class="ds-ic">.*?<span class="mo-sr">Open<\/span>/);
     expect(html).toContain('data-text="4"><span data-keep>4</span></span></b><span class="ln-muted"> of 5 pairs</span>');
-    expect(html).toContain("The level is the server&#39;s (verdict.evidence).");
+    expect(html).toContain("The level was set by the server.");
     expect(html).toContain("one-sided Fisher p = 5/70 (0.071)");
     expect(html).toContain("Gaps: exact p = 0.014, from the case file.");
     expect(html).toContain("With 4 copies per arm this experiment can reach at most 4 pairs, under the 5 needed, so it cannot be supported.");
@@ -1005,9 +1009,9 @@ describe("fork page", () => {
     expect(html).toContain("Supported needs a running score of 20 or more");
     expect(html).not.toContain("ln-conf");
     // The plan's running score sets the level: its chart has the rule at 20, its label the score.
-    expect(html).toContain("The plan's sequential score:");
+    expect(html).toContain("The running score:");
     expect(html).toContain("It sets the level: supported at 20 or more.");
-    expect(html).toMatch(/aria-label="Sequential score after 4 pairs: 13\.03, against the line at 20 in MASTER_PLAN 6\.4/);
+    expect(html).toMatch(/aria-label="Sequential score after 4 pairs: 13\.03, against the line at 20/);
     // The fork as two outcomes, once, over the arms.
     expect(count(html, 'class="ln-outcome"')).toBe(1);
     expect(html).toContain('The claim moved <b class="ln-outcome-n">-11.6 pts</b>, the model moved <b class="ln-outcome-n">+1.5 pts</b>.');
@@ -1170,20 +1174,20 @@ describe("verdict page", () => {
     expect(robot).toMatch(/ln-ev-level--open[^>]*><span class="ds-ic">.*?<span class="mo-sr">Open<\/span>/);
     expect(robot).toContain("The fork suggests that not testing other can positions inflates the claim: 4 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 5 pairs.");
     expect(robot).toContain("lowered the gap between claimed and measured by 45.1 pts (control +43.8 pts, forced -1.4 pts) in 4 of 4 pairs.");
-    expect(robot).toContain("4 of the 5 pairs needed · Fisher p 1/70 (0.014) · exact p 0.014 · sequential score 13.03 · pairs ranged 40.0 to 50.0 pts");
+    expect(robot).toContain("4 of the 5 pairs needed at the least · Fisher p 1/70 (0.014) · exact p 0.014 · sequential score 13.03 · pairs ranged 40.0 to 50.0 pts");
     expect(robot).toContain("With 4 copies per arm this experiment can reach at most 4 pairs, under the 5 needed, so it cannot be supported.");
     // The bar for supported is the running score of 20, said as such, not as a count of pairs.
     expect(robot).not.toMatch(/20 needed|of 20 needed|score &gt;= 20/);
     expect(robot).toContain("running score of 20 or more");
     const demoHtml = verdictView(vmOf());
     expect(demoHtml).toContain("by 13.1 pts");
-    expect(demoHtml).toContain("4 of the 5 pairs needed · Fisher p 5/70 (0.071) · exact p 0.014 · sequential score 13.03 · pairs ranged 8.1 to 18.8 pts");
+    expect(demoHtml).toContain("4 of the 5 pairs needed at the least · Fisher p 5/70 (0.071) · exact p 0.014 · sequential score 13.03 · pairs ranged 8.1 to 18.8 pts");
     expect(robot.indexOf("ln-v-stand")).toBeLessThan(robot.indexOf("ln-claim"));
   });
 
   it("quotes the investigator's sentence when it says no more than the evidence, and notes one that names a cause while open", () => {
     for (const html of [verdictView(vmOf()), verdictView(robotVm())]) {
-      expect(html).toContain("Recorded with record_verdict");
+      expect(html).toContain("Its own words, as saved when it wrote them");
       expect(html).toContain("The investigator wrote: ");
       expect(html).not.toContain("caused");
       expect(html).not.toContain("names a cause");
@@ -1252,7 +1256,7 @@ describe("verdict page", () => {
     expect(demoHtml).not.toContain("Pairs matched by copy number after the run, not assigned before it.");
     expect(demoHtml).not.toContain("does not set the level");
     expect(demoHtml).toContain("Matches fork f1");
-    expect(demoHtml).toContain("The level is the server&#39;s (verdict.evidence).");
+    expect(demoHtml).toContain("The level was set by the server.");
     expect(demoHtml).not.toContain("Simulated");
     const robot = verdictView(robotVm());
     expect(robot).toContain("Matches fork f1 for control and forced; the record leaves out placebo and show.");

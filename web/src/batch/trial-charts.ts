@@ -62,7 +62,7 @@ export function scoreStep(trace: number[], agrees: boolean[], opts: { total?: nu
   const xLabels = Array.from({ length: slots }, (_, i) =>
     `<span class="ln-evc-ax ln-evc-ax--x${i < trace.length ? "" : " ln-evc-ax--todo"}" style="left:${px(xOf(i + 1))}">${i + 1}</span>`).join("");
   const last = trace[trace.length - 1];
-  const label = `Sequential score after ${trace.length} ${trace.length === 1 ? "pair" : "pairs"}: ${score2(last)}, against the line at 20 in MASTER_PLAN 6.4. `
+  const label = `Sequential score after ${trace.length} ${trace.length === 1 ? "pair" : "pairs"}: ${score2(last)}, against the line at 20. `
     + `Step by step: ${trace.map(score2).join(", ")}.`;
   const key = `ev-chart:${opts.id ?? ""}:${slots}`;
   return `<div class="ln-ev-chart" data-morph-key="${attr(key)}">`

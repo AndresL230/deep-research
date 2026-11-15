@@ -145,7 +145,10 @@ describe("the live recording's Investigator page", () => {
     let board = "";
     expect(() => { board = suspectBoardView(vm); }).not.toThrow();
     expect(board).toContain("code defect in r06");
-    expect(() => investigatorPanelView(vm)).not.toThrow();
+    // h3 was tested by the measured fix: the card says so, and does not call it untested.
+    expect(board).toContain("Tested by the measured fix: contradicted.");
+    expect(board.match(/Not tested: the investigator reached its verdict first\./g)).toHaveLength(1);
+    expect(investigatorPanelView(vm)).toContain("3 proposed · 2 tested");
     expect(() => suspectVerdictView(vm)).not.toThrow();
   });
 });
