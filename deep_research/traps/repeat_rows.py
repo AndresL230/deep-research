@@ -159,4 +159,5 @@ TRAP = Trap(
     evidence_text="of test rows came from subjects also in training",
     # A grouped split is the split, so the step counts when it is in the action that splits.
     at_split=True,
+    columns=(ID,),
 )

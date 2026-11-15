@@ -78,4 +78,5 @@ TRAP = Trap(
     },
     # Dropping the column still counts when it happens after the split in the same script.
     at_split=True,
+    columns=(COLUMN,),
 )
