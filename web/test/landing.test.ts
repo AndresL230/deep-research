@@ -65,7 +65,7 @@ describe("the landing page", () => {
 
   it("links to the start panel and to the demo replay with real links", () => {
     expect(html).toContain('<a class="lp-cta" href="#/start">Start a batch</a>');
-    expect(html).toContain('href="#/b/demo-batch"');
+    expect(html).toContain('href="#/b/robot-live-investigation"');
     expect(html).toContain('<a class="lp-brand" href="#/">');
     expect(html).not.toContain("data-act=");
   });
@@ -112,20 +112,23 @@ describe("the folder", () => {
     expect(html.match(/role="tabpanel"[^>]*hidden/g)).toHaveLength(tabs.length - 1);
   });
 
-  it("shows the demo batch's own numbers", () => {
+  it("shows the recorded run's own numbers", () => {
+    // fixtures/robot-live-investigation: 12 agents, of which 3 honest, 5 inflated, 2 unclear and 2 failed. Its split is
+    // tune_params: all 3 honest runs took it and 2 of the 5 inflated ones.
     const runs = demoRuns();
     const honest = runs.filter((r) => r.honest);
-    expect(runs).toHaveLength(12);
-    expect(honest.map((r) => r.id)).toEqual(["r01", "r04", "r05", "r07", "r11", "r12"]);
-    expect(tabs[2].num).toBe(`${runs.length - honest.length} of ${runs.length}`);
+    expect(honest.map((r) => r.id)).toEqual(["r02", "r04", "r12"]);
+    expect(runs.filter((r) => !r.honest).map((r) => r.id)).toEqual(["r06", "r07", "r09", "r10", "r11"]);
+    expect(tabs[2].num).toBe(`${runs.length - honest.length} of 12`);
     expect(tabs[1].num).toBe(DEMO_SPLIT.honest);
     expect(DEMO_SPLIT.honest).toBe(`${honest.length} of ${honest.length}`);
-    expect(DEMO_SPLIT.inflated).toBe(`0 of ${runs.length - honest.length}`);
-    expect(DEMO_SPLIT.code).toContain("drop_duplicates");
+    expect(DEMO_SPLIT.inflated).toBe(`2 of ${runs.length - honest.length}`);
+    expect(DEMO_SPLIT.code).toBe("tune_params");
+    expect(LANDING.demo).toBe("robot-live-investigation");
   });
 
   it("opens on the humanoid video, muted and looping, with a poster", () => {
-    expect(tabs.map((t) => t.tab)).toEqual(["On a robot", "The split", "Many runs"]);
+    expect(tabs.map((t) => t.tab)).toEqual(["On a robot", "What changed", "Many agents"]);
     expect(html).toMatch(/data-lp-video aria-hidden="true"><video muted loop playsinline preload="metadata" poster="\/media\/humanoid-tracking\.jpg" src="\/media\/humanoid-tracking\.mp4"><\/video>/);
     expect(html).not.toContain("20%");
   });
@@ -135,18 +138,21 @@ describe("the sections under it", () => {
   const html = landingView();
 
   it("has three steps and four reasons, each a card", () => {
-    expect(LANDING.how.cards.map((c) => c.title)).toEqual(["Run", "Split", "Prove"]);
+    expect(LANDING.how.cards.map((c) => c.title)).toEqual(["Run", "Compare", "Test"]);
     expect(html.match(/<article class="lp-card"/g)).toHaveLength(LANDING.how.cards.length + 2);
     expect(html.match(/<article class="lp-feat"/g)).toHaveLength(LANDING.why.cards.length);
     for (const c of [...LANDING.how.cards, ...LANDING.why.cards]) expect(html).toContain(c.title);
   });
 
-  it("says what the fork experiment found, as the batch's verdict does", () => {
-    // case.json's verdict: forcing the step left 0 of 4 runs inflated, against 3 of 4 without it.
-    expect(LANDING.how.cards[2].words).toContain("3 of 4");
+  it("says what the experiment found, as the batch's verdict does, without claiming a cause", () => {
+    // case.json's verdict: forcing the edge test left 0 of 4 copies inflated, against 4 of 4 without it, and the
+    // evidence is open, so the page may say "suggests" and never "prove" or "caused".
+    expect(LANDING.how.cards[2].words).toContain("4 of 4");
     expect(LANDING.how.cards[2].words).toContain("0 of 4");
-    expect(text(html)).toContain("Left alone · 3 of 4");
-    expect(text(html)).toContain("Made to deduplicate · 0 of 4");
+    expect(text(html)).toContain("Left alone · 4 of 4");
+    expect(text(html)).toContain("Made to test the edges · 0 of 4");
+    expect(text(html)).toContain("suggests the reason");
+    expect(text(html)).not.toMatch(/\bprove[sd]?\b|was the cause/i);
   });
 
   it("has a chapter for each station of the robot floor, all in the markup", () => {
@@ -157,9 +163,10 @@ describe("the sections under it", () => {
       expect(text(html)).toContain(c.words);
     });
     expect(html).toMatch(/data-lp-floor-card data-chapter="0"/);
-    // sim/CALIBRATION.md: the controller is scored on 20 positions the agent never saw; the fork forces 10.
+    // sim/CALIBRATION.md: the controller is scored on 20 positions the agent never saw.
     expect(r.positions.words).toContain("20 positions");
-    expect(r.chapters[3].words).toContain("10 random positions");
+    expect(r.chapters[2].words).toContain("20 positions");
+    expect(r.chapters[3].words).toContain("four copies in each group");
   });
 
   it("names what Orro is built on in plain words, with no one's logo", () => {
@@ -649,8 +656,8 @@ describe("the terminal's script", () => {
     };
     expect(verdict("api")).toBe(verdict("cli"));
     expect(SCRIPTS.api.ticket).toEqual(SCRIPTS.cli.ticket);
-    // Both say they are not a live run.
-    for (const mode of modes) expect(SCRIPTS[mode].title).toContain("simulated");
+    // Both say they are a recording, not a live run.
+    for (const mode of modes) expect(SCRIPTS[mode].title).toContain("recorded run");
     expect(SCRIPTS.cli.title).not.toBe(SCRIPTS.api.title);
   });
 
