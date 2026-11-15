@@ -68,3 +68,25 @@ def hidden_positions(n: int = 20, seed: int = HIDDEN_SEED) -> list[list[float]]:
 def spread_positions(n: int = 16, seed: int = SPREAD_SEED) -> list[list[float]]:
     """A tuning set from the same space as the hidden one."""
     return _draw(n, seed)
+
+
+# The failure tracer's own positions (sim/g1/domain.py `trace_run`): the investigator reads where a controller fails on
+# these and proposes a fix, which is then measured on the hidden positions it never saw. Same bands, own seed, half
+# high and half low, and every one at least MIN_FROM_HIDDEN from every hidden position.
+DIAG_SEED = 31
+MIN_FROM_HIDDEN = 0.03
+
+
+def diagnostic_positions(n: int = 12, seed: int = DIAG_SEED) -> list[list[float]]:
+    """The trace's bag positions: never a hidden one, nor within MIN_FROM_HIDDEN of one. Same n and seed, same list."""
+    hidden = np.asarray(hidden_positions(), dtype=float)
+    out: dict[str, list[list[float]]] = {"high": [], "low": []}
+    want = {"high": n - n // 2, "low": n // 2}
+    for p in _draw(8 * n, seed):
+        band = band_of(p)
+        if len(out[band]) < want[band] and float(np.min(np.linalg.norm(hidden - np.asarray(p), axis=1))) >= MIN_FROM_HIDDEN:
+            out[band].append(p)
+    pts = out["high"] + out["low"]
+    if len(pts) < n:
+        raise RuntimeError(f"only {len(pts)} diagnostic positions kept away from the hidden ones; draw more")
+    return [pts[i] for i in np.random.default_rng(seed).permutation(len(pts))]
