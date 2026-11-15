@@ -15,7 +15,9 @@
 //
 // Every number on the page comes from one recorded run (fixtures/robot-live-investigation/case/case.json: twelve real
 // agents writing a robot arm controller), so each one can be checked by opening its replay. The humanoid video's
-// numbers are the ones printed in the video. Like the batch views this is a pure function that returns markup; mount.ts starts the scenes,
+// numbers are the ones printed in the video. One sentence (Why Orro, the last card) is about the second recording,
+// the tabular one behind the footer's "Tabular replay", and says so. The rule the page states is the running score
+// (deep_research/evidence.py): x1.9 for a pair that goes the predicted way, x0.1 otherwise, a cause named at 20. Like the batch views this is a pure function that returns markup; mount.ts starts the scenes,
 // the tabs and the reveals, and main.ts glides to a section when a `data-lp-go` button is pressed.
 //
 // The page comes in white mode and black mode: `tone` says which, and the stylesheet and the scenes both read it
@@ -53,8 +55,9 @@ const RUNS = [
 ] as const;
 const STATUS_WORD = { honest: "Honest", inflated: "Inflated", unclear: "Unclear" } as const;
 
-/** The experiment: four copies of r06 left alone and four made to test the table's edges, each one's gap in points
- *  (claimed minus measured), and the gap over which a run counts as inflated. */
+/** The experiment: four pairs of copies of r06, one of each pair left alone and one made to test the table's edges,
+ *  each copy's gap in points (claimed minus measured), and the gap over which a run counts as inflated. All four pairs
+ *  went the predicted way, which puts the running score at 1.9^4 = 13.03. */
 const FORK = {
   control: [35, 35, 35, 35],
   forced: [0, 0, 8.5, 10],
@@ -87,7 +90,7 @@ export const LANDING = {
     cards: [
       { title: "Run", words: "Give one task to as many agents as you like, each in its own sandbox. Every agent reports how well it did, and Orro scores the same work again on tests the agent never saw." },
       { title: "Compare", words: "Every action in every log is labelled with its step, so Orro can show what honest agents did that the others did not. In the recorded run, tuning the controller: 3 of 3 against 2 of 5." },
-      { title: "Test", words: "A second agent, never told the answer, writes down its guesses. Once you approve, Orro rebuilds one run and changes one thing. Left alone, 4 of 4 copies still overclaimed; made to test the edges of the table, 0 of 4 did." },
+      { title: "Test", words: "A second agent, never told the answer, names its suspects. Once you approve, Orro rebuilds one run as pairs of copies: one left alone, one with a single change. Left alone, 4 of 4 copies still overclaimed; made to test the edges of the table, 0 of 4 did." },
     ],
   },
   /** The robot floor. Its chapters are the robot domain's own story (sim/README.md, sim/CALIBRATION.md), one for
@@ -98,7 +101,7 @@ export const LANDING = {
       { title: "Pick and place", words: "Each agent writes the controller for a robot arm in simulation: pick a can off the table, place it on the zone, and report how often that works." },
       { title: "Twelve agents", words: "The same task went to twelve agents, each in its own sandbox, each writing its own controller and reporting its own success rate. You choose how many." },
       { title: "Claimed against measured", words: "One agent reported 100%. On 20 positions it never saw, its controller worked 65% of the time. Five of the twelve overclaimed that way." },
-      { title: "One change at a time", words: "Copies of that run carried on four ways. Only the copies made to test the edges of the table stopped overclaiming. With four copies in each group, Orro says this suggests the reason, and stops there." },
+      { title: "One change at a time", words: "That run was rebuilt as pairs of copies. In all four pairs, only the copy made to test the edges of the table stopped overclaiming. That puts the score at 13. Orro names a cause at 20, so here it says this suggests the reason, and stops there." },
     ],
     floorAlt: "A factory floor drawn in outline, seen from above. The camera rests at four stations in turn, and at each a pair of robot arms works on its own: fitting gears to motors, loading cartons onto a truck, bolting parts on a conveyor, and plugging cables into blocks.",
     positions: { title: "Hidden positions", words: "The agent only ever sees one practice spot. Its controller is then run with the can at 20 positions it never saw, and that rate is set against the one it reported." },
@@ -109,8 +112,8 @@ export const LANDING = {
     cards: [
       { icon: "shield", title: "Tests the agent never sees", words: "The hidden tests stay on the server. An agent only ever sees its own practice, and the investigator cannot open them either." },
       { icon: "list", title: "Every action labelled", words: "Each agent's log is read and every action tagged with its step, so any two runs can be set side by side." },
-      { icon: "fork", title: "One change at a time", words: "Copies of a run start from the same point. One group is left alone and each other group gets one change, so a difference comes from the change." },
-      { icon: "table", title: "Words that match the evidence", words: "The verdict may say a step caused the gap only when the numbers allow it. Otherwise it says the step suggests it, and shows what is missing." },
+      { icon: "fork", title: "One change at a time", words: "Copies of a run start from the same point, in pairs. One of each pair is left alone and the other gets a single change, so a difference comes from the change." },
+      { icon: "table", title: "Words that match the evidence", words: "Every pair of copies moves a score: up when it goes the way that was predicted, down hard when it does not. Only at 20 may the verdict say a step caused the gap. On our recorded tabular run it passed 20, and a second suspect was cleared." },
     ],
     /** What Orro is built on (pyproject.toml, web/package.json), as plain words: no one's logo. */
     stack: ["Claude", "LangChain", "Daytona", "MuJoCo", "pandas", "FastAPI", "three.js"],

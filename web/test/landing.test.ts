@@ -173,7 +173,11 @@ describe("the sections under it", () => {
     // sim/CALIBRATION.md: the controller is scored on 20 positions the agent never saw.
     expect(r.positions.words).toContain("20 positions");
     expect(r.chapters[2].words).toContain("20 positions");
-    expect(r.chapters[3].words).toContain("four copies in each group");
+    // deep_research/evidence.py: four agreeing pairs give 1.9^4 = 13.03, under the 20 a named cause needs.
+    expect(r.chapters[3].words).toContain("In all four pairs");
+    expect(r.chapters[3].words).toContain("score at 13. Orro names a cause at 20");
+    expect(LANDING.why.cards[3].words).toContain("Only at 20 may the verdict say a step caused the gap");
+    for (const mode of ["cli", "api"] as const) expect(SCRIPTS[mode].ticket[1]).toBe("Score 13.03 of 20 · 4 of 4 pairs agree");
   });
 
   it("names what Orro is built on in plain words, with no one's logo", () => {

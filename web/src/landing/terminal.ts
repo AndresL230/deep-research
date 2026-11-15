@@ -71,9 +71,10 @@ export const SCRIPTS: Record<Mode, Script> = {
       { kind: "work", stage: 2, name: "split", result: "tune_params" },
       { kind: "type", mark: "$", text: "python -m deep_research.cli forks $BATCH --n 4" },
       { kind: "work", stage: 3, name: "fork", result: "control 4 of 4 inflated · forced 0 of 4", seconds: 1.35 },
+      { kind: "note", text: "4 pairs · 4 as predicted · score 13.03" },
       { kind: "done", stage: 4, title: "Verdict", detail: "Skipping the edge test suggests why" },
     ],
-    ticket: ["Verdict · open", "0 of 4 inflated once the test is forced"],
+    ticket: ["Verdict · open", "Score 13.03 of 20 · 4 of 4 pairs agree"],
   },
   api: {
     title: "localhost:8000 · recorded run",
@@ -85,9 +86,10 @@ export const SCRIPTS: Record<Mode, Script> = {
       { kind: "work", stage: 2, name: "case.split", result: "tune_params" },
       { kind: "type", mark: "$", text: "curl -X POST :8000/api/batches/$ID/investigate" },
       { kind: "work", stage: 3, name: "case.forks", result: "control 4 of 4 · forced 0 of 4", seconds: 1.35 },
+      { kind: "note", text: "4 pairs · score 13.03 of 20" },
       { kind: "done", stage: 4, title: "case.verdict", detail: "Skipping the edge test suggests why" },
     ],
-    ticket: ["Verdict · open", "0 of 4 inflated once the test is forced"],
+    ticket: ["Verdict · open", "Score 13.03 of 20 · 4 of 4 pairs agree"],
   },
 };
 

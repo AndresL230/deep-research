@@ -63,6 +63,7 @@ import type { Loadable } from "./batch/model";
 import { costsView } from "./batch/costs";
 import { HOW_BATCH, firstVisitRedirect, howSeen, howStop, howView } from "./batch/how";
 import { placeHowTour } from "./batch/tour";
+import { syncHowFx } from "./batch/how-fx";
 import { landingView } from "./landing/landing";
 import { syncLanding } from "./landing/mount";
 import { syncMotion } from "./motion";
@@ -531,12 +532,14 @@ function scrollHome(): void {
  *  once the fonts and the picture have settled, and whenever the window changes size. */
 let tourSettle = 0;
 function placeTour(): void {
-  if (S.route.name !== "how") return;
-  placeHowTour(scrollEl);
+  // The last stop's moving recap (batch/how-fx.ts) starts and stops with its canvas, on any route.
+  if (S.route.name !== "how") { syncHowFx(scrollEl); return; }
+  const place = (): void => { placeHowTour(scrollEl); syncHowFx(scrollEl); };
+  place();
   clearTimeout(tourSettle);
-  tourSettle = window.setTimeout(() => { if (S.route.name === "how") placeHowTour(scrollEl); }, 450);
+  tourSettle = window.setTimeout(() => { if (S.route.name === "how") place(); }, 450);
 }
-window.addEventListener("resize", () => { if (S.route.name === "how") placeHowTour(scrollEl); });
+window.addEventListener("resize", () => { if (S.route.name === "how") { placeHowTour(scrollEl); syncHowFx(scrollEl); } });
 
 let ticker: ReturnType<typeof setInterval> | null = null;
 /** An element to focus once the next paint is in (a row's Start once its confirm opens, say), as a selector. */
@@ -1347,6 +1350,13 @@ function onField(e: Event): void {
   const field = el.dataset?.cfg;
   if (!field) return;
   const numeric = el instanceof HTMLInputElement && (el.type === "number" || el.type === "range");
+  // A box emptied mid-edit reads as 0, and a value past the field's min or max is one the server refuses (422): keep
+  // the last good value instead of sending either, and put it back in the box when the edit ends.
+  if (numeric && (el.value.trim() === "" || !(el as HTMLInputElement).validity.valid)) {
+    const kept = S.home.draft?.[field as keyof BatchConfig];
+    if (e.type === "change" && kept != null) el.value = String(kept);
+    return;
+  }
   setDraft(field, el.value, numeric);
 }
 root.addEventListener("input", onField);

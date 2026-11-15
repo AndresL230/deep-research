@@ -105,11 +105,11 @@ export const loopDiagram = (): string => loopWide() + loopNarrow();
 
 const HARNESS_TITLE = "How Orro is built";
 const HARNESS_DESC = "Each agent runs in its own Daytona VM with file tools, a shell and a plan. The Orro server in the middle collects "
-  + "every run's events and outputs, scores the work on hidden cases that never enter a VM, and forks a VM at a step. The "
-  + "investigator, with its step-tagger, hypothesis and code-tracer helpers, reads the case and the runs through read-only "
-  + "views. Its fork request waits for a person to approve before the server forks.";
+  + "every run's events and outputs, scores the work on hidden cases that never enter a VM, and copies a run up to a step. The "
+  + "investigator, with its step-tagger, its three lenses and its skeptic, reads the case and the runs through read-only "
+  + "views and never the hidden cases. Each experiment it asks for waits for a person to approve before the server copies a run.";
 
-const SUBAGENTS = ["step-tagger", "hypothesis", "code-tracer"] as const;
+const SUBAGENTS = ["step-tagger", "lenses × 3", "skeptic"] as const;
 
 function harnessWide(): string {
   const id = "hw-arch-w";
@@ -118,16 +118,16 @@ function harnessWide(): string {
   const server = frame({ x: 330, y: 30, w: 300, h: 268, title: "Orro server", tone: "strong" })
     + box({ x: 350, y: 66, w: 260, h: 58, title: "Collects each run", lines: ["its events and outputs"] })
     + box({ x: 350, y: 136, w: 260, h: 66, title: "Hidden cases", lines: ["scored here, never in a VM"], tone: "accent" })
-    + box({ x: 350, y: 214, w: 260, h: 66, title: "Forks a VM at a step", lines: ["copy on write, history replayed"] });
+    + box({ x: 350, y: 214, w: 260, h: 66, title: "Copies a run", lines: ["rebuilt up to a step, then continued"] });
   const inv = frame({ x: 720, y: 30, w: 260, h: 180, title: "Investigator" }, "Deep agent on Sonnet 5.5")
     + SUBAGENTS.map((s, i) => pill(770, 80 + i * 28, 160, s)).join("")
-    + label(850, 196, "reads /case/ /runs/ /skills/ only");
-  const gate = box({ x: 720, y: 238, w: 260, h: 60, title: "You approve", lines: ["each fork request"], tone: "dash" });
+    + label(850, 196, "never reads the hidden cases");
+  const gate = box({ x: 720, y: 238, w: 260, h: 60, title: "You approve", lines: ["each experiment"], tone: "dash" });
   const links = arrow(id, [[242, 70], [327, 70]])
     + arrow(id, [[242, 164], [327, 164]]) + label(285, 148, "events,") + label(285, 158, "outputs")
-    + arrow(id, [[328, 258], [243, 258]]) + label(285, 242, "fork at") + label(285, 252, "a step")
+    + arrow(id, [[328, 258], [243, 258]]) + label(285, 242, "copies") + label(285, 252, "of a run")
     + arrow(id, [[632, 110], [717, 110]]) + label(675, 94, "read-only") + label(675, 104, "views")
-    + arrow(id, [[850, 212], [850, 235]]) + label(858, 228, "fork request", "start")
+    + arrow(id, [[850, 212], [850, 235]]) + label(858, 228, "experiment", "start")
     + arrow(id, [[718, 268], [633, 268]]) + label(675, 260, "approved");
   return svg(id, 980, 310, HARNESS_TITLE, HARNESS_DESC,
     label(120, 18, "Daytona VMs, one per agent", "middle", "hw-d-l--h") + vms + server + inv + gate + links, "hw-svg--wide");
@@ -139,16 +139,16 @@ function harnessNarrow(): string {
   const server = frame({ x: 14, y: 166, w: 312, h: 248, title: "Orro server", tone: "strong" })
     + box({ x: 34, y: 200, w: 272, h: 56, title: "Collects each run", lines: ["its events and outputs"] })
     + box({ x: 34, y: 268, w: 272, h: 60, title: "Hidden cases", lines: ["scored here, never in a VM"], tone: "accent" })
-    + box({ x: 34, y: 340, w: 272, h: 60, title: "Forks a VM at a step", lines: ["copy on write, history replayed"] });
+    + box({ x: 34, y: 340, w: 272, h: 60, title: "Copies a run", lines: ["rebuilt up to a step, then continued"] });
   const inv = frame({ x: 34, y: 464, w: 272, h: 172, title: "Investigator" }, "Deep agent on Sonnet 5.5")
     + SUBAGENTS.map((s, i) => pill(90, 516 + i * 28, 160, s)).join("")
-    + label(170, 620, "reads /case/ /runs/ /skills/ only");
-  const gate = box({ x: 34, y: 702, w: 272, h: 56, title: "You approve", lines: ["each fork request"], tone: "dash" });
+    + label(170, 620, "never reads the hidden cases");
+  const gate = box({ x: 34, y: 702, w: 272, h: 56, title: "You approve", lines: ["each experiment"], tone: "dash" });
   const links = arrow(id, [[52, 108], [52, 163]])
     + arrow(id, [[170, 108], [170, 163]]) + label(178, 140, "events, outputs", "start")
-    + arrow(id, [[288, 164], [288, 109]]) + label(280, 156, "forks", "end")
+    + arrow(id, [[288, 164], [288, 109]]) + label(280, 156, "copies", "end")
     + arrow(id, [[170, 416], [170, 461]]) + label(178, 444, "read-only views", "start")
-    + arrow(id, [[170, 638], [170, 699]]) + label(178, 674, "fork request", "start")
+    + arrow(id, [[170, 638], [170, 699]]) + label(178, 674, "experiment", "start")
     + arrow(id, [[32, 730], [6, 730], [6, 390], [12, 390]]);
   return svg(id, 340, 768, HARNESS_TITLE, HARNESS_DESC,
     label(170, 14, "Daytona VMs, one per agent", "middle", "hw-d-l--h")
