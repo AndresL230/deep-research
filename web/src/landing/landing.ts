@@ -63,7 +63,7 @@ const FORK = {
 /** The page's words. */
 export const LANDING = {
   brand: "Orro",
-  title: "Is your agent telling the truth?",
+  title: "Are your agents telling the truth?",
   pill: "Inflated runs: 89% claimed, 75% real",
   lede: "Orro runs one data science agent many times, finds the step where honest and inflated runs split, then forks the VM to prove what went wrong.",
   /** The saved batch the page replays (fixtures/demo-batch). */
