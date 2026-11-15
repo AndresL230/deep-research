@@ -31,7 +31,7 @@ from .config import ROOT_DIR
 load_dotenv(ROOT_DIR / ".env")
 
 from . import controllers, datasets, domains, foolrate, hub, lessons, notebook, paper, robot_view, traps, user_scripts  # noqa: E402
-from .batch import Batch, Refused, more_pairs_problem, more_pairs_quote, resume_problem, testable_suspects  # noqa: E402 - needs the environment loaded first
+from .batch import Batch, Refused, more_pairs_problem, more_pairs_quote, recover_interrupted, resume_problem, testable_suspects  # noqa: E402 - needs the environment loaded first
 from .batch_summary import summarize  # noqa: E402
 from .case_file import current_domain, with_evidence  # noqa: E402
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
@@ -84,7 +84,14 @@ def lab_client() -> httpx.AsyncClient:
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # Keys this machine does not have come from the team hub, when one is set up (hub.py).
     await asyncio.to_thread(hub.load_runner_env)
+    # Batches a restart cut off (a deploy, a machine out of memory) are closed as stopped, not left "running" forever,
+    # and the VMs their runs were on are deleted in the background.
+    closed = await asyncio.to_thread(recover_interrupted, BATCHES_DIR)
+    stale = [v for c in closed for v in c["vm_ids"]]
+    cleanup = asyncio.create_task(asyncio.to_thread(_delete_vms, stale)) if stale else None
     yield
+    if cleanup is not None and not cleanup.done():
+        cleanup.cancel()
     await close_all()
     pusher = hub.pusher()
     if pusher is not None:
@@ -113,6 +120,21 @@ async def close_all() -> None:
     for r in results:
         if isinstance(r, BaseException):
             log.warning("could not close a batch: %r", r)
+
+
+def _delete_vms(vm_ids: list[str]) -> None:
+    """Delete the VMs a restart left behind, by id: best effort, one at a time. One that is already gone, or a server
+    without a Daytona key, is skipped (Daytona stops an idle VM after sandboxes.AUTO_STOP_MINUTES anyway)."""
+    if not vm_ids or not os.environ.get("DAYTONA_API_KEY"):
+        return
+    from . import sandboxes
+
+    for vm_id in vm_ids:
+        try:
+            sandboxes.delete_vm(sandboxes.client().get(vm_id))
+            log.info("deleted VM %s, left by a batch the restart stopped", vm_id)
+        except Exception as e:  # noqa: BLE001 - a VM already gone is the usual case
+            log.info("VM %s left by a stopped batch: not deleted (%s)", vm_id, e)
 
 
 def key_status() -> dict[str, bool]:
@@ -546,21 +568,22 @@ _RESUME_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 @app.post("/api/batches/{batch_id}/resume")
-async def resume_batch(batch_id: str, investigate: bool = False):
+async def resume_batch(batch_id: str, investigate: bool = False, cont: bool = Query(False, alias="continue")):
     """Load a saved batch back into this server so the investigator and the fork experiment can run on it.
 
     Only a batch whose runs are scored, with a split and no verdict yet. It comes back in phase `ready`; with
-    `?investigate=true` the investigator starts right away.
+    `?investigate=true` the investigator starts right away. With `&continue=true` as well, an investigation a server
+    restart cut off continues on its saved thread instead of starting again (`Batch.continue_investigation`).
     """
-    return await _resume_locked(batch_id, investigate)
+    return await _resume_locked(batch_id, investigate, cont)
 
 
-async def _resume_locked(batch_id: str, investigate: bool) -> dict:
+async def _resume_locked(batch_id: str, investigate: bool, cont: bool = False) -> dict:
     async with _RESUME_LOCKS.setdefault(batch_id, asyncio.Lock()):
-        return await _resume(batch_id, investigate)
+        return await _resume(batch_id, investigate, cont)
 
 
-async def _resume(batch_id: str, investigate: bool) -> dict:
+async def _resume(batch_id: str, investigate: bool, cont: bool = False) -> dict:
     b = _running(batch_id)
     if b is None:
         _batch_dir(batch_id)  # 404 for an unknown id
@@ -580,7 +603,7 @@ async def _resume(batch_id: str, investigate: bool) -> dict:
     # Only when nothing is already running for it: a second click must not start a second investigator.
     task = TASKS.get(b.id)
     if investigate and b.case.data.get("phase") == "ready" and (task is None or task.done()):
-        _spawn(b.id, b.investigate())
+        _spawn(b.id, b.continue_investigation() if cont else b.investigate())
     return {"id": b.id, "phase": b.case.data.get("phase")}
 
 

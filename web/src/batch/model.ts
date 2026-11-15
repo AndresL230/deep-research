@@ -34,6 +34,7 @@ export const ACT = {
   runPanel: "run-panel",        // arg: "notebook" | "steps" | "logs" | "evidence": open that panel of a run's page, or fold it
   runChart: "run-chart",        // arg: a chart's index; a tabular run's page shows it large
   investigate: "investigate",   // live only: start the investigator
+  continueInvestigation: "continue-investigation", // a saved batch a restart cut off mid-investigation: continue it
   approve: "approve",           // live only: approve forks.pending
   decline: "decline",           // live only: decline forks.pending
   stop: "stop",                 // live only: stop the batch and its VMs

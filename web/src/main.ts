@@ -1002,13 +1002,14 @@ async function liveAction(name: string, call: (id: string) => Promise<unknown>):
 
 /** A saved batch at its split: ask the server to bring it back live and start the investigator, then follow it over
  *  a fresh websocket (the replay's one closed after its snapshot). */
-async function resumeAndInvestigate(b: BatchState): Promise<void> {
+/** Bring a saved batch back and start its investigator; `cont`: continue the one a restart cut off, on its thread. */
+async function resumeAndInvestigate(b: BatchState, cont = false): Promise<void> {
   if (b.busy) return;
-  b.busy = ACT.investigate;
+  b.busy = cont ? ACT.continueInvestigation : ACT.investigate;
   b.error = null;
   paint();
   try {
-    await resumeBatch(b.id, true);
+    await resumeBatch(b.id, true, {}, cont);
     if (S.batch !== b) return;
     stopClock();
     openBatch(b.id, true);
@@ -1325,6 +1326,9 @@ root.addEventListener("click", (e) => {
       if ("id" in r && step) go(step === "wall" ? { name: "batch", id: r.id } : { name: "batch", id: r.id, step });
       return;
     }
+    case ACT.continueInvestigation:
+      if (b && !b.live && b.resumable) void resumeAndInvestigate(b, true);
+      return;
     case ACT.investigate:
       if (b && !b.live && b.resumable) void resumeAndInvestigate(b);
       else void liveAction("investigate", (id) => startInvestigation(id));

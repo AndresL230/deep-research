@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -109,6 +110,23 @@ def prefix_events(events: list[dict], n_actions: int) -> list[dict]:
 
 
 def read_events(path: Path) -> list[dict]:
+    """The events of a log, oldest first. A line that is not whole JSON is skipped, not fatal: a process killed
+    mid-write (a server restart, a machine out of memory) leaves its last line half written, and the rest of the log
+    still says what the agent did."""
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    out, bad = [], 0
+    for line in path.read_text(errors="replace").splitlines():
+        if not line.strip():
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            ev = None
+        if isinstance(ev, dict):
+            out.append(ev)
+        else:
+            bad += 1
+    if bad:
+        logging.getLogger(__name__).warning("%s: skipped %d line(s) that were not whole JSON", path, bad)
+    return out
