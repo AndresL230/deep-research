@@ -407,6 +407,15 @@ describe("the uploaded controller", () => {
     expect(tab).not.toContain('data-cfg="robot_start"');
   });
 
+  it("never offers an upload to a humanoid batch: its agents start from the template or the colleague's", () => {
+    const hum: BatchConfig = { ...robotCt, domain: "humanoid", robot_controller: controller.id };
+    const html = newBatchView(vm({ defaults: withCt, draft: hum, advanced: true }), { ...ctInputs, controller });
+    expect(html).not.toContain("CONTROLLER ROW");
+    expect(html).not.toContain("Starting from");
+    expect(startOpt(html, "uploaded")).toContain("disabled");
+    expect(startOpt(html, "colleague")).not.toContain("disabled");
+  });
+
   it("sends the controller with a robot batch and never with a tabular one", () => {
     const draft: BatchConfig = { ...robotCt, n_runs: 3, robot_start: "uploaded", robot_controller: controller.id };
     const body = startPayload(draft, { dataset: "ds-0123abcd", target: "price", script: "sc-0123abcd" }, withCt);
