@@ -26,7 +26,8 @@ from . import domains, hub
 from . import sandboxes as vms
 from .agents.analyst import build_analyst
 from .agents.investigator import RUBRIC, build_investigator
-from .analysis import find_split, fork_point, label_table
+from .analysis import find_split, fork_point, label_table, rank_candidates, run_attributes
+from .audit import build_audit
 from .case_file import CaseFile, with_evidence
 from .commentary import for_batch as commentary_for
 from .config import BATCHES_DIR, BatchConfig
@@ -37,7 +38,9 @@ from .evidence import describe as describe_evidence
 from .evidence import fix_evidence, fix_outcome, method_outcome
 from .domains import actions_from_events, build_task, intervention_for, score_run
 from .domains.robot_arm import BENCH_DIR
-from .forks import apply_step, cut_history, fix_plan, forced_turn, step_text
+from . import experiments as xp
+from . import interaction as ixn
+from .forks import ChangeError, anchor_error, change_messages, cut_history, fix_plan, parse_change, step_model
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +254,9 @@ def more_pairs_problem(case: dict, batch_dir: Path) -> str | None:
         marker = domains.get(cfg.get("domain")).task_marker
     except ValueError:
         return f"its domain '{cfg.get('domain')}' is not available here"
+    if found[1].get("change"):
+        # A paired experiment (`Batch.run_experiment`) is continued by running it again: the suspect's score runs on.
+        return f"{found[0]} is a paired experiment; run it again with run_experiment to add pairs"
     src = found[1].get("source_run")
     if not src or not (batch_dir / "runs" / src / "messages.json").is_file() or not (batch_dir / "task" / marker).is_file():
         return "the files needed to fork are missing"
@@ -809,9 +815,37 @@ class Batch:
                 runs[r] = actions_from_events(read_events(p), self.task)
         return runs, statuses
 
+    def write_candidates(self, runs: dict[str, list] | None = None, statuses: dict[str, str] | None = None) -> list[dict]:
+        """The plain-Python ranking of suspects (`analysis.rank_candidates`), both directions plus run attributes, to
+        the case file's `candidates`. For the UI and the fallback only: the investigator's view leaves it out."""
+        if runs is None or statuses is None:
+            runs, statuses = self._labelled_runs()
+        attrs = {}
+        for r in runs:
+            try:
+                report = json.loads((self.runs_dir / r / "outputs" / "report.json").read_text())
+            except (OSError, ValueError):
+                report = None
+            attrs[r] = run_attributes(report, (self.case.data["runs"].get(r) or {}).get("model") or self.run_model(r))
+        ranked = [c.to_dict() for c in rank_candidates(runs, statuses, self.domain.steps(), attrs)]
+        self.case.set_candidates(ranked)
+        return ranked
+
+    def write_audit(self) -> dict | None:
+        """The audit sheet of every scored run (audit.py) to the case file's `audit`, once there is a verdict."""
+        if not self.case.data.get("verdict"):
+            return None
+        sheet = build_audit(self.case.data, self.dir, self.cfg.inflation_threshold)
+        self.case.set_audit(sheet)
+        return sheet
+
     def analyze(self) -> None:
         self.case.set_phase("analyzing")
         runs, statuses = self._labelled_runs()
+        try:
+            self.write_candidates(runs, statuses)
+        except Exception as e:  # noqa: BLE001 - the ranking is for the screens; it never stops the batch
+            logger.warning("could not rank the candidates: %s: %s", type(e).__name__, e)
         finding = find_split(runs, statuses, prefer=self.domain.prefer_label(self.cfg), steps=self.domain.steps())
         if finding is None:
             self.case.set_split(None)
@@ -934,6 +968,155 @@ class Batch:
         h = self.case.hypothesis(hypothesis_id) or {}
         return {"hypothesis_id": hypothesis_id, "prediction": h.get("prediction"), "falsified_if": h.get("falsified_if"),
                 "preregistered_at": time.time()}
+
+    # ---- paired experiments (plan 6.5): one change, a control arm, pairs scored as they come ----
+    def parse_change(self, change: str):
+        """The change `change` names (forks.parse_change), with this batch's domain's forced steps. Raises ChangeError."""
+        c = parse_change(change, force=lambda label: self.domain.intervention_for(label, self.cfg))
+        tabular_only = c.kind == "fake_result" or (c.kind == "force_step" and c.name.startswith("drop_column:"))
+        if tabular_only and self.domain.name != "tabular":
+            raise ChangeError(f"{c.spec} works on data.csv, so only in a tabular batch")
+        return c
+
+    def _forkable_runs(self) -> tuple[dict[str, list], dict[str, str]]:
+        """The labelled runs that have a saved history to cut, and every run's status."""
+        runs, statuses = self._labelled_runs()
+        return {r: a for r, a in runs.items() if (self.runs_dir / r / "messages.json").exists()}, statuses
+
+    def _scope_usd(self, prefix: str) -> float | None:
+        scopes = self.tracker.snapshot()["scopes"]
+        vals = [s.get("total_usd") for k, s in scopes.items() if k.startswith(prefix)]
+        return None if any(v is None for v in vals) else round(sum(vals), 4)
+
+    def _budget_left(self) -> float | None:
+        spent = self.tracker.total_usd()
+        return None if spent is None else round(self.cfg.budget_usd - spent, 4)
+
+    async def run_experiment(self, suspect_id: str, change: str, prediction: str, pairs: int = 3,
+                             source_run: str | None = None, anchor: str = "before_split", reason: str = "") -> dict:
+        """Test one suspect with one change (plan 6.5): `pairs` control and changed copies, paired by index, forked
+        from the same moment of one run, with the prediction saved before any copy starts.
+
+        `change` is a registry name (`forks.registry`): `force_step:deduplicate`, `fake_result:no_duplicates`,
+        `edit_context:hint_quality`, `swap_model:<model>`, or `control` for a same-vs-same check. `prediction` is
+        `smaller_gap` or `larger_gap`. `anchor` is `before_split`, `before_label:<label>` or `index:<n>`; with no
+        `source_run`, plain code picks the first eligible run (`experiments.pick_source`). `pairs` is capped at 6.
+
+        Returns `{"error": ...}` when it cannot run (bad input, over budget, no eligible run, the base VM could not be
+        built). Otherwise `{fork_id, suspect_id, change, anchor, source_run, fork_at, prediction, pairs, dropped,
+        score, p_exact, level, evidence, cost_usd, budget_left_usd}`: this experiment's pairs and score, and the
+        suspect's running evidence over all its experiments (`evidence.<suspect_id>`).
+        """
+        self._loop = asyncio.get_running_loop()
+        if not (suspect_id or "").strip():
+            return {"error": "name the suspect this experiment tests (`suspect_id`)"}
+        if prediction not in xp.PREDICTIONS:
+            return {"error": f"prediction must be one of {list(xp.PREDICTIONS)}, stated before the experiment"}
+        if anchor_error(anchor or "before_split"):
+            return {"error": anchor_error(anchor or "before_split")}
+        try:
+            ch = self.parse_change(change)
+        except ChangeError as e:
+            return {"error": str(e)}
+        try:
+            asked = int(pairs)
+        except (TypeError, ValueError):
+            return {"error": f"pairs must be a whole number from 1 to {xp.MAX_PAIRS_PER_CALL}"}
+        n = max(1, min(asked, xp.MAX_PAIRS_PER_CALL))
+        spent = self._budget_spent()
+        if spent:
+            return {"error": spent}
+        try:
+            self.tracker.check(self.estimate_forks_usd(n, 2), f"{2 * n} experiment copies")
+        except OverBudget as e:
+            return {"error": str(e)}
+        runs, statuses = self._forkable_runs()
+        try:
+            src = xp.pick_source(ch, anchor, prediction, runs, statuses, self.domain.steps().anchor, source_run)
+        except xp.ExperimentError as e:
+            return {"error": str(e)}
+
+        fork_id = self._next_fork_id()
+        plan = {xp.CONTROL_ARM: None, xp.CHANGED_ARM: ch.step}
+        # Saved on the fork before the base VM exists, so before any copy starts: what was predicted, fixed in time.
+        record = {"suspect_id": suspect_id, "change": ch.spec, "change_kind": ch.kind,
+                  "intervention": ch.description, "anchor": src.anchor, "prediction": prediction,
+                  "preregistered_at": time.time(), "reason": (reason or "")[:500], "pairs_requested": asked,
+                  "pairs": [], "score": None, "p_exact": None, "level": None,
+                  **({"label": ch.about} if ch.about else {})}
+        ran = await self._fork_copies(fork_id, plan, xp.pair_jobs(n), kind="method", src=src.run_id,
+                                      fork_at=src.fork_at, n_per_arm=n, record=record)
+        if isinstance(ran, str):
+            return {"error": ran.removeprefix("error: ")}
+        results, n_prefix = ran
+
+        arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in plan}
+        kept, dropped = xp.pair_outcomes(self.case.data["forks"][fork_id].get("children") or {}, n, prediction)
+        for d in dropped:
+            logger.info("experiment %s: pair %s dropped: %s", fork_id, d["i"], d["reason"])
+        scored = xp.score_pairs(kept, prediction)
+        cost = self._scope_usd(f"fork:{fork_id}:")
+        self.case.update_fork(fork_id, status="done", arms=arms, pairs=kept, dropped_pairs=dropped,
+                              score=scored["score"], p_exact=scored["p_exact"], level=scored["level"], cost_usd=cost)
+        self._fork_findings(fork_id, arms)
+        mine = [{"id": fid, **f} for fid, f in self.case.data["forks"].items()
+                if fid != "pending" and isinstance(f, dict) and f.get("suspect_id") == suspect_id
+                and f.get("status") == "done" and f.get("pairs") is not None]
+        ev = xp.suspect_evidence(mine)
+        self.case.set_suspect_evidence(suspect_id, ev)
+        self.case.set_phase("forked")
+        self.push_costs(force=True)
+        return {"fork_id": fork_id, "suspect_id": suspect_id, "change": ch.spec, "anchor": src.anchor,
+                "source_run": src.run_id, "fork_at": n_prefix, "prediction": prediction, "pairs_requested": asked,
+                "pairs": kept, "dropped": dropped, "score": scored["score"], "p_exact": scored["p_exact"],
+                "level": scored["level"], "evidence": ev, "cost_usd": cost, "budget_left_usd": self._budget_left()}
+
+    async def run_interaction(self, change_a: str, change_b: str, per_cell: int = 2, source_run: str | None = None,
+                              anchor: str = "before_split", suspects: tuple[str, str] | None = None) -> dict:
+        """The two-factor grid (plan 6.4) from one fork point: neither change, A only, B only, both, `per_cell` copies
+        each (at most 4). Written to the case file's `interaction`. Returns it, or `{"error": ...}`."""
+        self._loop = asyncio.get_running_loop()
+        try:
+            a, b = self.parse_change(change_a), self.parse_change(change_b)
+        except ChangeError as e:
+            return {"error": str(e)}
+        if a.kind == "control" or b.kind == "control" or a.spec == b.spec:
+            return {"error": "the grid needs two different changes"}
+        if anchor_error(anchor or "before_split"):
+            return {"error": anchor_error(anchor or "before_split")}
+        n = max(1, min(int(per_cell), ixn.MAX_PER_CELL))
+        spent = self._budget_spent()
+        if spent:
+            return {"error": spent}
+        try:
+            self.tracker.check(self.estimate_forks_usd(n, 4), f"{4 * n} grid copies")
+        except OverBudget as e:
+            return {"error": str(e)}
+        runs, statuses = self._forkable_runs()
+        try:
+            # Both changes are fixes tested on an inflated run; A decides which run is eligible.
+            src = xp.pick_source(a, anchor, "smaller_gap", runs, statuses, self.domain.steps().anchor, source_run)
+        except xp.ExperimentError as e:
+            return {"error": str(e)}
+        fork_id = self._next_fork_id()
+        plan = ixn.cell_plan(a.step, b.step)
+        record = {"change_a": a.spec, "change_b": b.spec, "anchor": src.anchor, "preregistered_at": time.time(),
+                  "intervention": f"A: {a.description}. B: {b.description}"}
+        ran = await self._fork_copies(fork_id, plan, [(cell, i + 1) for cell in plan for i in range(n)],
+                                      kind="interaction", src=src.run_id, fork_at=src.fork_at, n_per_arm=n, record=record)
+        if isinstance(ran, str):
+            return {"error": ran.removeprefix("error: ")}
+        results, n_prefix = ran
+        arms = {cell: _arm_summary([r for r in results.values() if r["arm"] == cell]) for cell in plan}
+        grid = ixn.grid_result(self.case.data["forks"][fork_id].get("children") or {})
+        self.case.update_fork(fork_id, status="done", arms=arms, cost_usd=self._scope_usd(f"fork:{fork_id}:"))
+        out = {"fork_id": fork_id, "change_a": a.spec, "change_b": b.spec, "suspects": list(suspects or []),
+               "source_run": src.run_id, "fork_at": n_prefix, "anchor": src.anchor, "per_cell": n, **grid,
+               "cost_usd": self._scope_usd(f"fork:{fork_id}:"), "budget_left_usd": self._budget_left()}
+        self.case.set_interaction(out)
+        self.case.set_phase("forked")
+        self.push_costs(force=True)
+        return out
 
     # ---- the diagnosis: traceback and fix ----
     async def trace_failures(self, run_id: str, max_episodes: int = 3) -> dict:
@@ -1138,37 +1321,12 @@ class Batch:
         except OverBudget as e:
             return f"error: {e}"
 
-        fork_id = f"f{sum(k.startswith('f') for k in self.case.data['forks']) + 1}"
-        phase_before = self.case.data.get("phase")
-        base_key, base_scope = f"{fork_id}-base", f"fork:{fork_id}:base"
-        try:
-            point = self._fork_point(src, fork_at)
-            self.case.set_phase("forking")
-            self.case.update_fork(
-                fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=point.n_prefix, n_per_arm=n_per_arm,
-                children={}, arm_steps={a: (step or {}).get("description") for a, step in plan.items()}, **record,
-            )
-            base = await self._build_base(base_key, f"{self.id}-{fork_id}-base", base_scope, point.actions)
-        except Exception as e:  # noqa: BLE001 - returned, so an agent calling this as a tool reads it instead of dying
-            logger.warning("fork %s: could not build the base VM: %s: %s", fork_id, type(e).__name__, e)
-            await self._release(base_key, base_scope)
-            # No copy ran, so there is no experiment to show, and the batch is back where it was.
-            self.case.remove_fork(fork_id)
-            self.case.set_phase(phase_before)
-            return f"error: could not build the fork's base VM ({type(e).__name__}: {e})"[:400]
-        except BaseException:
-            await self._release(base_key, base_scope)
-            raise
-        self.case.update_fork(fork_id, status="running")
-        n_prefix = point.n_prefix
-
-        # Each copy is its own run, so each starts in an empty context (`_run_children`).
-        try:
-            results = await self._run_children(
-                fork_id, plan, [(arm, i + 1) for arm in plan for i in range(n_per_arm)], base, point, self.run_model(src),
-                kind=kind)
-        finally:
-            await self._release(base_key, base_scope)
+        fork_id = self._next_fork_id()
+        ran = await self._fork_copies(fork_id, plan, [(arm, i + 1) for arm in plan for i in range(n_per_arm)],
+                                      kind=kind, src=src, fork_at=fork_at, n_per_arm=n_per_arm, record=record)
+        if isinstance(ran, str):
+            return ran
+        results, n_prefix = ran
 
         arms = {arm: _arm_summary([r for r in results.values() if r["arm"] == arm]) for arm in plan}
         self.case.update_fork(fork_id, status="done", arms=arms)
@@ -1184,6 +1342,45 @@ class Batch:
             self.case.update_fix(status="tested", fork_id=fork_id,
                                  result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
         return " ".join(lines)
+
+    def _next_fork_id(self) -> str:
+        return f"f{sum(k.startswith('f') for k in self.case.data['forks']) + 1}"
+
+    async def _fork_copies(self, fork_id: str, plan: dict[str, Any], jobs: list[tuple[str, int]], *, kind: str,
+                           src: str, fork_at: int, n_per_arm: int, record: dict) -> tuple[dict[str, dict], int] | str:
+        """The fork-running core every experiment shares (`_experiment`, `run_experiment`, `run_interaction`): record
+        the fork with `record` before anything runs, rebuild the base VM by replay to the fork point, continue one copy
+        per `(arm, number)` of `jobs` and release the base. Returns ({child id: result}, actions before the cut), or
+        an error string when the base could not be built (the fork is then removed and the phase restored)."""
+        self._loop = asyncio.get_running_loop()
+        phase_before = self.case.data.get("phase")
+        base_key, base_scope = f"{fork_id}-base", f"fork:{fork_id}:base"
+        try:
+            point = self._fork_point(src, fork_at)
+            self.case.set_phase("forking")
+            self.case.update_fork(
+                fork_id, status="rebuilding", kind=kind, source_run=src, fork_at=point.n_prefix, n_per_arm=n_per_arm,
+                children={}, arm_steps={a: _step_description(step) for a, step in plan.items()}, **record,
+            )
+            base = await self._build_base(base_key, f"{self.id}-{fork_id}-base", base_scope, point.actions)
+        except Exception as e:  # noqa: BLE001 - returned, so an agent calling this as a tool reads it instead of dying
+            logger.warning("fork %s: could not build the base VM: %s: %s", fork_id, type(e).__name__, e)
+            await self._release(base_key, base_scope)
+            # No copy ran, so there is no experiment to show, and the batch is back where it was.
+            self.case.remove_fork(fork_id)
+            self.case.set_phase(phase_before)
+            return f"error: could not build the fork's base VM ({type(e).__name__}: {e})"[:400]
+        except BaseException:
+            await self._release(base_key, base_scope)
+            raise
+        self.case.update_fork(fork_id, status="running")
+
+        # Each copy is its own run, so each starts in an empty context (`_run_children`).
+        try:
+            results = await self._run_children(fork_id, plan, jobs, base, point, self.run_model(src), kind=kind)
+        finally:
+            await self._release(base_key, base_scope)
+        return results, point.n_prefix
 
     def _fork_findings(self, fork_id: str, arms: dict[str, dict]) -> dict:
         """What a fork's stored copies say, recomputed from every child and the arm summaries `arms`: how the copies
@@ -1258,23 +1455,29 @@ class Batch:
                         await asyncio.to_thread(vms.load_task, vm, self.task)
                         await asyncio.to_thread(vms.replay_actions, vm, prefix_actions)
                         how = "replay"
+                    step = plan[arm]
+                    # A `swap_model` change runs this copy on another model (forks.step_model); every other arm keeps
+                    # the source run's.
+                    copy_model = step_model(step, model)
                     url = await _try(asyncio.to_thread(vms.start_lab_page, vm))
-                    self._set_child(fork_id, cid, arm=arm, status="running", lab_url=url, how=how, model=model)
-                    (cdir / "meta.json").write_text(json.dumps({"model": model}))
+                    self._set_child(fork_id, cid, arm=arm, status="running", lab_url=url, how=how, model=copy_model)
+                    (cdir / "meta.json").write_text(json.dumps({"model": copy_model}))
 
                     history = list(prefix_msgs)
-                    step = plan[arm]
                     if step is not None:
                         backend = DaytonaSandbox(sandbox=vm)
                         try:
-                            output = await asyncio.to_thread(apply_step, backend, step)
+                            # A forced step runs in the VM; a made-up result, a message or a model swap does not
+                            # (forks.change_messages).
+                            turn, forced_events = await asyncio.to_thread(change_messages, backend, step)
                         except RuntimeError as e:
                             # Nothing was forced here, so this copy must not be scored as a result of its arm.
                             raise RuntimeError(f"the {arm} step failed: {e}") from e
-                        history += forced_turn(step, output)
-                        log.write({"type": "forced", "command": step_text(step), "output": output[:2000]})
+                        history += turn
+                        for ev in forced_events:
+                            log.write(ev)
 
-                    agent = build_analyst(DaytonaSandbox(sandbox=vm), model, self.domain.analyst_system_prompt)
+                    agent = build_analyst(DaytonaSandbox(sandbox=vm), copy_model, self.domain.analyst_system_prompt)
 
                     def on_event(ev: dict) -> None:
                         self._emit({"kind": "fork_event", "fork": fork_id, "child": cid, "event": ev})
@@ -1283,7 +1486,7 @@ class Batch:
                                           on_event, lambda files: self._set_child(fork_id, cid, motion_files=files))
                     await asyncio.wait_for(
                         self._drive(agent, {"messages": history}, f"{self.id}-{fork_id}-{cid}", scope,
-                                    model, log, on_event),
+                                    copy_model, log, on_event),
                         RUN_TIMEOUT_S,
                     )
                     if watch is not None:
@@ -1558,6 +1761,10 @@ class Batch:
                     self._emit({"kind": "investigator", "event": ev})
                 self.push_costs()
                 self._check_budget()
+            try:
+                self.write_audit()
+            except Exception as e:  # noqa: BLE001 - the audit sheet is for the screens; it never stops the batch
+                logger.warning("could not write the audit sheet: %s: %s", type(e).__name__, e)
             self.case.set_phase("done")
             # The investigator has finished and the verdict is in: the batch is over, so stop paying for its VMs.
             await self.close()
@@ -1697,6 +1904,15 @@ class _ForkPoint:
     n_prefix: int
     actions: list
     log: str
+
+
+def _step_description(step: dict | list | None) -> str | None:
+    """An arm's step in words for `arm_steps`: None for no step, the steps joined for a two-factor cell."""
+    if step is None:
+        return None
+    if isinstance(step, list):
+        return "; then ".join(s.get("description") or "" for s in step) or None
+    return step.get("description")
 
 
 def _put(q: asyncio.Queue, msg: dict) -> None:
