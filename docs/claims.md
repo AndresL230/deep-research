@@ -102,21 +102,23 @@ against `TAB` itself.
 
 ## Landing page (`web/src/landing/landing.ts`, `terminal.ts`)
 
-The landing page draws every number from `DEMO`, which is simulated (`config.simulated = true`). The terminal titles say
-"simulated". The pill, the tabs and the cards do not.
+Rewritten Sun Nov 15 around 04:15 Eastern. The page no longer draws from the simulated `DEMO`. Every robot arm number
+comes from `LIVE` (`fixtures/robot-live-investigation`), the terminal's title says "recorded run", and the rule the
+page states is the 6.4 running score.
 
 | Claim | Backing | Status |
 | --- | --- | --- |
-| "Inflated runs: 89% claimed, 75% real" (pill, and the terminal's "reported 89% · true 75%") | `DEMO` mean over the 6 inflated runs: reported 0.892, true 0.751 | **simulated**, and not labeled simulated where it is shown. It matches no real batch |
-| 6 of 12 runs reported more than they scored on the holdout | `DEMO` `runs.*.status`: 6 inflated, 6 honest | simulated |
-| 6 of 6 honest runs removed duplicates; none of the 6 inflated did | `DEMO` `split`: `deduplicate`, `honest_rate 1.0`, `inflated_rate 0.0` | simulated |
-| 20% of the table is held out | `DEMO` `config.holdout_fraction = 0.2` | simulated |
-| The per-run reported and holdout numbers (`RUNS`) and the fork gaps (`FORK`) | `DEMO` `runs.*`, `forks.f1.children.*.gap`, `config.inflation_threshold = 0.08` | simulated (r06 is 88.6 in the fixture and 88.7 on the page, r12 is 78.0 and 78.1: rounding) |
-| Left alone, 3 of 4 copies stay inflated; made to deduplicate, 0 of 4 do | `DEMO` `forks.f1.arms` | simulated |
-| Terminal verdict: "Skipping the duplicate check inflated the score" | `DEMO` `verdict.sentence` says "suggests". Its evidence is open: Fisher p = 5/70 on 4 pairs. The 6.4 score is 13.03 with 4 agreeing pairs, under 20 | **wrong**: a causal claim the fixture's own verdict does not make |
-| "...then forks the VM to prove what went wrong" (lede) | "Prove": `TAB` `forks.f1` reached `supported` (score 24.76, 5 of 5 pairs) on a real batch. "Forks the VM": every real copy was rebuilt by replay (`LIVE` and `TAB` `forks.*.built`, `fork: 0`). "Finds the step where honest and inflated runs split": `TAB` had no honest run and no split; the investigator named the step itself | **partly backed**: proved on `1115-012104-800f`, but never by a VM fork |
-| "Demo replay" links (nav and footer) | Open `#/b/tabular-live-investigation`, which is `TAB`, a real recording. The pill, the "Replay the batch" button and the footer's "Replay demo-batch" still open `DEMO`, whose numbers the page shows | backed |
-| Robot chapter: copies "made to try 10 random positions. If those come out honest, that step was the cause." | `LIVE` `forks.f1.arm_steps.forced` backs the 10 positions. The live run's copies did come out honest, and the verdict is still open | **rule**: overclaims next to the real run |
+| Pill: "One agent claimed 100%. We measured 65%." | `LIVE` `runs.r06`: reported 1.0, true 0.65 | backed |
+| "5 of 12 agents in our recorded run claimed far more than we measured" | `LIVE` `runs.*.status`: 5 inflated, 3 honest, 2 unclear, 2 failed | backed |
+| "3 of 3 honest agents tuned the controller before they reported. Only 2 of the 5 that overclaimed did" | `LIVE` `split`: `tune_params`, honest 3 of 3, inflated 2 of 5 | backed |
+| The per-run claimed and measured numbers (`RUNS`) and the copies' gaps (`FORK`), with the line at 27.5 | `LIVE` `runs.*`, `forks.f1.children.*.gap`, `config.inflation_threshold` | backed |
+| "Left alone, 4 of 4 copies still overclaimed; made to test the edges of the table, 0 of 4 did" | `LIVE` `forks.f1.arms` | backed |
+| "In all four pairs, only the copy made to test the edges of the table stopped overclaiming. That puts the score at 13. Orro names a cause at 20" | `LIVE` `forks.f1.pairs` (4, all `agree`), `verdict.evidence.score 13.0321`, `needed_score 20` | backed |
+| Terminal: "4 pairs · 4 as predicted · score 13.03", ticket "Verdict · open", "Score 13.03 of 20 · 4 of 4 pairs agree", verdict "Skipping the edge test suggests why" | `LIVE` `verdict.evidence`: `level open`, `score 13.0321`, `agree 4` | backed |
+| "Every pair of copies moves a score... Only at 20 may the verdict say a step caused the gap" | `deep_research/evidence.py` | backed |
+| "On our recorded tabular run it passed 20, and a second suspect was cleared" | `TT` (`fixtures/tabular-time-travel-investigation`): `suspects` s1 `supported`, s2 `cleared`; `forks.f2.score 24.761`, `verdict.evidence.score 89.39` | backed |
+| "A second agent, never told the answer, names its suspects. Once you approve, Orro rebuilds one run as pairs of copies" | `agents/investigator.py` (`record_suspects`, `run_experiment` behind approval), `experiments.py`. In `LIVE` the approval came from a written policy, and the copies were rebuilt by replay | backed as a description of the code |
+| The humanoid tab: "3 of 3 motions tracked with balance feedback. Plain playback fell at 3.9 s on two of them" | Printed in the video (`web/public/media/humanoid-tracking.mp4`). Not a batch, and it has no replay | backed by the video only |
 | The agent's controller is run at 20 positions it never saw | `sim/hidden.py`, `LIVE` `runs.*.n_hidden` | backed |
 
 ## How it works page (`web/src/batch/how.ts`)
@@ -124,8 +126,14 @@ The landing page draws every number from `DEMO`, which is simulated (`config.sim
 | Claim | Backing | Status |
 | --- | --- | --- |
 | "Every number and picture below comes from a real batch" | Before this PR the page drew from `robot-demo-batch`, which is simulated. This PR points `HOW_BATCH` at `robot-live-investigation`, so the claim now holds | backed (after this PR) |
-| "Each run is one Deep Agent on Claude Haiku 5.5 or Sonnet 5.5, the models taking turns across the batch" | General description of the code. In the real recording every analyst was Haiku | backed as a description, but not true of the batch the page shows |
-| "A fork is a copy on write of the VM... If a VM cannot be forked, the run's actions are replayed" | Every real copy so far was a replay (`LIVE` `forks.f1.built`) | backed, with the fallback being what actually ran |
+| "Each run is one LangChain Deep Agent on Claude Haiku 5.5; a robot batch can alternate it with Sonnet 5.5" | `config.py` (Haiku 5.5 is the default analyst model), `domains/robot_arm.py` (the robot domain alternates). In the real recording every analyst was Haiku | backed |
+| "To copy a run, the server rebuilds it on a fresh VM by replaying its actions up to the cut, then copies that VM once for each copy; a copy that cannot be made that way is rebuilt by replay as well" | `batch.py` (the base VM, then a fork of it per copy, replay when a fork fails). Every real copy so far was a replay (`LIVE` `forks.f1.built`) | backed, with the fallback being what actually ran |
+| Stop 3, "3 suspects", named "Testing the table edges", "Tuning the controller", "A defect in run r06's code", the first one tested | `LIVE` `hypotheses` h1, h2, h3; `forks.f1.hypothesis_id = h1` | backed |
+| Stop 4, four pairs of copies of r06: left alone +35.0 pts each, changed 0, 0, +8.5 and +10.0 pts, all four "as predicted" | `LIVE` `forks.f1.pairs` and the `control-*` and `forced-*` children | backed |
+| Stop 5, "Score: 1 x 1.9 x 1.9 x 1.9 x 1.9 = 13.03", "13.03 of 20", open | `LIVE` `verdict.evidence`: `rule running_score`, `score 13.0321`, `needed_score 20`, `level open` | backed |
+| "Each pair that goes the predicted way multiplies a score by 1.9, and each one that does not by 0.1. At 20 the verdict may name a cause; a suspect still under 1 after five pairs is cleared" | `deep_research/evidence.py`, `web/src/batch/evidence.ts` | backed |
+| The investigator's helpers: a step tagger, three lenses, a skeptic, and a code tracer where there is code to trace | `deep_research/agents/investigator.py`. The real robot recording predates the lenses and the skeptic: its investigator panel lists calls to the code tracer and the general-purpose helper only | backed as a description of the code, not of the batch the page shows |
+| The last stop's moving dots | Drawn from `LIVE`: one dot per run in the colour of its status, sparks in proportion to each inflated run's gap, and r06 splitting into its four scored pairs (`web/src/batch/how-fx.ts`) | backed |
 
 ## Not claimed anywhere, and not run
 

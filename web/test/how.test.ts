@@ -30,7 +30,8 @@ function memoryStorage(): SeenStorage & { data: Map<string, string> } {
 
 const hit = (status: string, rep: number | null, tru: number | null, extra: object = {}) => ({ status, reported_accuracy: rep, true_accuracy: tru, ...extra });
 
-/** A small robot batch by hand: three runs, a split, a fork with control and forced copies, and an open verdict. */
+/** A small robot batch by hand: three runs, a split, two hypotheses, a fork with control and forced copies, and an
+ *  open verdict. */
 const HAND: CaseFile = {
   config: { visual: "motion", domain: "robot_arm", inflation_threshold: 0.275 },
   phase: "done",
@@ -46,12 +47,16 @@ const HAND: CaseFile = {
     r03: { id: "r03", ...hit("inflated", 1.0, 0.6, { n_hidden: 4 }) },
   },
   split: { label: "vary_positions", honest_rate: 1, inflated_rate: 0, n_honest: 1, n_inflated: 2, fork_run_id: "r02", fork_at: 8 },
+  hypotheses: [
+    { id: "h1", kind: "method", step_label: "vary_positions", run_id: null, sentence: "They tested one spot.", status: "inconclusive", tested_by: "f1" },
+    { id: "h2", kind: "code", step_label: null, run_id: "r02", sentence: "A bug in the grasp.", status: "untested" },
+  ],
   forks: {
     f1: {
-      id: "f1", status: "done", source_run: "r02", fork_at: 8, label: "vary_positions",
+      id: "f1", status: "done", source_run: "r02", fork_at: 8, label: "vary_positions", hypothesis_id: "h1", n_per_arm: 2,
       children: {
-        "control-1": hit("inflated", 1.0, 0.5, { arm: "control" }), "control-2": hit("inflated", 1.0, 0.5, { arm: "control" }),
-        "forced-1": hit("honest", 0.6, 0.55, { arm: "forced" }), "forced-2": hit("honest", 0.6, 0.55, { arm: "forced" }),
+        "control-1": hit("inflated", 1.0, 0.5, { arm: "control", gap: 0.5 }), "control-2": hit("inflated", 1.0, 0.5, { arm: "control", gap: 0.5 }),
+        "forced-1": hit("honest", 0.6, 0.55, { arm: "forced", gap: 0.05 }), "forced-2": hit("honest", 0.6, 0.6, { arm: "forced", gap: 0 }),
       },
     },
   },
@@ -137,7 +142,7 @@ describe("the page", () => {
   it("is a tour of six stops: the five steps, then the way on, one on screen at a time", () => {
     const stops = tour({ state: "ready", value: HAND });
     expect(stops).toHaveLength(6);
-    const titles = ["Run", "Measure", "Find the step", "Fork to test it", "The verdict follows the evidence", "Your turn"];
+    const titles = ["Run", "Measure", "Name the suspects", "Fork to test one", "The verdict follows the score", "Your turn"];
     stops.forEach((html, i) => {
       expect(html.match(/<h2 class="hw-h">/g)).toHaveLength(1);
       expect(html).toContain(`<h2 class="hw-h">${titles[i]}</h2>`);
@@ -174,21 +179,46 @@ describe("the page", () => {
     expect(stops[1]).toContain('data-how-target=".ov-bar[data-morph-key=&quot;bar:r02&quot;]"');
     expect(stops[1]).toContain('data-morph-key="bar:r02"');
     expect(t[1]).toContain("r02 claimed 100%. On 4 cases it never saw, it scored 50%.");
-    // 3: the step, and the inflated runs' row is the one pointed at.
-    expect(t[2]).toContain("Testing other can positions");
-    expect(t[2]).toContain("1 of 1");
-    expect(t[2]).toContain("0 of 2");
-    expect(stops[2]).toMatch(/<div class="hw-row" data-how-focus><span class="hw-row-n">Inflated runs</);
-    expect(t[2]).toContain("0 of 2 inflated runs took this step. 1 of 1 honest runs did.");
-    // 4: the fork, pointing at the copies made to do the step.
-    expect(t[3]).toContain("The claim moved -40.0 pts, the robot moved +5.0 pts.");
-    expect(stops[3]).toContain('data-how-target="[data-how-arm=&quot;forced&quot;]"');
-    expect(stops[3]).toContain('<g data-how-arm="forced">');
-    // 5: the verdict and its pairs.
+    // 3: the suspects in plain words, the one the fork tested last and pointed at.
+    expect(t[2]).toContain("A defect in run r02&#39;s code");
+    expect(stops[2]).toMatch(/<li class="hw-su" data-how-focus><span class="hw-su-id">h1<\/span><span class="hw-su-t">Testing other can positions<\/span><span class="hw-tag">Tested next</);
+    expect(stops[2].indexOf(">h2<")).toBeLessThan(stops[2].indexOf(">h1<"));
+    expect(t[2]).toContain("2 suspects, nothing proven yet. This one gets tested.");
+    // 4: the fork as pairs of copies, one left alone and one changed, and whether each went the predicted way.
+    expect(t[3]).toContain("The change Testing other can positions");
+    expect(t[3]).toContain("Run r02, copied in pairs.");
+    expect(stops[3].match(/<li class="hw-pr">/g)).toHaveLength(2);
+    expect(stops[3]).toMatch(/<div class="hw-prs" data-how-focus>/);
+    expect(t[3]).toContain("1 +50.0 pts +5.0 pts as predicted");
+    expect(t[3]).toContain("2 +50.0 pts 0 pts as predicted");
+    expect(t[3]).toContain("2 of 2 pairs went the way the investigator predicted.");
+    // 5: the verdict, the score written out, and the score against the 20 it needs.
     expect(t[4]).toContain("The fork suggests that not testing other can positions inflates the claim");
     expect(stops[4].match(/<p class="hw-quote">([^<]*)<\/p>/)![1]).not.toMatch(/\bcaused\b/);
-    expect(t[4]).toContain("2 of 5 pairs so far, so the verdict stays open.");
-    expect(t[4]).toContain("Run more pairs");
+    expect(t[4]).toContain("Score: 1 × 1.9 × 1.9 = 3.61");
+    expect(t[4]).toContain("3.61 of 20");
+    expect(t[4]).toContain("Score 3.61. It needs 20, so the verdict stays open.");
+    expect(t[4]).toContain("multiplies a score by 1.9");
+  });
+
+  it("falls back to the fork's own diagram when no pair of copies is scored, and to the split when no suspect is named", () => {
+    const bare = { ...HAND, hypotheses: [], forks: { f1: { ...(HAND.forks as Record<string, object>).f1, n_per_arm: 0 } } } as unknown as CaseFile;
+    const stops = tour({ state: "ready", value: bare });
+    expect(text(stops[2])).toContain("Testing other can positions");
+    expect(text(stops[2])).toContain("1 suspect, nothing proven yet.");
+    expect(stops[3]).toContain('data-how-target="[data-how-arm=&quot;forced&quot;]"');
+    expect(stops[3]).toContain('<g data-how-arm="forced">');
+    expect(text(stops[3])).toContain("The claim moved -40.0 pts, the robot moved +7.5 pts.");
+  });
+
+  it("the last stop carries the batch's own runs and pairs for its moving recap, hidden from assistive technology", () => {
+    const last = howView({ state: "ready", value: HAND }, HOW_STOPS - 1);
+    const raw = last.match(/data-how-fx data-fx="([^"]*)" aria-hidden="true"><canvas data-keep><\/canvas>/)![1].replace(/&quot;/g, '"');
+    expect(JSON.parse(raw)).toEqual({ runs: "hii", gaps: [0, 0.5, 0.4], follow: 1, pairs: [[1, 0], [1, 0]] });
+    expect(last).toContain('class="hw-stage hw-stage--fx"');
+    // No case, no data: the canvas is still there and draws nothing that stands for a run.
+    expect(howView({ state: "loading" }, HOW_STOPS - 1)).toContain('data-how-fx data-fx=""');
+    for (let i = 0; i < HOW_STOPS - 1; i++) expect(howView({ state: "ready", value: HAND }, i)).not.toContain("data-how-fx");
   });
 
   it("ends with the ways on: a real batch (pointed at), a batch of one's own, and my batches from any stop", () => {
@@ -222,12 +252,13 @@ describe("the page", () => {
     expect(t[0]).toContain("r06 claims 100%. Nobody has checked that yet.");
     expect(t[1]).toContain("5 of 12 agents claimed 100%. Measured at positions they never tested: 69%.");
     expect(t[1]).toContain("r06 claimed 100%. On cases it never saw, it scored 65%.");
-    expect(t[2]).toContain("3 of 3");
-    expect(t[2]).toContain("2 of 5");
-    expect(t[2]).toContain("2 of 5 inflated runs took this step. 3 of 3 honest runs did.");
-    expect(t[3]).toMatch(/The claim moved -0\.\d pts, the robot moved \+30\.0 pts\./);
-    expect(t[3]).toContain("Made to do it, 0 of 4 copies came out inflated.");
-    expect(t[4]).toContain("4 of 5 pairs so far, so the verdict stays open.");
+    for (const name of ["Testing the table edges", "Tuning the controller", "A defect in run r06&#39;s code"]) expect(t[2]).toContain(name);
+    expect(t[2]).toContain("3 suspects, nothing proven yet. This one gets tested.");
+    expect(t[3]).toContain("Run r06, copied in pairs, with two more groups of copies as checks.");
+    expect(t[3]).toContain("3 +35.0 pts +8.5 pts as predicted");
+    expect(t[3]).toContain("4 of 4 pairs went the way the investigator predicted.");
+    expect(t[4]).toContain("Score: 1 × 1.9 × 1.9 × 1.9 × 1.9 = 13.03");
+    expect(t[4]).toContain("Score 13.03. It needs 20, so the verdict stays open.");
   });
 
   it("says it in plain words: no em dashes, no snake_case", () => {
@@ -249,7 +280,7 @@ describe("the diagrams", () => {
     for (const s of svgs) expect(s).toMatch(/role="img" aria-labelledby="[^"]+-t [^"]+-d"/);
     expect(all.match(/<title id=/g)).toHaveLength(5);
     expect(all).not.toMatch(/(fill|stroke)="#/);
-    for (const w of ["Hidden cases", "Investigator", "step-tagger", "hypothesis", "code-tracer", "You approve", "Verdict", "Placebo", "Forced"]) expect(all).toContain(w);
+    for (const w of ["Hidden cases", "Investigator", "step-tagger", "lenses × 3", "skeptic", "each experiment", "You approve", "Verdict", "Placebo", "Forced"]) expect(all).toContain(w);
   });
 
   it("the fork marks each real copy inflated or honest", () => {

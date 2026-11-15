@@ -53,8 +53,12 @@
 .hw-tip.is-placed { position:absolute; margin:0; width:max-content; transition:left .45s var(--ease-out), top .45s var(--ease-out); }
 .hw-tip.is-placed::before { content:""; position:absolute; left:var(--hw-ax, 24px); top:-5px; width:10px; height:10px; margin-left:-5px; background:var(--ink); transform:rotate(45deg); }
 
-/* 6. the way on */
+/* 6. the way on, over the moving recap (how-fx.ts). The canvas lies over the stage, above the ring's dim, and draws
+   only in the band under the buttons and the bubble; clicks pass through it. */
 .hw-start { display:flex; flex-wrap:wrap; gap:12px; }
+.hw-stage--fx { min-height:420px; }
+.hw-fx { position:absolute; inset:0; z-index:1; pointer-events:none; }
+.hw-fx > canvas { display:block; width:100%; height:100%; }
 
 .hw-head { margin:0; font-size:16px; font-weight:500; line-height:1.4; letter-spacing:-0.01em; }
 .hw-head--sm { font-size:14px; }
@@ -86,7 +90,24 @@
 .hw-step-name { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:0; font-size:15px; font-weight:500; }
 .hw-tag { padding:1px 7px; border-radius:var(--r-ctl); background:var(--hover); color:var(--fg-55); font-size:11.5px; font-weight:500; line-height:18px; }
 
-/* 4. the fork */
+/* 3. the suspects */
+.hw-sus { display:flex; flex-direction:column; gap:6px; margin:0; padding:0; list-style:none; }
+.hw-su { display:flex; align-items:center; gap:10px; min-width:0; padding:10px 12px; border:1px solid var(--border); border-radius:var(--r-ctl); background:var(--surface); font-size:14px; }
+.hw-su-id { flex:none; font-size:12px; font-variant-numeric:tabular-nums; color:var(--fg-55); }
+.hw-su-t { flex:1 1 auto; min-width:0; font-weight:500; text-wrap:pretty; }
+.hw-su .hw-tag { flex:none; }
+
+/* 4. the pairs of copies */
+.hw-prs { display:flex; flex-direction:column; align-self:flex-start; max-width:100%; min-width:0; font-size:13px; font-variant-numeric:tabular-nums; }
+.hw-pr-l { display:flex; flex-direction:column; margin:0; padding:0; list-style:none; }
+.hw-pr { display:grid; grid-template-columns:36px 108px 132px minmax(0, auto); align-items:center; gap:10px; padding:7px 0; border-top:1px solid var(--border); }
+.hw-pr--h { padding:0 0 6px; border-top:0; font-size:12px; color:var(--fg-55); }
+.hw-pr-i { color:var(--fg-55); }
+.hw-pr-c { display:inline-flex; align-items:center; gap:7px; font-weight:500; white-space:nowrap; }
+.hw-pr-a { color:var(--fg-55); white-space:nowrap; }
+.hw-pr-a.is-yes { color:var(--fg-70); }
+
+/* 4. the fork's own diagram, when no pair is scored */
 .hw-fork .hw-svg { max-width:460px; }
 .hw-keys { display:flex; flex-wrap:wrap; gap:4px 14px; margin:0; padding:0; list-style:none; font-size:12px; color:var(--fg-55); }
 .hw-keys li { display:inline-flex; align-items:center; gap:6px; }
@@ -94,13 +115,16 @@
 .hw-sw--ok { background:var(--ok); }
 .hw-sw--bad { background:var(--bad); }
 
-/* 5. the pairs */
+/* 5. the score against the 20 it needs */
+.hw-meter { position:relative; display:block; width:200px; max-width:100%; height:8px; border-radius:4px; background:var(--bar-base); }
+.hw-meter > i { display:block; height:100%; border-radius:4px; background:var(--accent); }
+.hw-meter > b { position:absolute; top:-4px; bottom:-4px; width:2px; margin-left:-1px; border-radius:1px; background:var(--fg); }
+.hw-level[data-level="cleared"] { color:var(--fg-70); }
+.hw-sum { font-variant-numeric:tabular-nums; }
+
 .hw-pairs { display:inline-flex; align-self:flex-start; align-items:center; flex-wrap:wrap; gap:10px 14px; }
 .hw-level { padding:1px 8px; border-radius:var(--r-ctl); font-size:11.5px; font-weight:600; line-height:20px; color:var(--fg-55); box-shadow:inset 0 0 0 1px var(--border-strong); }
 .hw-level[data-level="supported"] { color:var(--green); box-shadow:none; background:color-mix(in srgb, var(--green) 16%, transparent); }
-.hw-slots { display:inline-flex; gap:4px; }
-.hw-slots > i { display:block; width:18px; height:10px; border-radius:2px; box-shadow:inset 0 0 0 1px var(--border-strong); }
-.hw-slots > i.is-on { background:var(--accent); box-shadow:none; }
 
 /* ── under the hood, folded ── */
 .hw-hood { min-width:0; border-top:1px solid var(--border); padding-top:16px; }
@@ -158,6 +182,7 @@
   .hw-svg--wide { display:none; }
   .hw-svg--narrow { display:block; }
   .hw-row { grid-template-columns:96px minmax(0, 1fr) 48px; gap:10px; }
+  .hw-stage--fx { min-height:460px; }
 }
 /* A phone. The rail is six equal squares across the screen (the stop's name is the card's heading, right under it);
    Back and Next are 44px tall and Next takes the rest of the row; nothing is set smaller than 12px. */
@@ -176,6 +201,9 @@
   .hw-stage { padding:20px 16px 24px; }
   .hw-agent-id { font-size:12px; }
   .hw-tag, .hw-level { font-size:12px; }
+  .hw-pr { grid-template-columns:28px 92px 108px minmax(0, auto); gap:8px; }
+  .hw-pr-a { white-space:normal; font-size:12px; }
+  .hw-meter { width:140px; }
   /* The diagrams are drawn 340 units wide and shown a little narrower than that, so their small words are set up. */
   .hw-d-s, .hw-d-pill text { font-size:12.5px; }
   .hw-d-l { font-size:12px; }

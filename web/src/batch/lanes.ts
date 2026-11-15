@@ -2377,11 +2377,13 @@ function competingCard(h: Hypothesis, words: DomainWords, trap: TrapInfo | null)
 /** A hypothesis's title: its step in plain words, or, for a code hypothesis (no step label), the run whose code it
  *  blames. */
 function hypTitle(h: Hypothesis, words: DomainWords, trap: TrapInfo | null): string {
-  if (h.step_label) {
-    return `<b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b>`;
-  }
-  const what = h.kind === "code" ? (h.run_id ? `A defect in run ${h.run_id}'s code` : "A defect in the code") : "No step named";
-  return `<b class="ln-lit-word">${esc(what)}</b>`;
+  return `<b class="ln-lit-word"${h.step_label ? ` title="${attr(h.step_label)}"` : ""}>${esc(hypName(h, words, trap))}</b>`;
+}
+
+/** The same title as plain text: "Testing the table edges", "A defect in run r06's code". */
+export function hypName(h: Pick<Hypothesis, "step_label" | "kind" | "run_id">, words: DomainWords, trap: TrapInfo | null): string {
+  if (h.step_label) return capital(stepText(h.step_label, words, trap).name);
+  return h.kind === "code" ? (h.run_id ? `A defect in run ${h.run_id}'s code` : "A defect in the code") : "No step named";
 }
 
 /** What each state means, for the key under the investigator's picture: said once, in a few words. */
