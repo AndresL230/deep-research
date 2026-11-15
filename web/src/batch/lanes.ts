@@ -758,6 +758,97 @@ function runStrip(c: CaseFile, shown: readonly (string | null)[]): string {
     `<p class="ln-legend-t">Bar: ${esc(claim)} score. Line: ${esc(truth)} score. Both from 50% to 100%.${marked}</p>`;
 }
 
+/** One step of the tracks: how many honest and inflated runs took it, out of how many. */
+export interface StepRow {
+  label: string;
+  honest: [did: number, of: number];
+  inflated: [did: number, of: number];
+  /** "split": the step the finding names. "differs": another step most of one group took and most of the other
+   *  did not. "shared": both groups took it, or neither did. */
+  kind: "split" | "differs" | "shared";
+}
+
+/**
+ * Every step the honest and inflated runs took, in the order the runs reached them (a step's place is where it first
+ * comes in a run, averaged over the runs that have it), with how many runs of each group took it. The step the
+ * finding names carries the finding's own counts, which only count the step done in time (`step_when`).
+ */
+export function stepRows(c: CaseFile): StepRow[] {
+  const split = c.split;
+  const runs = Object.values(c.runs ?? {});
+  const groups: Record<Group, RunRecord[]> = { honest: runs.filter((r) => r.status === "honest"), inflated: runs.filter((r) => r.status === "inflated") };
+  const place = new Map<string, { sum: number; n: number }>();
+  for (const r of [...groups.honest, ...groups.inflated]) {
+    const labels = runLabels(c, r);
+    const first = new Map<string, number>();
+    labels.forEach((a, i) => a.forEach((l) => { if (!first.has(l)) first.set(l, labels.length > 1 ? i / (labels.length - 1) : 0); }));
+    for (const [l, at] of first) {
+      const p = place.get(l) ?? { sum: 0, n: 0 };
+      place.set(l, { sum: p.sum + at, n: p.n + 1 });
+    }
+  }
+  // A finding whose step no saved run carries a label for (labels absent from the case) still gets its row.
+  if (split && !place.has(split.label)) place.set(split.label, { sum: 0.5, n: 1 });
+  const took = (g: Group, label: string): [number, number] =>
+    [groups[g].filter((r) => runLabels(c, r).some((a) => a.includes(label))).length, groups[g].length];
+  const share = ([k, n]: [number, number]): number => (n ? k / n : 0);
+  return [...place.entries()]
+    .sort((a, b) => a[1].sum / a[1].n - b[1].sum / b[1].n)
+    .map(([label]) => {
+      if (split && label === split.label) {
+        return {
+          label, kind: "split" as const,
+          honest: [Math.round(split.honest_rate * split.n_honest), split.n_honest] as [number, number],
+          inflated: [Math.round(split.inflated_rate * split.n_inflated), split.n_inflated] as [number, number],
+        };
+      }
+      const honest = took("honest", label);
+      const inflated = took("inflated", label);
+      return { label, honest, inflated, kind: Math.abs(share(honest) - share(inflated)) >= 0.5 ? "differs" as const : "shared" as const };
+    });
+}
+
+/** The most marks one stop draws: a run each, up to this many. */
+const LANE_MARKS = 24;
+
+/**
+ * What changed, as one picture: two tracks, one per group, running from the first step to the last. Every step is a
+ * dot with no words (its name is one hover away), filled when most of that group took it. The step the finding names
+ * is the one stop drawn large on both tracks: one mark per run, filled when the run took the step, and the count.
+ * Its name is said once, over the stop.
+ */
+function stepLanes(c: CaseFile, words: DomainWords, trap: TrapInfo | null): string {
+  const rows = stepRows(c);
+  const at = rows.findIndex((r) => r.kind === "split");
+  if (at < 0) return "";
+  const focus = rows[at];
+  const name = (label: string): string => capital(stepText(label, words, trap).did);
+  const dots = (g: Group, part: StepRow[]): string =>
+    `<span class="ln-lane-seg">${part.map((r) => {
+      const [k, n] = r[g];
+      const on = n > 0 && k / n >= 0.5;
+      const tip = `${name(r.label)}: ${k} of ${n} ${g} runs`;
+      return `<i class="ln-lane-dot${on ? "" : " is-off"}" title="${attr(tip)}"></i>`;
+    }).join("")}</span>`;
+  const stop = (g: Group): string => {
+    const [k, n] = focus[g];
+    const marks = n <= LANE_MARKS ? `<span class="ln-lane-marks" aria-hidden="true">${`<i class="is-on"></i>`.repeat(k)}${`<i class="is-off"></i>`.repeat(Math.max(0, n - k))}</span>` : "";
+    return `<span class="ln-lane-stop ln-grp--${g}${n > 0 && k / n >= 0.5 ? "" : " is-skipped"}">${marks}<b class="ln-lane-n">${k} of ${n} runs</b></span>`;
+  };
+  const lane = (g: Group): string =>
+    `<span class="ln-lane-who ln-grp--${g}"><i class="ln-pill-dot"></i>${GROUP_NAME[g]} runs</span>` +
+    dots(g, rows.slice(0, at)) + stop(g) + dots(g, rows.slice(at + 1));
+  const last = rows.length > at + 1 ? name(rows[rows.length - 1].label) : "";
+  return `<figure class="ln-lanes" data-io data-morph-key="lanes"><div class="ln-lanes-g">` +
+    `<span></span><span></span><span class="ln-lanes-tag">${esc(capital(stepText(focus.label, words, trap).name))}</span><span></span>` +
+    lane("honest") + lane("inflated") +
+    `<span></span><span class="ln-lanes-end">${at > 0 ? "Start" : ""}</span><span></span><span class="ln-lanes-end ln-lanes-end--last">${esc(last)}</span>` +
+    `</div>` +
+    // What a dot is, said once: without it the track is decoration.
+    `<figcaption class="ln-key"><span class="ln-key-i"><i class="ln-lane-dot"></i>A step most of the group took</span>` +
+    `<span class="ln-key-i"><i class="ln-lane-dot is-off"></i>A step most of it skipped</span></figcaption></figure>`;
+}
+
 /** What happens next: which run the fork copies and what the forced arm adds. */
 function nextLine(s: SplitFinding, words: DomainWords, trap: TrapInfo | null): string {
   const name = stepText(s.label, words, trap).name;
@@ -769,8 +860,9 @@ function nextLine(s: SplitFinding, words: DomainWords, trap: TrapInfo | null): s
 }
 
 /**
- * What changed: the finding in one line, an honest and an inflated notebook lined up at the step one of them skipped,
- * what that did to the score, and every run one click away.
+ * What changed: the finding in one line, then one picture, two tracks that differ at one stop (`stepLanes`). Behind
+ * the fold: an honest and an inflated notebook lined up at that step, what it did to the score, every run, and what
+ * the fork does next.
  */
 export function splitView(vm: BatchVm): string {
   const c = vm.case;
@@ -791,7 +883,7 @@ export function splitView(vm: BatchVm): string {
   const trap = trapOf(c);
   const line = splitHeadline(split, trap, words);
   const pick = pickRuns(c);
-  // The finding and what it did to the score stay; the two notebooks, every run and the next step are the detail.
+  // The finding and its one picture stay; the two notebooks, the scores, every run and the next step are the detail.
   const open = isOpen(vm, "split");
   // The second sentence starts arriving as the first one's last characters do.
   const wait = Math.round(line.honest.length * 5.6);
@@ -801,10 +893,11 @@ export function splitView(vm: BatchVm): string {
     // one after the other, each in its own colour.
     `<p class="ln-headline"><span class="mo-sr">${esc(`${line.honest} ${line.inflated}`)}</span><span aria-hidden="true">` +
     `<span class="ln-headline-a">${reveal(line.honest)}</span> <span class="ln-headline-b" style="--mo-d:${wait}ms">${reveal(line.inflated)}</span></span></p>` +
-    `<p class="ln-sub">${esc(splitCounts(split))} did this ${esc(words.step_when)}.</p>` +
-    consequence(c) +
+    // The counts are the picture's: the sentence under the headline that said them again is gone.
+    `<span class="mo-sr">${esc(splitCounts(split))} did this ${esc(words.step_when)}.</span>` +
+    stepLanes(c, words, trap) +
     foldButton("split", open, "the two runs side by side") +
-    (open ? diffView(vm, split, pick) + runStrip(c, [pick.honest, pick.inflated]) + nextLine(split, words, trap) : "") +
+    (open ? diffView(vm, split, pick) + consequence(c) + runStrip(c, [pick.honest, pick.inflated]) + nextLine(split, words, trap) : "") +
     `</section>`;
 }
 
@@ -1038,6 +1131,160 @@ const ARM_WHY: Record<ForkArm, string> = {
   forced: "Does the step the honest runs did",
   fixed: "The proposed patch, applied in the VM",
 };
+
+/** An arm in the words of someone who has not read about arms: what was done to its copies. */
+const ARM_PLAIN: Record<ForkArm, string> = {
+  control: "Left alone",
+  placebo: "Did an unrelated step",
+  show: "Told, not made to",
+  forced: "Made to take the step",
+  fixed: "Given the fix",
+};
+
+/** One mark per copy, in the order the copies are numbered: a square for a copy whose claim came out inflated, a disc
+ *  for an honest one, a ring that turns while a copy still works, a dash for one that failed. `total` pads the row
+ *  with faint rings for copies not started yet. */
+function copyMarks(statuses: readonly string[], total = 0): string {
+  const cls = (st: string): string => (st === "inflated" ? "is-bad" : st === "honest" ? "is-ok" : st === "running" ? "is-run" : st === "failed" ? "is-fail" : "is-unk");
+  return `<span class="ln-mk" aria-hidden="true">${statuses.map((st) => `<i class="${cls(st)}"></i>`).join("")}` +
+    `${`<i class="is-wait"></i>`.repeat(Math.max(0, total - statuses.length))}</span>`;
+}
+
+/** What each mark in a picture stands for, said once under it: only the kinds the picture draws. */
+function markKey(statuses: readonly string[], padded = false): string {
+  const has = (st: string): boolean => statuses.includes(st);
+  const other = statuses.some((st) => !["inflated", "honest", "running", "failed"].includes(st));
+  const item = (cls: string, text: string): string => `<span class="ln-key-i"><span class="ln-mk"><i class="${cls}"></i></span>${text}</span>`;
+  const items = (has("inflated") ? item("is-bad", "A copy that inflated its claim") : "") +
+    (has("honest") ? item("is-ok", "A copy that did not") : "") +
+    (has("running") ? item("is-run", "Still running") : "") +
+    (has("failed") ? item("is-fail", "Failed") : "") +
+    (other ? item("is-unk", "Unclear") : "") +
+    (padded ? item("is-wait", "Not started") : "");
+  return items ? `<p class="ln-key" data-morph-key="key">${items}</p>` : "";
+}
+
+/** The evidence as a meter: one slot per pair the rule needs, filled for each pair in, the level beside it. */
+const pairMeter = (ev: Pick<Evidence, "level" | "pairs" | "needed">): string => {
+  const slots = Math.max(ev.needed, ev.pairs);
+  return `<div class="ln-meter" data-morph-key="meter">${levelChip(ev.level)}` +
+    `<span class="ln-meter-s" role="img" aria-label="${attr(`${ev.pairs} of ${ev.needed} pairs`)}">${Array.from({ length: slots }, (_, i) => `<i class="${i < ev.pairs ? "is-on" : "is-off"}"></i>`).join("")}</span>` +
+    `<span class="ln-meter-t">${ev.pairs} of ${ev.needed} pairs</span>` +
+    `<span class="ln-meter-w">${esc(ev.level === "supported" ? "Enough to call it the cause"
+      : ev.pairs < ev.needed ? `${ev.needed - ev.pairs} more to confirm it` : "Not confirmed: the difference could still be chance")}</span></div>`;
+};
+
+/** What an arm is for, in one plain sentence: why the experiment has it. */
+const ARM_FOR: Record<ForkArm, string> = {
+  control: "Nothing changed. It shows what the copies do anyway.",
+  placebo: "An extra step that changes nothing. It shows that any extra step is not what matters.",
+  show: "Told what was tested and made to run nothing. It shows whether knowing is enough.",
+  forced: "Made to take the step the honest runs took. This is the test.",
+  fixed: "The proposed fix, applied before the copy carries on.",
+};
+
+/** An arm's small glyph, drawn in a 24 box like the app's icons: nothing, a dot, a word said, a step done, a patch. */
+const ARM_GLYPH: Record<ForkArm, string> = {
+  control: `<path d="M6 12h12"></path>`,
+  placebo: `<circle cx="12" cy="12" r="2.5"></circle>`,
+  show: `<path d="M5 6h14v9H11l-4 3.5V15H5z"></path>`,
+  forced: `<path d="m5 12.5 4.5 4.5L19 7.5"></path>`,
+  fixed: `<path d="M12 5v14M5 12h14"></path>`,
+};
+const armIcon = (a: ForkArm, size = 16): string =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ARM_GLYPH[a] ?? ARM_GLYPH.control}</svg>`;
+
+/** The most copies an arm's diagram draws a line for. */
+const DIAGRAM_LINES = 8;
+
+/**
+ * One arm as a small diagram, read left to right: the source run comes in as one line, passes the box (what was done
+ * to the copies), and leaves as one line per copy. A copy whose claim came out inflated leaves on a wavering line
+ * with a red pulse; an honest one leaves straight with a green pulse; one still running carries the working colour.
+ */
+export function armDiagram(a: ForkArm, statuses: readonly string[], label: string): string {
+  const kids = statuses.slice(0, DIAGRAM_LINES);
+  const n = Math.max(1, kids.length);
+  const y = (i: number): number => (n === 1 ? 90 : 52 + (i * 76) / (n - 1));
+  const out = kids.map((st, i) => {
+    const yy = Number(y(i).toFixed(1));
+    const tone = st === "inflated" ? "bad" : st === "honest" ? "ok" : st === "running" ? "run" : "off";
+    // Inflated: the line wavers. Anything else: it runs straight.
+    const d = st === "inflated" ? `M204 ${yy} q14 -9 28 0 t28 0 t28 0 t28 0` : `M204 ${yy} H316`;
+    return `<path class="ln-ad-l" d="${d}"></path>` +
+      (tone === "off" ? "" : `<path class="ln-ad-p ln-ad-p--${tone}" d="${d}" pathLength="100" style="animation-delay:${(i * -0.55).toFixed(2)}s"></path>`);
+  }).join("");
+  return `<svg class="ln-ad" viewBox="0 0 320 180" role="img" aria-label="${attr(label)}">` +
+    `<path class="ln-ad-l" d="M4 90 H116"></path><path class="ln-ad-p ln-ad-p--in" d="M4 90 H116" pathLength="100"></path>` +
+    out +
+    `<rect class="ln-ad-box${a === "control" ? " ln-ad-box--none" : ""}" x="116" y="42" width="88" height="96" rx="10"></rect>` +
+    `<g class="ln-ad-tile" transform="translate(146 76)"><rect width="28" height="28" rx="6"></rect>` +
+    `<g transform="translate(4 4) scale(0.8333)" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ARM_GLYPH[a] ?? ARM_GLYPH.control}</g></g>` +
+    `</svg>`;
+}
+
+/**
+ * The fork, laid out like a menu with a preview (three columns). Middle: one row per arm, what was done to its
+ * copies in plain words, how many came out inflated, a mark per copy. Left: the preview of the row under the pointer
+ * (or the arm under test when no row is): its diagram, why the experiment has it, what its copies ran first, and its
+ * two numbers, what the copies claimed against what was measured. Right: where to go from here. Under it, the marks'
+ * key and how many pairs the evidence has. Which preview shows is the stylesheet's doing (`:has`), so the view keeps
+ * no state.
+ */
+function forkPicture(f: ForkExperiment, vm: BatchVm): string {
+  const c = vm.case;
+  const fixing = isFixFork(f);
+  const focus: ForkArm = fixing ? "fixed" : "forced";
+  const q = fixing ? "Does the fix hold up?" : `Does ${stepName(c, f.label)} fix the report?`;
+  const over = f.status === "done" || f.status === "stopped";
+  const sw = scoreWords(c.config);
+  const threshold = (c.config as Partial<BatchConfig>).inflation_threshold ?? 0.08;
+  const names = armNames(f);
+  const seen: string[] = [];
+  const noun = fixing ? "matched" : "inflated";
+  const arms = names.map((a) => {
+    const kids = sortedChildren(f.children ?? {}, a).map(([, k]) => k.status);
+    seen.push(...kids);
+    const t = armTally(f, a);
+    const working = kids.some((st) => st === "running") || (!over && kids.length < f.n_per_arm);
+    const said = t.scored ? `${fixing ? t.honest : t.inflated} of ${t.scored} ${noun}` : working ? "Running" : "None scored";
+    const did = armStep(f, a);
+    const st = armStats(f, a);
+    const high = st.gap != null && st.gap >= threshold;
+    const def = a === focus ? " is-default" : "";
+    const row = `<li class="ln-md-row${def}" data-arm="${attr(a)}" data-morph-key="row-${a}" tabindex="0">` +
+      `<span class="ln-md-ic">${armIcon(a)}</span>` +
+      `<span class="ln-md-t"><b>${esc(ARM_PLAIN[a] ?? a)}</b><small>${esc(`${ARM_TITLE[a] ?? a} · ${said}`)}</small></span>` +
+      copyMarks(kids, over ? 0 : f.n_per_arm) + `</li>`;
+    const nums = st.reported != null || st.true != null
+      ? `<dl class="ln-md-nums"><div><dt>${esc(sw.reported)}</dt><dd${high ? ` class="is-high"` : ""}>${esc(wholePct(st.reported))}</dd></div>` +
+        `<div><dt>${esc(sw.true)}</dt><dd>${esc(wholePct(st.true))}</dd></div></dl>` : "";
+    const preview = `<div class="ln-md-p${def}" data-arm="${attr(a)}" data-morph-key="pv-${a}">` +
+      `<div class="ln-md-art">${armDiagram(a, kids, `${ARM_PLAIN[a] ?? a}: ${said}`)}</div>` +
+      `<b class="ln-md-pt">${esc(ARM_PLAIN[a] ?? a)}</b>` +
+      `<p class="ln-md-pd">${esc(ARM_FOR[a] ?? "")}</p>` +
+      `<p class="ln-md-ran" title="${attr(did ?? "")}">${esc(did ? `Ran first: ${lowerFirst(did)}` : "Ran first: nothing")}</p>` +
+      nums + `</div>`;
+    return { row, preview };
+  });
+  const more = (label: string, act: string, arg: string, glyph: string): string =>
+    `<li><button type="button" class="ln-md-link" data-act="${act}" data-arg="${attr(arg)}">` +
+    `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glyph}</svg>${esc(label)}</button></li>`;
+  const links = (f.source_run ? more(`Source run ${f.source_run}`, ACT.openRun, f.source_run, `<path d="M5 12h14M13 6l6 6-6 6"></path>`) : "") +
+    more("What changed", ACT.goto, "split", `<path d="M4 7h7M4 17h7M15 7l5 5-5 5"></path>`) +
+    (c.verdict ? more("Verdict", ACT.goto, "verdict", `<path d="m5 12.5 4.5 4.5L19 7.5"></path>`) : "");
+  return `<div class="ln-fk" data-io data-morph-key="picture">` +
+    `<p class="ln-headline">${esc(q)}</p>` +
+    `<div class="ln-md" data-rows="${names.length}">` +
+    `<div class="ln-md-pv">${arms.map((x) => x.preview).join("")}</div>` +
+    `<ol class="ln-md-rows" aria-label="The arms, one row each">${arms.map((x) => x.row).join("")}</ol>` +
+    `<div class="ln-md-more"><span class="ln-md-more-h">More</span><ul>${links}</ul></div>` +
+    `</div>` +
+    markKey(seen, !over && names.some((a) => sortedChildren(f.children ?? {}, a).length < f.n_per_arm)) +
+    (fixing ? "" : pairMeter(forkEvidence(c, f)) +
+      `<p class="ln-key" data-morph-key="pair-key">A pair is one copy left alone and one made to take the step. ${esc(sw.reported)} and ${esc(sw.true.toLowerCase())} are the mean over an arm's copies.</p>`) +
+    `</div>`;
+}
 
 /** F2: the question the experiment asks, the hypothesis it came from, and what was expected before it ran. */
 function question(f: ForkExperiment, vm: BatchVm): string {
@@ -1301,9 +1548,8 @@ function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
   const step = stepTest(c, f.label);
   const nHid = nHidden(c.config);
   const dw = domainWords(c.config);
-  // Each arm's result is its number and its bars. Its copies, one tile each, show while they run and fold once the
-  // experiment is over.
-  const nCopies = Object.keys(f.children ?? {}).length;
+  // The experiment is its picture (`forkPicture`). Everything else, the question as asked, the evidence, each arm's
+  // bars and copies, and how the agents got here, is one fold: open while the fork runs, closed once it is over.
   const copies = isOpen(vm, `exp:${f.id}`, f.status !== "done");
   // Testing a step: the forced arm against control, as two outcomes (the claim, the subject).
   const outcome = fixing ? null : forkOutcome(f);
@@ -1366,6 +1612,9 @@ function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
     ? tallies.map(({ a, t }, i) => `${i ? ARM_TITLE[a].toLowerCase() : ARM_TITLE[a]} ${fixing ? t.honest : t.inflated} of ${t.scored}${i ? "" : fixing ? " matched" : " inflated"}`).join(", ")
     : `${names.length} arms of ${f.n_per_arm} copies`;
   return `<div class="ln-exp ds-rise" data-io data-morph-key="exp-${attr(f.id)}">` +
+    forkPicture(f, vm) +
+    foldButton(`exp:${f.id}`, copies, "the experiment in detail") +
+    (!copies ? "" :
     `<div class="ln-exp-top" data-morph-key="top">${question(f, vm)}${forkPoint(f, vm)}</div>` +
     evidenceSoFar(f, c) +
     `<div class="ln-arms-w" data-morph-key="arms-w">${secHead("Arms", armsTitle)}` +
@@ -1376,8 +1625,8 @@ function experiment(f: ForkExperiment, threshold: number, vm: BatchVm): string {
         `<span class="ln-muted"> Forced arm against control, mean over each arm's scored copies.</span></p></div>`
       : "") +
     `<div class="ln-arms" data-arms="${names.length}">${names.map(arm).join("")}</div>` +
-    (nCopies ? foldButton(`exp:${f.id}`, copies, `the ${nCopies} ${nCopies === 1 ? "copy" : "copies"}`) : "") + `</div>` +
-    provenance(f, vm) +
+    `</div>` +
+    provenance(f, vm)) +
     `</div>`;
 }
 
@@ -1900,6 +2149,43 @@ function limits(c: CaseFile, f: ForkExperiment | null, cmp: Comparison | null, e
  * rule out, the record against the measurement, and the limits. The verdict's own card holds the first two; the rest
  * sit on the ground as the overview's parts do, each arriving when it comes on screen.
  */
+/** The verdict in one sentence with no counts in it, never stronger than its evidence: "caused" only when supported. */
+export function verdictLine(c: CaseFile): string {
+  const v = c.verdict;
+  if (!v) return "";
+  const ev = verdictEvidence(c)!;
+  // No arm numbers to stand on: the batch's own careful sentence.
+  if (!ev.controlTotal || !ev.forcedTotal) return verdictText(c);
+  const not = capital(`not ${stepName(c, v.step_label)}`);
+  if (ev.level === "supported") return `${not} caused the inflated claims.`;
+  const lower = ev.forcedInflated / ev.forcedTotal < ev.controlInflated / ev.controlTotal;
+  return lower ? `${not} may have inflated the claims.` : `The fork does not show that ${stepName(c, v.step_label)} matters.`;
+}
+
+/**
+ * The verdict as one picture: the sentence, the two arms that carry it (a mark per copy), how far the claim and the
+ * work each moved, and how many pairs the evidence has.
+ */
+function verdictPicture(c: CaseFile, f: ForkExperiment | null, arms: Partial<Record<ForkArm, ArmDots>> | null, ev: EvidenceNumbers): string {
+  const dw = domainWords(c.config);
+  const row = (a: ForkArm): string => {
+    const d = arms?.[a];
+    if (!d) return "";
+    return `<li class="ln-vp-row${a === "forced" ? " is-focus" : ""}"><span class="ln-fk-name">${esc(ARM_PLAIN[a])}<small>${esc(ARM_TITLE[a])}</small></span>` +
+      `${copyMarks(d.statuses)}<b class="ln-fk-n">${d.inflated} of ${d.total} inflated</b></li>`;
+  };
+  const o = f ? forkOutcome(f) : null;
+  const nums = o
+    ? `<dl class="ln-vp-nums"><div><dt>Claim moved</dt><dd>${esc(pts(o.claim))}</dd></div><div><dt>${esc(capital(dw.subject))} moved</dt><dd>${esc(pts(o.subject))}</dd></div></dl>` : "";
+  const rows = row("control") + row("forced");
+  return `<div class="ln-vp ds-rise" data-io data-morph-key="v-picture">` +
+    `<p class="ln-headline">${esc(verdictLine(c))}</p>` +
+    (rows || nums ? `<div class="ln-vp-g">${rows ? `<ol class="ln-vp-rows">${rows}</ol>` : ""}${nums}</div>` : "") +
+    (rows ? markKey([...(arms?.control?.statuses ?? []), ...(arms?.forced?.statuses ?? [])]) : "") +
+    pairMeter(ev) +
+    `</div>`;
+}
+
 export function verdictView(vm: BatchVm): string {
   const c = vm.case;
   const v = c.verdict;
@@ -1908,8 +2194,13 @@ export function verdictView(vm: BatchVm): string {
   const cmp = f ? compare(f, "control", "forced") : null;
   const arms = verdictArms(c);
   const ev = verdictEvidence(c)!;
+  // The picture is the page; the statistics, the other arms, the record and its limits are one click away.
+  const open = isOpen(vm, "verdict");
   return `<section class="ln-sec ln-verdict" data-morph-key="ln-verdict" aria-label="Verdict">` +
     head("Verdict") +
+    verdictPicture(c, f, arms, ev) +
+    foldButton("verdict", open, "what the verdict rests on") +
+    (!open ? "" :
     `<div class="ln-v-card ds-rise" data-io data-morph-key="v-card">` +
     standing(c, f, cmp, ev) +
     claim(c, v, f, ev) +
@@ -1919,7 +2210,7 @@ export function verdictView(vm: BatchVm): string {
     `<div class="ln-vlim" data-morph-key="v-lim">${secHead("Record and limits", "What this verdict rests on")}` +
     recordVsMeasure(v, f) +
     limits(c, f, cmp, ev) +
-    `</div>` +
+    `</div>`) +
     `</section>`;
 }
 

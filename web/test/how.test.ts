@@ -1,16 +1,19 @@
 // How it works (src/batch/how.ts, how-diagrams.ts): its route and nav link, the once-only first-visit redirect, and the
-// page with a hand-made case, with the real robot demo, and with no case at all.
+// page with a hand-made case, with the recorded robot run it links to (HOW_BATCH), and with no case at all.
 
 import { describe, expect, it } from "vitest";
 import demoRaw from "../../fixtures/robot-demo-batch/case/case.json?raw";
+import liveRaw from "../../fixtures/robot-live-investigation/case/case.json?raw";
 import type { CaseFile } from "../src/api";
-import { HOW_BATCH, HOW_SEEN_KEY, firstVisitRedirect, howSeen, howView, type SeenStorage } from "../src/batch/how";
+import { HOW_BATCH, HOW_SEEN_KEY, HOW_STOPS, firstVisitRedirect, howSeen, howStop, howView, type SeenStorage } from "../src/batch/how";
 import { forkDiagram, harnessDiagram, loopDiagram } from "../src/batch/how-diagrams";
 import { parseRoute, routeHash, type Route } from "../src/batch/model";
 import { navBar, navCurrent, navMenu } from "../src/batch/nav";
 
 const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 const DEMO = JSON.parse(demoRaw) as CaseFile;
+/** The recorded robot run the page loads and links to (HOW_BATCH). */
+const LIVE = JSON.parse(liveRaw) as CaseFile;
 
 /** What main.ts does on every route: send someone new to How it works once, then remember it. */
 function enter(hash: string, seen: ReturnType<typeof howSeen>): string {
@@ -128,55 +131,112 @@ describe("the first visit", () => {
 });
 
 describe("the page", () => {
-  it("renders the five steps with pictures from a hand-made case", () => {
-    const html = howView({ state: "ready", value: HAND });
-    const t = text(html);
-    for (const h of ["Run", "Measure", "Find the step", "Fork to test it", "The verdict follows the evidence"]) expect(html).toContain(`<h3 class="hw-h">${h}</h3>`);
-    expect(html.match(/class="hw-pic"/g)).toHaveLength(5);
-    expect(t).toContain("2 of 3 agents claimed 100%. Measured at 4 positions they never tested: 55%.");
-    expect(html).toContain('data-ck-key="r02"');
-    expect(t).toContain("Testing other can positions");
-    expect(t).toContain("1 of 1");
-    expect(t).toContain("0 of 2");
-    expect(t).toContain("The claim moved -40.0 pts, the robot moved +5.0 pts.");
-    expect(t).toContain("The fork suggests that not testing other can positions inflates the claim");
-    expect(html.match(/<p class="hw-quote">([^<]*)<\/p>/)![1]).not.toMatch(/\bcaused\b/);
-    expect(t).toContain("2 of 5 pairs");
-    expect(t).toContain("Run more pairs");
+  /** Every stop of the tour, in order. */
+  const tour = (demo: Parameters<typeof howView>[0]): string[] => Array.from({ length: HOW_STOPS }, (_, i) => howView(demo, i));
+
+  it("is a tour of six stops: the five steps, then the way on, one on screen at a time", () => {
+    const stops = tour({ state: "ready", value: HAND });
+    expect(stops).toHaveLength(6);
+    const titles = ["Run", "Measure", "Find the step", "Fork to test it", "The verdict follows the evidence", "Your turn"];
+    stops.forEach((html, i) => {
+      expect(html.match(/<h2 class="hw-h">/g)).toHaveLength(1);
+      expect(html).toContain(`<h2 class="hw-h">${titles[i]}</h2>`);
+      expect(text(html)).toContain(`${i + 1} of 6`);
+      // The rail names every stop and marks the one on screen.
+      expect(html.match(/<button type="button" class="hw-stopb/g)).toHaveLength(6);
+      expect(html.match(/aria-current="step"/g)).toHaveLength(1);
+      expect(html).toMatch(new RegExp(`data-arg="${i}" aria-current="step"`));
+    });
+    // Next names the stop it goes to; the first stop has no Back and the last no Next.
+    expect(stops[0]).toMatch(/data-how-next data-act="how-step" data-arg="1"><span class="hw-next-k">Next<\/span>Measure</);
+    expect(stops[0]).not.toContain(">Back<");
+    expect(stops[3]).toContain('data-act="how-step" data-arg="2">Back<');
+    expect(stops[5]).not.toContain("data-how-next");
+    // A stop out of range is the nearest one.
+    expect(howView({ state: "ready", value: HAND }, 99)).toBe(stops[5]);
+    expect(howView({ state: "ready", value: HAND }, -3)).toBe(stops[0]);
+    expect(howStop(Number("x"))).toBe(0);
   });
 
-  it("ends with the two ways on: a real batch, and my batches (which marks the page seen)", () => {
-    const html = howView({ state: "error", message: "x" });
-    expect(html).toMatch(new RegExp(`<a [^>]*href="#/b/${HOW_BATCH}"[^>]*>See a real batch</a>`));
-    expect(html).toMatch(/<a [^>]*href="#\/start" data-how-done>Go to my batches<\/a>/);
+  it("draws each step's picture from a hand-made case, with one part to point at and one bubble", () => {
+    const stops = tour({ state: "ready", value: HAND });
+    for (const html of stops) {
+      expect(html.match(/class="hw-pic"/g)).toHaveLength(1);
+      expect(html.match(/data-how-ring/g)).toHaveLength(1);
+      expect(html.match(/data-how-tip/g)).toHaveLength(1);
+      expect(html).toMatch(/data-how-stage data-how-target="[^"]+"/);
+    }
+    const t = stops.map(text);
+    // 1 and 2 follow one inflated run: its claim, then its claim against what was measured.
+    expect(stops[0]).toMatch(/<li class="hw-agent" data-how-focus><span class="hw-agent-id">r02</);
+    expect(t[0]).toContain("r02 claims 100%. Nobody has checked that yet.");
+    expect(t[1]).toContain("2 of 3 agents claimed 100%. Measured at 4 positions they never tested: 55%.");
+    expect(stops[1]).toContain('data-how-target=".ov-bar[data-morph-key=&quot;bar:r02&quot;]"');
+    expect(stops[1]).toContain('data-morph-key="bar:r02"');
+    expect(t[1]).toContain("r02 claimed 100%. On 4 cases it never saw, it scored 50%.");
+    // 3: the step, and the inflated runs' row is the one pointed at.
+    expect(t[2]).toContain("Testing other can positions");
+    expect(t[2]).toContain("1 of 1");
+    expect(t[2]).toContain("0 of 2");
+    expect(stops[2]).toMatch(/<div class="hw-row" data-how-focus><span class="hw-row-n">Inflated runs</);
+    expect(t[2]).toContain("0 of 2 inflated runs took this step. 1 of 1 honest runs did.");
+    // 4: the fork, pointing at the copies made to do the step.
+    expect(t[3]).toContain("The claim moved -40.0 pts, the robot moved +5.0 pts.");
+    expect(stops[3]).toContain('data-how-target="[data-how-arm=&quot;forced&quot;]"');
+    expect(stops[3]).toContain('<g data-how-arm="forced">');
+    // 5: the verdict and its pairs.
+    expect(t[4]).toContain("The fork suggests that not testing other can positions inflates the claim");
+    expect(stops[4].match(/<p class="hw-quote">([^<]*)<\/p>/)![1]).not.toMatch(/\bcaused\b/);
+    expect(t[4]).toContain("2 of 5 pairs so far, so the verdict stays open.");
+    expect(t[4]).toContain("Run more pairs");
+  });
+
+  it("ends with the ways on: a real batch (pointed at), a batch of one's own, and my batches from any stop", () => {
+    const last = howView({ state: "error", message: "x" }, HOW_STOPS - 1);
+    expect(last).toMatch(new RegExp(`<a [^>]*data-how-focus href="#/b/${HOW_BATCH}"[^>]*>See a real batch</a>`));
+    expect(last).toContain('data-act="new-batch">Start my own batch</button>');
+    expect(text(last)).toContain("Start here.");
+    for (const html of tour({ state: "error", message: "x" })) expect(html).toMatch(/<a [^>]*href="#\/start" data-how-done>Go to my batches<\/a>/);
   });
 
   it("reads as text alone when the demo cannot load, and while it loads", () => {
-    for (const html of [howView({ state: "error", message: "404" }), howView({ state: "loading" })]) {
-      expect(html.match(/<h3 class="hw-h">/g)).toHaveLength(5);
-      expect(html).not.toContain('class="hw-pic"');
-      expect(html.match(/class="hw-step is-text"/g)).toHaveLength(5);
-      // The diagrams need no numbers: they stay.
-      expect(html).toContain("hw-svg--wide");
+    for (const demo of [{ state: "error", message: "404" }, { state: "loading" }] as const) {
+      const stops = tour(demo);
+      for (const html of stops.slice(0, 5)) {
+        expect(html.match(/<h2 class="hw-h">/g)).toHaveLength(1);
+        expect(html).not.toContain('class="hw-pic"');
+        expect(html).not.toContain("data-how-ring");
+        expect(html).toContain('class="hw-stop is-text"');
+      }
+      // How Orro is built needs no numbers: it stays, folded.
+      expect(stops[0]).toMatch(/<details class="hw-hood"[^>]*><summary class="hw-hood-s">How Orro is built<\/summary>/);
+      expect(stops[0]).toContain("hw-svg--wide");
     }
     expect(text(howView({ state: "error", message: "404" }))).toContain("could not be loaded");
     expect(text(howView({ state: "loading" }))).toContain("Loading");
   });
 
   it("shows the real robot demo's numbers", () => {
-    const t = text(howView({ state: "ready", value: DEMO }));
-    expect(t).toContain("6 of 12 agents claimed 99%. Measured at 20 positions they never tested: 59%.");
-    expect(t).toContain("4 of 4");
-    expect(t).toContain("0 of 6");
-    expect(t).toMatch(/The claim moved -40\.\d pts, the robot moved \+5\.0 pts\./);
-    expect(t).toContain("4 of 5 pairs");
+    expect(HOW_BATCH).toBe("robot-live-investigation");
+    const t = tour({ state: "ready", value: LIVE }).map(text);
+    expect(t[0]).toContain("r06 claims 100%. Nobody has checked that yet.");
+    expect(t[1]).toContain("5 of 12 agents claimed 100%. Measured at positions they never tested: 69%.");
+    expect(t[1]).toContain("r06 claimed 100%. On cases it never saw, it scored 65%.");
+    expect(t[2]).toContain("3 of 3");
+    expect(t[2]).toContain("2 of 5");
+    expect(t[2]).toContain("2 of 5 inflated runs took this step. 3 of 3 honest runs did.");
+    expect(t[3]).toMatch(/The claim moved -0\.\d pts, the robot moved \+30\.0 pts\./);
+    expect(t[3]).toContain("Made to do it, 0 of 4 copies came out inflated.");
+    expect(t[4]).toContain("4 of 5 pairs so far, so the verdict stays open.");
   });
 
   it("says it in plain words: no em dashes, no snake_case", () => {
-    for (const html of [howView({ state: "ready", value: DEMO }), howView({ state: "ready", value: HAND }), howView({ state: "loading" })]) {
-      const t = text(html.replace(/<svg[\s\S]*?<\/svg>|<section class="ck[\s\S]*?<\/section>/g, ""));
-      expect(t).not.toContain("—");
-      expect(t).not.toMatch(/\b[a-z]+_[a-z_]+\b/);
+    for (const demo of [{ state: "ready", value: LIVE }, { state: "ready", value: DEMO }, { state: "ready", value: HAND }, { state: "loading" }] as const) {
+      for (const html of tour(demo)) {
+        const t = text(html.replace(/<svg[\s\S]*?<\/svg>/g, ""));
+        expect(t).not.toContain("—");
+        expect(t).not.toMatch(/\b[a-z]+_[a-z_]+\b/);
+      }
     }
   });
 });

@@ -408,15 +408,19 @@ describe("the split fold", () => {
     expect(html).not.toContain("All 12 runs");
     expect(html).not.toContain("ln-strip");
     expect(html).not.toContain("Next, to test whether");
-    // The finding and what it did to the score stay.
+    // The finding and its one picture stay: two tracks that differ at one stop.
     // The headline arrives a character at a time (motion.ts `reveal`): the whole finding is there for a screen reader.
     expect(html).toContain('<p class="ln-headline"><span class="mo-sr">Honest runs removed duplicate rows before splitting into train and test. Inflated runs did not.</span>');
     expect(html).toContain('<span class="ln-headline-a">');
     expect(html).toContain('<span class="ln-headline-b"');
-    expect(html).toContain("6 of 6 honest runs, 0 of 6 inflated did this before splitting into train and test.");
-    expect(html).toContain('<h3 class="ln-h3">What it did to the score</h3>');
-    expect(html).toContain('data-morph-key="grp-honest"');
-    expect(html).toContain('data-morph-key="grp-inflated"');
+    // The counts are said once on screen, by the picture; the sentence that repeated them is for a screen reader only.
+    expect(html).toContain('<span class="mo-sr">6 of 6 honest runs, 0 of 6 inflated did this before splitting into train and test.</span>');
+    expect(html).not.toContain('class="ln-sub"');
+    expect(html).toContain('<figure class="ln-lanes"');
+    expect(html.match(/class="ln-lane-stop /g)).toHaveLength(2);
+    // What it did to the score is detail now: the Agents page already shows every score.
+    expect(html).not.toContain("What it did to the score");
+    expect(html).not.toContain('data-morph-key="grp-honest"');
   };
   const expectOpen = (html: string): void => {
     expect(html).toContain(fold("split", true, what));
@@ -427,9 +431,11 @@ describe("the split fold", () => {
     expect(html).toContain('<h3 class="ln-h3">All 12 runs</h3>');
     expect(html).toContain("Next, to test whether the step is the cause: the fork copies run <b>r02</b>");
     expect(html).toContain('<h3 class="ln-h3">What it did to the score</h3>');
+    expect(html).toContain('data-morph-key="grp-honest"');
+    expect(html).toContain('data-morph-key="grp-inflated"');
   };
 
-  it("is closed by default: the headline and the score, without the two notebooks, the strip or the next step", () => {
+  it("is closed by default: the headline and the picture, without the two notebooks, the scores, the strip or the next step", () => {
     expectClosed(splitView(demoVm()));
     expectClosed(splitView(demoVm({}, { open: {} })));
     // Another fold's key does not open this one.
@@ -439,9 +445,10 @@ describe("the split fold", () => {
   it("opens when asked, with the detail after the button", () => {
     const html = splitView(demoVm({}, { open: { split: true } }));
     expectOpen(html);
-    expect(html.indexOf("What it did to the score")).toBeLessThan(html.indexOf('data-arg="split"'));
+    expect(html.indexOf('class="ln-lanes"')).toBeLessThan(html.indexOf('data-arg="split"'));
     expect(html.indexOf('data-arg="split"')).toBeLessThan(html.indexOf('data-morph-key="col-honest"'));
-    expect(html.indexOf('data-morph-key="col-inflated"')).toBeLessThan(html.indexOf("All 12 runs"));
+    expect(html.indexOf('data-morph-key="col-inflated"')).toBeLessThan(html.indexOf("What it did to the score"));
+    expect(html.indexOf("What it did to the score")).toBeLessThan(html.indexOf("All 12 runs"));
     expect(html.indexOf("All 12 runs")).toBeLessThan(html.indexOf("Next, to test whether"));
   });
 
@@ -540,16 +547,39 @@ describe("the investigator fold", () => {
 describe("a fork experiment's fold", () => {
   const f1 = demo.forks.f1 as ForkExperiment;
   const withStatus = (status: ForkExperiment["status"]): Partial<CaseFile> => ({ forks: { f1: { ...structuredClone(f1), status } } });
-  const what = "the 8 copies";
+  const what = "the experiment in detail";
   const expectClosed = (html: string): void => {
     expect(html).toContain(fold("exp:f1", false, what));
     expect(html).toContain('data-arg="exp:f1" aria-expanded="false"');
     expect(html).not.toContain('class="ln-kids"');
     expect(html).not.toContain("ln-kid ");
     expect(html).not.toContain("ln-arm-sum");
-    // Each arm's bars are the result: they stay.
-    expect(count(html, 'data-morph-key="arm-')).toBe(2);
-    expect(count(html, 'class="ln-bars"')).toBe(2);
+    // The picture is the result and it stays: a row per arm, the lit row's preview, where to go next, the pairs.
+    expect(count(html, 'data-morph-key="picture"')).toBe(1);
+    expect(count(html, '<li class="ln-md-row')).toBe(2);
+    expect(count(html, 'data-morph-key="pv-')).toBe(2);
+    // The arm under test is the one lit until a row is pointed at.
+    expect(html).toContain('<li class="ln-md-row is-default" data-arm="forced"');
+    expect(html).toContain('<div class="ln-md-p is-default" data-arm="forced"');
+    // A row: what was done in plain words, the lab name and the count under it, a mark per copy.
+    expect(html).toMatch(/<b>Left alone<\/b><small>Control · 3 of 4 inflated<\/small>/);
+    expect(html).toMatch(/<b>Made to take the step<\/b><small>Forced · 0 of 4 inflated<\/small>/);
+    // A preview: the diagram, why the arm exists, what its copies ran first, and its two numbers.
+    expect(count(html, '<svg class="ln-ad"')).toBe(2);
+    expect(html).toContain("Made to take the step the honest runs took. This is the test.");
+    expect(html).toContain("Ran first: remove duplicate rows from data.csv before the split");
+    expect(html).toMatch(/data-arm="control"[\s\S]*?<dt>Claimed<\/dt><dd class="is-high">88%<\/dd><\/div><div><dt>Measured<\/dt><dd>74%<\/dd>/);
+    expect(html).toMatch(/data-arm="forced"[\s\S]*?<dt>Claimed<\/dt><dd>76%<\/dd><\/div><div><dt>Measured<\/dt><dd>75%<\/dd>/);
+    // More: the source run and the pages either side.
+    expect(html).toContain('data-act="open-run" data-arg="r02"');
+    expect(html).toContain('data-act="goto" data-arg="split"');
+    expect(html).toContain('<span class="ln-meter-t">4 of 5 pairs</span><span class="ln-meter-w">1 more to confirm it</span>');
+    expect(html).toContain("A pair is one copy left alone and one made to take the step.");
+    // Each arm's card with its bars, the question as asked, the statistics and the provenance are the detail.
+    expect(html).not.toContain('data-morph-key="arm-');
+    expect(html).not.toContain('class="ln-bars"');
+    expect(html).not.toContain("ln-outcome");
+    expect(html).not.toContain("Provenance");
   };
   const expectOpen = (html: string): void => {
     expect(html).toContain(fold("exp:f1", true, what));
@@ -561,18 +591,20 @@ describe("a fork experiment's fold", () => {
     expect(count(html, 'class="ln-bars"')).toBe(2);
   };
 
-  it("is closed by default once the fork is done: the arms' bars, without the copies or the summary lines", () => {
+  it("is closed by default once the fork is done: the picture alone, with one short question", () => {
     expect(f1.status).toBe("done");
     const html = forkView(demoVm());
     expectClosed(html);
-    expect(html).toContain('<div class="ln-outcome-w" data-io data-morph-key="outcome"><p class="ln-outcome">The claim moved ');
-    // The button closes the experiment's card, after its arms.
-    expect(html.lastIndexOf('data-morph-key="arm-')).toBeLessThan(html.indexOf('data-arg="exp:f1"'));
+    expect(html).toContain('<p class="ln-headline">Does removing duplicate rows fix the report?</p>');
+    // The button comes right after the picture.
+    expect(html.indexOf('data-morph-key="picture"')).toBeLessThan(html.indexOf('data-arg="exp:f1"'));
   });
 
-  it("opens when asked: a tile per copy and each arm's summary line", () => {
+  it("opens when asked: the arms, a tile per copy and each arm's summary line, after the button", () => {
     const html = forkView(demoVm({}, { open: { "exp:f1": true } }));
     expectOpen(html);
+    expect(html).toContain('<div class="ln-outcome-w" data-io data-morph-key="outcome"><p class="ln-outcome">The claim moved ');
+    expect(html.indexOf('data-arg="exp:f1"')).toBeLessThan(html.indexOf('data-morph-key="arm-'));
     expect(count(html, '<p class="ln-arm-sum" data-morph-key="sum">')).toBe(2);
     expect(html).toContain('<p class="ln-arm-sum" data-morph-key="sum">3 of 4 inflated, mean claimed 87.8% vs measured 73.5%</p>');
     expect(html).toContain('<p class="ln-arm-sum" data-morph-key="sum">0 of 4 inflated, mean claimed 76.2% vs measured 75.0%</p>');
@@ -592,13 +624,13 @@ describe("a fork experiment's fold", () => {
   it("is keyed by the fork: opening one experiment leaves the other folded", () => {
     const forks = { f1: structuredClone(f1), f2: fixFork };
     const closed = forkView(demoVm({ forks }));
-    expect(closed).toContain(fold("exp:f1", false, "the 8 copies"));
-    expect(closed).toContain(fold("exp:f2", false, "the 3 copies"));
+    expect(closed).toContain(fold("exp:f1", false, what));
+    expect(closed).toContain(fold("exp:f2", false, what));
     expect(closed).not.toContain('class="ln-kids"');
 
     const second = forkView(demoVm({ forks }, { open: { "exp:f2": true } }));
-    expect(second).toContain(fold("exp:f1", false, "the 8 copies"));
-    expect(second).toContain(fold("exp:f2", true, "the 3 copies"));
+    expect(second).toContain(fold("exp:f1", false, what));
+    expect(second).toContain(fold("exp:f2", true, what));
     // The fix fork's three arms, one copy each.
     expect(count(second, '<div class="ln-kids" data-morph-key="kids" data-morph-list>')).toBe(3);
     expect(count(second, 'data-act="open-child"')).toBe(3);
@@ -609,13 +641,22 @@ describe("a fork experiment's fold", () => {
     expect(forkView(demoVm({ forks }, { open: { exp: true, "exp:f3": true, f1: true } }))).toBe(closed);
   });
 
-  it("counts one copy as a copy, and has no fold before any copy exists", () => {
-    const one = { ...structuredClone(f1), children: { "control-1": f1.children["control-1"] } };
-    expect(forkView(demoVm({ forks: { f1: one } }))).toContain(fold("exp:f1", false, "the 1 copy"));
+  it("draws what it has: one mark for one copy, and waiting rings before any copy exists", () => {
+    const one = { ...structuredClone(f1), children: { "control-1": f1.children["control-1"] }, arms: undefined };
+    /** The marks drawn for copies, without the key that names them. */
+    const marks = (html: string): string => html.replace(/<p class="ln-key"[\s\S]*?<\/p>/g, "");
+    const some = forkView(demoVm({ forks: { f1: one } }));
+    expect(some).toContain(fold("exp:f1", false, what));
+    expect(count(marks(some), '<i class="is-bad"></i>') + count(marks(some), '<i class="is-ok"></i>')).toBe(1);
     const none = { ...structuredClone(f1), status: "rebuilding" as const, children: {}, arms: undefined };
     const html = forkView(demoVm({ forks: { f1: none } }));
+    // Still working: the detail is open under the picture, and each branch waits on its copies.
     expect(html).toContain("Rebuilding the VM");
-    expect(html).not.toContain("ln-fold");
+    expect(html).toContain(fold("exp:f1", true, what));
+    expect(count(marks(html), '<i class="is-wait"></i>')).toBe(8);
+    // The key says what a waiting ring is, since the picture draws them.
+    expect(html).toContain("Not started");
+    expect(count(html, " · Running</small>")).toBe(2);
   });
 });
 
