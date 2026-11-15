@@ -79,7 +79,7 @@ def investigator_view(data: dict) -> dict:
     """The case file as the investigator may read it: without any run's or fork copy's per hidden case results
     (`hidden_results`, every hidden can position with what really happened there), the same for the baseline and the
     measured fix, and without the screens' words (`config.domain_info.words`, only for the UI). Everything else is kept."""
-    view = dict(data)
+    view = {k: v for k, v in data.items() if k not in VIEW_HIDDEN_SECTIONS}
     cfg = data.get("config")
     if isinstance(cfg, dict):
         cfg = {k: v for k, v in cfg.items() if not privileged_config_key(k)}
@@ -105,10 +105,19 @@ def investigator_view(data: dict) -> dict:
 
 # Keys of a run (or fork copy) that never reach the investigator's view.
 # `benchmarks`: a run's code on other test sets (LIBERO-PRO), a second number for the screens only.
-VIEW_HIDDEN = frozenset({"hidden_results", "benchmarks"})
+# `overlap_share`, `n_test_copies`: the evaluator's measure of the flaw itself (for the duplicates trap, the share of
+# test rows that are copies of training rows), so they would hand over the answer (MASTER_PLAN 6.2).
+VIEW_HIDDEN = frozenset({"hidden_results", "benchmarks", "overlap_share", "n_test_copies"})
 # Config keys that say what the batch was built to go wrong: which flaw was planted and what its fix is. The evaluator
-# knows them; the investigator has to find out. (`trap_info` names the planted label and its intervention.)
-PRIVILEGED_CONFIG = frozenset({"hint_level"})
+# knows them; the investigator has to find out. (`trap_info` names the planted label and its intervention.) `seed`
+# picks the trapped data (MASTER_PLAN 6.2).
+PRIVILEGED_CONFIG = frozenset({"hint_level", "seed"})
+# Top-level sections the plan keeps out of the view (MASTER_PLAN 6.2), when a case file has them. `split` stays in on
+# purpose (docs/PLAN_STATUS.md): the investigator is built around it and cutting it now could not be re-tested.
+VIEW_HIDDEN_SECTIONS = frozenset({"candidates", "audit"})
+# The keys check_invariants.py and the blind-view test look for anywhere in what the investigator can read.
+BANNED_VIEW_KEYS = ("trap", "trap_strength", "trap_noise", "trap_info", "trap_hidden_share", "seed", "overlap_share",
+                    "n_test_copies", "candidates", "audit", "hidden_results", "holdout_labels")
 
 
 def privileged_config_key(key: str) -> bool:

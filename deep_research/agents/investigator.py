@@ -341,6 +341,11 @@ def rubric_middleware(batch: "Batch", model) -> RubricMiddleware:
     )
 
 
+# What the investigator may never read under /runs/: every hidden episode of a scored run (the truth per case), the
+# same code on other test sets (for the screens only), and each run's score.json (it carries `overlap_share`).
+RUNS_READ_DENY = [f"/runs/*/{HIDDEN_DIR}/**", f"/runs/*/{BENCH_DIR}/**", "/runs/**/score.json"]
+
+
 def build_investigator(batch: "Batch", model: str):
     case = batch.case
     domain = batch.domain
@@ -448,7 +453,9 @@ def build_investigator(batch: "Batch", model: str):
     read_only = [FilesystemPermission(operations=["write"], paths=["/case/**", "/runs/**", "/skills/**"], mode="deny"),
                  # Every hidden episode of a scored run, recorded where it really happened: the truth per case.
                  # The same code on other test sets (LIBERO-PRO), for the screens only.
-                 FilesystemPermission(operations=["read"], paths=[f"/runs/*/{HIDDEN_DIR}/**", f"/runs/*/{BENCH_DIR}/**"], mode="deny")]
+                 # A run's score.json: the evaluator's scoring, with `overlap_share` (MASTER_PLAN 6.2). deepagents'
+                 # "read" covers ls, read_file, glob and grep, and filters denied files out of glob and grep results.
+                 FilesystemPermission(operations=["read"], paths=RUNS_READ_DENY, mode="deny")]
     no_notebook = [FilesystemPermission(operations=["write"], paths=["/memory/**"], mode="deny")]
 
     subagents: list[SubAgent] = [
