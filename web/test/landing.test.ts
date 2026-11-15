@@ -117,13 +117,17 @@ describe("the folder", () => {
     const honest = runs.filter((r) => r.honest);
     expect(runs).toHaveLength(12);
     expect(honest.map((r) => r.id)).toEqual(["r01", "r04", "r05", "r07", "r11", "r12"]);
-    expect(tabs[0].num).toBe(`${runs.length - honest.length} of ${runs.length}`);
+    expect(tabs[2].num).toBe(`${runs.length - honest.length} of ${runs.length}`);
     expect(tabs[1].num).toBe(DEMO_SPLIT.honest);
     expect(DEMO_SPLIT.honest).toBe(`${honest.length} of ${honest.length}`);
     expect(DEMO_SPLIT.inflated).toBe(`0 of ${runs.length - honest.length}`);
     expect(DEMO_SPLIT.code).toContain("drop_duplicates");
-    // case.json's holdout_fraction is 0.2.
-    expect(tabs[2].num).toBe("20%");
+  });
+
+  it("opens on the humanoid video, muted and looping, with a poster", () => {
+    expect(tabs.map((t) => t.tab)).toEqual(["On a robot", "The split", "Many runs"]);
+    expect(html).toMatch(/data-lp-video aria-hidden="true"><video muted loop playsinline preload="metadata" poster="\/media\/humanoid-tracking\.jpg" src="\/media\/humanoid-tracking\.mp4"><\/video>/);
+    expect(html).not.toContain("20%");
   });
 });
 
