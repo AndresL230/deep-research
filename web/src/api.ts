@@ -880,7 +880,7 @@ export type AgentEvent = { t: number; /** Investigator only: which agent or suba
 /** Messages on `/api/batches/{id}/ws`. A replay sends one snapshot and closes; a live batch keeps streaming. */
 export type BatchMessage =
   /** `resumable`: a saved batch of ours that stopped at a split; `POST .../resume` brings it back live. */
-  | { kind: "snapshot"; case: CaseFile; live: boolean; resumable?: boolean }
+  | { kind: "snapshot"; case: CaseFile; live: boolean; resumable?: boolean; testable?: string[] }
   | { [S in CaseSection]: { kind: "case"; section: S; value: CaseFile[S] } }[CaseSection]
   | { kind: "event"; run: string; event: AgentEvent }
   | { kind: "fork_event"; fork: string; child: string; event: AgentEvent }
@@ -1207,6 +1207,10 @@ export const fetchMorePairs = (id: string, n?: number, o: Opts = {}) => call<Mor
  *  409 with the reason when they cannot run, an over-budget estimate included. */
 export const startMorePairs = (id: string, n?: number, o: Opts = {}) =>
   call<MorePairsStarted>(morePairsPath(id, n), { ...o, method: "POST" });
+/** A finished, saved batch: resume its investigator on its own thread, asking it to test `suspect` (untested). The
+ *  experiment it asks for waits for approval as usual. 409 with the reason when it cannot. */
+export const testSuspect = (id: string, suspect: string, o: Opts = {}) =>
+  call<{ id: string; phase: string; suspect_id: string }>(`${batchPath(id)}/suspects/${encodeURIComponent(suspect)}/test`, { ...o, method: "POST" });
 /** Live batches only: answer `forks.pending` while the phase is `awaiting_approval`. */
 export const postDecision = (id: string, approve: boolean, o: Opts = {}, pairs?: number) =>
   call<{ ok: true }>(`${batchPath(id)}/decision`, { ...o, json: pairs === undefined ? { approve } : { approve, pairs } });

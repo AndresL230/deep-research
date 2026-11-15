@@ -33,6 +33,7 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | POST | `/api/batches/{id}/lessons/{lesson_id}` | Live only. `{"approve": bool}` answers a lesson the investigator proposed (`forks.pending.lesson_id`) |
 | POST | `/api/batches/{id}/stop` | Live only. Cancels the work and stops every VM |
 | POST | `/api/batches/{id}/resume?investigate=<bool>` | Bring a saved batch of ours back live, in phase `ready`, so the investigator and the fork experiment can run on it after a server restart. With `investigate=true` the investigator starts in the same call. Only a batch whose runs are all scored, with a split and no verdict yet; `409 {"detail"}` says why otherwise. The list and the websocket snapshot flag such a batch with `resumable: true` |
+| POST | `/api/batches/{id}/suspects/{suspect_id}/test` | For a finished, real saved batch: resume its investigator on its own saved thread (`checkpoints.sqlite`), asking it to test a suspect its verdict left untested. Loads the batch back as more pairs do and claims it (phase `investigating`); the experiment it asks for waits on the usual approval, under the budget. Returns `{"id", "phase", "suspect_id"}`. `409 {"detail"}` says why it cannot (simulated, a fixture, running, already tested, no saved thread, files missing) |
 | GET | `/api/batches/{id}/more-pairs?n=<copies per arm>` | For a saved batch whose verdict is `open`: what running `n` more copies per arm of the verdict's fork experiment would add and cost, for the confirmation (`MorePairsQuote`, see More pairs below). Starts and loads nothing. `409 {"detail"}` says why more pairs cannot run; `422` for `n` below 1 |
 | POST | `/api/batches/{id}/more-pairs?n=<copies per arm>` | Run them: loads the saved batch back into this server (as `resume` does), claims it (phase `forking`) and starts the copies, then updates the fork and the verdict. Returns the quote plus `id`, `phase` and the new `children`. `409 {"detail"}` when it cannot run, an over-budget estimate included |
 | WS | `/api/batches/{id}/ws` | See below |
@@ -287,8 +288,10 @@ view (`case/view/case.json`) leaves them out (`case_file.UPGRADE_HIDDEN`).
   - `forks.pending` for a paired experiment adds `suspect_id`, `change`, `anchor`, `source_run`, `prediction`,
     `reason`, `pairs` (how many it asks for) and optionally `cost_per_pair_usd` (else `estimate_usd` scales by pairs).
   - `lessons`: `[{id, name, rule, status, suspect_id?}]`, `status` `proposed`, `approved` or `rejected`.
-  - `investigator`: `{todos: [{content, status}], subagent: str | null}`. Without it the UI reads the investigator
-    log: its last `todos` event, and the `agent` of its last event as the subagent at work.
+  - `investigator`: `{todos: [{content, status}], subagent: str | null, subagent_calls?: {name: int}}`.
+    `subagent_calls` counts the investigator's `task` calls by `subagent_type`. Without it the UI reads the
+    investigator log: its last `todos` event, the `agent` of its last event as the subagent at work, and its `task`
+    calls.
   - `config.investigator_assist` `"none" | "baseline"`: the UI tags the batch when it is `baseline`.
 - `POST /decision` may carry `{"approve": true, "pairs": n}` (1 to 6) when a person edited the pairs; plain
   `{"approve": bool}` is unchanged. `POST /api/batches/{id}/lessons/{lesson_id}` `{"approve": bool}` answers a
@@ -511,7 +514,8 @@ then stops sending files for the rest of its run, and case files and events go a
 ## Websocket
 
 `/api/batches/{id}/ws` first sends `{"kind": "snapshot", "case": <case file>, "live": bool}`. A replay adds
-`"resumable": bool` and then closes. A live batch keeps sending:
+`"resumable": bool` and `"testable": [suspect ids]` (the untested suspects its finished investigator can be asked to
+test) and then closes. A live batch keeps sending:
 
 ```ts
 { kind: "case", section, value }                  // one case file section changed; replace it

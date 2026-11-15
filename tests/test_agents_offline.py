@@ -145,3 +145,45 @@ async def test_the_built_investigator_has_the_plan_and_the_task_tools(batch, mon
     assert seen and {"write_todos", "task", "record_suspects", "run_experiment"} <= seen[0]
     prompt = inv_mod.main_prompt()
     assert "write_todos" in prompt and "step-tagger" in prompt and "skeptic" in prompt
+
+
+async def test_a_finished_investigator_can_be_asked_to_test_an_untested_suspect(tmp_path, monkeypatch):
+    """`test_suspect_problem` says when a finished batch's untested suspect can be tested; `test_suspect` resumes the
+    investigator on its own saved thread with the request, and it runs like any other turn of the investigator."""
+    from deep_research.batch import test_suspect_problem, testable_suspects
+    from tests.scripted import say, script_investigator
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
+    b = Batch(BatchConfig(n_runs=2, analyst_model="anthropic:claude-haiku-4-5"), batch_id="t", root=tmp_path)
+    b.case.update_run("r01", status="inflated")
+    b.case.update_run("r02", status="inflated")
+    assert b.case.record_suspects([
+        {"target": "deduplicate", "kind": "omission", "rationale": "inflated runs skip it"},
+        {"target": "evaluate", "kind": "omission", "rationale": "inflated runs skip it too"},
+    ]) == "suspects saved: s1, s2"
+    b.case.set_phase("ready")
+    script_investigator(monkeypatch, [say("Verdict written.")])
+    await b.investigate()
+    case = b.case.read()
+    # No task files on disk, and nothing to fork: refused with the reason.
+    assert test_suspect_problem(case, b.dir, "s2") == "the files needed to fork a run are missing"
+    (b.dir / "task").mkdir(exist_ok=True)
+    (b.dir / "task" / "data.csv").write_text("x\n")
+    (b.dir / "runs" / "r01").mkdir(parents=True, exist_ok=True)
+    (b.dir / "runs" / "r01" / "messages.json").write_text("[]")
+    assert test_suspect_problem(case, b.dir, "s2") is None
+    assert testable_suspects(case, b.dir) == ["s1", "s2"]
+    assert test_suspect_problem(case, b.dir, "s9") == "there is no suspect s9"
+    assert "simulated" in test_suspect_problem({**case, "config": {**case["config"], "simulated": True}}, b.dir, "s2")
+    assert test_suspect_problem({**case, "phase": "investigating"}, b.dir, "s2") == "the investigation has not finished"
+    tested = {**case, "forks": {"f1": {"suspect_id": "s2", "status": "done"}}}
+    assert test_suspect_problem(tested, b.dir, "s2") == "s2 has been tested already"
+
+    script_investigator(monkeypatch, [say("I will ask the skeptic and request one experiment on s2.")])
+    b2 = Batch.reopen("t", tmp_path, suspect_id="s2")
+    b2.claim_test("s2")
+    assert b2.case.read()["phase"] == "investigating"
+    await b2.test_suspect("s2")
+    assert b2.case.read()["phase"] == "done"
+    asks = [json.loads(line) for line in (b2.dir / "investigator" / "events.jsonl").read_text().splitlines()]
+    assert any("ask the skeptic" in (e.get("text") or "") for e in asks)

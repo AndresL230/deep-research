@@ -37,7 +37,7 @@ import { scheduleOrbs } from "./thinking-orb";
 import { PAGE_BACKGROUND, readStoredTheme, resolveTheme, storeTheme, themeChoice, themeSwitch, type Theme, type ThemeChoice } from "./theme";
 import {
   applyMessage, fetchBatches, fetchCase, fetchDatasets, fetchDefaults, fetchForkEvents, fetchHealth, fetchInvestigatorEvents,
-  fetchMorePairs, fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, postLesson, resumeBatch, startBatch, startMorePairs, uploadController, uploadDataset, uploadScript, startInvestigation, stopBatch,
+  fetchMorePairs, fetchRunEvents, isPendingForks, openBatchSocket, postDecision, postEstimate, postLesson, resumeBatch, startBatch, startMorePairs, testSuspect, uploadController, uploadDataset, uploadScript, startInvestigation, stopBatch,
   type AgentEvent, type HubStatus, type BatchConfig, type BatchListItem, type BatchSocket, type CaseFile,
 } from "./api";
 import { ACT, BATCH_STEPS, STEP_LABEL, childKey, parseRoute, routeHash, type BatchStep, type BatchVm, type EventKey, type HomeVm, type LogView, type ReplayState, type Route } from "./batch/model";
@@ -47,7 +47,7 @@ import { NY_ACT, moreFailedUi, needKey, needsCount, pruneNeeds, quoteUi, type Ne
 import { navBar, navMenu, newBatchButton, refreshDue } from "./batch/nav";
 import { newBatchDialog } from "./batch/new-batch-dialog";
 import { DI_ACT, controllerRow, fileKind, initialDatasetUi, inputsConfig, inputsLabel, inputsView, pickFile, uploadAfterEdit, withUpload, type DatasetUi, type Uploaded, type UploadKind, type UploadTicket } from "./dataset-input";
-import { notYetView, overviewView, pageHeadView, pagerView } from "./batch/overview";
+import { notYetView, overviewView, pageHeadView, pagerView, skippedView } from "./batch/overview";
 import { wallView } from "./batch/wall";
 import { feedButton, notebookWithCaptions } from "./batch/commentary";
 import { benchmarkView, diagnosisView, fixView, forkView, investigatorView, keyPointsView, splitView, verdictView } from "./batch/lanes";
@@ -81,6 +81,8 @@ interface BatchState {
   live: boolean;
   /** A saved batch the server can bring back live (the snapshot said so). */
   resumable: boolean;
+  /** The untested suspects its finished investigator can be asked to test (the snapshot said so). */
+  testable: string[];
   events: Record<EventKey, AgentEvent[]>;
   /** Live only: per log, the last event's time and when it arrived, to run that log's clock between events. */
   ticks: Record<EventKey, { t: number; at: number }>;
@@ -290,6 +292,7 @@ function batchVm(b: BatchState, full: CaseFile): BatchVm {
     id: b.id,
     live: b.live,
     resumable: b.resumable,
+    testable: b.testable,
     case: c,
     events: r ? eventsAt(full, b.events, r.t) : b.events,
     logs: logViews(b, full, c),
@@ -336,9 +339,9 @@ function headerView(vm: BatchVm | null): string {
   if (r.name === "run") crumbs.push(`<span class="pg-crumb is-cur">${esc(r.run)}</span>`);
   if (r.name === "child") crumbs.push(`<span class="pg-crumb is-cur">${esc(`${r.fork} ${r.child}`)}</span>`);
   const count = needsCount(S.home.batches);
-  // The logo, the links (nav.ts), then on a batch's pages its breadcrumb: the batch and the page in it.
+  // The logo (back to the landing page, the Orro site), the links (nav.ts), then on a batch's pages its breadcrumb.
   const left = `<div class="ask-hdr-l pg-hdr-l">
-    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${mark(11.8)}<span class="ask-h1 ask-h1-t">${wordmark(11.5)}</span></button>
+    <a class="pg-home" href="${routeHash({ name: "landing" })}" aria-label="Orro, to the Orro site">${mark(11.8)}<span class="ask-h1 ask-h1-t">${wordmark(11.5)}</span></a>
     ${navBar(r, count, admin())}
     ${crumbs.length ? `<nav class="pg-crumbs" aria-label="Breadcrumb" data-morph-key="crumbs">${crumbs.join(`<span class="ask-crumb-sep" aria-hidden="true">›</span>`)}</nav>` : ""}
   </div>`;
@@ -375,7 +378,7 @@ function batchBody(vm: BatchVm, step: BatchStep): string {
   const sections: [string, string][] = step === "wall"
     // The first page ends in the key points: what the batch found so far, one line each (lanes.ts keyPointsView).
     ? [["overview", overviewView(vm)], ["wall", wallView(vm)], ["points", keyPointsView(vm)], ["bench", benchmarkView(vm)]]
-    : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || notYetView(vm, step)]];
+    : [["head", pageHeadView(vm, step)], [step, STEP_VIEW[step](vm) || skippedView(vm, step) || notYetView(vm, step)]];
   // The bar is a new element on every page, so it arrives with the page.
   sections.push([`pager:${step}`, pagerView(vm, step)]);
   return `<div class="pg-batch" data-morph-key="batch:${attr(vm.id)}" data-morph-list>${sections
@@ -601,7 +604,7 @@ function closeBatch(): void {
 function openBatch(id: string, reopen = false): void {
   if (S.batch?.id === id && !reopen) return;
   closeBatch();
-  const b: BatchState = { id, full: null, live: false, resumable: false, events: {}, ticks: {}, replay: null, busy: null, error: null, loadError: null, socket: null };
+  const b: BatchState = { id, full: null, live: false, resumable: false, testable: [], events: {}, ticks: {}, replay: null, busy: null, error: null, loadError: null, socket: null };
   S.batch = b;
   let snapshotSeen = false;
   b.socket = openBatchSocket(id, {
@@ -612,6 +615,7 @@ function openBatch(id: string, reopen = false): void {
         snapshotSeen = true;
         b.live = m.live;
         b.resumable = !m.live && m.resumable === true;
+        b.testable = !m.live && Array.isArray(m.testable) ? m.testable : [];
         if (m.live) { b.full = m.case; void loadLiveLogs(b); }
         else void loadReplay(b, m.case);
         paint();
@@ -945,6 +949,25 @@ async function resumeAndInvestigate(b: BatchState): Promise<void> {
   }
 }
 
+/** A finished batch's untested suspect: ask the server to resume the investigator on it, then follow it live (its
+ *  request for an experiment arrives as the usual approval card). */
+async function testAndFollow(b: BatchState, suspect: string): Promise<void> {
+  if (b.busy || !b.testable.includes(suspect)) return;
+  b.busy = `test:${suspect}`;
+  b.error = null;
+  paint();
+  try {
+    await testSuspect(b.id, suspect);
+    if (S.batch !== b) return;
+    stopClock();
+    openBatch(b.id, true);
+  } catch (e) {
+    b.error = message(e, "Couldn't ask the investigator.");
+    b.busy = null;
+    paint();
+  }
+}
+
 // ── "Needs you" (batch/needs-you.ts) ─────────────────────────────────────────
 
 const needUi = (kind: NeedKind, id: string): NeedUi | undefined => S.home.needs?.[needKey(kind, id)];
@@ -1236,6 +1259,7 @@ root.addEventListener("click", (e) => {
       paint();
       return;
     }
+    case SX_ACT.testSuspect: if (b && !b.live) void testAndFollow(b, arg); return;
     case SX_ACT.lessonApprove: void liveAction(`lesson:${arg}`, (id) => postLesson(id, arg, true)); return;
     case SX_ACT.lessonReject: void liveAction(`lesson:${arg}`, (id) => postLesson(id, arg, false)); return;
     case ACT.decline: void liveAction("decline", (id) => postDecision(id, false)); return;
