@@ -176,3 +176,17 @@ describe("starting a humanoid batch", () => {
     expect(text).not.toContain("Franka");
   });
 });
+
+describe("the bag map on the run page", () => {
+  it("is small in the side column, plays in the page's player, and leaves the numbers to the Evidence panel", () => {
+    const map = checkedView("b1", "r03", scored, cfg, "map");
+    expect(map).toContain("ck--mini");
+    expect(map).toContain("ck-map--front");
+    expect(map).toContain("data-ck-play");
+    expect(map).not.toContain("data-ck-player");
+    expect(map).not.toContain("ck-vs");
+    expect(map.match(/data-ck-dot="/g)).toHaveLength(HIDDEN.length);
+    expect(map).toContain("Bag positions");
+    expect(checkedView("b1", "r03", scored, cfg, "evidence")).toContain("ck-vs");
+  });
+});

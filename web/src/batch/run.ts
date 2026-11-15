@@ -10,7 +10,8 @@
 //                             own summary of what it did, and without text the view says "didn't write an answer".
 //                             Earlier thoughts (said alongside tool calls) go to the one thinking row, joined.
 //   finished                  a `done` (tokens zero); otherwise the turn stays live and the view shows it working.
-// `runSummaryView` is the strip above it: back, which run, status, score, cost, charts.
+// `runSummaryView` is the page around it: the header line, the player or the charts, and the panels (one of them the
+// conversation).
 
 import "./run.css";
 import { batchFileUrl, labPageUrl, type AgentEvent, type AgentTodo, type BatchConfig, type ForkChild, type ForkExperiment, type RunRecord, type ScopeCost, type TrapInfo } from "../api";
@@ -22,9 +23,9 @@ import { ACT, type BatchVm, type EventKey } from "./model";
 import { cleanReason, duration, pct, pts, tokens, usd } from "./format";
 import { domainWords } from "./words";
 import { evidenceParts, trapOf } from "./trap";
-import { isMotionBatch, robotView, scoreWords } from "../robot/markup";
+import { episodesHost, isMotionBatch, robotView, scoreWords } from "../robot/markup";
 import "../robot/mount";
-import { benchmarkMapView, checkedView } from "./checked";
+import { benchmarkMapView, checkedView, tabularEvidence, type CheckedSubject } from "./checked";
 
 // ── text helpers ─────────────────────────────────────────────────────────────
 
@@ -315,55 +316,67 @@ export function chartName(path: string): string {
   return base ? base[0].toUpperCase() + base.slice(1) : "Chart";
 }
 
-const stat = (label: string, value: string, cls = "", title = ""): string =>
-  `<div class="rn-stat${cls}"${title ? ` title="${attr(title)}"` : ""}><dt class="rn-stat-l">${esc(label)}</dt><dd class="rn-stat-v">${esc(value)}</dd></div>`;
+/** A number in the run's header line: its label, value, a tone class and the tooltip that says what it is. */
+interface StatItem { label: string; value: string; cls?: string; title?: string }
+
+const stat = (x: StatItem): string =>
+  `<div class="rn-stat${x.cls ?? ""}"${x.title ? ` title="${attr(x.title)}"` : ""}><dt class="rn-stat-l">${esc(x.label)}</dt><dd class="rn-stat-v">${esc(x.value)}</dd></div>`;
 
 /**
  * The trap's evidence number, with its sentence as the tooltip ("53% of test rows were also in training"). Left out
  * when the batch's trap has no evidence number, or the run is scored and has none. A batch that does not describe its
  * trap planted duplicate rows.
  */
-function overlapStat(share: number | null | undefined, trap: TrapInfo | null, scored: boolean, config: unknown): string {
-  if (trap && !trap.evidence_text) return "";
-  if (share == null && scored) return "";
+function overlapItem(share: number | null | undefined, trap: TrapInfo | null, scored: boolean, config: unknown): StatItem | null {
+  if (trap && !trap.evidence_text) return null;
+  if (share == null && scored) return null;
   // A batch that does not describe its trap: the domain's words finish the sentence (a robot run's practice spot).
   const text = domainWords(config).evidence_text;
   const ev = evidenceParts(share, trap, text ?? "", 1);
   const title = ev ? `${ev.share} ${ev.text}` : "";
   // "Overlap" is a tabular word (test rows in training); a robot run's number is its share of practice spot episodes.
   // A domain whose words name what was checked says so: "At practice bag" on a humanoid run.
-  return stat(isMotionBatch(config) ? `At ${domainWords(config).checked || "practice spot"}` : "Overlap", pct(share), "", title);
+  return { label: isMotionBatch(config) ? `At ${domainWords(config).checked || "practice spot"}` : "Overlap", value: pct(share), title };
 }
 
-/** The strip above the conversation: which run, its status and score, charts, back to the batch. */
-export function runSummaryView(vm: BatchVm, key: EventKey): string {
+/** The panels under a run's player, in their order. Logs is the raw event log; Steps the same log as the agent's
+ *  steps (the conversation view). */
+export type RunPanel = "notebook" | "steps" | "logs" | "evidence";
+export const RUN_PANELS: readonly { id: RunPanel; label: string }[] = [
+  { id: "notebook", label: "Notebook" }, { id: "steps", label: "Steps" }, { id: "logs", label: "Logs" }, { id: "evidence", label: "Evidence" },
+];
+export const isRunPanel = (v: unknown): v is RunPanel => RUN_PANELS.some((p) => p.id === v);
+/** The element a panel's button controls. */
+export const panelId = (p: RunPanel): string => `rn-panel-${p}`;
+/** A panel's button pressed: that panel opens (closing the one open), or folds when it was the open one. Anything
+ *  else leaves the page as it is. */
+export function togglePanel(open: RunPanel | null, pressed: unknown): RunPanel | null {
+  if (!isRunPanel(pressed)) return open;
+  return open === pressed ? null : pressed;
+}
+
+export interface RunPageOpts {
+  /** The open panel, or null: all folded, as the page opens. */
+  open?: RunPanel | null;
+  /** The open panel's content: main.ts draws the notebook, the steps and the log; this file draws Evidence. */
+  body?: string;
+  /** A tabular run's chart shown large, by index. */
+  chart?: number;
+}
+
+/**
+ * A run's page (or a fork child's), as one box: the header line (back, name, status, the numbers), the player or the
+ * charts on the left, the episodes and the positions map (a robot run) or the steps and the evidence (a tabular run)
+ * on the right, and the panels under them, folded until one is opened. `data-rb-deck`: the player, its episode list
+ * and the map find each other inside it (robot/viewer.ts, checked.ts).
+ */
+export function runSummaryView(vm: BatchVm, key: EventKey, opts: RunPageOpts = {}): string {
   const s = subject(vm, key);
   const status = s.status ?? "queued";
   const scored = status === "honest" || status === "inflated";
+  const motionBatch = isMotionBatch(vm.case.config);
   const tone = status === "honest" ? " is-honest" : status === "inflated" ? " is-inflated" : status === "failed" ? " is-failed"
     : status === "unclear" ? " is-unclear" : "";
-  // A simulated batch says so once, in the page header.
-  const top = `<div class="rn-top">
-    <button type="button" class="rn-back" data-act="${ACT.back}">${askIcon("chevLeft", 13, null, 2.2)}<span>Batch</span></button>
-  </div>`;
-
-  const armTag = s.fork?.arm ? `<span class="rn-arm rn-arm--${s.fork.arm}">${s.fork.arm === "forced" ? "Forced arm" : "Control arm"}</span>` : "";
-  const head = `<div class="rn-head">
-    <h2 class="rn-name">${esc(s.name)}</h2>
-    <span class="rn-pill${tone}">${esc(STATUS_TEXT[status] ?? status)}</span>${armTag}
-  </div>`;
-
-  let note = "";
-  if (s.fork) {
-    const exp = s.fork.exp;
-    const from = exp ? `Forked from ${exp.source_run} after ${exp.fork_at} ${exp.fork_at === 1 ? "action" : "actions"}. ` : "";
-    const what = s.fork.arm === "forced"
-      ? `The experiment ran one step first: ${exp?.intervention ?? "the forced step"}.`
-      : "No change: the agent carried on by itself.";
-    note = `<p class="rn-note">${esc(from + what)}</p>`;
-  }
-  if (status === "unclear" && s.score.reason) note += `<p class="rn-note">${esc(s.score.reason)}</p>`;
-  if (status === "failed" && s.score.reason) note += `<p class="rn-note rn-note--fail">${esc(cleanReason(s.score.reason))}</p>`;
 
   const cost: ScopeCost | undefined = vm.case.costs.scopes?.[s.scope];
   const tin = cost?.input_tokens ?? s.tokens?.input ?? null;
@@ -372,45 +385,186 @@ export function runSummaryView(vm: BatchVm, key: EventKey): string {
   const gapTone = scored ? (status === "inflated" ? " is-inflated" : " is-honest") : "";
   // The domain's labels: "Claimed" and "Measured" on a robot batch; an older tabular batch keeps "Reported" and "True".
   const words = scoreWords(vm.case.config);
-  const stats = [
-    stat(words.reported, pct(s.score.reported_accuracy), "", words.reportedTitle),
-    stat(words.true, pct(s.score.true_accuracy), "", words.trueTitle),
-    stat("Gap", pts(s.score.gap) + words.gapSuffix(s.score.gap), gapTone, words.gapTitle),
-    overlapStat(s.score.overlap_share, trapOf(vm.case), scored, vm.case.config),
-    stat("Time", duration(s.durationS)),
-    tin != null || tout != null ? stat("Tokens", `${tokens(tin)} in, ${tokens(tout)} out`, " rn-stat--wide") : "",
-    money != null ? stat("Cost", usd(money)) : "",
-  ].join("");
-
-  // A robot run shows its episodes in 3D where a tabular run shows its charts.
-  const motion = isMotionBatch(vm.case.config) && (s.motion.length || scored || status === "failed")
-    ? robotView(vm.id, key, s.motion)
-    : "";
-  const charts = motion ? motion : s.charts.length
-    ? `<div class="rn-charts" data-morph-list>${s.charts.map((p) => {
-      const url = batchFileUrl(vm.id, p);
-      const name = chartName(p);
-      return `<a class="rn-thumb" data-morph-key="${attr(p)}" href="${attr(url)}" target="_blank" rel="noopener" title="${attr(`Open ${name} full size`)}"><img class="rn-thumb-i" src="${attr(url)}" alt="${attr(name)}" loading="lazy" decoding="async"><span class="rn-thumb-l">${esc(name)}</span></a>`;
-    }).join("")}</div>`
-    : "";
+  const overlap = overlapItem(s.score.overlap_share, trapOf(vm.case), scored, vm.case.config);
+  const items: StatItem[] = [
+    { label: words.reported, value: pct(s.score.reported_accuracy), title: words.reportedTitle },
+    { label: words.true, value: pct(s.score.true_accuracy), title: words.trueTitle },
+    { label: "Gap", value: pts(s.score.gap) + words.gapSuffix(s.score.gap), cls: gapTone, title: words.gapTitle },
+    ...(overlap ? [overlap] : []),
+    { label: "Time", value: duration(s.durationS) },
+    ...(tin != null || tout != null ? [{ label: "Tokens", value: `${tokens(tin)} in, ${tokens(tout)} out` }] : []),
+    ...(money != null ? [{ label: "Cost", value: usd(money) }] : []),
+  ];
 
   const live = status === "running" || status === "starting";
   const lab = s.labUrl && live
     ? `<a class="rn-lab" href="${attr(labPageUrl(vm.id, key))}" target="_blank" rel="noopener">${askIcon("external", 12, null, 2)}<span>Open lab page</span></a>`
     : "";
+  const armTag = s.fork?.arm ? `<span class="rn-arm rn-arm--${s.fork.arm}">${s.fork.arm === "forced" ? "Forced arm" : "Control arm"}</span>` : "";
+  // A simulated batch says so once, in the page header.
+  const top = `<div class="rn-top" data-morph-key="top">`
+    + `<div class="rn-id">`
+    + `<button type="button" class="rn-back" data-act="${ACT.back}">${askIcon("chevLeft", 13, null, 2.2)}<span>Batch</span></button>`
+    + `<h2 class="rn-name">${esc(s.name)}</h2>`
+    + `<span class="rn-pill${tone}">${esc(STATUS_TEXT[status] ?? status)}</span>${armTag}`
+    + `</div>`
+    + `<dl class="rn-stats">${items.map(stat).join("")}</dl>${lab}`
+    + `</div>`;
 
-  // What it checked next to what it is judged on (checked.ts), right under the numbers.
-  const checked = checkedView(vm.id, key, { ...s.score, status }, vm.case.config);
-  // The same controller where LIBERO-PRO moves the can, on the table and in 3D (a run only: a fork copy has none).
-  const libero = benchmarkMapView(vm.id, `bm:${key}`, vm.case.runs?.[key]?.benchmarks?.libero_pro, "LIBERO-PRO", "At LIBERO-PRO's positions");
+  // One short line: where a fork child came from, why a run is unclear or failed. The full text is its tooltip.
+  const notes: { text: string; cls?: string }[] = [];
+  if (s.fork) {
+    const exp = s.fork.exp;
+    const from = exp ? `Forked from ${exp.source_run} after ${exp.fork_at} ${exp.fork_at === 1 ? "action" : "actions"}. ` : "";
+    const what = s.fork.arm === "forced"
+      ? `The experiment ran one step first: ${exp?.intervention ?? "the forced step"}.`
+      : "No change: the agent carried on by itself.";
+    notes.push({ text: from + what });
+  }
+  if (status === "unclear" && s.score.reason) notes.push({ text: s.score.reason });
+  if (status === "failed" && s.score.reason) notes.push({ text: cleanReason(s.score.reason), cls: "rn-note-fail" });
+  const note = notes.length
+    ? `<p class="rn-note" data-morph-key="note" title="${attr(notes.map((n) => n.text).join(" "))}">${notes.map((n) => `<span${n.cls ? ` class="${n.cls}"` : ""}>${esc(n.text)}</span>`).join(" ")}</p>`
+    : "";
 
-  return `<section class="rn" data-morph-key="rn:${attr(key)}">${top}${head}${note}<dl class="rn-stats">${stats}</dl>${checked}${libero}${charts}${lab}</section>`;
+  const subjectScore = { ...s.score, status };
+  const { main, side } = motionBatch ? robotDeck(vm, key, s, subjectScore, scored) : tabularDeck(vm, key, s, subjectScore, opts.chart ?? 0);
+  const deck = `<div class="rn-deck${side ? "" : " rn-deck--one"}" data-morph-key="deck" data-morph-list>`
+    + `<div class="rn-main" data-morph-key="main">${main}</div>`
+    + (side ? `<div class="rn-side" data-morph-key="side" data-morph-list>${side}</div>` : "")
+    + `</div>`;
+
+  const open = opts.open ?? null;
+  // The Evidence panel also has the same controller where LIBERO-PRO moves the can, on the table and in 3D (a run
+  // only: a fork copy has none).
+  const libero = open === "evidence" ? benchmarkMapView(vm.id, `bm:${key}`, vm.case.runs?.[key]?.benchmarks?.libero_pro, "LIBERO-PRO", "At LIBERO-PRO's positions") : "";
+  const body = open === "evidence" ? evidenceBody(vm, key, subjectScore, items, notes.map((n) => n.text)) + libero : opts.body ?? "";
+  return `<section class="rn" data-rb-deck data-morph-key="rn:${attr(key)}" data-morph-list>${top}${note}${deck}${panelsView(vm, key, open, body)}</section>`;
 }
 
+/** A robot run: the 3D player on the left, its episodes and the positions map on the right. */
+function robotDeck(vm: BatchVm, key: EventKey, s: Subject, score: CheckedSubject, scored: boolean): { main: string; side: string } {
+  const status = score.status;
+  const main = s.motion.length || scored || status === "failed"
+    ? robotView(vm.id, key, s.motion, { listHost: true })
+    : `<div class="rn-empty" data-morph-key="rb-wait">No episodes yet</div>`;
+  const map = checkedView(vm.id, key, score, vm.case.config, "map");
+  let side = episodesHost(key, s.motion) + map;
+  // Nothing recorded yet: what the agent has done so far, if anything.
+  if (!side) side = stepsBlock(vm, key);
+  return { main, side };
+}
 
-// ── what the agent did, in a line ────────────────────────────────────────────
+/** A tabular run: its charts on the left (one large, the others to pick), its steps and the evidence on the right. */
+function tabularDeck(vm: BatchVm, key: EventKey, s: Subject, score: CheckedSubject, pick: number): { main: string; side: string } {
+  let main: string;
+  if (s.charts.length) {
+    const i = Math.max(0, Math.min(s.charts.length - 1, Math.floor(pick) || 0));
+    const p = s.charts[i];
+    const url = batchFileUrl(vm.id, p);
+    const name = chartName(p);
+    const big = `<a class="rn-chart" data-morph-key="${attr(`big:${p}`)}" href="${attr(url)}" target="_blank" rel="noopener" title="${attr(`Open ${name} full size`)}">`
+      + `<img class="rn-chart-i" src="${attr(url)}" alt="${attr(name)}" decoding="async"><span class="rn-chart-l">${esc(name)}</span></a>`;
+    const thumbs = s.charts.length > 1
+      ? `<div class="rn-thumbs" role="group" aria-label="Charts" data-morph-key="thumbs" data-morph-list>${s.charts.map((c, j) => {
+        const u = batchFileUrl(vm.id, c);
+        const n = chartName(c);
+        return `<button type="button" class="rn-thumb" data-morph-key="${attr(c)}" data-act="${ACT.runChart}" data-arg="${j}" aria-pressed="${j === i}" title="${attr(n)}"><img class="rn-thumb-i" src="${attr(u)}" alt="" loading="lazy" decoding="async"><span class="rn-thumb-l">${esc(n)}</span></button>`;
+      }).join("")}</div>`
+      : "";
+    main = `<div class="rn-charts" data-morph-key="charts">${big}${thumbs}</div>`;
+  } else {
+    // A fork child draws no charts: its claim next to the truth is the picture, once it is scored.
+    const bars = checkedView(vm.id, key, score, vm.case.config, "evidence");
+    main = bars || `<div class="rn-empty" data-morph-key="no-charts">No charts yet</div>`;
+  }
 
-/** Step labels as words, for the strip over a folded notebook. A label not listed here reads with its underscores as spaces. */
+  const ev = tabularEvidence(score, vm.case.config);
+  const trap = trapOf(vm.case);
+  const lines: string[] = [];
+  // The copies line is the trap's evidence number in words; a trap without one (a leaky column) has the holdout only.
+  if (ev && !(trap && !trap.evidence_text)) lines.push(ev.copiesLine);
+  if (ev) lines.push(ev.holdName);
+  const evidence = lines.length
+    ? `<div class="rn-block" data-morph-key="evidence"><h3 class="rn-block-h">Evidence</h3><ul class="rn-facts">${lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></div>`
+    : "";
+  return { main, side: stepsBlock(vm, key) + evidence };
+}
+
+/** The run's steps as a compact list (`workSteps`), or "" without labels (a fork child, a run just started). */
+function stepsBlock(vm: BatchVm, key: EventKey): string {
+  const steps = workSteps(vm, key);
+  if (!steps.length) return "";
+  return `<div class="rn-block" data-morph-key="steps"><h3 class="rn-block-h">Steps <span>${steps.length}</span></h3>`
+    + `<ol class="rn-steps" data-lenis-prevent>${steps.map((w) => `<li>${esc(w)}</li>`).join("")}</ol></div>`;
+}
+
+/** The Evidence panel: the claim next to the truth (checked.ts), then every number with what it means. */
+function evidenceBody(vm: BatchVm, key: EventKey, score: CheckedSubject, items: StatItem[], notes: string[]): string {
+  const pair = checkedView(vm.id, key, score, vm.case.config, "evidence");
+  const defs = items.filter((x) => x.title).map((x) => `<div class="rn-def"><dt>${esc(x.label)} <span>${esc(x.value)}</span></dt><dd>${esc(x.title!)}</dd></div>`).join("");
+  const why = notes.map((n) => `<p class="rn-ev-note">${esc(n)}</p>`).join("");
+  return `<div class="rn-ev">${pair || `<p class="rn-ev-note">Not scored yet.</p>`}${why}<dl class="rn-defs">${defs}</dl></div>`;
+}
+
+/** The panel row: a button per panel (aria-expanded, aria-controls), and each panel's region, only the open one drawn. */
+function panelsView(vm: BatchVm, key: EventKey, open: RunPanel | null, body: string): string {
+  const events = vm.events[key];
+  const count: Partial<Record<RunPanel, number>> = events
+    ? { steps: events.filter((e) => e.type === "tool_call" || e.type === "forced").length, logs: events.length }
+    : {};
+  const tabs = RUN_PANELS.map((p) => {
+    const on = p.id === open;
+    const n = count[p.id];
+    return `<button type="button" class="rn-tab" data-act="${ACT.runPanel}" data-arg="${p.id}" aria-expanded="${on}" aria-controls="${panelId(p.id)}">`
+      + `<span class="rn-tab-c" aria-hidden="true">${askIcon("chevRight", 12, null, 2.2)}</span><span>${p.label}</span>${n ? `<span class="rn-tab-n">${n}</span>` : ""}</button>`;
+  }).join("");
+  const regions = RUN_PANELS.map((p) => p.id === open
+    ? `<div class="rn-panel rn-panel--${p.id}" id="${panelId(p.id)}" role="region" aria-label="${p.label}" data-rn-panel="${p.id}" data-lenis-prevent data-morph-key="panel:${p.id}">${body}</div>`
+    : `<div class="rn-panel" id="${panelId(p.id)}" role="region" aria-label="${p.label}" hidden data-morph-key="panel:${p.id}"></div>`).join("");
+  return `<div class="rn-panels${open ? " is-open" : ""}" data-morph-key="panels"><div class="rn-tabs" role="group" aria-label="Panels">${tabs}</div>${regions}</div>`;
+}
+
+// ── the raw log ──────────────────────────────────────────────────────────────
+
+/** A raw event's text past this is cut, saying how much was left out. */
+const LOG_TEXT_MAX = 6000;
+const logCut = (t: string): string => (t.length > LOG_TEXT_MAX ? `${t.slice(0, LOG_TEXT_MAX)}\n… ${t.length - LOG_TEXT_MAX} more characters` : t);
+/** "0:07.4", "12:03.0": time into the run. */
+const clock = (s: number): string => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
+
+/** The Logs panel: every event of the run as it was recorded, in order, with its time. */
+export function logView(events: AgentEvent[]): string {
+  if (!events.length) return `<p class="rn-ev-note">No events yet.</p>`;
+  const times = eventTimes(events);
+  const rows = events.map((e, i) => {
+    let kind: string = e.type;
+    let head = "";
+    let body = "";
+    switch (e.type) {
+      case "thought": kind = "thought"; body = e.text; break;
+      case "tool_call": {
+        kind = "call";
+        head = e.name;
+        const a = e.args ?? {};
+        body = typeof a.command === "string" ? a.command : JSON.stringify(a, null, 2);
+        break;
+      }
+      case "tool_result": kind = "result"; head = e.name ?? ""; body = e.content ?? ""; break;
+      case "todos": kind = "plan"; body = (e.todos ?? []).map((t) => `${t.status === "completed" ? "[x]" : t.status === "in_progress" ? "[~]" : "[ ]"} ${t.content}`).join("\n"); break;
+      case "forced": kind = "forced"; head = e.command; body = e.output ?? ""; break;
+      case "motion": kind = "motion"; head = e.path; break;
+      case "caption": kind = "caption"; body = e.text; break;
+    }
+    return `<li class="rn-log-e rn-log-e--${kind}" data-morph-key="e${i}"><span class="rn-log-t">${clock(times[i] ?? 0)}</span><span class="rn-log-k">${esc(kind)}</span>`
+      + `<div class="rn-log-b">${head ? `<code class="rn-log-h">${esc(head)}</code>` : ""}${body.trim() ? `<pre class="rn-log-pre">${esc(logCut(body.trimEnd()))}</pre>` : ""}</div></li>`;
+  }).join("");
+  return `<ol class="rn-log" data-morph-list>${rows}</ol>`;
+}
+
+// ── the steps ────────────────────────────────────────────────────────────────
+
+/** Step labels as words, for the run page's list of steps. A label not listed here reads with its underscores as spaces. */
 const STEP_WORDS: Record<string, string> = {
   inspect_scene: "read the scene", write_controller: "wrote controller.py", run_single_episode: "ran an episode",
   test_one_position: "tested one position", vary_positions: "tested other positions", tune_params: "tuned the numbers",
@@ -437,15 +591,4 @@ export function workSteps(vm: BatchVm, key: EventKey): string[] {
     else out.push({ word, n: 1 });
   }
   return out.map((x) => (x.n > 1 ? `${x.word} ×${x.n}` : x.word));
-}
-
-/** The strip: the steps joined, and a button that unfolds the full notebook. `cells` is how many cells it holds. */
-export function workStrip(vm: BatchVm, key: EventKey, cells: number, open: boolean, act: string): string {
-  const steps = workSteps(vm, key);
-  const what = steps.length ? steps.map((w) => `<span class="pg-work-step">${esc(w)}</span>`).join(`<span class="pg-work-sep" aria-hidden="true">›</span>`) : "";
-  const label = open ? "Hide the agent's work" : `Show the agent's work${cells ? ` (${cells} ${cells === 1 ? "cell" : "cells"})` : ""}`;
-  return `<div class="pg-work" data-morph-key="work:${attr(key)}">` +
-    (what ? `<p class="pg-work-strip"><span class="pg-work-lbl">What it did</span>${what}</p>` : "") +
-    `<button type="button" class="ask-ghostbtn ask-ghostbtn--outline pg-work-btn" data-act="${act}" aria-expanded="${open}">${esc(label)}</button>` +
-    `</div>`;
 }

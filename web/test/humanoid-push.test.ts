@@ -169,3 +169,19 @@ describe("the scene per robot", () => {
     expect(urls).toEqual(["/api/robot/scene?model=g1-push-v1", "/api/robot/scene"]);
   });
 });
+
+describe("the push dial on the run page", () => {
+  it("is small in the side column, plays in the page's player, and leaves the numbers to the Evidence panel", () => {
+    const map = checkedView("b1", "r01", scored, humanoidCfg, "map");
+    expect(map).toContain("ck--mini");
+    expect(map).toContain("ck-map--dial");
+    expect(map).toContain("data-ck-play");
+    expect(map).not.toContain("data-ck-player");
+    expect(map).not.toContain("ck-vs");
+    expect(tags(map, "button", "data-ck-dot")).toHaveLength(HIDDEN.length);
+    expect(text(map)).toContain("Pushes");
+    const ev = checkedView("b1", "r01", scored, humanoidCfg, "evidence");
+    expect(ev).toContain("ck-vs");
+    expect(ev).not.toContain("data-ck-dot");
+  });
+});
