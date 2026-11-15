@@ -6,7 +6,7 @@
 // attributes and in its `data-morph-key`: when the list of files changes, the key does, and a new one replaces it.
 
 import { attr, esc } from "../ui";
-import type { EpisodeResult, Push } from "./data";
+import { ServerError, type EpisodeResult, type Push } from "./data";
 import { domainWords } from "../batch/words";
 
 /** The batch draws its runs as robot motion. */
@@ -14,6 +14,23 @@ export const isMotionBatch = (config: unknown): boolean => (config as { visual?:
 
 /** The batch is a humanoid push recovery one (deep_research/domains/humanoid_push.py). */
 export const isPushBatch = (config: unknown): boolean => (config as { domain?: unknown } | null)?.domain === "humanoid_push";
+
+/**
+ * What the player shows when an episode cannot be loaded. A sentence from the server (such as a batch from another
+ * machine whose recording is not on the team hub yet) is shown as it is. A bare "no batch ..." is never shown: the
+ * page around the player loaded, so the batch plainly exists. Anything else is prefixed.
+ */
+export function episodeError(e: unknown): string {
+  const msg = (e instanceof Error ? e.message : String(e)).trim();
+  if (/^no batch\b/i.test(msg)) return "This episode's recording isn't on this machine or on the team hub.";
+  if (e instanceof ServerError && /^[A-Z]/.test(msg)) return msg;
+  return `Couldn't load this episode: ${msg || "unknown error"}`;
+}
+
+/** A file picker entry's note when its summary could not be read. */
+export function summaryErrorText(error: string): string {
+  return /isn't on the hub/i.test(error) ? "not on the hub yet" : "can't be read";
+}
 
 /** "runs/r01/outputs/live/far_left_tuned.motion.json" -> "far_left_tuned". A hidden episode's recording
  *  ("runs/r02/hidden/07-s1.motion.json", sim/evaluate.py, positions counted from 0) -> "Hidden position 8, seed 1",

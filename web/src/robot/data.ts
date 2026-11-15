@@ -139,12 +139,18 @@ export interface MotionSummary {
   error?: string;
 }
 
+/** The server's own reason a read failed (its `detail`), as opposed to a network error or a bare status. */
+export class ServerError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) {
     let detail = "";
     try { const j = (await res.json()) as { detail?: unknown }; detail = typeof j.detail === "string" ? j.detail : ""; } catch { /* no body */ }
-    throw new Error(detail || `The server answered HTTP ${res.status}`);
+    if (detail) throw new ServerError(detail, res.status);
+    throw new Error(`The server answered HTTP ${res.status}`);
   }
   return (await res.json()) as T;
 }

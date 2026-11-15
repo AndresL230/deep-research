@@ -17,7 +17,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { attr, esc } from "../ui";
 import { ARM_MODEL, fetchMotion, fetchScene, fetchSummaries, type MotionData, type MotionSummary, type SceneData, type SceneGeom, type SceneView } from "./data";
-import { BASKET_LEGEND, PUSH_LEGEND, STRIKE_LEGEND, SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, hasBasket, motionName, noWebglView, pushText, resultFacts, resultText, resultTone, resultWord, seconds, xy, xyz } from "./markup";
+import { BASKET_LEGEND, PUSH_LEGEND, STRIKE_LEGEND, SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, episodeError, hasBasket, motionName, noWebglView, pushText, resultFacts, resultText, resultTone, resultWord, seconds, summaryErrorText, xy, xyz } from "./markup";
 
 // ── WebGL, checked once ──────────────────────────────────────────────────────
 
@@ -683,7 +683,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     } catch (e) {
       if (disposed || my !== seq) return;
       loadingEl.hidden = false;
-      loadingEl.textContent = `Couldn't load this episode: ${e instanceof Error ? e.message : String(e)}`;
+      loadingEl.textContent = episodeError(e);
     }
   };
   const select = (i: number): void => {
@@ -903,7 +903,7 @@ function fileButton(path: string, i: number, s: MotionSummary | null, compact = 
   const tone = s?.error ? "none" : resultTone(s?.result);
   const full = s && !s.error
     ? [s.can_start ? `can ${xy(s.can_start)}` : s.bag_pos ? `bag ${xyz(s.bag_pos)}` : "", s.push ? `push ${pushText(s.push)}` : "", resultText(s.result)].filter(Boolean).join(" · ")
-    : s?.error ? "can't be read" : "";
+    : s?.error ? summaryErrorText(s.error) : "";
   const meta = compact && s && !s.error ? resultWord(s.result) : full;
   const title = compact && full ? `${motionName(path, s?.push ? "push" : "position")}: ${full}` : path;
   return `<button type="button" class="rb-file${compact ? " rb-file--row" : ""}" role="option" data-rb-file="${i}" aria-selected="false" title="${attr(title)}">`

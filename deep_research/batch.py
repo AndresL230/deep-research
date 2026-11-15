@@ -425,6 +425,7 @@ class Batch:
         self.started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         if self._hub is not None:
             self.case.subscribe(lambda section, value: self._push_case())
+            self.case.subscribe(self._push_motion)
         # The domain in words and what the UI draws for a run, plus the domain's own keys (the tabular `trap_info`).
         info = {"visual": self.domain.visual, "domain_info": self.domain.public(), **self.domain.case_config(cfg)}
         if not resume:
@@ -437,6 +438,13 @@ class Batch:
         # Called inside the case file's lock, so the data is consistent; copy it, the push happens later elsewhere.
         if self._hub is not None:
             self._hub.push_case(self.id, json.loads(json.dumps(self.case.data, default=str)), self.started_at)
+
+    def _push_motion(self, section: str, value: Any) -> None:
+        # The motion files the case names, as each is saved: a live practice episode MotionWatch pulled in (and pulled
+        # again when it changed), the final download, a scored run's hidden episodes (`hidden_results`), the same for
+        # fork children. Queuing is cheap and the pusher sends a file again only when it changed on disk.
+        if self._hub is not None and section in ("runs", "forks"):
+            self._hub.push_case_files(self.id, self.dir, {section: value})
 
     def _log(self, path: Path, key: str) -> EventLog:
         """An event log whose events also go to the hub, under `key` (a run, a fork child, or "investigator")."""

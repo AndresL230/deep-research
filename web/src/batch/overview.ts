@@ -218,7 +218,7 @@ export function pagerView(vm: BatchVm, current: BatchStep): string {
   const working = ["running", "analyzing", "investigating", "forking", "forked"].includes(phase);
   let right: string;
   if (nav.next) {
-    right = `<button type="button" class="pgr-next ds-primary ds-pop" data-act="${ACT.goto}" data-arg="${nav.next.key}" data-morph-key="next:${nav.next.key}">`
+    right = `<button type="button" class="pgr-next ds-primary" data-act="${ACT.goto}" data-arg="${nav.next.key}" data-morph-key="next:${nav.next.key}">`
       + `<span class="pgr-next-k">Next</span><span class="pgr-next-l">${esc(nav.next.label)}</span><span class="pgr-ic pgr-go">${NEXT}</span></button>`;
   } else if (nav.waiting) {
     right = `<span class="pgr-wait" data-morph-key="wait:${attr(nav.waiting.label)}">${working ? spinner(14) : `<i class="pgr-wait-box"></i>`}`

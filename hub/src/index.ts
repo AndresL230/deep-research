@@ -12,10 +12,15 @@
 //   GET    /v1/cases                        every batch with its case file (for the cost report)
 //   PUT    /v1/batches/:id                  {machine, revision, case, started_at?}: store the case file
 //   GET    /v1/batches/:id                  one batch with its case file
-//   DELETE /v1/batches/:id                  remove a batch and its events
+//   DELETE /v1/batches/:id                  remove a batch, its events and its files
 //   POST   /v1/batches/:id/events           {log, events: [{seq, event}]}: add events; a seq already stored is skipped
 //   GET    /v1/batches/:id/logs             the logs a batch has, with their event counts
 //   GET    /v1/batches/:id/events?log=r01   one log's events, in order
+//   PUT    /v1/batches/:id/files/<path>     a robot run's motion file (body: the JSON, gzipped with content-encoding gzip
+//                                           or plain); <path> is batch-relative, as in the case file's motion_files
+//   GET    /v1/batches/:id/files/<path>     that file back, with its ETag; If-None-Match answers 304
+//
+// Motion files live in R2 (the FILES binding), the rest in D1. A hub deployed without FILES answers 503 on /files.
 
 /** Secrets this Worker hands to local servers, so a key is changed in one place. */
 export const RUNNER_KEYS = [
@@ -28,7 +33,7 @@ export const RUNNER_KEYS = [
 ] as const;
 
 type RunnerKey = (typeof RUNNER_KEYS)[number];
-export type HubEnv = { DB: D1Database; TEAM_TOKEN?: string } & Partial<Record<RunnerKey, string>>;
+export type HubEnv = { DB: D1Database; FILES?: R2Bucket; TEAM_TOKEN?: string } & Partial<Record<RunnerKey, string>>;
 
 const BATCH_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const LOG_KEY = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}(?:\/[A-Za-z0-9][A-Za-z0-9_.-]{0,39})?$/;
@@ -36,6 +41,11 @@ const LOG_KEY = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}(?:\/[A-Za-z0-9][A-Za-z0-9_.-]{
 const MAX_VALUE_BYTES = 1_900_000;
 const MAX_EVENTS_PER_PUSH = 500;
 const MAX_ROWS = 500;
+// A motion file as sent: one is a few hundred kB of JSON at most (robot_view.MAX_MOTION_BYTES is 2 MB unpacked).
+const MAX_FILE_BYTES = 4_000_000;
+const MAX_FILE_PATH = 300;
+// One part of a file's path: no leading dot (so never `..` or a dotfile), no slash.
+const PATH_PART = /^[A-Za-z0-9_,-][A-Za-z0-9._, -]{0,119}$/;
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -166,7 +176,77 @@ async function deleteBatch(env: HubEnv, id: string): Promise<Response> {
     env.DB.prepare("DELETE FROM batches WHERE id = ?1").bind(id),
     env.DB.prepare("DELETE FROM events WHERE batch_id = ?1").bind(id),
   ]);
+  if (env.FILES) await deleteFiles(env.FILES, id);
   return json({ ok: true, deleted: b.meta.changes > 0 });
+}
+
+async function deleteFiles(files: R2Bucket, id: string): Promise<void> {
+  let cursor: string | undefined;
+  do {
+    const page = await files.list({ prefix: `${id}/`, cursor });
+    if (page.objects.length) await files.delete(page.objects.map((o) => o.key));
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+}
+
+// ── motion files ─────────────────────────────────────────────────────────────
+
+/**
+ * A batch-relative motion file path, checked: under a run's or a fork child's outputs (`runs/r01/outputs/live/x.motion.json`)
+ * or hidden episodes (`runs/r01/hidden/07-s0.motion.json`, `forks/f1/control-1/hidden/...`), named `*.motion.json` or
+ * `motion*.json` (sim's OUTPUT_GLOBS). Anything else is refused, so the hub never holds task files or holdout labels.
+ */
+export function motionPath(parts: string[]): string {
+  const bad = () => new HttpError(400, "a file must be a motion file under runs/<run>/outputs, runs/<run>/hidden or the same of forks/<fork>/<child>");
+  const path = parts.join("/");
+  if (path.length > MAX_FILE_PATH || !parts.every((p) => PATH_PART.test(p))) throw bad();
+  const owner = parts[0] === "runs" ? 2 : parts[0] === "forks" ? 3 : 0;
+  if (!owner || parts.length < owner + 2) throw bad();
+  const area = parts[owner];
+  if (!(area === "outputs" || (area === "hidden" && parts.length === owner + 2))) throw bad();
+  const name = parts[parts.length - 1];
+  if (!(name.endsWith(".motion.json") || (name.startsWith("motion") && name.endsWith(".json")))) throw bad();
+  return path;
+}
+
+function fileStore(env: HubEnv): R2Bucket {
+  if (!env.FILES) throw new HttpError(503, "this hub has no file storage yet: add the FILES R2 bucket to wrangler.jsonc and deploy");
+  return env.FILES;
+}
+
+const isGzip = (b: Uint8Array): boolean => b.length >= 2 && b[0] === 0x1f && b[1] === 0x8b;
+
+async function putFile(env: HubEnv, id: string, path: string, request: Request): Promise<Response> {
+  const files = fileStore(env);
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (declared > MAX_FILE_BYTES) throw new HttpError(413, `a file is at most ${MAX_FILE_BYTES} bytes`);
+  const encoding = (request.headers.get("content-encoding") ?? "identity").trim().toLowerCase();
+  if (encoding !== "gzip" && encoding !== "identity") throw new HttpError(415, "send a file plain or with content-encoding gzip");
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.length > MAX_FILE_BYTES) throw new HttpError(413, `a file is at most ${MAX_FILE_BYTES} bytes`);
+  if (!bytes.length) throw new HttpError(400, "the file is empty");
+  // Stored as it arrived; whether it is gzipped is read from the bytes, in case something on the way unpacked it.
+  const gzipped = isGzip(bytes);
+  const stored = await files.put(`${id}/${path}`, bytes, {
+    httpMetadata: { contentType: "application/json", ...(gzipped ? { contentEncoding: "gzip" } : {}) },
+  });
+  return json({ ok: true, size: bytes.length, etag: stored.httpEtag });
+}
+
+async function getFile(env: HubEnv, id: string, path: string, request: Request): Promise<Response> {
+  const files = fileStore(env);
+  const obj = await files.get(`${id}/${path}`, { onlyIf: request.headers });
+  if (!obj) throw new HttpError(404, `the hub has no ${path} for batch ${id}`);
+  const headers = new Headers({ "content-type": "application/json", etag: obj.httpEtag, "cache-control": "private, no-cache" });
+  if (!("body" in obj)) return new Response(null, { status: 304, headers });
+  const gzipped = obj.httpMetadata?.contentEncoding === "gzip";
+  if (!gzipped) return new Response(obj.body, { headers });
+  if (/\bgzip\b/i.test(request.headers.get("accept-encoding") ?? "")) {
+    headers.set("content-encoding", "gzip");
+    // Already gzipped: sent as it is, not packed again.
+    return new Response(obj.body, { headers, encodeBody: "manual" });
+  }
+  return new Response(obj.body.pipeThrough(new DecompressionStream("gzip")), { headers });
 }
 
 async function postEvents(env: HubEnv, id: string, request: Request): Promise<Response> {
@@ -251,6 +331,17 @@ async function route(request: Request, env: HubEnv): Promise<Response> {
     if (method === "GET") return getEvents(env, id, url);
   }
   if (parts.length === 4 && parts[3] === "logs" && method === "GET") return listLogs(env, id);
+  if (parts.length > 4 && parts[3] === "files") {
+    let rel: string[];
+    try {
+      rel = parts.slice(4).map(decodeURIComponent);
+    } catch {
+      throw new HttpError(400, "the file path is not valid URL encoding");
+    }
+    const path = motionPath(rel);
+    if (method === "PUT") return putFile(env, id, path, request);
+    if (method === "GET") return getFile(env, id, path, request);
+  }
   throw new HttpError(404, "not found");
 }
 

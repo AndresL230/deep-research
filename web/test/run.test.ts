@@ -336,6 +336,22 @@ describe("the run page as one box", async () => {
     expect(between(ev, 'id="rn-panel-evidence"', 'id="rn-panel-x"')).toContain("Accuracy of its predictions on the holdout set");
   });
 
+  it("lays the open panel over the deck, the player still in it, with a close button; the tab row last", () => {
+    const closed = runSummaryView(rvm(), "r04");
+    expect(closed).toContain('<div class="rn-layer" data-morph-key="layer" hidden>');
+    const html = runSummaryView(rvm(), "r04", { open: "logs", body: "<p>THE LOG</p>" });
+    const deck = between(html, 'class="rn-deck', 'class="rn-panels');
+    expect(deck).toContain("is-covered");
+    expect(deck).toContain("data-robot-view");
+    expect(deck).toContain('<div class="rn-layer" data-morph-key="layer">');
+    expect(deck).toContain('data-act="run-panel" data-arg="logs" aria-label="Close Logs"');
+    expect(deck).toContain("THE LOG");
+    // Reading order: header line, deck, tab row.
+    expect(html.indexOf('class="rn-top"')).toBeLessThan(html.indexOf('class="rn-deck'));
+    expect(html.indexOf('class="rn-deck')).toBeLessThan(html.indexOf('class="rn-panels'));
+    expect(html.indexOf('class="rn-tabs"')).toBeGreaterThan(html.indexOf("THE LOG"));
+  });
+
   it("opens one panel at a time, and folds it when pressed again", () => {
     expect(togglePanel(null, "notebook")).toBe("notebook");
     expect(togglePanel("notebook", "steps")).toBe("steps");
