@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from deepagents import create_deep_agent, register_harness_profile
+from pathlib import Path
+
+from deepagents import FilesystemPermission, create_deep_agent, register_harness_profile
+from deepagents.backends import CompositeBackend, FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol
 from deepagents.profiles import GeneralPurposeSubagentProfile, HarnessProfile
 from langchain.agents.middleware import AgentMiddleware, TodoListMiddleware
@@ -51,13 +54,36 @@ class NoCompaction(AgentMiddleware):
         return "SummarizationMiddleware"
 
 
-def build_analyst(backend: BackendProtocol, model: str, system_prompt: str = SYSTEM_PROMPT):
+# Where an analyst with lessons on (`BatchConfig.lessons = "learned"`) reads the approved lessons: a read-only route to
+# the server's `skills/learned/` folder, next to its VM. The lessons are rules a person approved, never a run's data.
+LEARNED_MOUNT = "/skills/learned/"
+
+
+def build_analyst(backend: BackendProtocol, model: str, system_prompt: str = SYSTEM_PROMPT, *, checkpointer=None,
+                  learned_dir: Path | None = None):
+    """One flat analyst on `backend` (its VM).
+
+    `checkpointer` keeps its graph state: the batch's durable SQLite saver (`Batch._analyst_saver`), which a
+    checkpoint-mode fork reads the source run's state history from. None: an in-memory one, as before.
+
+    `learned_dir` (lessons on) gives it the approved lessons as Deep Agents skills: the VM backend is wrapped in a
+    CompositeBackend whose `/skills/learned/` route reads that folder, read only (writes there are denied; every other
+    path, and `execute`, still go to the VM). The analyst sees the skills' names and descriptions in its prompt and
+    reads a SKILL.md with read_file, like any skill.
+    """
     _make_flat(model)
+    extra: dict = {}
+    if learned_dir is not None:
+        backend = CompositeBackend(
+            default=backend, routes={LEARNED_MOUNT: FilesystemBackend(root_dir=learned_dir, virtual_mode=True)})
+        extra = {"skills": [LEARNED_MOUNT],
+                 "permissions": [FilesystemPermission(operations=["write"], paths=[f"{LEARNED_MOUNT}**"], mode="deny")]}
     return create_deep_agent(
         model=model,
         system_prompt=system_prompt,
         backend=backend,
         middleware=[TodoListMiddleware(), NoCompaction()],
-        checkpointer=InMemorySaver(),
+        checkpointer=checkpointer if checkpointer is not None else InMemorySaver(),
         name="analyst",
+        **extra,
     )
