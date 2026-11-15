@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 9,
+  "notes": "Scripted preview, no agent: 9 of 9 episodes struck the bag and stayed standing, with the baseline: a punch for a high bag, a kick for a low one: the practice bag 3 times, then high left struck, high centre struck, high far struck, low right struck, low left struck, low far struck."
+}

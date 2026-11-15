@@ -35,6 +35,8 @@ RUN uv sync --frozen --no-dev
 
 # The Panda meshes the robot domain scores in (33 MB, pinned commit, hash-checked; not in git).
 RUN python sim/fetch_assets.py
+# The Unitree G1, for the humanoid domain and its demo batch's 3D replays.
+RUN python sim/g1/fetch_assets.py
 
 COPY --from=web /app/web/dist ./web/dist
 

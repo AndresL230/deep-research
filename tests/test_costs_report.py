@@ -205,7 +205,7 @@ def test_costs_endpoint_reads_live_batches_from_memory_and_saved_ones_from_disk(
     report = res.json()
     rows = {b["id"]: b for b in report["batches"]}
     assert [b["id"] for b in report["batches"]] == [
-        "1114-093012-a1b2", "1113-080000-ffff", "robot-live-investigation", "demo-batch", "robot-demo-batch"]
+        "1114-093012-a1b2", "1113-080000-ffff", "robot-live-investigation", "demo-batch", "humanoid-demo-batch", "robot-demo-batch"]
     assert rows["1114-093012-a1b2"]["kind"] == "live" and rows["1114-093012-a1b2"]["usd"]["total"] == 0.25
     assert rows["1113-080000-ffff"]["kind"] == "replay" and rows["1113-080000-ffff"]["started_at"].endswith("-11-13T08:00:00")
     assert rows["demo-batch"]["simulated"] is True and rows["demo-batch"]["usd"] is None and rows["demo-batch"]["started_at"] is None
@@ -220,7 +220,7 @@ def test_costs_endpoint_reads_live_batches_from_memory_and_saved_ones_from_disk(
 
 def test_costs_endpoint_with_only_the_demo_batch(client):  # noqa: F811
     report = client.get("/api/costs").json()
-    assert [b["id"] for b in report["batches"]] == ["robot-live-investigation", "demo-batch", "robot-demo-batch"]
+    assert [b["id"] for b in report["batches"]] == ["robot-live-investigation", "demo-batch", "humanoid-demo-batch", "robot-demo-batch"]
     # Only the real recording counts: the two simulated fixtures are tokens only.
     live = report["batches"][0]
     assert report["totals"]["batches"] == 1 and report["totals"]["usd"]["total"] == pytest.approx(live["usd"]["total"])
