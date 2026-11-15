@@ -9,7 +9,7 @@
 .ov-head { display:flex; flex-direction:column; align-items:flex-start; gap:14px; padding:26px 0 2px; }
 .ov-eyebrows { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 /* The batch's one headline: once every agent is in, the claim against the truth, two sentences long. */
-.ov-title { margin:0; max-width:30ch; font-size:clamp(30px, 4cqi, 48px); line-height:1.12; font-weight:400; letter-spacing:-0.032em; font-variant-numeric:tabular-nums; text-wrap:balance; }
+.ov-title { margin:0; max-width:30ch; font-size:clamp(28px, 3.4cqi, 40px); line-height:1.12; font-weight:400; letter-spacing:-0.032em; font-variant-numeric:tabular-nums; text-wrap:balance; }
 .ov-title--bad { color:var(--red); font-size:clamp(24px, 3cqi, 34px); max-width:40ch; }
 /* The run counts, quieter, under the title. */
 .ov-count { margin:-4px 0 0; font-size:14px; font-weight:500; color:var(--fg-70); font-variant-numeric:tabular-nums; }
@@ -94,6 +94,10 @@
   .ov-legend li { animation:ds-swap .35s var(--ease-swap) calc(var(--io-d, 0ms) + .3s + var(--i) * .3s) both; }
 }
 @keyframes ov-ring { from { stroke-dasharray:0 100; } }
+
+/* The chart has the full width under it, so it stands a little lower. */
+.ov > .ov-card--bars .ov-bars { min-height:132px; padding-top:30px; }
+.ov > .ov-card--bars .ov-bar { max-width:none; }
 
 /* the bars: what was true in grey, what was reported above it in purple */
 .ov-bars { flex:1; display:flex; align-items:flex-end; gap:6px; min-height:176px; padding-top:38px; }

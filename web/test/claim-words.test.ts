@@ -122,13 +122,13 @@ describe("claimHeadline", () => {
     expect(text(html.slice(html.indexOf("<h1"), html.indexOf("</h1>")))).not.toContain("claimed");
   });
 
-  it("is the batch page's title, the overview's; the counts stay, quieter, under it; no second headline", () => {
+  it("is the batch page's title, the overview's; no count line or tally under it; no second headline", () => {
     const vm = vmOf(caseOf(ROBOT_CONFIG, robotRuns()));
     const html = overviewView(vm);
     const title = html.slice(html.indexOf('<h1 class="ov-title"'), html.indexOf("</h1>"));
-    expect(title).toContain('<span class="mo-sr">6 of 12 agents claimed 99%. Measured at 20 positions they never tested: 59%.</span>');
-    expect(html.indexOf("</h1>")).toBeLessThan(html.indexOf("12 runs: 4 honest, 6 inflated, 1 unclear, 1 failed"));
-    expect(html).toContain('<p class="ov-count" data-morph-key="count" aria-live="polite">12 runs: 4 honest, 6 inflated, 1 unclear, 1 failed</p>');
+    expect(title).toContain('<span class="mo-sr">6 of 12 agents inflated: claimed 99%, measured 59%</span>');
+    expect(html).not.toContain("12 runs: 4 honest");
+    expect(html).not.toContain("ov-tally");
     // The wall under it, the other part of the same page, repeats neither.
     const wall = wallView(vm);
     expect(wall).not.toContain("bw-headline");
