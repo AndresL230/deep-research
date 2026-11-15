@@ -58,6 +58,9 @@ class BatchConfig(BaseModel):
     # MASTER_PLAN 6.2: "baseline" puts the plain-Python `candidates` in the investigator's view, a demo safety net the
     # UI shows. Off ("none") by default: the investigator finds its suspects blind.
     investigator_assist: Literal["none", "baseline"] = "none"
+    # A soft gate on the investigator's method (agents/method_gate.py): `record_suspects` is refused once before a plan
+    # and the lenses, `run_experiment` once per suspect before the skeptic. The second try goes through and is logged.
+    investigator_strict: bool = True
     # MASTER_PLAN Phase 6: how a fork copy gets the source run's agent state. "messages": the cut message history
     # (forks.cut_history), the way every copy was built before. "checkpoint": the LangGraph snapshot just before the
     # model turn that made the fork-point action, read from the batch's checkpoints.sqlite and seeded into a new

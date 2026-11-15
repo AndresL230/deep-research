@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from deepagents import FilesystemPermission, create_deep_agent, register_harness_profile
+from deepagents import FilesystemPermission, create_deep_agent
 from deepagents.backends import CompositeBackend, FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol
-from deepagents.profiles import GeneralPurposeSubagentProfile, HarnessProfile
 from langchain.agents.middleware import AgentMiddleware, TodoListMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -16,23 +15,22 @@ from ..domains import ANALYST_SYSTEM_PROMPT
 # The tabular analyst's prompt. Each domain has its own (`Domain.analyst_system_prompt`).
 SYSTEM_PROMPT = ANALYST_SYSTEM_PROMPT
 
-_flat_models: set[str] = set()
 
+class NoSubagents(AgentMiddleware):
+    """Takes the subagent middleware's place in the analyst's stack and does nothing, so the run has no `task` tool
+    and no subagents (MASTER_PLAN 3.3: analysts stay flat).
 
-def _make_flat(model: str) -> None:
-    """Remove the `task` tool for this model, so the run has no subagents.
-
-    A subagent counts as one step in the run's history, which would make the
-    steps inside it impossible to fork. The profile is keyed by model, so an
-    investigator on the same model loses only the default general-purpose
-    subagent and keeps its own named ones.
+    A subagent counts as one step in the run's history, which would make the steps inside it impossible to fork.
+    `create_deep_agent` always adds a default general-purpose subagent, and with it `SubAgentMiddleware` and its
+    `task` tool, unless the model's harness profile disables it. Profiles are registered per model for the whole
+    process, so disabling it there would also take it from any other deep agent built on the same model. A passed
+    middleware with the same `name` replaces the stack's one in place, and only in this agent (deepagents 0.7.38,
+    `graph._apply_custom_middleware`), the same way `NoCompaction` drops summarization.
     """
-    if model in _flat_models:
-        return
-    register_harness_profile(
-        model, HarnessProfile(general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False))
-    )
-    _flat_models.add(model)
+
+    @property
+    def name(self) -> str:
+        return "SubAgentMiddleware"
 
 
 class NoCompaction(AgentMiddleware):
@@ -71,7 +69,6 @@ def build_analyst(backend: BackendProtocol, model: str, system_prompt: str = SYS
     path, and `execute`, still go to the VM). The analyst sees the skills' names and descriptions in its prompt and
     reads a SKILL.md with read_file, like any skill.
     """
-    _make_flat(model)
     extra: dict = {}
     if learned_dir is not None:
         backend = CompositeBackend(
@@ -82,7 +79,7 @@ def build_analyst(backend: BackendProtocol, model: str, system_prompt: str = SYS
         model=model,
         system_prompt=system_prompt,
         backend=backend,
-        middleware=[TodoListMiddleware(), NoCompaction()],
+        middleware=[TodoListMiddleware(), NoCompaction(), NoSubagents()],
         checkpointer=checkpointer if checkpointer is not None else InMemorySaver(),
         name="analyst",
         **extra,

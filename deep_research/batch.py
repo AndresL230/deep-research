@@ -2050,6 +2050,11 @@ class Batch:
                 self.push_costs()
                 self._check_budget()
             if interrupted is not None:
+                gated = self._method_gate_answer(interrupted)
+                if gated is not None:  # refused before a person is asked: nothing to approve
+                    log.close()
+                    await self._stream_investigator(gated)
+                    return
                 self._on_interrupt(interrupted)
                 return
             try:
@@ -2086,6 +2091,28 @@ class Batch:
                         names[key] = m.name
                         break
         return names.get(key, "subagent")
+
+    def _method_gate_answer(self, interrupts):
+        """The answer to a `run_experiment` approval request the method gate refuses (agents/method_gate.py): a
+        reject carrying the gate's refusal, given at once, so no person approves a cost that would then not be spent.
+        None when the gate lets it through and a person is asked as usual."""
+        from .agents import method_gate
+
+        try:
+            requests = interrupts[0].value["action_requests"]
+            first = requests[0]
+        except Exception:  # noqa: BLE001
+            return None
+        if first.get("name") != "run_experiment":
+            return None
+        sid = str((first.get("args") or {}).get("suspect_id") or "")
+        if self.case.suspect(sid) is None:
+            return None  # the tool itself says the suspect is unknown
+        refusal = method_gate.experiment_refusal(self.case, sid, bool(getattr(self.cfg, "investigator_strict", True)))
+        if refusal is None:
+            return None
+        rest = {"type": "reject", "message": "Only one experiment is asked for at a time. Ask again if you still need it."}
+        return Command(resume={"decisions": [{"type": "reject", "message": refusal}] + [rest] * (len(requests) - 1)})
 
     def _on_interrupt(self, interrupts) -> None:
         try:

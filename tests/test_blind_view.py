@@ -181,7 +181,8 @@ def test_nothing_the_investigator_reads_or_gets_back_names_a_trap(trap, tmp_path
     """Every file it is pointed at and every tool output it gets, list_changes included, in a batch of each trap."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
     rx = _trap_words()
-    b = Batch(BatchConfig(trap=trap), batch_id="1114-000000-cata", root=tmp_path)
+    # The method gate (plan, lenses, skeptic first) is off: this test is about what the tools say, not the order.
+    b = Batch(BatchConfig(trap=trap, investigator_strict=False), batch_id="1114-000000-cata", root=tmp_path)
     b.case.update_run("r01", status="honest", true_accuracy=0.8, overlap_share=0.0)
     b.case.update_run("r02", status="inflated", true_accuracy=0.6, overlap_share=0.5)
     b.case.set_split({"label": "deduplicate", "honest_rate": 1.0, "inflated_rate": 0.0, "n_honest": 1, "n_inflated": 1,

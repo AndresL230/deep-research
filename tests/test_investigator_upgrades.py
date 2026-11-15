@@ -92,8 +92,11 @@ def test_the_analyst_has_no_summarization_and_keeps_prompt_caching(batch, monkey
     assert any(isinstance(m, analyst_mod.NoCompaction) for m in stack)
     names = [m.name for m in stack]
     assert "AnthropicPromptCachingMiddleware" in names and "TodoListMiddleware" in names
-    # Flat: no `task` tool, so no subagent stacks either.
-    assert "SubAgentMiddleware" not in names
+    # Flat: no `task` tool, so no subagent stacks either. `NoSubagents` holds the subagent middleware's place.
+    from deepagents.middleware.subagents import SubAgentMiddleware
+
+    assert not any(isinstance(m, SubAgentMiddleware) for m in stack)
+    assert any(isinstance(m, analyst_mod.NoSubagents) for m in stack)
 
     stacks.clear()
     inv_mod.build_investigator(batch, "anthropic:claude-sonnet-5-5")
