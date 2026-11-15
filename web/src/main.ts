@@ -1269,5 +1269,5 @@ onRoute();
 // Who is signed in, their plan and credits (only behind the Cloudflare gateway).
 void mountAccount();
 
-// The GDPR notice, as a joke (gdpr.ts). Shown once.
+// The GDPR notice, as a joke (gdpr.ts). Only Ctrl+E (Cmd+E on a Mac) shows it.
 mountGdpr();
