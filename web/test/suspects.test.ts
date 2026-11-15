@@ -148,6 +148,17 @@ describe("the verdict by suspect", () => {
     expect(html).toContain("Test touched training?");
     expect(html).toContain("r01");
   });
+  it("shows an inconclusive suspect as a neutral tag with the reason, never cleared", () => {
+    // No control copy reproduced the inflation (evidence.py): no counted pair, level inconclusive, status kept.
+    const c: SxCase = { ...full, evidence: { ...full.evidence, s2: { pairs: 0, agree: 0, score: 1, p_exact: null, level: "inconclusive", cost_usd: null, experiments: ["f2"] } },
+      suspects: full.suspects!.map((s) => (s.id === "s2" ? { ...s, status: "proposed" } : s)) };
+    const board = suspectBoardView(vmOf(c));
+    expect(board).toMatch(/sx-sus--inconclusive.*Inconclusive/s);
+    expect(board).toContain("None of the control copies reproduced the inflation from this fork point.");
+    const verdict = suspectVerdictView(vmOf(c));
+    expect(verdict).toMatch(/sx-vgrp--inconclusive.*s2/s);
+    expect(verdict).not.toMatch(/sx-vgrp--cleared.*s2.*sx-vgrp--open/s);
+  });
   it("is empty with nothing scored, no grid and no audit", () => {
     expect(suspectVerdictView(vmOf({ ...demo, audit: undefined }))).toBe("");
     expect(interactionView(null)).toBe("");

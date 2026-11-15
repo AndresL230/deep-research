@@ -186,7 +186,9 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   `VerdictEvidence` in `web/src/api.ts`): `{level, pairs, needed_pairs, control_inflated, control_total,
   forced_inflated, forced_total, p_value, rule, score, needed_score, agree, disagree, basis, p_exact}`. The level is
   the MASTER_PLAN 6.4 running score (`rule`: `running_score`): it starts at 1 and is multiplied by 1.9 per agreeing
-  pair and 0.1 per other pair of the fork it rests on. `level` is `supported` at `score` >= `needed_score` (20),
+  pair and 0.1 per other pair of the fork it rests on. A pair counts only when its control copy reproduces the effect
+  under test (`inflated` for `smaller_gap`, `honest` for `larger_gap`); `level` is `inconclusive` (added, additive)
+  when no pair counts and some were dropped for that reason. `level` is `supported` at `score` >= `needed_score` (20),
   `cleared` after `needed_pairs` (5) or more pairs with a score under 1, else `open`. The score stays valid when it
   is checked after every pair, so more pairs never inflate it. `basis` is `pairs` when the fork's copies were paired
   by their gaps, `counts` when only arm counts were known (then the least favourable pairing, inflated standing in for
@@ -262,13 +264,15 @@ view (`case/view/case.json`) leaves them out (`case_file.UPGRADE_HIDDEN`).
   `control` and `forced`, where `forced` is the changed copy) plus `suspect_id`, `change` (`<kind>:<name>`, see
   below), `change_kind`, `anchor`, `prediction` (`smaller_gap` or `larger_gap`, saved with `preregistered_at`
   before any copy starts), `reason`, `pairs_requested`, `pairs` (`[{i, control_gap, changed_gap, agree}]`,
-  `control-i` against `forced-i`), `dropped_pairs` (`[{i, reason}]`, a pair with a failed copy), `score`,
-  `p_exact`, `level` (`open`, `supported`, `cleared`) and `cost_usd`. A two-factor grid's fork has `kind`
+  `control-i` against `forced-i`), `dropped_pairs` (`[{i, reason}]`, a pair with a failed copy, a changed copy
+  that undid the change, or a control copy that did not reproduce the effect), `score`, `p_exact`, `level` (`open`,
+  `supported`, `cleared`, `inconclusive`) and `cost_usd`. A two-factor grid's fork has `kind`
   `interaction`, `change_a`, `change_b` and arms `neither`, `a`, `b`, `both`.
 - `evidence`: by suspect id, `{pairs, agree, score, p_exact, level, cost_usd, experiments}`, the running evidence
   over every experiment that tested the suspect (fork ids, oldest first). Score: start at 1, x1.9 per agreeing pair,
-  x0.1 per disagreeing one; `supported` at 20 or more, `cleared` after 5 or more pairs with a score under 1, else
-  `open`. `agree = (control_gap - changed_gap) * direction > 0` (+1 for `smaller_gap`, -1 for `larger_gap`; a tie
+  x0.1 per disagreeing one; `supported` at 20 or more, `cleared` after 5 or more counted pairs with a score under 1,
+  `inconclusive` with no counted pair because no control copy reproduced the effect (the suspect keeps its status),
+  else `open`. `agree = (control_gap - changed_gap) * direction > 0` (+1 for `smaller_gap`, -1 for `larger_gap`; a tie
   disagrees). `p_exact` is a one-sided exact permutation test on the gaps of the newest prediction, for display.
   When a `suspects` list has the suspect, its `status` follows the level.
 - `interaction` (`Batch.run_interaction`): `{fork_id, change_a, change_b, suspects, source_run, fork_at, anchor,

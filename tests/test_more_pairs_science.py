@@ -61,12 +61,13 @@ async def test_more_pairs_recompute_the_outcome_and_keep_the_registered_predicti
 
 async def test_more_pairs_can_contradict_a_prediction_the_first_round_left_inconclusive(tmp_path, monkeypatch):
     gaps = {"inflated": 0.2, "honest": 0.0}
-    _fake_copies(monkeypatch, {"control": "honest", "forced": "inflated"}, gaps=gaps)
+    # The new round's control copies still reproduce the inflation (a pair counts only then), but so do the forced ones.
+    _fake_copies(monkeypatch, {"control": "inflated", "forced": "inflated"}, gaps=gaps)
     b = _decided(tmp_path, control=(4, 4), forced=(0, 4), gaps=gaps)
     _registered(b)
     await b.run_more_pairs(4)
     f1 = _case(b)["forks"]["f1"]
-    # 4 agreeing pairs, then 4 whose forced copy's gap is larger: score 13.03 x 0.1^4, under 1 after 8 pairs, cleared.
+    # 4 agreeing pairs, then 4 ties (a tie disagrees): score 13.03 x 0.1^4, under 1 after 8 pairs, cleared.
     assert f1["evidence"]["pairs"] == 8 and f1["level"] == "cleared" and f1["outcome"] == "contradicted"
     assert round(f1["score"], 6) == 0.001303 and [p["agree"] for p in f1["pairs"]] == [True] * 4 + [False] * 4
     assert b.case.hypothesis("h1")["status"] == "contradicted" and f1["prediction"] == PREDICTION

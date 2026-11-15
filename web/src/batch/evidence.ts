@@ -30,7 +30,9 @@ export const PERM_MAX_POOL = 16;
 export const N_HIDDEN_DEFAULT = 20;
 
 /** The evidence level, as the server words it. */
-export type Level = "open" | "supported" | "cleared";
+export type Level = "open" | "supported" | "cleared" | "inconclusive";
+/** Why a level is inconclusive, the server's words (evidence.INCONCLUSIVE_NOTE). */
+export const INCONCLUSIVE_NOTE = "None of the control copies reproduced the inflation from this fork point. Try another source run or an earlier fork point.";
 export type Prediction = "smaller_gap" | "larger_gap";
 
 /** The fields the server may add to forks.<id> (MASTER_PLAN 6.1). Read through this so the module works before and

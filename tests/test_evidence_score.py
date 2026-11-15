@@ -26,7 +26,7 @@ def test_the_levels():
     assert ev.score_level(0.5, 4) == "open"  # under 1, but fewer than 5 pairs
     assert ev.score_level(0.5, 5) == "cleared"
     assert ev.score_level(1.0, 9) == "open"  # exactly 1 is not under 1
-    assert ev.LEVELS == ("open", "supported", "cleared") and ev.NEEDED_PAIRS == 5
+    assert ev.LEVELS == ("open", "supported", "cleared", "inconclusive") and ev.NEEDED_PAIRS == 5
 
 
 def test_the_score_is_valid_when_checked_after_every_pair():
@@ -48,8 +48,8 @@ def test_pairs_match_by_copy_number_a_tie_disagrees_and_a_failed_copy_is_dropped
     children = {
         "control-1": {"arm": "control", "status": "inflated", "gap": 0.3},
         "forced-1": {"arm": "forced", "status": "honest", "gap": 0.0},
-        "control-2": {"arm": "control", "status": "honest", "gap": 0.01},
-        "forced-2": {"arm": "forced", "status": "honest", "gap": 0.01},  # a tie
+        "control-2": {"arm": "control", "status": "inflated", "gap": 0.21},
+        "forced-2": {"arm": "forced", "status": "inflated", "gap": 0.21},  # a tie
         "control-3": {"arm": "control", "status": "failed"},
         "forced-3": {"arm": "forced", "status": "honest", "gap": 0.0},
         "control-4": {"arm": "control", "status": "running"},  # still to come: neither pair nor dropped
@@ -58,10 +58,13 @@ def test_pairs_match_by_copy_number_a_tie_disagrees_and_a_failed_copy_is_dropped
     }
     done, dropped = ev.pair_up(children)
     assert done == [{"i": 1, "control_gap": 0.3, "changed_gap": 0.0, "agree": True},
-                    {"i": 2, "control_gap": 0.01, "changed_gap": 0.01, "agree": False}]
+                    {"i": 2, "control_gap": 0.21, "changed_gap": 0.21, "agree": False}]
     assert dropped == [{"i": 3, "why": "control-3 failed"}]
-    # A larger_gap prediction turns the direction around.
-    assert [p["agree"] for p in ev.pair_up(children, direction=-1)[0]] == [False, False]
+    # A larger_gap prediction turns the direction around, and needs honest control copies: both are inflated.
+    assert ev.pair_up(children, direction=-1) == ([], [{"i": 1, "why": ev.NOT_REPRODUCED[-1]},
+                                                      {"i": 2, "why": ev.NOT_REPRODUCED[-1]},
+                                                      {"i": 3, "why": "control-3 failed"}])
+    assert ev.agrees(0.0, 0.3, -1) and not ev.agrees(0.21, 0.21, -1)
     assert ev.pairs_to_support({"score": 13.0321}) == 1 and ev.pairs_to_support({"score": 1.0}) == 5
     assert ev.pairs_to_support({"score": 24.8}) == 0
 
@@ -70,14 +73,15 @@ def test_the_plans_known_answers_from_the_demo_batch_fork():
     case = json.loads((FIXTURES_DIR / "demo-batch" / "case" / "case.json").read_text())
     fork = case["forks"]["f1"]
     pairs = ev.fork_pairs(fork)
-    assert len(pairs) == 4 and all(p["agree"] for p in pairs)
+    # control-3 came out honest (gap 0.058): it did not reproduce the inflation, so its pair is dropped. 3 pairs count.
+    assert [p["i"] for p in pairs] == [1, 2, 4] and all(p["agree"] for p in pairs) and pairs.unreproduced == 1
     got = ev.verdict_evidence({"control": {"inflated": 3, "total": 4}, "forced": {"inflated": 0, "total": 4}}, pairs=pairs)
     assert got["p_value"] == pytest.approx(5 / 70, abs=1e-4)  # one-sided Fisher on the counts, display only
-    assert got["p_exact"] == pytest.approx(1 / 70, abs=1e-4)  # exact permutation test on the gaps, display only
-    assert got["score"] == pytest.approx(13.03, abs=0.01) and got["level"] == "open"
-    # The fixture carries the same, on the fork and on the verdict.
-    assert fork["score"] == got["score"] and fork["level"] == "open" and fork["pairs"] == pairs
-    assert case["verdict"]["evidence"] == got
+    assert got["p_exact"] == pytest.approx(1 / 20, abs=1e-4)  # exact permutation test on the gaps, display only
+    assert got["score"] == pytest.approx(6.859, abs=0.01) and got["level"] == "open"
+    # The fixture keeps what it recorded under the rule before the fix: 4 pairs, 13.03, open. The level is the same.
+    assert fork["score"] == pytest.approx(13.0321) and fork["level"] == "open" and len(fork["pairs"]) == 4
+    assert case["verdict"]["evidence"]["score"] == pytest.approx(13.0321) and case["verdict"]["evidence"]["level"] == "open"
 
 
 def test_an_old_verdict_is_read_by_the_new_rule_and_keeps_what_it_recorded():
@@ -100,7 +104,9 @@ def test_an_old_verdict_is_read_by_the_new_rule_and_keeps_what_it_recorded():
     with_evidence(case)
     v = case["verdict"]
     assert v["sentence"] == sentence and v["evidence_old_rule"] == old_ev
-    assert v["evidence"]["rule"] == "running_score" and v["evidence"]["agree"] == 6 and v["evidence"]["pairs"] == 8
-    assert v["evidence"]["level"] == "cleared"  # 1.9^6 x 0.1^2 = 0.47, under 1 after 8 pairs
+    # Only the 4 pairs whose control copy came out inflated count (the other 4 did not reproduce the inflation, and
+    # held the two ties); all 4 agree: 1.9^4 = 13.03, open. Before the control-must-reproduce fix it read cleared.
+    assert v["evidence"]["rule"] == "running_score" and v["evidence"]["agree"] == 4 and v["evidence"]["pairs"] == 4
+    assert v["evidence"]["level"] == "open" and v["evidence"]["score"] == pytest.approx(13.0321)
     assert ev.wording_error(sentence, v["evidence"]) is not None  # so its "caused" reads as an overclaim
-    assert case["forks"]["f1"]["level"] == "cleared" and "evidence_old_rule" not in case["forks"]["f1"]
+    assert case["forks"]["f1"]["level"] == "open" and "evidence_old_rule" not in case["forks"]["f1"]

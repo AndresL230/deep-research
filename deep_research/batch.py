@@ -41,7 +41,7 @@ from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, p
 from .evidence import (current_verdict_evidence, fork_pairs, pairs_to_support, verdict_evidence, verdict_fork,
                        verdict_sentence)
 from .evidence import describe as describe_evidence
-from .evidence import direction_of, fix_evidence, fix_outcome, method_outcome, pair_up
+from .evidence import INCONCLUSIVE_NOTE, direction_of, fix_evidence, fix_outcome, method_outcome, pair_up
 from .domains import actions_from_events, build_task, intervention_for, score_run
 from .domains.robot_arm import BENCH_DIR
 from . import experiments as xp
@@ -292,7 +292,7 @@ def more_pairs_problem(case: dict, batch_dir: Path) -> str | None:
     if found is None:
         return "no fork experiment finished with a control and a forced arm, so there are no pairs to add to"
     evidence = current_verdict_evidence(case)
-    if evidence.get("level") != "open":
+    if evidence.get("level") not in ("open", "inconclusive"):
         return f"the verdict's evidence is already {evidence.get('level')}"
     try:
         marker = domains.get(cfg.get("domain")).task_marker
@@ -1118,6 +1118,7 @@ class Batch:
             return {"error": str(e)}
 
         fork_id = self._next_fork_id()
+        status_before = (self.case.suspect(suspect_id) or {}).get("status")
         if self.case.suspect(suspect_id) is not None:
             self.case.set_suspect_status(suspect_id, "testing")
         plan = {xp.CONTROL_ARM: None, xp.CHANGED_ARM: ch.step}
@@ -1138,7 +1139,7 @@ class Batch:
         kept, dropped = xp.pair_outcomes(self.case.data["forks"][fork_id].get("children") or {}, n, prediction)
         for d in dropped:
             logger.info("experiment %s: pair %s dropped: %s", fork_id, d["i"], d["reason"])
-        scored = xp.score_pairs(kept, prediction)
+        scored = xp.score_pairs(kept, prediction, dropped)
         cost = self._scope_usd(f"fork:{fork_id}:")
         held = xp.adherence(self.case.data["forks"][fork_id].get("children") or {}, dropped)
         self.case.update_fork(fork_id, status="done", arms=arms, pairs=kept, dropped_pairs=dropped,
@@ -1152,12 +1153,17 @@ class Batch:
                 and f.get("status") == "done" and f.get("pairs") is not None]
         ev = xp.suspect_evidence(mine)
         self.case.set_suspect_evidence(suspect_id, ev)
+        inconclusive = scored["level"] == "inconclusive"
+        if inconclusive and status_before and ev["level"] not in ("supported", "cleared"):
+            # No control copy reproduced the effect: this experiment says nothing, so the suspect keeps its status.
+            self.case.set_suspect_status(suspect_id, status_before)
         self.case.set_phase("forked")
         self.push_costs(force=True)
         return {"fork_id": fork_id, "suspect_id": suspect_id, "change": ch.spec, "anchor": src.anchor,
                 "source_run": src.run_id, "fork_at": n_prefix, "prediction": prediction, "pairs_requested": asked,
                 "pairs": kept, "dropped": dropped, "adherence": held, "score": scored["score"],
                 "p_exact": scored["p_exact"], "level": scored["level"], "evidence": ev, "cost_usd": cost,
+                **({"note": INCONCLUSIVE_NOTE} if inconclusive else {}),
                 "budget_left_usd": self._budget_left()}
 
     async def run_interaction(self, change_a: str, change_b: str, per_cell: int = 2, source_run: str | None = None,

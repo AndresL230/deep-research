@@ -21,7 +21,7 @@ import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parse
 import { evidenceParts, trapMark, trapOf, type Mark } from "./trap";
 import { isMotionBatch, motionName, robotThumb, scoreWords, type ScoreWords } from "../robot/markup";
 import {
-  AGREE, DISAGREE, NEEDED_PAIRS, RULE, RULE_TEXT, SUPPORTED_SCORE, causeWords, ceilingText, compare, evidenceFrom, fmtFrac, forkEvidence, isDone, isDropped, isPending, kOfN, nHidden,
+  AGREE, DISAGREE, INCONCLUSIVE_NOTE, NEEDED_PAIRS, RULE, RULE_TEXT, SUPPORTED_SCORE, causeWords, ceilingText, compare, evidenceFrom, fmtFrac, forkEvidence, isDone, isDropped, isPending, kOfN, nHidden,
   verdictFork, type Comparison, type Evidence, type Level, type Pair,
 } from "./evidence";
 import { bestMotion, copyStory, forcedCheck, forcedEvent, investigatorCounts, type StepTest } from "./forkread";
@@ -959,6 +959,7 @@ const LEVEL: Record<Level, { text: string; tone: ChipTone; mark: ChipMark }> = {
   open: { text: "Open", tone: "warn", mark: "hold" },
   supported: { text: "Supported", tone: "ok", mark: "check" },
   cleared: { text: "Cleared", tone: "idle", mark: "dot" },
+  inconclusive: { text: "Inconclusive", tone: "idle", mark: "dot" },
 };
 /** The rule behind the chip, said once in its tooltip. */
 const levelChip = (l: Level): string =>
@@ -1994,7 +1995,9 @@ export function verdictText(c: CaseFile): string {
     return `${capital(`not ${name}`)} caused the inflated claims: ${counts}${ev.p != null ? ` (${pText(ev.p)})` : ""}.`;
   }
   const lower = ev.forcedInflated / ev.forcedTotal < ev.controlInflated / ev.controlTotal;
-  const open = ev.level === "cleared"
+  const open = ev.level === "inconclusive"
+    ? `Inconclusive: ${INCONCLUSIVE_NOTE}`
+    : ev.level === "cleared"
     ? `Cleared: the score is ${two(ev.score)} after ${ev.pairs} pairs, under 1.`
     : ev.pairs < ev.needed
       ? `Open: supported needs ${ev.needed} pairs.`

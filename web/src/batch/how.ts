@@ -226,7 +226,7 @@ function forkTip(c: CaseFile): string {
 }
 const forkFocus = (c: CaseFile): string => (tourPairs(c).length ? FOCUS_SEL : `[data-how-arm="forced"]`);
 
-const LEVEL_WORD: Record<string, string> = { supported: "Supported", cleared: "Cleared", open: "Open" };
+const LEVEL_WORD: Record<string, string> = { supported: "Supported", cleared: "Cleared", open: "Open", inconclusive: "Inconclusive" };
 
 /** 5. The verdict as the batch words it, and the score it stands on against the 20 it needs. */
 function verdictPicture(c: CaseFile): string {
@@ -252,6 +252,7 @@ function verdictTip(c: CaseFile): string {
   const score = ev.score == null ? "" : scoreText(ev.score);
   if (ev.level === "supported") return `Score ${score}, past ${SUPPORTED_SCORE}: the verdict may name the cause.`;
   if (ev.level === "cleared") return `Score ${score} after ${ev.pairs} pairs: this suspect is cleared.`;
+  if (ev.level === "inconclusive") return "None of the control copies reproduced the inflation, so the experiment says nothing either way.";
   return score ? `Score ${score}. It needs ${SUPPORTED_SCORE}, so the verdict stays open.` : `${ev.pairs} pairs so far, so the verdict stays open.`;
 }
 
