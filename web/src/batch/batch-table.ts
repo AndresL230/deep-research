@@ -39,7 +39,7 @@ const FIRST_DIR: Record<SortKey, SortDir> = {
 };
 
 /** Short names for the domains the app knows; a domain added later shows its own title. */
-const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm" };
+const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm", humanoid: "Humanoid" };
 
 export function domainName(s: BatchSummary | null | undefined): string | null {
   const d = s?.domain;

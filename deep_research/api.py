@@ -793,11 +793,17 @@ def _robot_unavailable(e: Exception) -> HTTPException:
 
 
 @app.get("/api/robot/scene")
-def robot_scene(request: Request):
-    """The pick-and-place scene for the 3D viewer: every visual geom, its body, pose and color, and the meshes."""
+def robot_scene(request: Request, model: str = robot_view.PANDA):
+    """A scene for the 3D viewer: every visual geom, its body, pose and color, and the meshes. `model`: "panda", the
+    pick-and-place scene, or "g1", the humanoid's (a motion file's poses say which it was recorded in)."""
+    if model not in robot_view.SCENES:
+        raise HTTPException(404, f"no scene named '{model}'")
     try:
-        _, packed = robot_view.scene()
+        _, packed = robot_view.scene(model)
     except (ImportError, OSError, ValueError) as e:
+        if model == robot_view.G1:
+            raise HTTPException(503, "the humanoid viewer needs mujoco and the G1 model "
+                                     f"(`uv run python -m sim.g1.fetch_assets`): {type(e).__name__}") from e
         raise _robot_unavailable(e) from e
     return _gzipped_json(packed, request, "public, max-age=3600")
 

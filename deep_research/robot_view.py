@@ -171,14 +171,40 @@ def layout_geoms(m, first_body: int, also: int | None = None) -> list[dict]:
     return out
 
 
-def build_scene() -> dict:
+# The scenes the viewer can draw, by the name a motion file's poses give it (`poses()["scene"]`, absent for the arm's).
+PANDA = "panda"
+G1 = "g1"
+SCENES = (PANDA, G1)
+# The format of the humanoid sim's motion files (sim/g1/motion.py), copied so reading one never imports that sim.
+G1_FORMAT = "g1-motion/1"
+_g1_model = None
+
+
+def g1_model():
+    """The humanoid scene's model (sim/g1/scene.py), compiled once, with the bag hung at a nominal spot: each
+    motion file says where its own hangs."""
+    global _g1_model
+    with _lock:
+        if _g1_model is None:
+            from sim.g1.scene import build_model  # needs mujoco and the G1 meshes
+
+            _g1_model = build_model([0.38, -0.15, 1.0])
+        return _g1_model
+
+
+def build_scene(which: str = PANDA) -> dict:
     """The scene as plain data: bodies, meshes (decimated, flat arrays) and visual geoms. See `scene()`."""
     import mujoco
     import numpy as np
 
-    from sim.scene import MODEL_ID
+    if which == G1:
+        from sim.g1.scene import MODEL_ID
 
-    m = model()
+        m = g1_model()
+    else:
+        from sim.scene import MODEL_ID
+
+        m = model()
     name = lambda kind, i: mujoco.mj_id2name(m, kind, i) or ""  # noqa: E731
     meshes: dict[str, dict] = {}
     geoms: list[dict] = []
@@ -228,8 +254,9 @@ def _pack(data: dict) -> bytes:
     return gzip.compress(json.dumps(data, separators=(",", ":"), allow_nan=False).encode(), compresslevel=6)
 
 
-def scene() -> tuple[dict, bytes]:
+def scene(which: str = PANDA) -> tuple[dict, bytes]:
     """The static scene for the viewer, and the same as gzipped JSON. Built on the first call, then cached.
+    `which`: one of SCENES, the arm's by default.
 
     {"model_id", "bodies": [{"id", "name"}], "meshes": {"<mesh id>": {"v": [x, y, z, ...], "f": [i, j, k, ...]}},
      "geoms": [{"body", "type": "mesh" | "cylinder" | "plane" | ..., "name", "size", "pos", "quat" (w, x, y, z),
@@ -237,10 +264,90 @@ def scene() -> tuple[dict, bytes]:
     Positions are meters in the body's frame; the world body (0) holds the floor.
     """
     global _scene_cache
+    if which == G1:
+        hit = _other_scenes.get(which)
+        if hit is None:
+            data = build_scene(which)
+            hit = _other_scenes[which] = (data, _pack(data))
+        return hit
+    if which != PANDA:
+        raise ValueError(f"unknown scene {which!r}: there are {SCENES}")
     if _scene_cache is None:
         data = build_scene()
         _scene_cache = (data, _pack(data))
     return _scene_cache
+
+
+_other_scenes: dict[str, tuple[dict, bytes]] = {}
+
+
+def _frames_of(motion: dict, m, d, moving: list[int]) -> tuple[list[float], list[list[float]]]:
+    """Each frame's time and the world pose of every body in `moving`, from `mj_kinematics` on the frame's qpos."""
+    import mujoco
+    import numpy as np
+
+    times: list[float] = []
+    frames: list[list[float]] = []
+    for i, fr in enumerate(motion["frames"]):
+        qpos = fr.get("qpos") if isinstance(fr, dict) else None
+        if not isinstance(qpos, list) or len(qpos) != m.nq:
+            raise MotionError(f"frame {i} has no qpos of {m.nq} numbers")
+        try:
+            d.qpos[:] = np.asarray(qpos, dtype=float)
+        except (TypeError, ValueError) as e:
+            raise MotionError(f"frame {i} has a qpos that is not numbers") from e
+        if not np.all(np.isfinite(d.qpos)):
+            raise MotionError(f"frame {i} has a qpos that is not finite")
+        mujoco.mj_kinematics(m, d)
+        row: list[float] = []
+        for b in moving:
+            row += _r(d.xpos[b], POS_DECIMALS) + _r(d.xquat[b], QUAT_DECIMALS)
+        frames.append(row)
+        t = fr.get("t")
+        times.append(round(float(t), 4) if isinstance(t, (int, float)) and np.isfinite(t) else (times[-1] if times else 0.0))
+    return times, frames
+
+
+def _xyz(v) -> bool:
+    import math
+
+    return isinstance(v, list) and len(v) == 3 and all(
+        isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and abs(x) < 10 for x in v)
+
+
+def g1_poses(motion: dict) -> dict:
+    """`poses()` of a humanoid recording (sim/g1/motion.py): the same shape, with "scene": "g1" for the viewer to
+    draw the humanoid scene, and "bag_pos", where the bag hung, in place of a can start and a place target."""
+    import copy
+
+    import mujoco
+
+    header = motion.get("header") if isinstance(motion.get("header"), dict) else {}
+    result = motion.get("result") if isinstance(motion.get("result"), dict) else {}
+    bag = header.get("bag_pos") or result.get("bag_pos")
+    if not _xyz(bag):
+        raise MotionError("the file does not say where the bag hung")
+    from sim.g1.scene import BAG_BODY, ROPE_LENGTH
+
+    # The bag's body is the rope's fixed top end: a copy of the model with it above this file's bag.
+    m = copy.copy(g1_model())
+    m.body_pos[m.body(BAG_BODY).id] = [float(bag[0]), float(bag[1]), float(bag[2]) + ROPE_LENGTH]
+    d = mujoco.MjData(m)
+    moving = _moving_bodies(m)
+    times, frames = _frames_of(motion, m, d, moving)
+    return {
+        "scene": G1,
+        "fps": header.get("fps", 30),
+        "can_start": None,
+        "place_target": None,
+        "bag_pos": _r(bag, POS_DECIMALS),
+        "result": _public_result(result),
+        "n": len(frames),
+        "t": times,
+        "bodies": moving,
+        "frames": frames,
+        "static": {},
+    }
 
 
 def _moving_bodies(m) -> list[int]:
@@ -265,30 +372,14 @@ def poses(motion: dict) -> dict:
 
     if not isinstance(motion, dict) or not isinstance(motion.get("frames"), list) or not motion["frames"]:
         raise MotionError("not a motion file: no frames")
+    if motion.get("format") == G1_FORMAT:
+        return g1_poses(motion)
     header = motion.get("header") if isinstance(motion.get("header"), dict) else {}
     layout = header.get("layout") if isinstance(header.get("layout"), dict) else None
     m = layout_model(layout) if layout else model()
     d = mujoco.MjData(m)
     moving = _moving_bodies(m)
-    times: list[float] = []
-    frames: list[list[float]] = []
-    for i, fr in enumerate(motion["frames"]):
-        qpos = fr.get("qpos") if isinstance(fr, dict) else None
-        if not isinstance(qpos, list) or len(qpos) != m.nq:
-            raise MotionError(f"frame {i} has no qpos of {m.nq} numbers")
-        try:
-            d.qpos[:] = np.asarray(qpos, dtype=float)
-        except (TypeError, ValueError) as e:
-            raise MotionError(f"frame {i} has a qpos that is not numbers") from e
-        if not np.all(np.isfinite(d.qpos)):
-            raise MotionError(f"frame {i} has a qpos that is not finite")
-        mujoco.mj_kinematics(m, d)
-        row: list[float] = []
-        for b in moving:
-            row += _r(d.xpos[b], POS_DECIMALS) + _r(d.xquat[b], QUAT_DECIMALS)
-        frames.append(row)
-        t = fr.get("t")
-        times.append(round(float(t), 4) if isinstance(t, (int, float)) and np.isfinite(t) else (times[-1] if times else 0.0))
+    times, frames = _frames_of(motion, m, d, moving)
     result = motion.get("result") if isinstance(motion.get("result"), dict) else {}
     can_start = header.get("can_start") or result.get("can_start")
     place = header.get("place_target") or result.get("place_target")
@@ -331,6 +422,8 @@ def _xy(v) -> bool:
 RESULT_KEYS = (
     "success", "place_error_cm", "upright", "dropped", "max_height_cm", "time_taken", "exception", "end_reason",
     "resting", "released", "tipped", "tilt_deg", "seed", "in_basket", "target",
+    # The humanoid sim's (sim/g1/episode.py).
+    "struck", "touched", "struck_with", "fell", "bag_peak_cm", "standing",
 )
 
 
@@ -371,7 +464,8 @@ _summary_cache: OrderedDict[tuple, dict] = OrderedDict()
 def motion_summary(path: Path) -> dict:
     """What the viewer's file picker shows for a motion file, without the frames: no mujoco needed.
 
-    {"can_start", "place_target", "duration" (seconds), "n" (frames), "result"}"""
+    {"can_start", "place_target", "duration" (seconds), "n" (frames), "result"}, and for a humanoid recording
+    "bag_pos", where its bag hung."""
     st = path.stat()
     if st.st_size > MAX_MOTION_BYTES:
         raise MotionError("the file is too large to be a motion file")
@@ -392,9 +486,11 @@ def motion_summary(path: Path) -> dict:
     t = last.get("t") if isinstance(last, dict) else None
     can_start = header.get("can_start") or result.get("can_start")
     place = header.get("place_target") or result.get("place_target")
+    bag = header.get("bag_pos") or result.get("bag_pos")
     out = {
         "can_start": can_start if _xy(can_start) else None,
         "place_target": place if _xy(place) else None,
+        **({"bag_pos": bag} if _xyz(bag) else {}),
         "duration": round(float(t), 3) if isinstance(t, (int, float)) and not isinstance(t, bool) else None,
         "n": len(motion["frames"]),
         "result": _public_result(result),

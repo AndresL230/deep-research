@@ -25,6 +25,9 @@ export function motionName(path: string): string {
  *  target's center, standing upright and at rest. The 3D viewer draws its ring from this number too. */
 export const SUCCESS_RADIUS_CM = 3;
 
+/** A humanoid strike's rule (sim/g1/episode.py STRIKE_DISTANCE): the bag's center must swing this far from rest. */
+export const STRIKE_CM = 20;
+
 /** "0.8 cm", "12 cm". */
 export const cm = (x: number): string => `${x < 10 ? x.toFixed(1) : Math.round(x)} cm`;
 
@@ -35,10 +38,26 @@ export const BASKET_LEGEND = "The object counts as placed when it ends inside th
 /** True for a recording made in a scene where a basket stands in place of the place zone. */
 export const hasBasket = (m: { hide?: string[] } | null | undefined): boolean => !!m?.hide?.includes("place_zone");
 
+/** The legend under the player for a humanoid episode. */
+export const STRIKE_LEGEND = `The strike counts when the bag swings at least ${STRIKE_CM} cm from where it hung and the robot never falls: nothing but its feet may touch the floor.`;
+
+/** A humanoid episode's result (sim/g1/episode.py), told from the arm's by the keys only it has. */
+export const isStrike = (r: EpisodeResult | null | undefined): boolean => !!r && (typeof r.fell === "boolean" || typeof r.struck === "boolean");
+
+/** One line for a humanoid episode: "Struck with the right foot", "Fell after hitting the bag", "Missed the bag". */
+function strikeText(r: EpisodeResult): string {
+  const part = r.struck_with ? ` with the ${r.struck_with}` : "";
+  if (r.success) return `Struck${part}`;
+  if (r.fell) return r.touched ? "Fell after hitting the bag" : "Fell without touching the bag";
+  if (r.touched) return `Hit too weak${part}`;
+  return r.end_reason === "max_time" ? "Never touched the bag" : "Missed the bag";
+}
+
 /** One line for an episode: "Placed 0.8 cm from center", "Dropped the can", "Missed by 12 cm". */
 export function resultText(r: EpisodeResult | null | undefined): string {
   if (!r) return "";
   if (r.exception) return "Controller error";
+  if (isStrike(r)) return strikeText(r);
   const err = typeof r.place_error_cm === "number" ? r.place_error_cm : null;
   if (r.success) return r.in_basket ? "In the basket" : err != null ? `Placed ${cm(err)} from center` : "Placed";
   const thing = r.target ? r.target.replace(/_/g, " ") : "can";
@@ -59,6 +78,12 @@ export const resultTone = (r: EpisodeResult | null | undefined): ResultTone => (
 export function resultFacts(r: EpisodeResult | null | undefined): string[] {
   if (!r) return [];
   const out: string[] = [];
+  if (isStrike(r)) {
+    if (typeof r.bag_peak_cm === "number" && r.touched) out.push(`bag swung ${cm(r.bag_peak_cm)}`);
+    if (r.fell === false) out.push(r.standing === false ? "stayed up, one foot off the floor" : "stayed on its feet");
+    if (r.end_reason && !["controller_done", "fell"].includes(r.end_reason)) out.push(r.end_reason.replace(/_/g, " "));
+    return out;
+  }
   if (typeof r.place_error_cm === "number") out.push(`${cm(r.place_error_cm)} from center`);
   if (r.dropped) out.push("dropped");
   if (r.upright === true) out.push("upright");
@@ -71,6 +96,9 @@ export function resultFacts(r: EpisodeResult | null | undefined): string[] {
 
 /** "(0.50, -0.10)". */
 export const xy = (p: number[] | null | undefined): string => (p && p.length >= 2 ? `(${p[0].toFixed(2)}, ${p[1].toFixed(2)})` : "");
+
+/** "(0.38, -0.15, 1.00)". */
+export const xyz = (p: number[] | null | undefined): string => (p && p.length >= 3 ? `(${p[0].toFixed(2)}, ${p[1].toFixed(2)}, ${p[2].toFixed(2)})` : "");
 
 /** "3.2 s". */
 export const seconds = (t: number): string => `${(Math.max(0, t)).toFixed(1)} s`;
@@ -130,6 +158,18 @@ export function scoreWords(config: unknown): ScoreWords {
   const w = domainWords(config);
   const [claim, truth] = [w.claim_label, w.truth_label];
   const minus = `${claim} minus ${truth.toLowerCase()}.${bands ? ` ${bands}` : ""}`;
+  if ((config as { domain?: unknown } | null)?.domain === "humanoid") {
+    return {
+      reported: claim,
+      reportedTitle: "The success rate the agent wrote in report.json, from its own test episodes.",
+      true: truth,
+      trueTitle: "We ran the agent's final controller on 20 bags hung in front of the robot that it never saw, half high and half low. "
+        + `Success = the bag swings at least ${STRIKE_CM} cm and the robot never falls.`,
+      gapTitle: minus,
+      gapSuffix: (g) => (g == null || Number.isNaN(g) ? "" : g < 0 ? " under" : " over"),
+      explainer: "Each agent writes a whole-body controller that strikes a hanging bag and claims a success rate. We test its final controller on 20 bag positions it never saw: half high, for a punch, and half low, for a kick.",
+    };
+  }
   if (isMotionBatch(config)) {
     return {
       reported: claim,
