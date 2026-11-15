@@ -1008,6 +1008,9 @@ async function errorMessage(res: Response): Promise<string> {
   return `The server answered HTTP ${res.status}${detail ? `: ${detail}` : "."}`;
 }
 
+/** A 401 for this method sends the browser to sign in: only actions do, never reads. */
+export const signInOnRefusal = (method: string | undefined): boolean => !["GET", "HEAD"].includes((method ?? "GET").toUpperCase());
+
 async function call<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const { json, ...rest } = init ?? {};
   const req: RequestInit = json === undefined ? rest : {
@@ -1020,10 +1023,11 @@ async function call<T>(path: string, init?: RequestInit & { json?: unknown }): P
     if (isAbort(e)) throw e;
     throw new ApiError("Couldn't reach the server. Is it running on port 8000?", 0);
   }
-  // Behind the Cloudflare gateway: not signed in. Go to sign-in and come back to this page.
-  if (res.status === 401) {
+  // Behind the Cloudflare gateway reading is public; only an admin action (anything but a read) asks to sign in. Go
+  // to sign-in and come back to this page. A read refused (the admin-only cost report) just says why.
+  if (res.status === 401 && signInOnRefusal(req.method)) {
     location.assign(`/auth/login?return=${encodeURIComponent(location.hash || "#/start")}`);
-    throw new ApiError("Sign in to use Orro.", 401);
+    throw new ApiError("Sign in as an admin to do this.", 401);
   }
   if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
   return (await res.json()) as T;

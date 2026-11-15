@@ -32,11 +32,11 @@ export function navCurrent(r: Route): NavKey | null {
 export const countLabel = (n: number | null): string => (!n || n < 0 ? "" : n > 99 ? "99+" : String(n));
 
 /** The links, for the bar or for the menu. `count` is how many batches wait on the person (needs-you.ts
- *  `needsCount`). */
-export function navLinks(r: Route, count: number | null, where: "bar" | "menu" = "bar"): string {
+ *  `needsCount`). `costs`: the Costs link is there (the all-batches cost report is for admins on the hosted site). */
+export function navLinks(r: Route, count: number | null, where: "bar" | "menu" = "bar", costs = true): string {
   const cur = navCurrent(r);
   const n = countLabel(count);
-  const items = NAV_LINKS.map((l) => {
+  const items = NAV_LINKS.filter((l) => costs || l.key !== "costs").map((l) => {
     const badge = l.key === "needs" && n
       ? `<span class="nv-n" aria-hidden="true">${n}</span><span class="nv-sr">, ${n} waiting</span>`
       : "";
@@ -47,8 +47,8 @@ export function navLinks(r: Route, count: number | null, where: "bar" | "menu" =
 }
 
 /** The links in the bar, on a wide screen. */
-export function navBar(r: Route, count: number | null): string {
-  return `<nav class="nv" aria-label="Main" data-morph-key="nav">${navLinks(r, count)}</nav>`;
+export function navBar(r: Route, count: number | null, costs = true): string {
+  return `<nav class="nv" aria-label="Main" data-morph-key="nav">${navLinks(r, count, "bar", costs)}</nav>`;
 }
 
 const MENU_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" style="flex:none;display:block"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>`;
@@ -59,13 +59,13 @@ const MENU_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" s
  * (`[label, html]`): what a phone's bar has no room for, the theme switch and the hub badge (nav.css shows them there
  * only).
  */
-export function navMenu(r: Route, count: number | null, open: boolean, extra: readonly [string, string][] = []): string {
+export function navMenu(r: Route, count: number | null, open: boolean, extra: readonly [string, string][] = [], costs = true): string {
   const waiting = countLabel(count);
   return `<div class="nv-menu" data-morph-key="nav-menu">
     <button type="button" class="nv-menu-b" data-act="${ACT.navMenu}" aria-expanded="${open}" aria-controls="nv-panel"${waiting ? ` title="${attr(`${waiting} waiting`)}"` : ""}>`
     + `${open ? askIcon("close", 16) : MENU_ICON}<span class="nv-sr">Menu${waiting ? `, ${waiting} waiting` : ""}</span>${waiting && !open ? `<span class="nv-dot" aria-hidden="true"></span>` : ""}</button>
     <div class="nv-panel" id="nv-panel"${open ? "" : " hidden"}>
-      <nav aria-label="Main">${navLinks(r, count, "menu")}</nav>
+      <nav aria-label="Main">${navLinks(r, count, "menu", costs)}</nav>
       ${extra.length ? `<div class="nv-panel-x">${extra.map(([label, html]) => `<div class="nv-row"><span>${esc(label)}</span>${html}</div>`).join("")}</div>` : ""}
     </div>
   </div>`;

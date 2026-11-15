@@ -17,6 +17,9 @@
 // (batch/new-batch-dialog.ts). The batch list behind the count and the home screen is loaded once and kept fresh by
 // one poller, on whichever app page is open.
 //
+// On the hosted site anyone can read every batch without signing in; "+ New batch", Costs and every action on a batch
+// (investigate, approve, decline, stop, run more pairs, uploads) are for admins only (access.ts, gateway/src/index.ts).
+//
 // A live batch follows the server over the websocket. A saved batch (a replay) loads its final case file and every
 // event log once, then a clock plays it back on the timeline in batch/replay.ts.
 //
@@ -62,6 +65,7 @@ import { syncMotion } from "./motion";
 import { refreshMotion } from "./robot/mount";
 import { smoothScroll } from "./scroll";
 import { mountAccount } from "./account";
+import { canAct, loadAccess, roleOf, type Access } from "./access";
 import { mountGdpr } from "./gdpr";
 import { isMotionBatch } from "./robot/markup";
 
@@ -118,6 +122,8 @@ interface AppState {
   /** The batch page's folds the person opened or closed (lanes.ts), and the batch they belong to. */
   folds: Record<string, boolean>;
   foldsFor: string;
+  /** Who is looking (access.ts, from /auth/me): on the hosted site only admins start or change batches. */
+  access: Access;
 }
 
 const S: AppState = {
@@ -139,7 +145,11 @@ const S: AppState = {
   feedOpen: false,
   folds: {},
   foldsFor: "",
+  access: { kind: "unknown" },
 };
+
+/** The visitor may start and change batches (access.ts): an admin behind the gateway, or local development. */
+const admin = (): boolean => canAct(S.access);
 
 const DEFAULT_SPEED = 4;
 const message = (e: unknown, fallback: string): string => (e instanceof Error ? e.message : fallback);
@@ -194,7 +204,7 @@ function formInputs(): HomeInputs {
 /** "+ New batch": the dialog, from any app page. The data behind the form loads with the app; the first open of a
  *  session that has not loaded it yet starts it. */
 function openNewBatch(opener: HTMLElement | null): void {
-  if (S.route.name === "landing") return;
+  if (S.route.name === "landing" || !admin()) return;
   S.navOpen = false;
   void loadApp();
   newBatch.open(opener);
@@ -266,6 +276,7 @@ function batchVm(b: BatchState, full: CaseFile): BatchVm {
     error: b.error,
     now: Date.now(),
     open: S.foldsFor === b.id ? S.folds : {},
+    role: roleOf(S.access),
   };
 }
 
@@ -305,13 +316,14 @@ function headerView(vm: BatchVm | null): string {
   // The logo, the links (nav.ts), then on a batch's pages its breadcrumb: the batch and the page in it.
   const left = `<div class="ask-hdr-l pg-hdr-l">
     <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${mark(18.7)}<span class="ask-h1 ask-h1-t">${wordmark(11.5)}</span></button>
-    ${navBar(r, count)}
+    ${navBar(r, count, admin())}
     ${crumbs.length ? `<nav class="pg-crumbs" aria-label="Breadcrumb" data-morph-key="crumbs">${crumbs.join(`<span class="ask-crumb-sep" aria-hidden="true">›</span>`)}</nav>` : ""}
   </div>`;
   const bar = vm ? costBar(vm.case.costs ?? {}, { simulated: !!(vm.case.config as BatchConfig).simulated }) : "";
   // The live feed sits where the hub badge was: on a batch's pages only, opening on hover (commentary.ts).
   const feed = vm && "id" in r ? feedButton(vm, S.feedOpen) : "";
-  const right = `<div class="pg-hdr-r">${bar}${feed}${themeSwitch(theme())}${newBatchButton(newBatch.isOpen)}${navMenu(r, count, S.navOpen, [["Theme", themeSwitch(theme())]])}</div>`;
+  // "+ New batch" and the Costs link are for those who may start batches (access.ts).
+  const right = `<div class="pg-hdr-r">${bar}${feed}${themeSwitch(theme())}${admin() ? newBatchButton(newBatch.isOpen) : ""}${navMenu(r, count, S.navOpen, [["Theme", themeSwitch(theme())]], admin())}</div>`;
   return left + right;
 }
 
@@ -389,8 +401,8 @@ function render(): void {
   if (newBatch.isOpen) morphInner(newBatchEl, newBatchView(S.home, formInputs()));
 
   let body: string;
-  if (landing) body = landingView(landingTone);
-  else if (r.name === "home") body = homeView(S.home);
+  if (landing) body = landingView(landingTone, admin());
+  else if (r.name === "home") body = homeView(S.home, roleOf(S.access));
   else if (r.name === "how") body = howView(S.how);
   else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
@@ -712,7 +724,7 @@ const WRONG_FILE: Record<UploadKind, string> = {
 /** Upload a CSV (a dataset) or a .py file: the training script in the tabular domain, the robot controller in the
  *  robot one. `expected` is what the picker was opened for. */
 async function upload(file: File, expected?: UploadKind): Promise<void> {
-  if (S.ds.upload.state === "busy" || S.home.starting) return;
+  if (S.ds.upload.state === "busy" || S.home.starting || !admin()) return;
   const k = fileKind(file);
   const kind: UploadKind | null = "problem" in k ? null : k.kind === "script" && domainOf(S.home.draft) !== DEFAULT_DOMAIN ? "controller" : k.kind;
   const problem = expected === "controller" && !/\.py$/i.test(file.name) ? WRONG_FILE.controller
@@ -744,6 +756,8 @@ async function upload(file: File, expected?: UploadKind): Promise<void> {
 let estimateTimer: ReturnType<typeof setTimeout> | null = null;
 let estimateSeq = 0;
 function scheduleEstimate(): void {
+  // An estimate is a POST, so the gateway keeps it for admins: nobody else has the form it is for.
+  if (!admin()) return;
   if (estimateTimer) clearTimeout(estimateTimer);
   estimateTimer = setTimeout(async () => {
     const draft = S.home.draft;
@@ -776,7 +790,7 @@ function setDraft(field: string, raw: string, numeric: boolean): void {
 
 async function start(): Promise<void> {
   const draft = S.home.draft;
-  if (!draft || S.home.starting || S.ds.upload.state === "busy") return;
+  if (!draft || S.home.starting || S.ds.upload.state === "busy" || !admin()) return;
   S.home = { ...S.home, starting: true, error: null };
   paint();
   try {
@@ -1043,6 +1057,8 @@ root.addEventListener("click", (e) => {
   const arg = el.dataset.arg ?? "";
   const r = S.route;
   const b = S.batch;
+  // The views draw no actions for anyone who may not act (access.ts); this keeps a stale button from sending one.
+  if (ADMIN_ACTS.has(el.dataset.act ?? "") && !admin()) return;
   switch (el.dataset.act) {
     case ACT.home: go({ name: "home" }); if (S.home.batches.state === "error") void loadApp(true); return;
     case ACT.openBatch: go({ name: "batch", id: arg }); return;
@@ -1152,6 +1168,13 @@ root.addEventListener("click", (e) => {
   }
 });
 
+/** The presses that start or change a batch: admins only on the hosted site (gateway/src/index.ts). */
+const ADMIN_ACTS = new Set<string>([
+  ACT.newBatch, ACT.start, DI_ACT.upload,
+  ACT.investigate, ACT.approve, ACT.decline, ACT.stop,
+  NY_ACT.approve, NY_ACT.decline, NY_ACT.investigate, NY_ACT.more, NY_ACT.start,
+]);
+
 // Keyboard: Esc folds the header's menu (the dialog closes on Esc by itself), back onto its button.
 root.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && S.feedOpen && !newBatch.isOpen) {
@@ -1209,7 +1232,7 @@ root.addEventListener("dragleave", (e) => { if (!e.relatedTarget) setDragging(fa
 root.addEventListener("drop", (e) => {
   if (!hasFiles(e)) return;
   e.preventDefault();
-  const file = overDrop(e) ? e.dataTransfer?.files[0] : null;
+  const file = overDrop(e) && admin() ? e.dataTransfer?.files[0] : null;
   setDragging(false);
   if (file) void upload(file);
 });
@@ -1266,8 +1289,14 @@ setInterval(() => { void refreshHub(); }, 30_000);
 
 onRoute();
 
-// Who is signed in, their plan and credits (only behind the Cloudflare gateway).
-void mountAccount();
+// Who is looking (access.ts): the actions show only for admins, and the account chip (only behind the Cloudflare
+// gateway) says who is signed in. The New batch form's estimate waits for this, since only admins may ask for one.
+void loadAccess().then((a) => {
+  S.access = a;
+  mountAccount(a);
+  if (admin()) scheduleEstimate();
+  paint();
+});
 
 // The GDPR notice, as a joke (gdpr.ts). Only Ctrl+E (Cmd+E on a Mac) shows it.
 mountGdpr();

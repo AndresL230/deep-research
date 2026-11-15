@@ -28,6 +28,7 @@ import { bestMotion, copyStory, forcedCheck, forcedEvent, investigatorCounts, ty
 import { scoreStep, sourceStrip, tableMap } from "./trial-charts";
 import { TABULAR_WORDS, capital, domainWords, judgedOn, stepText } from "./words";
 import type { DomainWords } from "../api";
+import { ADMIN_ONLY } from "../access";
 
 export { NEEDED_PAIRS } from "./evidence";
 
@@ -955,8 +956,10 @@ function approvalCard(p: PendingForks, vm: BatchVm): string {
     more.map((t) => `<p class="ln-ask-more">${esc(t)}</p>`).join("") +
     `<p class="ln-ask-more">${esc(why)}</p>` +
     `<p class="ln-approval-est">Estimated cost <b>${esc(est)}</b></p>` +
-    `<div class="ln-actions">${btn(ACT.approve, "Approve", true)}${btn(ACT.decline, "Decline", false)}` +
-    (vm.live ? "" : `<span class="ln-muted">Approval happens on live batches.</span>`) + `</div>` +
+    (vm.role && vm.role !== "admin"
+      ? (vm.role === "viewer" ? `<div class="ln-actions"><span class="ln-muted">${esc(ADMIN_ONLY.approve)}</span></div>` : "")
+      : `<div class="ln-actions">${btn(ACT.approve, "Approve", true)}${btn(ACT.decline, "Decline", false)}` +
+        (vm.live ? "" : `<span class="ln-muted">Approval happens on live batches.</span>`) + `</div>`) +
     (vm.live && vm.error ? `<p class="ln-err" role="alert">${esc(vm.error)}</p>` : "") +
     `</div></div>`;
 }
@@ -1988,6 +1991,8 @@ export function investigatorView(vm: BatchVm): string {
       actions += `<button type="button" class="ask-ghostbtn ask-ghostbtn--outline" data-act="${ACT.stop}"${dis}>${vm.busy === ACT.stop ? spinner(13) : ""}Stop</button>`;
     }
   }
+  // Only admins act on a batch (access.ts): anyone else gets a line where the buttons would be.
+  if (actions && vm.role && vm.role !== "admin") actions = vm.role === "viewer" ? `<span class="ln-muted">${esc(ADMIN_ONLY.act)}</span>` : "";
 
   const all = vm.events?.investigator ?? [];
   const start = Math.max(0, all.length - RECENT);
