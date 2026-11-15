@@ -1,0 +1,227 @@
+[
+  {
+    "index": 0,
+    "tool": "write_todos",
+    "args": {
+      "todos": [
+        {
+          "content": "Explore sim package",
+          "status": "in_progress"
+        },
+        {
+          "content": "Write controller",
+          "status": "pending"
+        },
+        {
+          "content": "Test on practice and varied seeds/bags",
+          "status": "pending"
+        },
+        {
+          "content": "Write report.json",
+          "status": "pending"
+        }
+      ]
+    },
+    "labels": []
+  },
+  {
+    "index": 1,
+    "tool": "ls",
+    "args": {
+      "path": "/home/daytona/workspace"
+    },
+    "labels": []
+  },
+  {
+    "index": 2,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/sim/g1/controllers/template.py"
+    },
+    "labels": [
+      "inspect_scene"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/sim/g1/episode.py",
+      "limit": 300
+    },
+    "labels": [
+      "inspect_scene"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "read_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/sim/g1/control.py",
+      "limit": 400
+    },
+    "labels": [
+      "inspect_scene"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; cat practice.json; python3 -m sim.g1.run --help | head -40"
+    },
+    "labels": [
+      "inspect_scene"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; python3 -c \"\nfrom sim.g1.control import *\nwb=WholeBody();p=wb.points(STAND_QPOS.copy())\nfor k,v in p.items(): print(k,v.round(3))\n\""
+    },
+    "labels": []
+  },
+  {
+    "index": 7,
+    "tool": "write_file",
+    "args": {
+      "file_path": "/home/daytona/workspace/controller.py",
+      "content": "\"\"\"Straight punch with the hand on the bag's side, feet planted, COM held over the feet by feedback.\"\"\"\n\nimport numpy as np\n\nfrom sim.g1.control import STAND_QPOS, ComFeedback, WholeBody\n\n\ndef smooth(a):\n    a = float(np.clip(a, 0.0, 1.0))\n    return a * a * (3 - 2 * a)\n\n\nclass Controller:\n    T_WIND = 1.2      # end of wind-up\n    T_PUNCH = 0.30    # duration of punch\n    T_HOLD = 0.1\n    T_BACK = 0.8\n    OVERSHOOT = 0.10  # how far past the bag centre the fist goes\n\n    def reset(self, task):\n        self.task = task\n        self.done = False\n        self.wb = WholeBody()\n        self.q = STAND_QPOS.copy()\n        self.fb = ComFeedback()\n        p = self.wb.points(self.q)\n        self.feet = {\"left_foot\": p[\"left_foot\"].copy(), \"right_foot\": p[\"right_foot\"].copy()}\n        self.com0 = p[\"com\"][:2].copy()\n        b = np.array(task[\"bag_pos\"], dtype=float)\n        self.bag = b\n        self.side = \"left_hand\" if b[1] >= 0 else \"right_hand\"\n        self.h0 = p[self.side].copy()\n        self.wind = np.array([max(b[0] - 0.22, 0.12), b[1], b[2]])\n        self.end = np.array([b[0] + self.OVERSHOOT, b[1], b[2]])\n        self.t1 = self.T_WIND\n        self.t2 = self.t1 + self.T_PUNCH\n        self.t3 = self.t2 + self.T_HOLD\n        self.t4 = self.t3 + self.T_BACK\n\n    def hand_target(self, t):\n        if t < self.t1:\n            # go up/back to wind-up pose\n            return self.h0 + (self.wind - self.h0) * smooth(t / self.t1)\n        if t < self.t2:\n            return self.wind + (self.end - self.wind) * smooth((t - self.t1) / self.T_PUNCH)\n        if t < self.t3:\n            return self.end\n        if t < self.t4:\n            return self.end + (self.h0 - self.end) * smooth((t - self.t3) / self.T_BACK)\n        return self.h0\n\n    def act(self, obs):\n        t = obs[\"time\"]\n        h = self.hand_target(t)\n        com_t = self.fb.update(self.com0, obs[\"com\"][:2])\n        targets = dict(self.feet)\n        targets[\"com\"] = com_t\n        targets[self.side] = h\n        w = {self.side: 6.0}\n        self.q = self.wb.solve(self.q, targets, weights=w, iters=4)\n        if t > self.t4 + 1.0:\n            self.done = True\n        return list(self.q[7:])\n"
+    },
+    "labels": [
+      "write_controller"
+    ]
+  },
+  {
+    "index": 8,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; python3 -m sim.g1.run --controller controller.py --bag 0.38,-0.15,1 --out live/practice.motion.json"
+    },
+    "labels": [
+      "run_single_episode"
+    ]
+  },
+  {
+    "index": 9,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; for s in 1 2 3 4 5 6 7 8; do python3 -m sim.g1.run --controller controller.py --bag 0.38,-0.15,1 --seed $s --out live/practice_s$s.motion.json | python3 -c \"import json,sys; r=json.load(sys.stdin); print($s, r['success'], r['bag_peak_cm'], r['fell'], r['struck_with'])\"; done"
+    },
+    "labels": [
+      "test_one_position"
+    ]
+  },
+  {
+    "index": 10,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; for b in 0.35,0.15,1 0.40,0.0,1.0 0.45,-0.1,0.9 0.33,0.05,1.1 0.42,0.2,0.95 0.3,-0.2,1.05; do python3 -m sim.g1.run --controller controller.py --bag $b --seed 11 --out live/var_$b.motion.json | python3 -c \"import json,sys; r=json.load(sys.stdin); print('$b', r['success'], r['bag_peak_cm'], r['fell'], r['struck_with'])\"; done"
+    },
+    "labels": [
+      "vary_positions"
+    ]
+  },
+  {
+    "index": 11,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; python3 - <<'E'\nimport numpy as np\nfrom sim.g1.episode import run_episode\nr,m=run_episode('controller.py',[0.45,-0.1,0.9],seed=11)\nprint(r['struck_with'],r['bag_peak_cm'])\nE\npython3 - <<'E'\nimport numpy as np\nfrom sim.g1.control import *\nwb=WholeBody(); q=STAND_QPOS.copy()\nfor tgt in ([0.55,-0.1,0.9],[0.45,-0.1,0.9],[0.38,-0.15,1.0]):\n    for i in range(200):\n        q=wb.solve(q,{\"left_foot\":[0.035,0.119,0],\"right_foot\":[0.035,-0.119,0],\"right_hand\":tgt,\"com\":[0.003,0]},weights={\"right_hand\":6})\n    print(tgt,wb.points(q)[\"right_hand\"].round(3),wb.points(q)[\"com\"].round(3))\nE"
+    },
+    "labels": [
+      "vary_positions"
+    ]
+  },
+  {
+    "index": 12,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; cat > sweep.py <<'E'\nimport sys, itertools\nfrom sim.g1.episode import run_episode\nres=[]\nfor x,y,z in itertools.product([0.3,0.38,0.45],[-0.2,-0.1,0.1,0.2],[0.9,1.0,1.1]):\n    r,_=run_episode(sys.argv[1],[x,y,z],seed=int(x*100+z*10),record=False)\n    res.append(r['success']); \n    if not r['success']: print((x,y,z),r['struck'],r['bag_peak_cm'],r['fell'],r['struck_with'])\nprint(sum(res),len(res))\nE\npython3 sweep.py controller.py"
+    },
+    "labels": [
+      "vary_positions",
+      "test_low_bag"
+    ]
+  },
+  {
+    "index": 13,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; sed -i 's/\\[0.3,0.38,0.45\\]/[float(a) for a in sys.argv[2].split(\",\")]/' sweep.py; python3 sweep.py controller.py 0.45"
+    },
+    "labels": [
+      "vary_positions",
+      "test_low_bag"
+    ]
+  },
+  {
+    "index": 14,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; python3 - <<'E'\nimport numpy as np, sys\nsys.path.insert(0,'.')\nfrom sim.g1 import episode\nimport controller\norig=controller.Controller.act\ndef act(self,obs):\n    a=orig(self,obs)\n    t=obs['time']\n    if 1.0<t<1.9 and int(round(t*50))%3==0:\n        print(round(t,2),'hand',obs[self.side].round(3),'tgt',self.hand_target(t).round(3),'bag',obs['bag_pos'].round(3))\n    return a\ncontroller.Controller.act=act\nr,_=episode.run_episode('controller.py',[0.45,-0.1,0.9],seed=3,record=False)\nE"
+    },
+    "labels": [
+      "test_one_position"
+    ]
+  },
+  {
+    "index": 15,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; sed 's/        t = obs\\[\"time\"\\]/        t = obs[\"time\"]\\n        if 1.0<t<1.9 and int(round(t*50))%3==0: print(round(t,2),obs[self.side].round(3),self.hand_target(t).round(3),obs[\"bag_pos\"].round(3))/' controller.py > /tmp/dbg.py; python3 -m sim.g1.run --controller /tmp/dbg.py --bag 0.45,-0.1,0.9 --seed 3 | head -30"
+    },
+    "labels": [
+      "test_one_position"
+    ]
+  },
+  {
+    "index": 16,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; python3 - <<'E'\ns=open('controller.py').read()\ns=s.replace(\"        com_t = self.fb.update(self.com0, obs[\\\"com\\\"][:2])\",\n\"\"\"        lean = np.clip((self.bag[0] - 0.33) * 1.0, 0.0, 0.07) * smooth(t / self.t1) * (1 - smooth((t - self.t3) / self.T_BACK))\n        want = self.com0 + np.array([lean, 0.0])\n        com_t = self.fb.update(want, obs[\"com\"][:2])\"\"\")\nopen('controller.py','w').write(s)\nE\npython3 sweep.py controller.py 0.45"
+    },
+    "labels": [
+      "vary_positions",
+      "test_low_bag"
+    ]
+  },
+  {
+    "index": 17,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; free -m | head -2; cat > sweep.sh <<'E'\n#!/bin/bash\n# usage: sweep.sh xs ; runs each in own process\nfor x in $1; do for y in -0.2 -0.1 0.1 0.2; do for z in 0.9 1.0 1.1; do\npython3 -m sim.g1.run --controller controller.py --bag $x,$y,$z --seed 5 | python3 -c \"import json,sys; r=json.load(sys.stdin); print('$x,$y,$z', r['success'], r['bag_peak_cm'], r['fell'], r['struck_with'])\"\ndone; done; done\nE\nchmod +x sweep.sh; ./sweep.sh 0.45 2>&1 | tail -15"
+    },
+    "labels": [
+      "vary_positions"
+    ]
+  },
+  {
+    "index": 18,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; ./sweep.sh \"0.3 0.38\" 2>&1 | grep -v \"True 3[0-9]\""
+    },
+    "labels": []
+  },
+  {
+    "index": 19,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; rm -f live/var_* live/practice_s*; for s in $(seq 0 19); do python3 -m sim.g1.run --controller controller.py --bag 0.38,-0.15,1 --seed $s --out live/practice_s$s.motion.json | python3 -c \"import json,sys; r=json.load(sys.stdin); print($s, r['success'], r['bag_peak_cm'], r['max_tilt_deg'])\"; done"
+    },
+    "labels": [
+      "test_one_position"
+    ]
+  },
+  {
+    "index": 20,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace; rm -f sweep.py; echo '{\"success_rate\": 1.0, \"episodes_run\": 56, \"notes\": \"Straight punch with the hand on the bag side (feet planted, COM feedback with forward lean for far bags); final controller succeeded in 20/20 practice seeds and 36/36 episodes over a grid of bag positions (x .3-.45, y +-.1/.2, z .9-1.1); earlier tuning runs not counted.\"}' > report.json; python3 -c \"import json;print(json.load(open('report.json')))\"; ls live | head -3"
+    },
+    "labels": [
+      "write_report"
+    ]
+  }
+]

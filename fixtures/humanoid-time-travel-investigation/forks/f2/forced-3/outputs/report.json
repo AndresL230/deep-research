@@ -1,0 +1,5 @@
+{
+ "success_rate": 0.4,
+ "episodes_run": 20,
+ "notes": "Straight-punch controller (both feet planted, COM feedback): 8/8 on bags at z>=0.8 m in the varied-position grid (plus 20/20 on the practice bag, seeds 0-19, not counted in this rate), but 0/12 for bags at z<=0.7 m (no strike, and 6 of those fell); my kick and squat-punch attempts for low bags failed, so low bags are unsolved."
+}
