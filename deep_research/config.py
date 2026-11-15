@@ -58,6 +58,9 @@ class BatchConfig(BaseModel):
     # MASTER_PLAN 6.2: "baseline" puts the plain-Python `candidates` in the investigator's view, a demo safety net the
     # UI shows. Off ("none") by default: the investigator finds its suspects blind.
     investigator_assist: Literal["none", "baseline"] = "none"
+    # A soft gate on the investigator's method (agents/method_gate.py): `record_suspects` is refused once before a plan
+    # and the lenses, `run_experiment` once per suspect before the skeptic. The second try goes through and is logged.
+    investigator_strict: bool = True
     # The model family the task asks for. Duplicates inflate tree models far more
     # than logistic regression (measured on Pima: about +13 points vs +1).
     model_hint: Literal["random_forest", "any"] = "random_forest"

@@ -189,6 +189,110 @@ async def test_a_finished_investigator_can_be_asked_to_test_an_untested_suspect(
     assert any("ask the skeptic" in (e.get("text") or "") for e in asks)
 
 
+GATE_SUSPECTS = {"suspects": [
+    {"target": "deduplicate", "kind": "omission", "rationale": "r01 removed repeated rows; r02 did not",
+     "proposed_by": "lens-omission"},
+    {"target": "inspect", "kind": "omission", "rationale": "r01 looked at the data first; r02 did not"},
+]}
+GATE_EXPERIMENT = {"suspect_id": "s1", "change": "force_step:deduplicate", "prediction": "smaller_gap", "pairs": 1,
+                   "reason": "honest runs did this step and inflated ones skipped it"}
+
+
+def _gate_batch(tmp_path, monkeypatch, **config) -> Batch:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
+    b = Batch(BatchConfig(n_runs=2, analyst_model="anthropic:claude-haiku-4-5", **config), batch_id="t", root=tmp_path)
+    b.case.update_run("r01", status="honest")
+    b.case.update_run("r02", status="inflated")
+    b.case.set_phase("ready")
+    return b
+
+
+def _restarted(b: Batch) -> Batch:
+    """The batch as a restarted server loads it from disk (with the files a fork would need)."""
+    (b.dir / "task").mkdir(exist_ok=True)
+    (b.dir / "task" / "data.csv").write_text("x\n")
+    for rid in ("r01", "r02"):
+        (b.dir / "runs" / rid).mkdir(parents=True, exist_ok=True)
+        (b.dir / "runs" / rid / "messages.json").write_text("[]")
+    return Batch.resume(b.id, b.root)
+
+
+def _results(b: Batch, name: str) -> list[str]:
+    events = [json.loads(line) for line in (b.dir / "investigator" / "events.jsonl").read_text().splitlines()]
+    return [e["content"] for e in events if e.get("type") == "tool_result" and e.get("name") == name
+            and e.get("agent") == "investigator"]
+
+
+async def test_the_method_gate_refuses_a_skipped_step_once_then_lets_it_through(tmp_path, monkeypatch):
+    """No plan and no lens: `record_suspects` is refused once, and the second call saves them. No skeptic:
+    `run_experiment` is refused once, before any person is asked to approve it, and the second call waits for its
+    approval. Both skipped steps are in the case file. Never twice, so the gate cannot deadlock the investigator."""
+    from deep_research.agents import method_gate
+    from tests.scripted import call, script_investigator
+
+    b = _gate_batch(tmp_path, monkeypatch)
+    script_investigator(monkeypatch, [
+        call("record_suspects", GATE_SUSPECTS, "s1"),
+        call("record_suspects", GATE_SUSPECTS, "s2"),
+        call("run_experiment", GATE_EXPERIMENT, "x1"),
+        call("run_experiment", GATE_EXPERIMENT, "x2"),
+    ])
+    await b.investigate()
+
+    suspects = _results(b, "record_suspects")
+    assert suspects[0].startswith("refused") and "write_todos" in suspects[0] and "lens-omission" in suspects[0]
+    assert suspects[1] == "suspects saved: s1, s2"
+    experiments = _results(b, "run_experiment")
+    assert len(experiments) == 1 and "refused by the method check" in experiments[0] and "skeptic" in experiments[0]
+    case = b.case.read()
+    assert case["phase"] == "awaiting_approval" and case["forks"]["pending"]["suspect_id"] == "s1"
+    skipped = [(s["tool"], s["skipped"], s.get("suspect_id")) for s in case["investigator"]["skipped_steps"]]
+    assert skipped == [("record_suspects", ["write_todos", "lenses"], None), ("run_experiment", ["skeptic"], "s1")]
+    # The gate's state is the case file's, on disk: a restarted server refuses nothing a second time.
+    again = _restarted(b)
+    assert method_gate.experiment_refusal(again.case, "s1") is None
+    assert method_gate.suspects_refusal(again.case) is None
+    await again.close()
+    await b.close()
+
+
+async def test_an_investigator_that_follows_the_method_is_never_refused(tmp_path, monkeypatch):
+    """A plan, the three lenses, the suspects, the skeptic, then the experiment: nothing is refused or skipped, and
+    the gate reads the subagent calls back from the case file after a restart."""
+    from deep_research.agents import method_gate
+    from tests.scripted import call, script_investigator
+
+    b = _gate_batch(tmp_path, monkeypatch)
+    plan = [{"content": "Ask the lenses", "status": "in_progress"}, {"content": "Test s1", "status": "pending"}]
+    lens = [call("task", {"subagent_type": f"lens-{k}", "description": "Suspects?"}, f"l{k}") for k in
+            ("omission", "commission", "data")]
+    reports = [call("LensReport", {"lens": k, "suspects": [], "notes": "nothing"}, f"r{k}") for k in
+               ("omission", "commission", "data")]
+    script_investigator(monkeypatch, [
+        call("write_todos", {"todos": plan}, "t1"),
+        lens[0], reports[0], lens[1], reports[1], lens[2], reports[2],
+        call("record_suspects", GATE_SUSPECTS, "s1"),
+        call("task", {"subagent_type": "skeptic", "description": "Cheapest disproof of s1?"}, "k1"),
+        call("SkepticReport", {"checks": []}, "k2"),
+        call("run_experiment", GATE_EXPERIMENT, "x1"),
+    ])
+    await b.investigate()
+
+    assert _results(b, "record_suspects") == ["suspects saved: s1, s2"]
+    case = b.case.read()
+    assert case["phase"] == "awaiting_approval" and case["forks"]["pending"]["suspect_id"] == "s1"
+    inv = case["investigator"]
+    assert not inv.get("skipped_steps") and inv["method_gate"]["refused"] == []
+    assert inv["subagent_calls"] == {"lens-omission": 1, "lens-commission": 1, "lens-data": 1, "skeptic": 1}
+    assert inv["method_gate"]["skeptic_mark"] == {"s1": 0, "s2": 0}
+    again = _restarted(b)
+    assert method_gate.experiment_refusal(again.case, "s1") is None
+    assert method_gate.experiment_refusal(again.case, "s2", strict=False) is None
+    assert again.case.data["investigator"]["method_gate"]["refused"] == []
+    await again.close()
+    await b.close()
+
+
 def _tool_names(agent) -> dict:
     """The compiled agent's tools by name (its `tools` node)."""
     return agent.nodes["tools"].bound.tools_by_name

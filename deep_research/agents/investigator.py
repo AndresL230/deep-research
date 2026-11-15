@@ -51,6 +51,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel, Field
 
 from .. import notebook
+from . import method_gate
 from ..analysis import LABELS, fork_point
 from ..config import SKILLS_DIR
 from ..experiments import MAX_PAIRS_PER_CALL, PREDICTIONS
@@ -558,6 +559,8 @@ def build_investigator(batch: "Batch", model: str, checkpointer=None):
     case = batch.case
     domain = batch.domain
     labels, words = domain.labels(), domain.investigator_words
+    # The soft gate on the method (method_gate.py): on unless the batch turns it off.
+    strict = bool(getattr(batch.cfg, "investigator_strict", True))
 
     @tool
     def record_step_labels(run_id: str, labels: list[list[str]]) -> str:
@@ -612,7 +615,13 @@ def build_investigator(batch: "Batch", model: str, checkpointer=None):
     def record_suspects(suspects: list) -> str:
         """Add suspects to the case: each a target, its kind (omission, commission, attribute, data), why, and who
         proposed it. Returns their ids (s1, s2, ...). Record at least two before the first experiment."""
-        return case.record_suspects(suspects)
+        refused = method_gate.suspects_refusal(case, strict)
+        if refused:
+            return refused
+        before = {s.get("id") for s in case.data.get("suspects") or []}
+        out = case.record_suspects(suspects)
+        method_gate.mark_recorded(case, [s["id"] for s in case.data.get("suspects") or [] if s.get("id") not in before])
+        return out
 
     @tool
     def list_changes() -> str:
@@ -634,6 +643,9 @@ def build_investigator(batch: "Batch", model: str, checkpointer=None):
         if len(case.data.get("suspects") or []) < MIN_SUSPECTS:
             return (f"error: record at least {MIN_SUSPECTS} suspects before an experiment, so the one you test is "
                     "chosen over an alternative")
+        refused = method_gate.experiment_refusal(case, suspect_id, strict)
+        if refused:
+            return refused
         out = await batch.run_experiment(suspect_id, change, prediction, pairs, source_run, anchor, reason)
         return json.dumps(out, separators=(",", ":"), default=str)
 
