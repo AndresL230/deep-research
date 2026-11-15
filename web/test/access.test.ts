@@ -72,7 +72,7 @@ describe("the landing page's button", () => {
   });
   it("asks the headline, under the pill", () => {
     expect(landingView()).toContain('aria-label="Are your agents telling the truth?"');
-    expect(landingView()).toContain("Inflated runs: 89% claimed, 75% real");
+    expect(landingView()).toContain("One agent claimed 100%. We measured 65%.");
   });
 });
 
