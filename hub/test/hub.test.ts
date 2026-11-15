@@ -1,6 +1,7 @@
-// The hub against a local D1, through Wrangler's test harness: auth, storing and reading batches, the revision guard,
-// idempotent events, limits, and the runner keys.
+// The hub against a local D1 and R2, through Wrangler's test harness: auth, storing and reading batches, the revision
+// guard, idempotent events, motion files, limits, and the runner keys.
 
+import { gunzipSync, gzipSync } from "node:zlib";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { createTestHarness } from "wrangler";
 
@@ -20,7 +21,7 @@ beforeEach(async () => {
 });
 afterAll(async () => { await server.close(); });
 
-type Call = { method?: string; body?: string; headers?: Record<string, string>; json?: unknown; token?: string | null };
+type Call = { method?: string; body?: string | Uint8Array; headers?: Record<string, string>; json?: unknown; token?: string | null };
 
 const call = (path: string, init: Call = {}) => {
   const { json, token = TOKEN, method, body, headers: extra } = init;
@@ -143,6 +144,89 @@ describe("events", () => {
   test("takes a full push of 500 events", async () => {
     const many = Array.from({ length: 500 }, (_, i) => ev(i));
     expect(await (await call("/v1/batches/b1/events", { method: "POST", json: { log: "investigator", events: many } })).json()).toEqual({ ok: true, inserted: 500 });
+  });
+});
+
+describe("files", () => {
+  const MOTION = { header: { can_start: [0.3, 0.25] }, frames: [{ t: 0 }, { t: 0.5 }], result: { success: true } };
+  const text = JSON.stringify(MOTION);
+  const live = "/v1/batches/b1/files/runs/r01/outputs/live/v5_0.3,0.25_s0.motion.json";
+  const put = (path: string, body: string | Uint8Array, headers: Record<string, string> = {}, token?: string | null) =>
+    call(path, { method: "PUT", body, headers: { "content-type": "application/json", ...headers }, token });
+
+  test("stores a gzipped motion file and hands it back", async () => {
+    const res = await put(live, gzipSync(text), { "content-encoding": "gzip" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true });
+    const back = await call(live, { headers: { "accept-encoding": "gzip" } });
+    expect(back.status).toBe(200);
+    expect(back.headers.get("content-type")).toBe("application/json");
+    expect(back.headers.get("etag")).toBeTruthy();
+    // Either still gzipped (the client unpacks it) or already unpacked on the way: the JSON is the same.
+    const bytes = new Uint8Array(await back.arrayBuffer());
+    const raw = bytes[0] === 0x1f ? gunzipSync(bytes).toString() : new TextDecoder().decode(bytes);
+    expect(JSON.parse(raw)).toEqual(MOTION);
+  });
+
+  test("unpacks a gzipped file for a client that does not take gzip", async () => {
+    await put(live, gzipSync(text), { "content-encoding": "gzip" });
+    const back = await call(live, { headers: { "accept-encoding": "identity" } });
+    expect(back.headers.get("content-encoding")).toBeNull();
+    expect(await back.json()).toEqual(MOTION);
+  });
+
+  test("stores a plain file, replaces it, and answers 304 for an ETag it still has", async () => {
+    const hidden = "/v1/batches/b1/files/forks/f1/control-1/hidden/07-s0.motion.json";
+    await put(hidden, text);
+    const first = await call(hidden);
+    expect(await first.json()).toEqual(MOTION);
+    const etag = first.headers.get("etag") as string;
+    expect((await call(hidden, { headers: { "if-none-match": etag } })).status).toBe(304);
+    await put(hidden, JSON.stringify({ ...MOTION, frames: [{ t: 0 }] }));
+    const again = await call(hidden, { headers: { "if-none-match": etag } });
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as { frames: unknown[] }).frames).toHaveLength(1);
+  });
+
+  test("a file it does not have is 404, and the files go with their batch", async () => {
+    expect((await call(live)).status).toBe(404);
+    await call("/v1/batches/b1", { method: "PUT", json: { machine: "m", revision: 1, case: CASE } });
+    await put(live, text);
+    await put("/v1/batches/b2/files/runs/r01/outputs/live/x.motion.json", text);
+    await call("/v1/batches/b1", { method: "DELETE" });
+    expect((await call(live)).status).toBe(404);
+    expect((await call("/v1/batches/b2/files/runs/r01/outputs/live/x.motion.json")).status).toBe(200);
+  });
+
+  test("needs the team token", async () => {
+    expect((await put(live, text, {}, null)).status).toBe(401);
+    expect((await call(live, { token: "wrong" })).status).toBe(401);
+  });
+
+  test("takes only motion files under a run's or fork child's outputs or hidden episodes", async () => {
+    const bad = [
+      "/v1/batches/b1/files/task/hidden_positions.json",
+      "/v1/batches/b1/files/runs/r01/outputs/report.json",
+      "/v1/batches/b1/files/runs/r01/events.jsonl",
+      "/v1/batches/b1/files/runs/r01/hidden/sub/07.motion.json",
+      "/v1/batches/b1/files/runs/r01/outputs/.secret.motion.json",
+      "/v1/batches/b1/files/runs/r01/outputs/live%2F..%2F..%2Fx.motion.json",
+      "/v1/batches/b1/files/runs/r01/outputs/%2e%2e/x.motion.json",
+      "/v1/batches/b1/files/forks/f1/outputs/x.motion.json",
+      `/v1/batches/b1/files/runs/r01/outputs/${"a".repeat(290)}.motion.json`,
+    ];
+    for (const path of bad) {
+      const status = (await put(path, text)).status;
+      expect([400, 404], path).toContain(status);
+    }
+    expect((await put("/v1/batches/b1/files/runs/r01/outputs/motion_01.json", text)).status).toBe(200);
+    expect((await put("/v1/batches/bad%20id/files/runs/r01/outputs/x.motion.json", text)).status).toBe(400);
+  });
+
+  test("caps a file's size and refuses an empty or oddly encoded one", async () => {
+    expect((await put(live, new Uint8Array(4_000_001).fill(0x20))).status).toBe(413);
+    expect((await put(live, "")).status).toBe(400);
+    expect((await put(live, text, { "content-encoding": "br" })).status).toBe(415);
   });
 });
 

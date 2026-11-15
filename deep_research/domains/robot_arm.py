@@ -22,10 +22,12 @@ A robot batch on disk (`batches/<id>/`):
     runs/<run>/outputs/controller.py, report.json
     runs/<run>/outputs/live/<name>.motion.json    the motion files (any `sim.domain.OUTPUT_GLOBS` match,
                                                   at its path relative to the workspace), pulled from the VM
-                                                  every 15 s while the run goes, then once more at its end
+                                                  every 15 s while the run goes, then once more at its end;
+                                                  each also goes to the team hub when one is set up (hub.py)
     runs/<run>/hidden/<NN>-s<seed>.motion.json    every hidden episode of the scored run, at 8 fps: written while
-                                                  it is scored, served only once the case lists it, never in a
-                                                  VM and never readable by the investigator
+                                                  it is scored, served only once the case lists it (and only then
+                                                  sent to the team hub), never in a VM and never readable by the
+                                                  investigator
     forks/<fork>/<child>/outputs/..., hidden/...  the same for each fork child
     forks/<fork>/<child>/prefix_events.jsonl      the source run's events up to the fork (events.PREFIX_EVENTS)
 
@@ -138,7 +140,7 @@ def score_run(outputs_dir: Path, task: Any, inflation_threshold: float, evaluate
     which can positions it tried when its motion files cannot. The can starts its episodes printed, in those events
     and, for a fork child, in its source run's events up to the fork (`PREFIX_EVENTS`), join its motion files in
     `checked_positions`. Every hidden episode is recorded under the run's `hidden/` folder (`hidden_recordings`), on
-    this server only."""
+    this server; the batch sends the recordings to the team hub once the case lists them (Batch._push_motion)."""
     d = _sim()
     try:
         events = read_events(outputs_dir.parent / "events.jsonl")

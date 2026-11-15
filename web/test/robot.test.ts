@@ -10,7 +10,8 @@ import { caseAt, replayDuration } from "../src/batch/replay";
 import type { BatchVm } from "../src/batch/model";
 import { wallView } from "../src/batch/wall";
 import { runSummaryView } from "../src/batch/run";
-import { isMotionBatch, motionName, resultFacts, resultText, resultTone, robotThumb, robotView, xy } from "../src/robot/markup";
+import { episodeError, isMotionBatch, motionName, resultFacts, resultText, resultTone, robotThumb, robotView, summaryErrorText, xy } from "../src/robot/markup";
+import { ServerError } from "../src/robot/data";
 
 const robot = JSON.parse(robotRaw) as CaseFile;
 const demo = JSON.parse(demoRaw) as CaseFile;
@@ -23,6 +24,17 @@ describe("markup helpers", () => {
     // A hidden episode's recording reads as the position it was, like its dot on the map.
     expect(motionName("runs/r02/hidden/00-s0.motion.json")).toBe("Hidden position 1");
     expect(motionName("forks/f1/forced-1/hidden/07-s1.motion.json")).toBe("Hidden position 8, seed 1");
+  });
+
+  it("says plainly why an episode cannot be loaded", () => {
+    const notOnHub = "This episode's recording isn't on the hub: the batch was run before recordings were shared, or is still uploading";
+    expect(episodeError(new ServerError(notOnHub, 404))).toBe(notOnHub);
+    // A batch whose page loaded is never "no batch".
+    expect(episodeError(new ServerError("no batch 1114-050000-abcd", 404))).not.toMatch(/no batch/);
+    expect(episodeError(new ServerError("cannot replay this file: bad frames", 422))).toBe("Couldn't load this episode: cannot replay this file: bad frames");
+    expect(episodeError(new TypeError("Failed to fetch"))).toBe("Couldn't load this episode: Failed to fetch");
+    expect(summaryErrorText(notOnHub)).toBe("not on the hub yet");
+    expect(summaryErrorText("no such motion file")).toBe("can't be read");
   });
 
   it("says how an episode ended", () => {
