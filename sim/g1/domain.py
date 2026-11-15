@@ -520,8 +520,12 @@ def symptoms(result: dict) -> list[dict]:
 
 
 def trace_run(task: HumanoidTaskFiles, run_dir: Path, max_episodes: int = 3, workers: int | None = None) -> dict:
-    """Re-run one run's controller on the hidden positions with recording on, and describe where it fails: the
-    recording of up to `max_episodes` failures is kept under `run_dir/trace/`, each with what happened in it."""
+    """Re-run one run's controller on the diagnostic positions with recording on, and describe where it fails: the
+    recording of up to `max_episodes` failures is kept under `run_dir/trace/`, each with what happened in it.
+
+    Never the hidden positions (`sim.g1.hidden.diagnostic_positions`, kept at least 3 cm from each): the investigator
+    reads where the controller fails here and proposes a fix, which is then measured on the hidden positions as a
+    held-out test. Tracing on the hidden set would tune the fix on its own test (as sim/domain.py's trace_run)."""
     from sim.domain import TRACE_WORKERS
     from sim.evaluate import run_jobs
 
@@ -529,12 +533,14 @@ def trace_run(task: HumanoidTaskFiles, run_dir: Path, max_episodes: int = 3, wor
     if not controller.is_file():
         return {"error": f"{FIX_OUTPUT} is missing from this run's outputs"}
     meta = read_meta(task)
-    positions = json.loads(task.hidden.read_text())
+    from sim.g1.hidden import diagnostic_positions
+
+    positions = diagnostic_positions()
     seed = int((meta.get("eval_seeds") or (0,))[0])
     out = run_dir / TRACE_DIR
     out.mkdir(parents=True, exist_ok=True)
     jobs = [{"episode": "sim.g1.episode", "failure": "sim.g1.results", "controller_path": str(controller.resolve()),
-             "bag_pos": [float(v) for v in pos], "seed": seed, "record_to": str(out / f"hidden_{i:02d}.motion.json")}
+             "bag_pos": [float(v) for v in pos], "seed": seed, "record_to": str(out / f"diag_{i:02d}.motion.json")}
             for i, pos in enumerate(positions)]
     results = run_jobs(jobs, workers=workers or TRACE_WORKERS)
     episodes, successes = [], 0

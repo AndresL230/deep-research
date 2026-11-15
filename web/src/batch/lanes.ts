@@ -7,7 +7,7 @@
 import "./lanes.css";
 import {
   batchFileUrl, isPendingForks, notebookUrl, type AgentEvent, type ArmSummary, type BatchConfig, type CaseFile, type ForkArm, type ForkChild,
-  type Benchmark, type FixMeasured, type ForkExperiment, type MeasuredRate, type PendingForks, type ProposedFix, type RubricCheck, type RunRecord, type SplitFinding, type TrapInfo,
+  type Benchmark, type FixEvidence, type FixMeasured, type ForkExperiment, type Hypothesis, type MeasuredRate, type PendingForks, type ProposedFix, type RubricCheck, type RunRecord, type SplitFinding, type TrapInfo,
   type Verdict,
 } from "../api";
 import { askIcon } from "../ask-icons";
@@ -184,10 +184,12 @@ const head = (title: string, extra = ""): string =>
 const isOpen = (vm: BatchVm, key: string, byDefault = false): boolean =>
   vm.open === "all" ? true : vm.open?.[key] ?? byDefault;
 
-/** A fold's button: "Show the 12 copies" / "Hide the 12 copies". The caller renders the folded part only when open. */
+/** A fold's button: "Show the 12 copies" / "Hide the 12 copies". The caller renders the folded part only when open.
+ *  It is the outlined button the run page's "Show the agent's work" is (run.ts `workStrip`), with the chevron the New
+ *  batch form's Advanced toggle turns (home.ts). */
 const foldButton = (key: string, open: boolean, what: string): string =>
-  `<button type="button" class="ln-fold" data-morph-key="fold-${attr(key)}" data-act="${ACT.fold}" data-arg="${attr(key)}" aria-expanded="${open}">` +
-  `<i class="ln-fold-i" aria-hidden="true"></i>${esc(`${open ? "Hide" : "Show"} ${what}`)}</button>`;
+  `<button type="button" class="ln-fold ask-ghostbtn ask-ghostbtn--outline" data-morph-key="fold-${attr(key)}" data-act="${ACT.fold}" data-arg="${attr(key)}" aria-expanded="${open}">` +
+  `${askIcon("chevRight", 13)}${esc(`${open ? "Hide" : "Show"} ${what}`)}</button>`;
 
 const code = (label: string, text: string | null, tone: Tone): string =>
   `<figure class="ln-code ln-code--${tone}"><figcaption class="ln-code-cap"><i class="ln-pill-dot"></i>${esc(label)}</figcaption>` +
@@ -878,7 +880,7 @@ function inheritsController(c: CaseFile, f: ForkExperiment): boolean {
   for (let i = 0; i < f.fork_at; i++) if (actionLabels(c, src, i).includes("write_controller")) return true;
   return false;
 }
-const CONTROLLER_LINE = "The copies start after controller.py was written, so this experiment can change the report more than the controller.";
+const CONTROLLER_LINE = "The copies start after controller.py was written, but they can still edit it: compare both what they claim and what is measured.";
 
 /** The batch's step under test, the way forkread.copyStory reads it in a copy's code. */
 function stepTest(c: CaseFile, label: string): StepTest {
@@ -920,7 +922,9 @@ function approvalCard(p: PendingForks, vm: BatchVm): string {
   const btn = (act: string, label: string, primary: boolean): string =>
     `<button type="button" class="${primary ? "ask-btn ln-approve ds-primary" : "ask-ghostbtn ask-ghostbtn--outline"}" data-act="${act}"${disabled ? " disabled" : ""}>` +
     `${vm.busy === act ? spinner(13) : ""}${esc(label)}${primary ? GO : ""}</button>`;
-  const size = `${p.n_per_arm} ${p.n_per_arm === 1 ? "run" : "runs"} in each of ${armCount(p)} arms, ${p.vm_count} VMs.`;
+  const size = p.direct
+    ? "scored on this server on the held-out setups, no VMs and no model calls; the patched code is executed."
+    : `${p.n_per_arm} ${p.n_per_arm === 1 ? "run" : "runs"} in each of ${armCount(p)} arms, ${p.vm_count} VMs.`;
   const fixing = isFixFork(p);
   const ask = fixing
     ? `The investigator wants to test its fix on run ${esc(c.fix?.run_id ?? src ?? "?")}: ${size}`
@@ -928,12 +932,17 @@ function approvalCard(p: PendingForks, vm: BatchVm): string {
   // What a person is approving, in three plain lines with no controls in them: what runs, the most this request can
   // show, and why the investigator is waiting.
   const more: string[] = [];
+  if (p.hypothesis_id) {
+    more.push(`Tests ${p.hypothesis_id}${p.hypothesis ? `: ${p.hypothesis}` : ""}`);
+    if (p.prediction) more.push(`Predicted, saved before it runs: ${p.prediction}`);
+    if (p.falsified_if) more.push(`Falsified if: ${p.falsified_if}`);
+  }
   if (fixing) {
     const fx = c.fix;
     if (fx) more.push(`Fixed arm applies: ${fx.description} at ${fx.file_path}${fx.line != null ? `:${fx.line}` : ""}.`);
   } else {
     const cfg = c.config as Partial<BatchConfig>;
-    const iv = c.split?.intervention;
+    const iv = p.hypothesis_id ? null : c.split?.intervention;
     const arms = ["control", ...(cfg.placebo_arm ? ["placebo"] : []), ...(cfg.show_arm ? ["show"] : []), "forced"];
     const which = armCount(p) === arms.length ? `Arms: ${arms.join(", ")}.` : `${armCount(p)} arms.`;
     more.push(`${iv ? `Forced arm runs first: ${iv}. ` : ""}${which}`);
@@ -1001,6 +1010,13 @@ export const forkOutcomeText = (o: ForkOutcome, subject: string): string =>
 export function forcedArmText(o: ForkOutcome, subject: string, honestGap: number): string {
   const claimDown = o.claim < -UP;
   const honestNow = o.forcedGap < honestGap;
+  if (o.subject > honestGap) {
+    // The copies changed their code too, by more than an honest test can miss by: say so, before the claim.
+    const better = `The ${subject} got better by ${ptsAbs(o.subject)}.`;
+    if (honestNow) return `${better} Its claim is honest now.`;
+    if (claimDown) return `${better} Its claim came down ${ptsAbs(o.claim)} but is still over what was measured.`;
+    return `${better} Its claim did not come down and is still over what was measured.`;
+  }
   if (o.subject > -UP) {
     if (claimDown && honestNow) return `The ${subject} didn't get worse. Its claim got honest.`;
     if (claimDown) return `The ${subject} didn't get worse. Its claim came down ${ptsAbs(o.claim)} but is still over what was measured.`;
@@ -1030,14 +1046,23 @@ function question(f: ForkExperiment, vm: BatchVm): string {
   const q = fixing
     ? "With the proposed fix applied, does the measured success rate rise?"
     : `If a copy is made to do one step first (${lowerFirst(f.intervention)}), does the gap between what it claims and what is measured shrink?`;
-  const hyp = [...(c.hypotheses ?? [])].filter((h) => h.step_label === f.label).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).pop();
+  const hyp = (f.hypothesis_id ? (c.hypotheses ?? []).find((h) => h.id === f.hypothesis_id) : undefined) ??
+    [...(c.hypotheses ?? [])].filter((h) => h.step_label === f.label).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).pop();
   // The quote, then who said it on the line under it, the way the verdict attributes the investigator's sentence.
   const hypRow = hyp
-    ? `<div class="ln-q-row"><span class="ln-q-k">Hypothesis</span><div class="ln-q-x"><q class="ln-q-quote">${esc(hyp.evidence)}</q>` +
-      `<span class="ln-q-by">${whoTag("llm", "hypothesis subagent")}</span></div></div>` : "";
+    ? `<div class="ln-q-row"><span class="ln-q-k">Hypothesis${hyp.id ? ` ${esc(hyp.id)}` : ""}</span><div class="ln-q-x"><q class="ln-q-quote">${esc(hyp.sentence ?? hyp.evidence)}</q>` +
+      (hyp.sentence ? `<span class="ln-note">Evidence for it: ${esc(hyp.evidence)}</span>` : "") +
+      `<span class="ln-q-by">${whoTag("llm", hyp.id ? "investigator" : "hypothesis subagent")}</span></div></div>` : "";
+  const rivals = competingRow(c.hypotheses ?? [], hyp?.id);
+  const falsified = f.falsified_if ?? hyp?.falsified_if;
+  const falsifiedRow = falsified ? `<div class="ln-q-row"><span class="ln-q-k">Falsified if</span><span class="ln-q-x">${esc(falsified)}</span></div>` : "";
+  const outcomeRow = f.outcome
+    ? `<div class="ln-q-row"><span class="ln-q-k">Outcome</span><span class="ln-q-x"><span class="ln-q-line">${hypPill(f.outcome)}` +
+      `${whoTag("py", "computed from the counts")}</span></span></div>` : "";
   const prediction = f.prediction;
+  const planned = prediction === "smaller_gap" || prediction === "larger_gap";
   const expect = prediction
-    ? `Saved before any copy ran: ${prediction.replace(/_/g, " ")}`
+    ? `Saved before any copy ran: ${planned ? prediction.replace(/_/g, " ") : prediction}`
     : fixing
       ? "Expected: a higher measured rate in the fixed arm"
       : "Expected: a smaller gap in the forced arm. Implied by the design (the forced step is what honest runs did); no prediction was saved before the copies ran.";
@@ -1046,7 +1071,40 @@ function question(f: ForkExperiment, vm: BatchVm): string {
     `<h3 class="ln-q-t">${reveal(q, "word")}</h3>` +
     hypRow +
     `<div class="ln-q-row"><span class="ln-q-k">Prediction</span><span class="ln-q-x">${esc(expect)}</span></div>` +
+    falsifiedRow + outcomeRow + rivals +
     `</div>`;
+}
+
+/** How the copies were made, in words that match what happened: a copy-on-write fork of the base VM, or (when the
+ *  sandbox refused to fork) a fresh VM that replayed the same actions. */
+export function builtText(forkAt: number, nFork: number, nReplay: number): string {
+  if (nReplay > 0 && nFork === 0) return `Each copy is a fresh VM that replayed the run's first ${forkAt} actions (the sandbox could not fork a VM)`;
+  if (nReplay > 0) return `One base VM replayed the first ${forkAt} actions; copies are copy-on-write forks of it, or fresh VMs that replayed the same actions`;
+  return `One base VM replayed the first ${forkAt} actions. Each copy is a copy-on-write fork of it`;
+}
+
+/** A hypothesis's state in words. */
+const OUTCOME_WORDS: Record<string, string> = {
+  untested: "untested", testing: "testing", supported: "supported", contradicted: "contradicted",
+  inconclusive: "inconclusive", no_data: "no data",
+};
+
+/** A hypothesis's state as a pill: supported in the honest green, under test in the running accent, the rest grey.
+ *  The state is computed from the counts (evidence.py), so no other state gets a colour of its own. */
+const hypPill = (status: string | undefined): string => {
+  const s = status ?? "untested";
+  return pill(s, OUTCOME_WORDS[s] ?? s, s === "supported" ? "honest" : s === "testing" ? "running" : "muted");
+};
+
+/** Every competing hypothesis the investigator recorded before testing, with its state; the tested one marked. */
+export function competingRow(hs: Hypothesis[], tested?: string): string {
+  const listed = hs.filter((h) => h.id);
+  if (listed.length < 2) return "";
+  const li = (h: Hypothesis): string =>
+    `<li class="ln-rival${h.id === tested ? " ln-rival--tested" : ""}"><span class="ln-tag">${esc(h.id ?? "")}</span>` +
+    `<span class="ln-rival-x">${h.kind ? `<span class="ln-muted">${esc(capital(h.kind))} · </span>` : ""}${esc(h.sentence ?? h.evidence)}</span>` +
+    `${hypPill(h.status)}</li>`;
+  return `<div class="ln-q-row"><span class="ln-q-k">Competing</span><ul class="ln-q-x ln-rivals">${listed.map(li).join("")}</ul></div>`;
 }
 
 /** F3: where the copies were cut from the source run, and how they were made. */
@@ -1076,7 +1134,7 @@ function forkPoint(f: ForkExperiment, vm: BatchVm): string {
     ? `a scripted analyst continued from there, standing in for a fresh Deep Agent${model ? ` on ${esc(model)}` : ""}`
     : `a fresh analyst Deep Agent${model ? ` on ${esc(model)}` : ""} continued from there`;
   const mechanics = kids.length
-    ? `<p class="ln-src-how">${whoTag("py")}<span>One base VM replayed the first ${f.fork_at} actions. Each copy is a copy-on-write fork of it${made}, and ${who}.</span></p>`
+    ? `<p class="ln-src-how">${whoTag("py")}<span>${esc(builtText(f.fork_at, nFork, nReplay))}${made}, and ${who}.</span></p>`
     : "";
   const splitAt = c.split?.fork_at;
   const moved = !fixing && splitAt != null && c.split?.fork_run_id === f.source_run && splitAt !== f.fork_at
@@ -1349,8 +1407,18 @@ function provenance(f: ForkExperiment, vm: BatchVm): string {
     const k = runs.reduce((n, r) => n + (r.labels ?? []).filter((l) => l.length).length, 0);
     lines.push({ who: "py", src: "runs.*.labels", text: `Rule-based step labels used (${k} labelled actions)` });
   }
-  const hyp = [...(c.hypotheses ?? [])].filter((h) => h.step_label === f.label).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).pop();
-  if (hyp) {
+  const hyp = (f.hypothesis_id ? (c.hypotheses ?? []).find((h) => h.id === f.hypothesis_id) : undefined) ??
+    [...(c.hypotheses ?? [])].filter((h) => h.step_label === f.label).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).pop();
+  if (hyp?.id) {
+    // Competing hypotheses, recorded before any experiment by the investigator (or the hypothesis subagent it may ask
+    // to draft them); the tested one's prediction is copied onto the fork before its copies run.
+    const n = (c.hypotheses ?? []).filter((h) => h.id).length;
+    lines.push({
+      who: "llm", src: "hypotheses[].at",
+      text: `${n} competing ${n === 1 ? "hypothesis" : "hypotheses"} recorded before any experiment (record_hypothesis); this fork tests ` +
+        `${hyp.id}, ${stepName(c, hyp.step_label)}${inv.length && hyp.at ? `, at ${clock(hyp.at)}` : ""}${times(asked?.subagents.hypothesis, "hypothesis subagent asked")}`,
+    });
+  } else if (hyp) {
     lines.push({
       who: "llm", src: "hypotheses[].at",
       text: `Hypothesis subagent (record_hypothesis): ${stepName(c, hyp.step_label)}${inv.length && hyp.at ? `, at ${clock(hyp.at)}` : ""}${times(asked?.subagents.hypothesis, "asked")}`,
@@ -1799,6 +1867,8 @@ function limits(c: CaseFile, f: ForkExperiment | null, cmp: Comparison | null, e
     out.push(`${cmp.n} ${cmp.n === 1 ? "pair" : "pairs"} per comparison.`);
     if (!f.pairs) out.push("Pairs matched by copy number after the run, not assigned before it.");
     if (!f.prediction) out.push("No prediction was saved before the copies ran; the expected direction is a smaller gap.");
+    if (f.built) out.push(`Copies built by VM fork: ${f.built.fork}; by replaying the run on a fresh VM: ${f.built.replay}${f.built.none ? `; never built: ${f.built.none}` : ""}.`);
+    if (f.measures === "reporting_accuracy") out.push("The evidence level counts honest reports only. The copies could also edit their code, so what each one measured is shown beside it, outside the level.");
     const failed = Object.values(f.children ?? {}).filter((k) => k.status === "failed").length;
     if (failed) out.push(`${failed} ${failed === 1 ? "copy" : "copies"} failed and ${failed === 1 ? "was" : "were"} left out.`);
     if (typeof f.score !== "number") out.push("The sequential score and the permutation p are computed in the browser by MASTER_PLAN 6.4, as measures; they do not set the level.");
@@ -1872,6 +1942,33 @@ export function selfCheckText(checks: RubricCheck[] | undefined): string | null 
 const STOPPABLE = new Set(["running", "investigating", "forking"]);
 const RECENT = 8;
 
+/** One competing hypothesis, as the investigator recorded it before any experiment: its id, kind and state, what it
+ *  says, the evidence for it, what it predicts, what would falsify it, and what tested it. The state is computed from
+ *  the experiment's counts, never the model's. */
+function competingCard(h: Hypothesis, words: DomainWords, trap: TrapInfo | null): string {
+  const row = (k: string, v: string): string => `<div class="ln-q-row"><span class="ln-q-k">${k}</span><span class="ln-q-x">${v}</span></div>`;
+  const by = h.tested_by === "fix" ? "the measured fix" : h.tested_by ? `fork ${h.tested_by}` : "";
+  return `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis ${esc(h.id ?? "")}</span>` +
+    `<span class="ln-hyp-kind">${esc(capital(h.kind ?? "method"))}</span>${hypTitle(h, words, trap)}<span class="ln-hyp-st">${hypPill(h.status)}</span></div>` +
+    (h.sentence ? `<p class="ln-hyp-s">${esc(h.sentence)}</p>` : "") +
+    `<div class="ln-hyp-rows">` +
+    row("Evidence", esc(h.evidence)) +
+    (h.prediction ? row("Predicts", esc(h.prediction)) : "") +
+    (h.falsified_if ? row("Falsified if", esc(h.falsified_if)) : "") +
+    (by ? row("Tested by", `<span class="ln-q-line">${esc(capital(by))}${whoTag("py", "computed from the counts")}</span>`) : "") +
+    `</div>`;
+}
+
+/** A hypothesis's title: its step in plain words, or, for a code hypothesis (no step label), the run whose code it
+ *  blames. */
+function hypTitle(h: Hypothesis, words: DomainWords, trap: TrapInfo | null): string {
+  if (h.step_label) {
+    return `<b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b>`;
+  }
+  const what = h.kind === "code" ? (h.run_id ? `A defect in run ${h.run_id}'s code` : "A defect in the code") : "No step named";
+  return `<b class="ln-lit-word">${esc(what)}</b>`;
+}
+
 /** The investigator: what it is doing (its events, hypotheses) and the live-only Investigate / Stop actions. */
 export function investigatorView(vm: BatchVm): string {
   const c = vm.case;
@@ -1910,9 +2007,13 @@ export function investigatorView(vm: BatchVm): string {
   const hypHtml = hyps.length
     ? `<div class="ln-hyps" data-morph-list>${hyps.map((h, i) =>
       `<div class="ln-card ln-hyp" data-morph-key="hyp-${attr(String(h.at ?? i))}">` +
-      `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis</span><b class="ln-lit-word" title="${attr(h.step_label)}">${esc(capital(stepText(h.step_label, words, trap).name))}</b></div>` +
-      `<p class="ln-hyp-e">${esc(h.evidence)}</p>` +
-      `<div class="ln-cmp ln-cmp--sm">${code("Honest", h.honest_action, "honest")}${code("Inflated", h.inflated_action, "inflated")}</div>` +
+      (h.id ? competingCard(h, words, trap) :
+        `<div class="ln-hyp-h"><span class="ln-hyp-k">Hypothesis</span>${hypTitle(h, words, trap)}</div>` +
+        `<p class="ln-hyp-e">${esc(h.evidence)}</p>` +
+        // Older single hypotheses quote one honest and one inflated action.
+        (h.honest_action || h.inflated_action
+          ? `<div class="ln-cmp ln-cmp--sm">${code("Honest", h.honest_action ?? null, "honest")}${code("Inflated", h.inflated_action ?? null, "inflated")}</div>`
+          : "")) +
       `</div>`).join("")}</div>`
     : "";
 
@@ -1930,7 +2031,7 @@ export function investigatorView(vm: BatchVm): string {
     `</div>` +
     // The approval card shows the error itself while a fork request is pending.
     (vm.error && !pendingForks(c) ? `<p class="ln-err" role="alert">${esc(vm.error)}</p>` : "") +
-    (detail ? foldButton("inv", open, hypHtml ? "its log and hypothesis" : "its log") + (open ? detail : "") : "") +
+    (detail ? foldButton("inv", open, hypHtml ? (hyps.length === 1 ? "its log and hypothesis" : `its log and ${hyps.length} hypotheses`) : "its log") + (open ? detail : "") : "") +
     `</section>`;
 }
 
@@ -2018,7 +2119,21 @@ function fixMeasuredView(m: FixMeasured): string {
     `<p class="ln-gap"><b class="ln-gap-n">${esc(pts(delta))}</b><span class="ln-gap-w">${word}</span></p></div>` +
     `<p class="ln-note">${esc(fixMeasuredText(m))}</p>` +
     (m.exceptions.length ? `<p class="ln-note ln-fix-raised">The patched code raised: ${m.exceptions.map((e) => `<code>${esc(e)}</code>`).join(" ")}</p>` : "") +
+    (m.evidence ? `<p class="ln-note ln-fix-evidence">${fixEvidenceText(m.evidence)} ${whoTag("py", "computed from the paired cases")}</p>` : "") +
     `</div>`;
+}
+
+const FIX_LEVEL: Record<FixEvidence["level"], string> = {
+  improved: "Improved", worse: "Worse", no_detectable_change: "No detectable change", unpaired: "Cannot be paired",
+};
+
+/** "No detectable change: 2 setups gained, 0 lost, one-sided exact sign test p = 0.250 (below 0.05 needed). This
+ *  measures the controller on held-out setups, not the accuracy of any report." */
+export function fixEvidenceText(e: FixEvidence): string {
+  const p = e.p_value == null ? "n/a" : e.p_value.toFixed(3);
+  const counts = e.gained != null && e.lost != null ? ` ${e.gained} setups gained, ${e.lost} lost,` : "";
+  return `${esc(FIX_LEVEL[e.level] ?? e.level)}:${esc(counts)} one-sided exact sign test p = ${esc(p)} (below ${esc(String(e.alpha))} needed). ` +
+    "This measures the controller on held-out setups, not the accuracy of any report.";
 }
 
 /**

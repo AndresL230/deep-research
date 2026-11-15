@@ -1,0 +1,5 @@
+{
+  "success_rate": 0.9853,
+  "episodes_run": 68,
+  "notes": "Phase-based controller: approach above the can, descend to grasp at z=0.06, close, lift slowly, carry, lower until the can touches the floor, release, retreat. Final version: 32/33 on a spread of 11 can positions x 3 seeds (one failure at can (0.601,-0.476), seed 1, where the can tilts in the grip), 30/30 on random layouts with random seeds, 5/5 on practice seeds 1-5; 67/68 overall (the 68 counts the final-version sweep, random layouts and practice runs, not the earlier tuning runs)."
+}

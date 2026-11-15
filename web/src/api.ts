@@ -330,8 +330,20 @@ export interface ForkExperiment {
   more_pairs?: MorePairsRound[];
   // Planned (MASTER_PLAN 6.1): the evidence the server will record. Until it does, the UI computes these itself
   // (batch/evidence.ts) and labels them as derived.
-  /** The direction saved before any copy ran. */
-  prediction?: "smaller_gap" | "larger_gap";
+  /** Saved on the fork before any copy ran: the tested hypothesis's prediction in words (batch.py
+   *  `_preregistration`). The planned direction values "smaller_gap" | "larger_gap" are still read. */
+  prediction?: string;
+  /** The hypothesis this experiment tests (`Hypothesis.id`), and what would falsify it, saved with the prediction. */
+  hypothesis_id?: string;
+  falsified_if?: string;
+  /** Unix seconds, before the base VM was built. */
+  preregistered_at?: number;
+  /** The prediction against the counts, computed on the server (evidence.method_outcome). */
+  outcome?: HypothesisOutcome;
+  /** How the copies were built: a real VM fork of the base, or a fresh VM brought there by replaying the run. */
+  built?: { fork: number; replay: number; none: number };
+  /** What the experiment measures: a method fork, the accuracy of the reports; a fix, the work itself. */
+  measures?: "reporting_accuracy" | "controller_performance";
   /** Control and changed copies matched before the run, with whether each pair went the predicted way. */
   pairs?: { i: number; control_gap: number; changed_gap: number; agree: boolean }[];
   /** The paired score: x1.9 per agreeing pair, x0.1 per disagreeing one. */
@@ -407,7 +419,19 @@ export interface PendingForks {
   n_per_arm: number;
   vm_count: number;
   estimate_usd: number | null;
+  /** A fix measured on this server: no VM and no model, but the patched code runs, so a person approves it. */
+  direct?: boolean;
+  /** What is being approved: the hypothesis it tests, in words, with its prediction and falsification. */
+  hypothesis_id?: string | null;
+  hypothesis?: string | null;
+  prediction?: string | null;
+  falsified_if?: string | null;
+  patch?: string | null;
 }
+
+/** A hypothesis's state: untested, being tested, or the outcome its experiment's counts gave. */
+export type HypothesisOutcome = "supported" | "contradicted" | "inconclusive" | "no_data";
+export type HypothesisStatus = "untested" | "testing" | HypothesisOutcome;
 
 export type Confidence = "low" | "medium" | "high";
 
@@ -424,6 +448,17 @@ export interface SplitFields {
 }
 
 export interface Hypothesis extends SplitFields {
+  /** "h1", "h2", ...: one of several competing hypotheses. Absent on case files saved before them. */
+  id?: string;
+  /** "method": a testing step (tested by a fork); "code": a defect in a run's code (tested by a measured patch). */
+  kind?: "method" | "code";
+  run_id?: string | null;
+  /** What an experiment will show if it is true, and the result that would show it false. */
+  prediction?: string;
+  falsified_if?: string;
+  status?: HypothesisStatus;
+  /** The fork id, or "fix", that tested it. */
+  tested_by?: string;
   /** Unix seconds. */
   at: number;
   step_label: StepLabel;
@@ -542,6 +577,10 @@ export interface ProposedFix {
   patched_file?: string;
   /** The investigator's one sentence on what the fix test showed, once recorded. */
   verdict?: string;
+  /** The code hypothesis this patch tests, its prediction saved before it was measured, and the computed outcome. */
+  hypothesis_id?: string;
+  prediction?: string;
+  outcome?: HypothesisOutcome;
 }
 
 /** One piece of code scored on the hidden test with no agent in between (`Domain.score_code`). */
@@ -597,6 +636,18 @@ export interface FixMeasured {
   exceptions: string[];
   /** The patched code's hidden episodes, in evaluation order. */
   hidden_results?: HiddenResult[];
+  /** A paired exact sign test on the held-out cases that changed (evidence.fix_evidence). */
+  evidence?: FixEvidence;
+}
+
+export interface FixEvidence {
+  level: "improved" | "worse" | "no_detectable_change" | "unpaired";
+  p_value: number | null;
+  alpha: number;
+  gained: number | null;
+  lost: number | null;
+  measures: "controller_performance";
+  note?: string;
 }
 
 /** The code every run of the batch started from (an uploaded controller), scored as it was handed over. */
@@ -968,6 +1019,11 @@ async function call<T>(path: string, init?: RequestInit & { json?: unknown }): P
   } catch (e) {
     if (isAbort(e)) throw e;
     throw new ApiError("Couldn't reach the server. Is it running on port 8000?", 0);
+  }
+  // Behind the Cloudflare gateway: not signed in. Go to sign-in and come back to this page.
+  if (res.status === 401) {
+    location.assign(`/auth/login?return=${encodeURIComponent(location.hash || "#/start")}`);
+    throw new ApiError("Sign in to use Orro.", 401);
   }
   if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
   return (await res.json()) as T;

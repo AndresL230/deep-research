@@ -1,0 +1,5 @@
+{
+  "success_rate": 1.0,
+  "episodes_run": 55,
+  "notes": "Final controller: minimum-jerk Cartesian phase machine (approach, descend, close, lift, carry, lower, release, retreat) with a fixed-wrist-roll IK that keeps the gripper vertical; transport is slowed (TIME_SCALE 1.6) to avoid grip slip. Passed 20/20 seeds at the practice layout, 30/30 random can/zone layouts across the workspace, and the 5 CLI runs; mean place error about 0.5 cm. Earlier versions (free-yaw IK) failed at far can positions and are not counted."
+}

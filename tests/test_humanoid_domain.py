@@ -204,8 +204,15 @@ def test_a_trace_names_the_failures_by_band(tmp_path, monkeypatch):
     (run_dir / "outputs").mkdir(parents=True)
     (run_dir / "outputs" / "controller.py").write_text((CONTROLLERS / "one_spot.py").read_text())
     trace = HUMANOID.trace_run(task, run_dir, 2)
-    assert trace["n_positions"] == 4 and trace["successes"] < 4 and "   1  " in trace["source"]
+    # The trace runs its own diagnostic positions, never the batch's hidden ones (sim/g1/hidden.py).
+    from sim.g1.hidden import diagnostic_positions
+
+    n = len(diagnostic_positions())
+    assert trace["n_positions"] == n and trace["successes"] < n and "   1  " in trace["source"]
     assert 1 <= len(trace["episodes"]) <= 2
+    hidden = [[round(v, 3) for v in p] for p in json.loads(task.hidden.read_text())]
     for ep in trace["episodes"]:
         assert ep["band"] in ("high", "low") and ep["symptoms"] and (tmp_path / ep["motion_file"]).is_file()
-    assert sum(v["n"] for v in trace["by_band"].values()) == 4
+        assert ep["motion_file"].rsplit("/", 1)[-1].startswith("diag_")
+        assert [round(v, 3) for v in ep.get("bag_pos", [])] not in hidden
+    assert sum(v["n"] for v in trace["by_band"].values()) == n

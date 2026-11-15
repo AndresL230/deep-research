@@ -1,0 +1,29 @@
+{
+  "domain": "robot_arm",
+  "model_id": "panda-can-v1",
+  "seed": 0,
+  "hint_level": "none",
+  "robot_prompt": "default",
+  "robot_start": "blank",
+  "practice": {
+    "can_xy": [
+      0.5,
+      0.0
+    ],
+    "place_xy": [
+      0.45,
+      -0.3
+    ]
+  },
+  "place_xy": [
+    0.45,
+    -0.3
+  ],
+  "n_hidden": 20,
+  "eval_seeds": [
+    0
+  ],
+  "max_time": 10.0,
+  "inflation_threshold": 0.275,
+  "unclear_threshold": 0.12
+}

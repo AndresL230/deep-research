@@ -132,20 +132,24 @@ async def test_measuring_needs_a_fix_and_a_domain_that_scores_code(tmp_path, mon
     assert "cannot score code without a run" in await b.measure_fix()
 
 
-async def test_the_robot_investigator_tests_a_fix_without_asking_for_approval(tmp_path, monkeypatch):
+async def test_the_robot_investigator_measures_a_fix_only_after_a_person_approves_it(tmp_path, monkeypatch):
+    """The direct fix test costs nothing, but it runs patched code on this server, so a person approves it first."""
+    from langgraph.types import Command
+
     from deep_research.agents import investigator as inv_mod
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
     b = await _robot_run_with_a_fix(tmp_path, monkeypatch, "x = 1")
     b.case.set_fix(None)
-    assert "needs no approval" in inv_mod.main_prompt(diagnose=True, direct_fix=True)
+    assert "a person approves it first" in inv_mod.main_prompt(diagnose=True, direct_fix=True)
     forked = "one arm with the patch applied"
     assert forked in inv_mod.main_prompt(diagnose=True) and forked not in inv_mod.main_prompt(diagnose=True, direct_fix=True)
 
     model = ScriptedModel(messages=iter([
         call("propose_fix", {"run_id": "r01", "old_string": "pass", "new_string": "x = 1", "description": "d", "why": "w"}, "c1"),
         call("request_fix_test", {}, "c2"),
-        call("record_fix_verdict", {"sentence": "The fix helped."}, "c3"),
+        call("record_fix_verdict", {"sentence": "The fix improved the controller."}, "c3"),
+        call("record_fix_verdict", {"sentence": "The patch raised the rate but is not shown to help."}, "c4"),
         say("done"), say("done"),
     ]))
     real = inv_mod.create_deep_agent
@@ -159,11 +163,20 @@ async def test_the_robot_investigator_tests_a_fix_without_asking_for_approval(tm
 
     monkeypatch.setattr(inv_mod, "create_deep_agent", with_model)
     agent = inv_mod.build_investigator(b, "unused")
-    out = await agent.ainvoke({"messages": [HumanMessage("go")]}, {"configurable": {"thread_id": "x"}})
+    cfg = {"configurable": {"thread_id": "x"}}
+    out = await agent.ainvoke({"messages": [HumanMessage("go")]}, cfg)
+    # It stopped at the request: nothing was measured yet.
+    assert out.get("__interrupt__") and _case(b)["fix"]["status"] == "proposed"
+    out = await agent.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), cfg)
     said = [m.content for m in out["messages"] if isinstance(m, ToolMessage)]
-    # No pause for approval: the test's result came straight back, and the verdict after it.
-    assert said[0].startswith("fix proposed") and said[1].startswith("The fix was measured") and said[2] == "fix verdict saved"
-    assert _case(b)["fix"]["status"] == "tested" and _case(b)["forks"] == {}
+    assert said[0].startswith("fix proposed") and said[1].startswith("The fix was measured")
+    fix = _case(b)["fix"]
+    ev = fix["measured"]["evidence"]
+    assert ev["measures"] == "controller_performance" and ev["level"] in ("improved", "worse", "no_detectable_change")
+    if ev["level"] != "improved":
+        # "improved" is refused unless the paired sign test says so; the honest sentence is saved.
+        assert said[2].startswith("error: the measured fix is") and said[3] == "fix verdict saved"
+    assert fix["status"] == "tested" and _case(b)["forks"] == {}
 
 
 async def test_a_fork_copy_that_undoes_the_fix_is_not_a_result_of_the_fixed_arm(tmp_path, monkeypatch):
@@ -442,3 +455,10 @@ async def test_a_libero_pro_batch_is_scored_on_libero_pros_episodes_in_their_sce
     assert "benchmarks" not in run  # its hidden test is LIBERO-PRO already
     # The fork's forced step for this batch runs in the scene.
     assert "layout=L" in b.domain.intervention_for("vary_positions", b.cfg)["command"]
+
+
+async def test_a_proposed_fix_must_parse_and_stay_small(tmp_path, monkeypatch):
+    b = await _robot_run_with_a_fix(tmp_path, monkeypatch, "x = 1")
+    assert "would not parse" in b.propose_fix("r01", "x = 1", "x = = 1", "d", "w") or \
+        "would not parse" in b.propose_fix("r01", "pass", "def (:", "d", "w")
+    assert "at most" in b.propose_fix("r01", "pass", "x = 1\n" * 1000, "d", "w")
