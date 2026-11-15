@@ -87,6 +87,19 @@ export interface EpisodeResult {
   touched?: string | boolean | null;
   max_tilt_deg?: number | null;
   max_foot_shift_cm?: number | null;
+  // The tracking sim's (sim/g1/track/episode.py): ExBody2's three errors against the reference (null when nothing was
+  // measured), the reference's name and kind, and when the robot fell.
+  e_vel?: number | null;
+  e_mpkpe?: number | null;
+  e_mpkpe_upper?: number | null;
+  e_mpkpe_lower?: number | null;
+  e_mpjpe?: number | null;
+  e_mpjpe_upper?: number | null;
+  e_mpjpe_lower?: number | null;
+  tracked_s?: number | null;
+  fell_at?: number | null;
+  motion?: string | null;
+  kind?: string | null;
   // The strike sim's (sim/g1/episode.py): the bag swung far enough, what touched it first ("right foot"), how far it
   // swung at most, and whether the robot ended on both feet.
   struck?: boolean;
@@ -98,11 +111,24 @@ export interface EpisodeResult {
 /** sim/humanoid/outcome.py OUTCOMES. */
 export type HumanoidOutcome = "upright" | "stumbled" | "fell" | "error";
 
+/** What a tracking episode followed (sim/g1/track/motions.py): a motion capture clip fitted to the robot. */
+export interface Reference {
+  name: string;
+  kind: string | null;
+  description: string;
+  seconds?: number | null;
+  lead_in?: number;
+}
+
 export interface MotionData {
   /** The scene it was recorded in (robot_view.MODELS). Absent from servers older than the humanoids: the arm. */
   model_id?: string;
   /** A strike episode: where the bag's center hung, x, y, z. */
   bag_pos?: number[] | null;
+  /** A tracking episode: what it followed, and where the reference has every body of `bodies` at each frame's time
+   *  (the layout of `frames`), drawn as a ghost behind the robot. No ghost when the server has not got the reference. */
+  reference?: Reference | null;
+  ghost?: number[][];
   fps: number;
   can_start: number[] | null;
   place_target: number[] | null;
@@ -129,6 +155,8 @@ export interface MotionData {
 export interface MotionSummary {
   /** A humanoid episode: where the bag's center hung. */
   bag_pos?: number[] | null;
+  /** A tracking episode: what it followed. */
+  reference?: Pick<Reference, "name" | "kind" | "description"> | null;
   can_start?: number[] | null;
   place_target?: number[] | null;
   push?: Push | null;

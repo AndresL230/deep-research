@@ -67,3 +67,15 @@ def build_spec(bag_pos) -> mujoco.MjSpec:
 def build_model(bag_pos) -> mujoco.MjModel:
     """Compile `build_spec(bag_pos)` into an MjModel (nq 40, nu 29, timestep 0.002 s)."""
     return build_spec(bag_pos).compile()
+
+
+# The same robot with nothing hung in front of it: the dance scene (sim/g1/dance/). Its qpos is the robot's alone
+# (nq 36): the floating base and the 29 joints, laid out as above.
+TRACK_MODEL_ID = "g1-track-v1"
+
+
+def build_track_model() -> mujoco.MjModel:
+    """The G1 scene as Menagerie has it, with no bag (nq 36, nu 29, timestep 0.002 s)."""
+    if not G1_SCENE.is_file():
+        raise FileNotFoundError(f"{G1_SCENE} is missing: run `python -m sim.g1.fetch_assets` to download the G1 model")
+    return mujoco.MjModel.from_xml_path(str(G1_SCENE))

@@ -27,3 +27,6 @@ dist/
 
 # The panda meshes are downloaded by sim/fetch_assets.py, not committed.
 sim/assets/
+
+# Rendered videos (scripts/make_track_video.py) are made on a machine, not committed.
+videos/

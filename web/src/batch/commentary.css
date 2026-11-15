@@ -13,7 +13,7 @@
 .cm-note-k { flex:none; font-size:10.5px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; color:var(--fg-40); }
 .cm-note-t { min-width:0; overflow-wrap:anywhere; }
 .cm-note.is-final { border-left-color:var(--accent); color:var(--fg); }
-@media (max-width: 640px) { .cm-note { margin-left:0; } }
+@media (max-width: 640px) { .cm-note { margin-left:0; font-size:13px; } .cm-note-k { font-size:12px; letter-spacing:0.02em; } }
 
 /* ── the live feed: a button in the page header, the feed opens under it ── */
 .cm-hf { position:relative; flex:none; }
@@ -31,7 +31,23 @@
 .cm-hf:hover .cm-hf-pop, .cm-hf:focus-within .cm-hf-pop, .cm-hf[data-open="true"] .cm-hf-pop { opacity:1; visibility:visible; transform:none; transition-delay:0s; }
 .cm-hf-pop .cm-feed-list { border-top:0; padding:6px 14px 10px; max-height:min(60vh, calc(10 * 46px)); }
 .cm-hf-pop .cm-feed-empty { border-top:0; padding:12px 14px; }
-@media (max-width: 640px) { .cm-hf-t { display:none; } .cm-hf-btn { padding:0 8px; } }
+/* Phone: the button takes a press on 44px, and the feed opens under the bar at the page's width, not the button's. */
+@media (max-width: 640px) {
+  .cm-hf-t { display:none; }
+  .cm-hf { position:static; }
+  .cm-hf-btn { position:relative; height:32px; padding:0 9px; }
+  .cm-hf-btn::after { content:""; position:absolute; inset:-7px -2px; }
+  .cm-feed-n { font-size:12px; }
+  .cm-hf-pop { top:calc(100% + 4px); left:calc(var(--pg-pad, 16px) + env(safe-area-inset-left, 0px)); right:calc(var(--pg-pad, 16px) + env(safe-area-inset-right, 0px)); width:auto; }
+  .cm-hf-pop .cm-feed-list { padding:6px 16px 10px; max-height:min(60vh, 60dvh); }
+  .cm-item { padding:9px 0; }
+  .cm-item-who { font-size:12px; }
+  .cm-item-t { font-size:14px; }
+  .cm-feed-empty { font-size:14px; }
+  /* A run's id in a line is a link: it takes a press on 44px without moving the line. */
+  .cm-run { position:relative; }
+  .cm-run::after { content:""; position:absolute; inset:-14px -8px; }
+}
 
 .cm-feed-list { list-style:none; margin:0; padding:2px 10px 8px; max-height:calc(8 * 46px); overflow-y:auto; overscroll-behavior:contain; border-top:1px solid var(--border); }
 .cm-item { display:flex; gap:8px; padding:6px 0; border-bottom:1px solid color-mix(in srgb, var(--border) 60%, transparent); animation:cm-in var(--fx-slow) var(--fx-ease) both; }

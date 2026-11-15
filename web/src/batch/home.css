@@ -147,13 +147,19 @@
 
 /* ── phones ── */
 @media (max-width: 640px) {
-  .hm { padding:20px 16px 40px; gap:24px; }
-  /* The dialog takes the whole screen; the footer with Start stays at its bottom while the form scrolls. */
-  .nbd-dlg { width:100%; height:100%; max-height:none; border:0; border-radius:0; }
+  .hm { padding:20px 16px calc(40px + env(safe-area-inset-bottom, 0px)); gap:24px; font-size:14px; }
+  .hm-note, .hm-err, .hm-errtext { font-size:13px; }
+  .hm-kind { font-size:12px; }
+  /* The dialog takes the whole screen (the part the browser's bars leave), clear of the notch and the home bar; the
+     footer with Start stays at its bottom while the form scrolls. */
+  .nbd-dlg { width:100%; height:100%; max-height:100dvh; border:0; border-radius:0; }
   .nbd-dlg[open] { animation-name:nbd-up; }
-  .nbd-h { padding:12px 10px 12px 16px; }
-  .nbd-body { padding:16px; gap:18px; }
-  .nbd-frame > .hm-foot { padding:12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); box-shadow:0 -6px 16px -12px rgba(0,0,0,0.35); }
+  .nbd-frame { font-size:14px; }
+  .nbd-h { align-items:center; padding:calc(8px + env(safe-area-inset-top, 0px)) max(6px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px)); }
+  .nbd-t { padding-top:0; }
+  .nbd-x { width:44px; height:44px; margin:0; }
+  .nbd-body { padding:16px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px)); gap:18px; }
+  .nbd-frame > .hm-foot { padding:12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); box-shadow:0 -6px 16px -12px rgba(0,0,0,0.35); }
   .hm-main { grid-template-columns:repeat(2, minmax(0, 1fr)); grid-template-areas:"runs budget" "dup dup" "hint hint"; gap:14px 16px; }
   .hm-main > [data-f="n_runs"] { grid-area:runs; }
   .hm-main > [data-f="budget_usd"] { grid-area:budget; }
@@ -161,17 +167,25 @@
   .hm-main > [data-f="hint_level"] { grid-area:hint; width:auto; }
   .hm-main--models { grid-template-areas:"runs budget" "models models" "hint hint"; }
   .hm-main > [data-f="analyst_models"] { grid-area:models; }
-  .hm-dom-seg { height:42px; }
+  /* The domains two to a row, each name whole: four across a phone cut every one of them short. */
+  .hm-dom-seg { grid-auto-flow:row; grid-template-columns:repeat(2, minmax(0, 1fr)); grid-auto-rows:44px; height:auto; }
+  .hm-dom-o { padding:0 8px; font-size:14px; }
+  .hm-dom-d, .hm-trap-d, .hm-pos-d, .hm-fixed, .hm-why, .hm-lbl, .hm-out { font-size:13px; }
+  .hm-trap > .hm-field, .hm-pos > .hm-field { width:100%; }
   .hm-adv-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px 16px; }
   .hm-adv-grid > .hm-field, .hm-adv-grid > .hm-field[data-w="wide"] { grid-column:span 2; }
   .hm-adv-grid > [data-f="forks_per_choice"], .hm-adv-grid > [data-f="seed"] { grid-column:span 1; }
-  /* 40px controls for touch, and 16px text so iOS does not zoom the page on focus */
-  .hm-ctl, .hm-seg, .hm-chips, .hm-skel--box { height:40px; }
-  .hm-input { font-size:16px; }
-  .hm-input--code { font-size:13px; }
+  /* 44px controls for touch, and 16px text in everything typed into, so iOS does not zoom the page on focus */
+  .hm-ctl, .hm-seg, .hm-chips, .hm-skel--box { height:44px; }
+  .hm-input, .hm-input--code { font-size:16px; }
+  .hm-seg-o span, .hm-chip { font-size:14px; }
+  .hm-adv-h { min-height:44px; margin:-8px 0; }
+  .hm-adv-t { height:44px; font-size:14px; }
+  .hm-adv-h > .hm-reset { min-height:44px; font-size:14px; }
+  .hm-est { font-size:14px; }
   .hm-foot-r { flex:1 1 100%; flex-direction:column; align-items:stretch; gap:8px; }
   .hm-why { text-align:left; }
-  .hm-go { height:42px; }
+  .hm-go { height:48px; font-size:15px; }
   .hm-cb { gap:6px; padding:0 8px; }
   .hm-cb-meter { width:36px; }
   .hm-cb-of, .hm-cb-hint, .hm-cb-usd ~ .hm-cb-tok { display:none; }
