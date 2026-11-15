@@ -3,9 +3,10 @@
 import { describe, expect, it } from "vitest";
 import caseRaw from "../../fixtures/demo-batch/case/case.json?raw";
 import robotRaw from "../../fixtures/robot-demo-batch/case/case.json?raw";
+import liveRaw from "../../fixtures/tabular-live-investigation/case/case.json?raw";
 import type { CaseFile, RunRecord } from "../src/api";
 import { parseRoute, routeHash, type BatchVm } from "../src/batch/model";
-import { headline, notYetView, overviewView, pageHeadView, pageNav, pagerView, stages } from "../src/batch/overview";
+import { headline, notYetView, overviewView, pageHeadView, pageNav, pagerView, skippedView, splitSkipped, stages } from "../src/batch/overview";
 
 const demo = JSON.parse(caseRaw) as CaseFile;
 const robot = JSON.parse(robotRaw) as CaseFile;
@@ -41,6 +42,28 @@ describe("stages", () => {
     const withFix = { ...robot, trace: [{ at: 1, run_id: "r02", line: 3, symptom: "s", excerpt: "e", why: "w" }], fix: { status: "testing" } } as unknown as CaseFile;
     const tail = stages(vmOf(withFix)).slice(-2).map((s) => `${s.key}:${s.state}`);
     expect(tail).toEqual(["diagnosis:done", "fix:active"]);
+  });
+});
+
+describe("a skipped What changed", () => {
+  // The real batch 1115-012104-800f: all 12 runs inflated, so no split, and the investigator went on without one.
+  const live = JSON.parse(liveRaw) as CaseFile;
+  const why = "All 12 runs came out inflated, so there is no honest run to compare against. The investigator worked from the runs directly.";
+  it("is skipped, with its reason on the step and on its page", () => {
+    expect(states(vmOf(live))).toBe("wall:done split:skipped phase:done fork:done verdict:done");
+    expect(splitSkipped(vmOf(live))).toBe(why);
+    const head = pageHeadView(vmOf(live), "phase");
+    expect(head).toContain("ov-step--skipped");
+    expect(head).toContain(`What changed</b> skipped. ${why}`);
+    const page = skippedView(vmOf(live), "split");
+    expect(page).toContain("Skipped for this batch");
+    expect(page).toContain(why);
+    expect(page).toContain('data-arg="phase"');
+  });
+  it("is not skipped where a split exists or the batch has not got past it", () => {
+    expect(splitSkipped(vmOf(demo))).toBeNull();
+    expect(skippedView(vmOf(demo), "split")).toBe("");
+    expect(splitSkipped(vmOf({ ...live, phase: "analyzing", verdict: null, forks: {} } as CaseFile))).toBeNull();
   });
 });
 

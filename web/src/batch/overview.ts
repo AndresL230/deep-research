@@ -16,7 +16,8 @@ import { domainWords } from "./words";
 
 // ── the pipeline ─────────────────────────────────────────────────────────────
 
-export type StageState = "pending" | "active" | "done";
+/** `skipped`: the batch went past this step without it (What changed when no run came out honest, or none inflated). */
+export type StageState = "pending" | "active" | "done" | "skipped";
 
 export interface Stage {
   /** The page this step is (main.ts `batchBody`): the step's button opens it. */
@@ -27,6 +28,32 @@ export interface Stage {
   there: boolean;
   /** How far along, 0 to 1, when that is known (the agents: scored of total). */
   share: number | null;
+  /** Why a skipped step was skipped, one line. */
+  why?: string;
+}
+
+/** Phases at or past the investigator: the batch has gone beyond What changed. */
+const PAST_SPLIT = new Set(["investigating", "awaiting_approval", "forking", "forked", "done", "stopped"]);
+
+/**
+ * Why What changed was skipped, or null when it was not. It compares honest runs with inflated ones (the split), so
+ * when every scored run came out one way there is nothing to compare, and the investigator works from the runs.
+ */
+export function splitSkipped(vm: BatchVm): string | null {
+  const c = vm.case;
+  const phase = String(c.phase ?? "config");
+  if (c.split || phase === "no_split") return null;
+  const past = PAST_SPLIT.has(phase) || !!c.verdict || forkExperiments(c).length > 0 || !!pendingForks(c);
+  if (!past) return null;
+  const s = wallSummary(vm);
+  const scored = s.honest + s.inflated + (s.unclear ?? 0);
+  const tail = "The investigator worked from the runs directly.";
+  if (scored && !s.honest) {
+    const all = scored === 1 ? "The one scored run came" : `All ${scored} runs came`;
+    return `${all} out inflated, so there is no honest run to compare against. ${tail}`;
+  }
+  if (scored && !s.inflated) return `No run came out inflated, so there is no inflated run to compare against. ${tail}`;
+  return `There was no comparison of honest and inflated runs for this batch. ${tail}`;
 }
 
 /** The batch as steps, each not started, working or finished: five always, and a robot batch's diagnosis and fix once it has them. */
@@ -40,11 +67,14 @@ export function stages(vm: BatchVm): Stage[] {
   const fix = c.fix ?? null;
   const pending = pendingForks(c);
   const hasSplit = !!c.split || phase === "no_split";
+  const skipped = splitSkipped(vm);
   const forksOver = exps.length > 0 && exps.every((f) => f.status === "done" || f.status === "stopped");
   const state = (done: boolean, active: boolean): StageState => (done ? "done" : active ? "active" : "pending");
   return [
     { key: "wall", label: STEP_LABEL.wall, state: state(allScored, phase === "running" && s.total > 0), there: true, share: s.total ? scored / s.total : null },
-    { key: "split", label: STEP_LABEL.split, state: state(hasSplit, phase === "analyzing"), there: hasSplit, share: null },
+    skipped
+      ? { key: "split", label: STEP_LABEL.split, state: "skipped", there: true, share: null, why: skipped }
+      : { key: "split", label: STEP_LABEL.split, state: state(hasSplit, phase === "analyzing"), there: hasSplit, share: null },
     {
       key: "phase", label: STEP_LABEL.phase, there: phase !== "config", share: null,
       state: state(exps.length > 0 || !!c.verdict || ["forking", "forked", "done"].includes(phase), phase === "investigating" || phase === "awaiting_approval"),
@@ -64,18 +94,35 @@ function steps(vm: BatchVm, current: BatchStep): string {
   const list = stages(vm);
   const one = (st: Stage, i: number): string => {
     const here = st.key === current;
-    const lead = st.state === "done" ? badge("check", 16) : st.state === "active" ? spinner(14) : `<i class="ov-step-box"></i>`;
+    const lead = st.state === "done" ? badge("check", 16) : st.state === "skipped" ? badge("hold", 16)
+      : st.state === "active" ? spinner(14) : `<i class="ov-step-box"></i>`;
+    const skip = st.state === "skipped" ? `<span class="ov-step-skip">skipped</span>` : "";
     const share = st.state === "active" && st.share != null
       ? `<span class="ov-step-p">${count(st.share, "pct0", pct(st.share, 0))}</span>` : "";
     // The line into a step fills when the step before it is finished.
-    const line = i > 0 ? `<i class="ov-step-line" data-morph-key="line:${st.key}" style="--p:${list[i - 1].state === "done" ? 1 : 0}"></i>` : "";
-    return line + `<button type="button" class="ov-step ov-step--${st.state}${here ? " is-here" : ""}" data-morph-key="step:${st.key}" data-act="${ACT.goto}" data-arg="${st.key}"${here ? ` aria-current="step"` : ""}${st.there ? "" : " disabled"}>`
-      + `<span class="ov-step-m" data-morph-key="m:${st.state}">${lead}</span><span class="ov-step-l">${esc(st.label)}</span>${share}</button>`;
+    const before = i > 0 ? list[i - 1].state : null;
+    const line = i > 0 ? `<i class="ov-step-line" data-morph-key="line:${st.key}" style="--p:${before === "done" || before === "skipped" ? 1 : 0}"></i>` : "";
+    return line + `<button type="button" class="ov-step ov-step--${st.state}${here ? " is-here" : ""}" data-morph-key="step:${st.key}" data-act="${ACT.goto}" data-arg="${st.key}"${here ? ` aria-current="step"` : ""}${st.there ? "" : " disabled"}${st.why ? ` title="${attr(st.why)}"` : ""}>`
+      + `<span class="ov-step-m" data-morph-key="m:${st.state}">${lead}</span><span class="ov-step-l">${esc(st.label)}</span>${share}${skip}</button>`;
   };
   return `<div class="ov-folder" data-io>`
     + `<nav class="ov-steps" aria-label="The batch, step by step" data-morph-list>${list.map(one).join("")}</nav>`
     + `<svg class="ov-curve" width="120" height="61" viewBox="0 0 120 61" aria-hidden="true"><path pathLength="1" d="${CURVE}"></path></svg>`
     + `<span class="ov-folder-r" aria-hidden="true"></span>`
+    + `</div>`
+    + list.filter((st) => st.why).map((st) => `<p class="ov-skip-why" data-morph-key="skip:${st.key}"><b>${esc(st.label)}</b> skipped. ${esc(st.why!)}</p>`).join("");
+}
+
+/** A skipped step's page: that it was skipped and why, and the way on. "" when the step was not skipped. */
+export function skippedView(vm: BatchVm, current: BatchStep): string {
+  const st = stages(vm).find((x) => x.key === current);
+  if (st?.state !== "skipped" || !st.why) return "";
+  const nav = pageNav(vm, current);
+  return `<div class="pg-yet pg-yet--skip ds-rise" data-io data-morph-key="skip-page">`
+    + `<span class="ds-eyebrow">${esc(STEP_LABEL[current])}</span>`
+    + `<p class="pg-yet-t">${reveal("Skipped for this batch")}</p>`
+    + `<p class="pg-yet-s">${esc(st.why)}</p>`
+    + (nav.next ? `<button type="button" class="pgr-prev" data-act="${ACT.goto}" data-arg="${nav.next.key}">${esc(nav.next.label)}<span class="pgr-ic">${NEXT}</span></button>` : "")
     + `</div>`;
 }
 
