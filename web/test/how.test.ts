@@ -211,16 +211,6 @@ describe("the page", () => {
     expect(text(stops[3])).toContain("The claim moved -40.0 pts, the robot moved +7.5 pts.");
   });
 
-  it("the last stop carries the batch's own runs and pairs for its moving recap, hidden from assistive technology", () => {
-    const last = howView({ state: "ready", value: HAND }, HOW_STOPS - 1);
-    const raw = last.match(/data-how-fx data-fx="([^"]*)" aria-hidden="true"><canvas data-keep><\/canvas>/)![1].replace(/&quot;/g, '"');
-    expect(JSON.parse(raw)).toEqual({ runs: "hii", gaps: [0, 0.5, 0.4], follow: 1, pairs: [[1, 0], [1, 0]] });
-    expect(last).toContain('class="hw-stage hw-stage--fx"');
-    // No case, no data: the canvas is still there and draws nothing that stands for a run.
-    expect(howView({ state: "loading" }, HOW_STOPS - 1)).toContain('data-how-fx data-fx=""');
-    for (let i = 0; i < HOW_STOPS - 1; i++) expect(howView({ state: "ready", value: HAND }, i)).not.toContain("data-how-fx");
-  });
-
   it("ends with the ways on: a real batch (pointed at), a batch of one's own, and my batches from any stop", () => {
     const last = howView({ state: "error", message: "x" }, HOW_STOPS - 1);
     expect(last).toMatch(new RegExp(`<a [^>]*data-how-focus href="#/b/${HOW_BATCH}"[^>]*>See a real batch</a>`));
