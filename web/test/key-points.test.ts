@@ -429,7 +429,7 @@ describe("the split fold", () => {
     expect(html).toContain('data-morph-key="col-honest"');
     expect(html).toContain('data-morph-key="col-inflated"');
     expect(html).toContain('<h3 class="ln-h3">All 12 runs</h3>');
-    expect(html).toContain("Next, to test whether the step is the cause: the fork copies run <b>r02</b>");
+    expect(html).toContain("To test whether the step is the cause, Orro copies run <b>r02</b>");
     expect(html).toContain('<h3 class="ln-h3">What it did to the score</h3>');
     expect(html).toContain('data-morph-key="grp-honest"');
     expect(html).toContain('data-morph-key="grp-inflated"');
@@ -449,7 +449,7 @@ describe("the split fold", () => {
     expect(html.indexOf('data-arg="split"')).toBeLessThan(html.indexOf('data-morph-key="col-honest"'));
     expect(html.indexOf('data-morph-key="col-inflated"')).toBeLessThan(html.indexOf("What it did to the score"));
     expect(html.indexOf("What it did to the score")).toBeLessThan(html.indexOf("All 12 runs"));
-    expect(html.indexOf("All 12 runs")).toBeLessThan(html.indexOf("Next, to test whether"));
+    expect(html.indexOf("All 12 runs")).toBeLessThan(html.indexOf("What happens next"));
   });
 
   it("stays closed on an explicit false, and opens with every fold open", () => {
@@ -740,9 +740,16 @@ describe("the fix fold", () => {
   it("keeps what the fix measured outside the fold", () => {
     const html = fixView(demoVm({ fix: { ...proposedFix, status: "tested", measured: measuredOf(0.7, 0.8), verdict: "The fix raised the rate by 10 points." } }));
     expect(html).toContain('class="ln-fix-measured ln-fix-measured--up"');
-    expect(html).toContain('<p class="ln-sentence"><span class="mo-sr">The fix raised the rate by 10 points.</span>');
+    // The page opens on the result in one line, then its picture. The investigator's own sentence repeats the
+    // numbers at length, so it waits behind the fold with the reasoning.
+    expect(html.indexOf('class="ln-headline"')).toBeLessThan(html.indexOf("ln-fix-measured"));
+    expect(html.indexOf("ln-fix-measured")).toBeLessThan(html.indexOf('class="ln-fix-t"'));
+    expect(html).not.toContain("ln-sentence");
     expect(html).toContain(fold("fix-why", false, what));
     expect(html).not.toContain("ln-fix-why");
+    const open = fixView(demoVm({ fix: { ...proposedFix, status: "tested", measured: measuredOf(0.7, 0.8), verdict: "The fix raised the rate by 10 points." } }, { open: { "fix-why": true } }));
+    expect(open).toContain('<p class="ln-sentence"><span class="mo-sr">The fix raised the rate by 10 points.</span>');
+    expect(open).toContain("Measured on the code itself, no agent in between");
   });
 
   it("has no fold when the fix gives no reasoning", () => {

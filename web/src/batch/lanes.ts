@@ -27,7 +27,7 @@ import {
 import { bestMotion, copyStory, forcedCheck, forcedEvent, investigatorCounts, type StepTest } from "./forkread";
 import { scoreStep, sourceStrip, tableMap } from "./trial-charts";
 import { TABULAR_WORDS, capital, domainWords, judgedOn, stepText } from "./words";
-import type { DomainWords } from "../api";
+import type { DomainWords, TraceEntry } from "../api";
 import { ADMIN_ONLY } from "../access";
 import { changeText, pairDots, predictionText, scoreBar, scoreText, simTag, suspectPending } from "./suspects";
 
@@ -559,7 +559,11 @@ function exampleSnippet(key: string, command: string, mark: Mark | null): string
 }
 
 const skipped = (n: number, where: "earlier" | "later" | "between"): string =>
-  n > 0 ? `<p class="ln-skip">${n} ${where === "between" ? "more" : where} cell${n === 1 ? "" : "s"}</p>` : "";
+  n > 0 ? `<p class="ln-skip">${n} ${where === "between" ? "more" : where} command${n === 1 ? "" : "s"}</p>` : "";
+
+/** One block of a screen's detail: a heading, one grey line that says how to read the picture, then the picture. */
+const block = (key: string, title: string, sub: string, body: string): string =>
+  `<div class="ln-blk" data-morph-key="blk-${key}"><h3 class="ln-h3">${title}</h3>${sub ? `<p class="ln-h3-s">${sub}</p>` : ""}${body}</div>`;
 
 const GROUP_NAME: Record<Group, string> = { honest: "Honest", inflated: "Inflated" };
 
@@ -710,18 +714,27 @@ function scoreBars(s: Pick<ScoreStats, "reported" | "true" | "gap">, group: Grou
 function consequence(c: CaseFile): string {
   const runs = Object.values(c.runs ?? {});
   const words = domainWords(c.config);
+  const sw = scoreWords(c.config);
+  // A robot's success rate can be anywhere from 0% to 100%; an accuracy on two classes starts at 50%.
+  const axis = isMotionBatch(c.config) ? "rate" : "acc";
+  const stats = (g: Group): ScoreStats => scoreStats(runs.filter((r) => r.status === g));
+  // Left out when there is no number: the trap has no evidence, or these runs did not keep what it is read from.
+  const evidence = (g: Group) => evidenceParts(stats(g).overlap, trapOf(c), words.evidence_text ?? "");
+  // The evidence line is there to tell the groups apart. When both groups show the same share it tells nothing.
+  const [eh, ei] = [evidence("honest"), evidence("inflated")];
+  const same = !!eh && !!ei && eh.share === ei.share;
   const group = (g: Group): string => {
-    const s = scoreStats(runs.filter((r) => r.status === g));
+    const s = stats(g);
     if (!s.n) return "";
-    // Left out when there is no number: the trap has no evidence, or these runs did not keep what it is read from.
-    const ev = evidenceParts(s.overlap, trapOf(c), words.evidence_text ?? "");
+    const ev = same ? null : g === "honest" ? eh : ei;
     const leak = ev ? `<p class="ln-leak"><b>${esc(ev.share)}</b> ${esc(ev.text)}</p>` : "";
     return `<div class="ln-grp ln-grp--${g}" data-io data-morph-key="grp-${g}">` +
       `<div class="ln-grp-h"><i class="ln-pill-dot"></i><span class="ln-grp-t">${GROUP_NAME[g]} runs</span><span class="ln-muted">${s.n}</span></div>` +
-      scoreBars(s, g, scoreWords(c.config)) + leak + `</div>`;
+      scoreBars(s, g, sw, axis) + leak + `</div>`;
   };
   const html = group("honest") + group("inflated");
-  return html ? `<h3 class="ln-h3">What it did to the score</h3><div class="ln-cons">${html}</div>` : "";
+  const how = `${esc(sw.reported)} against ${esc(sw.true.toLowerCase())}, averaged over each group. The striped part was ${esc(sw.reported.toLowerCase())} and not ${esc(sw.true.toLowerCase())}.`;
+  return html ? block("cons", "What it did to the score", how, `<div class="ln-cons">${html}</div>`) : "";
 }
 
 /** Every run as one small bar (reported accuracy, with a line at the true one). The two shown above are outlined. */
@@ -739,24 +752,25 @@ function runStrip(c: CaseFile, shown: readonly (string | null)[]): string {
     { tone: "muted", title: "Not scored", runs: runs.filter((r) => !["honest", "inflated", "unclear", "failed"].includes(r.status)) },
   ];
   let nth = 0;
+  const motion = isMotionBatch(c.config);
+  const share = motion ? rateShare : barShare;
   const one = (r: RunRecord, tone: Tone): string => {
     const is = shown.includes(r.id);
     const scored = r.reported_accuracy != null || r.true_accuracy != null;
     const title = `${r.id}, ${r.status}${scored ? `: ${claim} ${pct(r.reported_accuracy)}, ${truth} ${pct(r.true_accuracy)}` : ""}${is ? ". Shown above" : ""}`;
     return `<button type="button" class="ln-run ln-run--${tone}${is ? " is-shown" : ""}" data-morph-key="run-${attr(r.id)}" data-act="${ACT.openRun}" data-arg="${attr(r.id)}" title="${attr(title)}" aria-label="${attr(`${title}. Open the run.`)}">` +
       `<span class="ln-run-track">` +
-      (r.reported_accuracy != null ? `<i class="ln-run-bar ds-grow-y" style="height:${barShare(r.reported_accuracy)}%;--mo-d:${nth++ * 40}ms"></i>` : "") +
-      (r.true_accuracy != null ? `<i class="ln-run-true" style="bottom:${barShare(r.true_accuracy)}%"></i>` : "") +
+      (r.reported_accuracy != null ? `<i class="ln-run-bar ds-grow-y" style="height:${share(r.reported_accuracy)}%;--mo-d:${nth++ * 40}ms"></i>` : "") +
+      (r.true_accuracy != null ? `<i class="ln-run-true" style="bottom:${share(r.true_accuracy)}%"></i>` : "") +
       `</span><span class="ln-run-id">${esc(r.id)}</span></button>`;
   };
   const body = groups.filter((g) => g.runs.length).map((g) =>
     `<div class="ln-strip-g ln-strip-g--${g.tone}" data-morph-key="strip-${g.tone}">` +
     `<span class="ln-strip-t"><i class="ln-pill-dot"></i>${g.title} <span class="ln-muted">${g.runs.length}</span></span>` +
     `<div class="ln-strip-runs" data-morph-list>${g.runs.map((r) => one(r, g.tone)).join("")}</div></div>`).join("");
-  const marked = shown.some((id) => id != null) ? " The outlined runs are the two shown above." : "";
-  return `<h3 class="ln-h3">All ${runs.length} runs</h3>` +
-    `<div class="ln-strip" data-io data-morph-list>${body}</div>` +
-    `<p class="ln-legend-t">Bar: ${esc(claim)} score. Line: ${esc(truth)} score. Both from 50% to 100%.${marked}</p>`;
+  const marked = shown.some((id) => id != null) ? " The two outlined runs are the ones shown above." : "";
+  const how = `One bar for each run. Bar: ${esc(claim)}. Line across it: ${esc(truth)}. Scale ${motion ? "0%" : "50%"} to 100%.${marked}`;
+  return block("strip", `All ${runs.length} runs`, how, `<div class="ln-strip" data-io data-morph-list>${body}</div>`);
 }
 
 /** One step of the tracks: how many honest and inflated runs took it, out of how many. */
@@ -853,11 +867,11 @@ function stepLanes(c: CaseFile, words: DomainWords, trap: TrapInfo | null): stri
 /** What happens next: which run the fork copies and what the forced arm adds. */
 function nextLine(s: SplitFinding, words: DomainWords, trap: TrapInfo | null): string {
   const name = stepText(s.label, words, trap).name;
-  if (!s.fork_run_id || s.fork_at == null) return `<p class="ln-note">No inflated run skipped ${esc(name)}, so there is no run to fork.</p>`;
-  const forced = s.intervention
-    ? `once unchanged, and once with one step added first: <span class="ln-iv">${esc(s.intervention)}</span>.`
-    : `but no intervention is defined for ${esc(name)} yet, so the forced arm cannot run.`;
-  return `<p class="ln-note">Next, to test whether the step is the cause: the fork copies run <b>${esc(s.fork_run_id)}</b> just ${esc(words.step_when)} and runs it both ways, ${forced}</p>`;
+  const next = (body: string): string => block("next", "What happens next", "", `<p class="ln-note">${body}</p>`);
+  if (!s.fork_run_id || s.fork_at == null) return next(`No inflated run skipped ${esc(name)}, so there is no run to copy and test.`);
+  // The experiment can only add a step it knows how to run. Without one for this step, the step itself is not tested.
+  if (!s.intervention) return next(`Orro has no way yet to make a copy of a run do this step, so ${esc(name)} is not tested directly. The Fork page shows what was tested instead.`);
+  return next(`To test whether the step is the cause, Orro copies run <b>${esc(s.fork_run_id)}</b> just ${esc(words.step_when)} and continues it both ways: once unchanged, and once with one step added first: <span class="ln-iv">${esc(s.intervention)}</span>.`);
 }
 
 /**
@@ -898,7 +912,10 @@ export function splitView(vm: BatchVm): string {
     `<span class="mo-sr">${esc(splitCounts(split))} did this ${esc(words.step_when)}.</span>` +
     stepLanes(c, words, trap) +
     foldButton("split", open, "the two runs side by side") +
-    (open ? diffView(vm, split, pick) + consequence(c) + runStrip(c, [pick.honest, pick.inflated]) + nextLine(split, words, trap) : "") +
+    (open
+      ? block("diff", "Where the two runs differ", "One honest run and one inflated run, lined up at the step. The commands before and after it are folded away.", diffView(vm, split, pick)) +
+        consequence(c) + runStrip(c, [pick.honest, pick.inflated]) + nextLine(split, words, trap)
+      : "") +
     `</section>`;
 }
 
@@ -2350,9 +2367,9 @@ function competingCard(h: Hypothesis, words: DomainWords, trap: TrapInfo | null)
     `<span class="ln-hyp-kind">${esc(capital(h.kind ?? "method"))}</span>${hypTitle(h, words, trap)}<span class="ln-hyp-st">${hypPill(h.status)}</span></div>` +
     (h.sentence ? `<p class="ln-hyp-s">${esc(h.sentence)}</p>` : "") +
     `<div class="ln-hyp-rows">` +
-    row("Evidence", esc(h.evidence)) +
-    (h.prediction ? row("Predicts", esc(h.prediction)) : "") +
-    (h.falsified_if ? row("Falsified if", esc(h.falsified_if)) : "") +
+    row("Why", esc(h.evidence)) +
+    (h.prediction ? row("Expects", esc(h.prediction)) : "") +
+    (h.falsified_if ? row("Wrong if", esc(h.falsified_if)) : "") +
     (by ? row("Tested by", `<span class="ln-q-line">${esc(capital(by))}${whoTag("py", "computed from the counts")}</span>`) : "") +
     `</div>`;
 }
@@ -2366,6 +2383,65 @@ function hypTitle(h: Hypothesis, words: DomainWords, trap: TrapInfo | null): str
   const what = h.kind === "code" ? (h.run_id ? `A defect in run ${h.run_id}'s code` : "A defect in the code") : "No step named";
   return `<b class="ln-lit-word">${esc(what)}</b>`;
 }
+
+/** What each state means, for the key under the investigator's picture: said once, in a few words. */
+const OUTCOME_MEANS: Record<string, string> = {
+  supported: "the experiment agreed with it",
+  contradicted: "the experiment went against it",
+  inconclusive: "tested, too little to say",
+  untested: "not tested",
+  testing: "being tested now",
+  no_data: "tested, no result",
+};
+const TESTED = new Set(["supported", "contradicted", "inconclusive", "no_data"]);
+
+/** "3 explanations. 2 tested. None confirmed yet.": the investigator's competing hypotheses, counted. */
+export function investigatorLine(hs: readonly Hypothesis[]): string {
+  const n = hs.length;
+  const some = `${n} explanation${n === 1 ? "" : "s"}.`;
+  const held = hs.filter((h) => h.status === "supported").length;
+  const tested = hs.filter((h) => TESTED.has(h.status ?? "untested")).length;
+  if (held) return `${some} ${held} held up.`;
+  if (tested) return `${some} ${tested} tested. None confirmed yet.`;
+  return `${some} None tested yet.`;
+}
+
+/**
+ * The investigator's page as one picture: its competing explanations as rows. Each row is a mark for where it stands,
+ * the explanation in plain words with its one sentence, and at the end its state and what tested it. The mark's shape
+ * carries the state; only "supported" has a colour, as on the pills. A key under the rows names the marks drawn.
+ */
+function investigatorPicture(hs: readonly Hypothesis[], words: DomainWords, trap: TrapInfo | null): string {
+  const state = (h: Hypothesis): string => h.status ?? "untested";
+  const mark = (s: string): string => `<i class="ln-ip-mk ln-ip-mk--${attr(s)}" aria-hidden="true"></i>`;
+  const by = (h: Hypothesis): string => (h.tested_by === "fix" ? "The measured fix" : h.tested_by ? `Fork ${h.tested_by}` : "");
+  const rows = hs.map((h) => {
+    const s = state(h);
+    return `<li class="ln-ip-row${s === "supported" ? " is-focus" : ""}" data-morph-key="ip-${attr(h.id ?? "")}">${mark(s)}` +
+      `<span class="ln-ip-t">${hypTitle(h, words, trap)}<small>${esc(h.sentence ?? h.evidence)}</small></span>` +
+      `<span class="ln-ip-o"><b>${esc(capital(OUTCOME_WORDS[s] ?? s))}</b>${by(h) ? `<small>${esc(by(h))}</small>` : ""}</span></li>`;
+  }).join("");
+  const drawn = [...new Set(hs.map(state))];
+  const key = drawn.map((s) => `<span class="ln-key-i">${mark(s)}${esc(capital(OUTCOME_WORDS[s] ?? s))}: ${esc(OUTCOME_MEANS[s] ?? "")}</span>`).join("");
+  return `<div class="ln-vp ln-ip ds-rise" data-io data-morph-key="inv-picture">` +
+    `<p class="ln-headline">${reveal(investigatorLine(hs))}</p>` +
+    `<ol class="ln-ip-rows" data-morph-list>${rows}</ol>` +
+    `<p class="ln-key" data-morph-key="key">${key}</p>` +
+    `</div>`;
+}
+
+/** The grader's note in the log, read out of its JSON: "passed", or "sent it back" with why. Null for any other line. */
+function graderNote(ev: AgentEvent): string | null {
+  if (ev.type !== "thought") return null;
+  const m = /^\s*\{\s*"result"\s*:\s*"(\w+)"\s*(?:,\s*"explanation"\s*:\s*"((?:[^"\\]|\\.)*))?/.exec(ev.text);
+  if (!m) return null;
+  const said = m[1] === "satisfied" ? "Passed the verdict." : m[1] === "needs_revision" ? "Sent the verdict back." : `Result: ${m[1].replace(/_/g, " ")}.`;
+  const why = (m[2] ?? "").replace(/\\"/g, '"').replace(/\\n/g, " ");
+  return why ? `${said} ${why.length > 140 ? `${why.slice(0, 139)}…` : why}` : said;
+}
+
+/** The log's kinds, in the words the page uses. */
+const EVENT_WORD: Record<string, string> = { call: "ran", result: "got", thought: "thought", plan: "plan", forced: "forced", motion: "saved", caption: "note" };
 
 /** The investigator: what it is doing (its events, hypotheses) and the live-only Investigate / Stop actions. */
 export function investigatorView(vm: BatchVm): string {
@@ -2394,10 +2470,12 @@ export function investigatorView(vm: BatchVm): string {
   const recent = all.slice(start);
   const events = recent.length
     ? `<ol class="ln-evs" data-morph-list>${recent.map((ev, j) => {
-      const { kind, text } = eventLine(ev);
-      const who = ev.agent && ev.agent !== "investigator" ? `<span class="ln-tag">${esc(ev.agent)}</span>` : "";
+      // The grader speaks in JSON: its line is read out in words, under its own name.
+      const grader = graderNote(ev);
+      const { kind, text } = grader ? { kind: "grader", text: grader } : eventLine(ev);
+      const who = !grader && ev.agent && ev.agent !== "investigator" ? `<span class="ln-tag">${esc(ev.agent)}</span>` : "";
       return `<li class="ln-ev ln-ev--${kind}" data-morph-key="ev-${start + j}"><span class="ln-ev-t">${esc(duration(ev.t))}</span>` +
-        `<span class="ln-ev-k">${esc(kind)}</span>${who}<span class="ln-ev-x">${esc(text)}</span></li>`;
+        `<span class="ln-ev-k">${esc(EVENT_WORD[kind] ?? kind)}</span>${who}<span class="ln-ev-x">${esc(text)}</span></li>`;
     }).join("")}</ol>`
     : "";
 
@@ -2417,12 +2495,19 @@ export function investigatorView(vm: BatchVm): string {
       `</div>`).join("")}</div>`
     : "";
 
+  // The competing explanations are the page's picture. Each one in full, and the log, are the detail.
+  const competing = hyps.filter((h) => h.id);
+  const picture = competing.length ? investigatorPicture(competing, words, trap) : "";
   // While it works its log is the news. Once it is done the verdict below says what it found, and the log folds.
-  const detail = events + (hypHtml ? `<h3 class="ln-h3">Hypotheses</h3>${hypHtml}` : "");
+  const detail =
+    (hypHtml ? block("hyps", "Hypotheses", competing.length
+      ? "Each explanation in full, as written down before any experiment ran: why it thinks so, what it expects to see, and what would prove it wrong."
+      : "", hypHtml) : "") +
+    (events ? block("log", "Its last steps", `The last ${recent.length} thing${recent.length === 1 ? "" : "s"} it did, oldest first.`, events) : "");
   const open = isOpen(vm, "inv", !["done", "stopped", "no_split"].includes(phase));
   const domain = (c.config as Partial<BatchConfig>).domain || "tabular";
   const nb = `<a class="ln-nb-link" href="${attr(notebookUrl(domain))}" target="_blank" rel="noopener" title="What the investigator noted from earlier ${attr(domain)} batches (read-only)">Notebook</a>`;
-  return `<section class="ln-sec ln-inv ds-rise" data-io data-morph-key="ln-inv" aria-label="Investigator">` +
+  return `<section class="ln-sec ln-inv${picture ? " ln-inv--pic" : ""} ds-rise" data-io data-morph-key="ln-inv" aria-label="Investigator">` +
     `<div class="ln-head"><h2 class="ln-h">Investigator</h2>${nb}</div>` +
     `<div class="ln-inv-status">` +
     (problem ? `<p class="ln-err" role="alert">${esc(phaseText(phase))}</p>`
@@ -2431,6 +2516,7 @@ export function investigatorView(vm: BatchVm): string {
     `</div>` +
     // The approval card shows the error itself while a fork request is pending.
     (vm.error && !pendingForks(c) ? `<p class="ln-err" role="alert">${esc(vm.error)}</p>` : "") +
+    picture +
     (detail ? foldButton("inv", open, hypHtml ? (hyps.length === 1 ? "its log and hypothesis" : `its log and ${hyps.length} hypotheses`) : "its log") + (open ? detail : "") : "") +
     `</section>`;
 }
@@ -2443,28 +2529,61 @@ export function investigatorView(vm: BatchVm): string {
  */
 const SAME_WORDS: Record<string, string> = { same: "Same cause in every traced run.", different: "Different causes.", mixed: "Partly the same cause." };
 
+/** "3 runs traced. Partly the same cause.": how many runs the code tracer read, and whether they fail for one reason. */
+export function diagnosisLine(trace: readonly TraceEntry[], same?: string): string {
+  const runs = new Set(trace.map((t) => t.run_id)).size;
+  const traced = `${runs} run${runs === 1 ? "" : "s"} traced.`;
+  if (same) return `${traced} ${SAME_WORDS[same] ?? same}`;
+  return `${traced} ${trace.length} failure${trace.length === 1 ? "" : "s"}, each with a line of code behind it.`;
+}
+
+/** A line of code as the tracer saved it. Some excerpts arrive with their quotes already written as HTML entities;
+ *  they are read back to plain characters here, and escaped once where the line is drawn. */
+const plainCode = (s: string): string =>
+  s.replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/**
+ * The diagnosis. One line says how many runs were traced and whether they share a cause. Under it the failures, grouped
+ * by run: for each, the line of the run's controller.py the tracer blames, then what it saw happen in the recording
+ * (two lines of it, the whole sentence once the fold is open), and a link to the recording. Why each line causes the
+ * failure is behind the fold.
+ */
 export function diagnosisView(vm: BatchVm): string {
   const c = vm.case;
   const trace = c.trace ?? [];
   if (!trace.length) return "";
   const why = isOpen(vm, "dx-why");
+  const sw = scoreWords(c.config);
   const card = (t: (typeof trace)[number]): string => {
     const where = `line ${t.line}`;
     const link = t.motion_file
       ? `<a class="ln-dx-link" href="${attr(batchFileUrl(vm.id, t.motion_file))}" target="_blank" rel="noopener">recording</a>`
       : "";
     return `<div class="ln-card ln-dx-entry" data-io data-morph-key="trace-${attr(String(t.at))}">` +
-      `<div class="ln-dx-h"><span class="ln-tag">${esc(t.run_id)}</span><span class="ln-muted">controller.py ${esc(where)}</span>${link}</div>` +
+      `<pre class="ln-dx-code"><span class="ln-dx-ln">${esc(where)}</span>${esc(plainCode(t.excerpt))}</pre>` +
       `<p class="ln-dx-symptom">${esc(t.symptom)}</p>` +
-      `<pre class="ln-dx-code"><span class="ln-dx-ln">${esc(where)}</span>${esc(t.excerpt)}</pre>` +
       (why ? `<p class="ln-dx-why ln-muted">${esc(t.why)}</p>` : "") +
+      (link ? `<div class="ln-dx-h">${link}</div>` : "") +
       `</div>`;
   };
+  // The runs in the order they were traced, each with its failures under it.
+  const ids = [...new Set(trace.map((t) => t.run_id))];
+  const group = (id: string): string => {
+    const own = trace.filter((t) => t.run_id === id);
+    const r = c.runs?.[id];
+    const scores = r && (r.reported_accuracy != null || r.true_accuracy != null)
+      ? `<span class="ln-muted">${esc(sw.reported.toLowerCase())} ${esc(pct(r.reported_accuracy))}, ${esc(sw.true.toLowerCase())} ${esc(pct(r.true_accuracy))}</span>` : "";
+    return `<div class="ln-dx-run" data-morph-key="dxrun-${attr(id)}">` +
+      `<div class="ln-dx-run-h"><span class="ln-tag">${esc(id)}</span><b>${own.length} failure${own.length === 1 ? "" : "s"} traced</b>${scores}</div>` +
+      `<div class="ln-dx-entries" data-morph-list>${own.map(card).join("")}</div></div>`;
+  };
+  const cmp = c.trace_comparison;
   return `<section class="ln-sec ln-dx ds-rise" data-io data-morph-key="ln-dx" aria-label="Diagnosis">` +
     head("Diagnosis") +
-    `<p class="ln-sub">What the code-tracer saw in the recordings of the failing run, and the line behind each symptom.</p>` +
-    (c.trace_comparison ? `<p class="ln-note ln-dx-cmp"><b>${esc(SAME_WORDS[c.trace_comparison.same] ?? c.trace_comparison.same)}</b> ${esc(c.trace_comparison.sentence)}</p>` : "") +
-    `<div class="ln-stack" data-morph-list>${trace.map(card).join("")}</div>` +
+    `<p class="ln-headline">${reveal(diagnosisLine(trace, cmp?.same))}</p>` +
+    (cmp ? `<p class="ln-sub ln-dx-cmp">${esc(cmp.sentence)}</p>`
+      : `<p class="ln-sub">Each failure the code tracer saw in a recording, with the line of code behind it.</p>`) +
+    `<div class="ln-stack ln-dx-runs${why ? " is-full" : ""}" data-morph-list>${ids.map(group).join("")}</div>` +
     foldButton("dx-why", why, "why each line causes it") +
     `</section>`;
 }
@@ -2517,10 +2636,36 @@ function fixMeasuredView(m: FixMeasured): string {
     row("Without the fix", m.before, "ln-fill--true") + row("With the fix", m.after, "") +
     `<span class="ln-axis" aria-hidden="true"><span>0%</span><span>100%</span></span></div>` +
     `<p class="ln-gap"><b class="ln-gap-n">${esc(pts(delta))}</b><span class="ln-gap-w">${word}</span></p></div>` +
-    `<p class="ln-note">${esc(fixMeasuredText(m))}</p>` +
+    `<p class="ln-note ln-fix-counts">${esc(fixCountsText(m))} ${whoTag("py", "computed from the paired cases")}</p>` +
     (m.exceptions.length ? `<p class="ln-note ln-fix-raised">The patched code raised: ${m.exceptions.map((e) => `<code>${esc(e)}</code>`).join(" ")}</p>` : "") +
-    (m.evidence ? `<p class="ln-note ln-fix-evidence">${fixEvidenceText(m.evidence)} ${whoTag("py", "computed from the paired cases")}</p>` : "") +
     `</div>`;
+}
+
+/** "Run on 20 hidden setups, no agent in between: 0 fixed, 8 broken." The measured fix in one short line. */
+export function fixCountsText(m: FixMeasured): string {
+  const n = m.after.n ?? m.before.n;
+  const on = n != null ? `Run on ${n} hidden setups, no agent in between` : "Run on the hidden setups, no agent in between";
+  return m.gained != null && m.lost != null ? `${on}: ${m.gained} fixed, ${m.lost} broken.` : `${on}.`;
+}
+
+/** The fix's result in one line, for the top of its page. It follows the computed evidence level, so it says the fix
+ *  helped only when the sign test says so; with no level it says which way the rate moved and no more. */
+export function fixLine(fix: ProposedFix, tested: boolean): string {
+  const m = fix.measured;
+  if (m) {
+    if (m.exceptions.length) return "The patched code raised an error.";
+    const level = m.evidence?.level;
+    if (level === "improved") return "The fix helped.";
+    if (level === "worse") return "The fix made it worse.";
+    if (level === "no_detectable_change") return "The fix changed nothing we could measure.";
+    const delta = m.after.true_accuracy - m.before.true_accuracy;
+    return delta > 0.0005 ? "The rate went up with the fix." : delta < -0.0005 ? "The rate went down with the fix." : "The rate did not change with the fix.";
+  }
+  if (tested) return "The fix was tested in a fork.";
+  if (fix.status === "testing") return "The fix is being tested.";
+  if (fix.status === "rejected") return "The fix was rejected.";
+  if (fix.status === "tested") return "The fix was tested.";
+  return "A fix is proposed. It has not been tested.";
 }
 
 const FIX_LEVEL: Record<FixEvidence["level"], string> = {
@@ -2548,21 +2693,31 @@ export function fixView(vm: BatchVm): string {
   const st = FIX_STATUS[fix.status] ?? { text: fix.status, tone: "muted" as Tone };
   const file = fix.file_path.split("/").pop() || fix.file_path;
   const where = `run ${fix.run_id} · ${file}${fix.line != null ? ` line ${fix.line}` : ""}`;
-  const block = (label: string, cls: string, text: string): string =>
+  const codeBlock = (label: string, cls: string, text: string): string =>
     `<figure class="ln-fix-block ${cls}"><figcaption class="ln-fix-cap">${esc(label)}</figcaption>` +
     `<pre class="ln-fix-pre">${text ? esc(text) : `<span class="ln-muted">(nothing)</span>`}</pre></figure>`;
   const fork = fixFork(c, fix);
   const tested = fork ? fixTestedText(fork) : null;
   const why = isOpen(vm, "fix-why");
+  const m = fix.measured;
+  // Behind the fold: why it proposed this, its own sentence on the result, and how the result was measured.
+  const detail =
+    (fix.why ? `<p class="ln-fix-why">${esc(fix.why)}</p>` : "") +
+    (fix.verdict ? block("fix-said", "In the investigator's words", "", `<p class="ln-sentence">${reveal(fix.verdict, "word")}</p>`) : "") +
+    (m ? block("fix-how", "How it was measured", "",
+      `<p class="ln-note">${esc(fixMeasuredText(m))}</p>` +
+      (m.evidence ? `<p class="ln-note ln-fix-evidence">${fixEvidenceText(m.evidence)}</p>` : "")) : "");
   return `<section class="ln-sec ln-fix ds-rise" data-io data-morph-key="ln-fix" aria-label="Fix">` +
     head("Fix", pill(fix.status, st.text, st.tone)) +
-    `<p class="ln-fix-t">${reveal(fix.description, "word")}</p>` +
-    `<p class="ln-fix-where ln-muted">${esc(where)}</p>` +
-    `<div class="ln-fix-diff" role="group" aria-label="The text replaced, and its replacement">` +
-    block("Before", "ln-fix-old", fix.old_string) + block("After", "ln-fix-new", fix.new_string) +
-    `</div>` +
-    (fix.measured ? fixMeasuredView(fix.measured) : tested ? `<p class="ln-note ln-fix-tested">${esc(tested)}</p>` : "") +
-    (fix.verdict ? `<p class="ln-sentence">${reveal(fix.verdict, "word")}</p>` : "") +
-    (fix.why ? foldButton("fix-why", why, "the reasoning") + (why ? `<p class="ln-fix-why">${esc(fix.why)}</p>` : "") : "") +
+    // The result first, in one line; then its picture; then what was changed.
+    `<p class="ln-headline">${reveal(fixLine(fix, !!tested))}</p>` +
+    (m ? fixMeasuredView(m) : tested ? `<p class="ln-note ln-fix-tested">${esc(tested)}</p>` : "") +
+    block("fix-what", "What the fix changes", "",
+      `<p class="ln-fix-t">${reveal(fix.description, "word")}</p>` +
+      `<p class="ln-fix-where ln-muted">${esc(where)}</p>` +
+      `<div class="ln-fix-diff" role="group" aria-label="The text replaced, and its replacement">` +
+      codeBlock("Before", "ln-fix-old", fix.old_string) + codeBlock("After", "ln-fix-new", fix.new_string) +
+      `</div>`) +
+    (detail ? foldButton("fix-why", why, "the reasoning") + (why ? detail : "") : "") +
     `</section>`;
 }

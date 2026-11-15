@@ -249,13 +249,13 @@ describe("splitView", () => {
       expect(side).toContain("… 3 lines above");
       expect(side).toContain("… 7 lines below");
       expect(side).not.toContain("holdout_features");
-      expect(side).toContain("1 later cell<");
+      expect(side).toContain("1 later command<");
     }
     expect(honest).toContain("pd.read_csv(&#39;clean.csv&#39;)");
     expect(inflated).toContain("pd.read_csv(&#39;data.csv&#39;)");
     expect(honest).toContain('<span class="nb-ln ln-at">train, test = train_test_split(df, test_size=0.2, random_state=100)</span>');
-    expect(honest).toContain("2 earlier cells");
-    expect(inflated).toContain("2 earlier cells");
+    expect(honest).toContain("2 earlier commands");
+    expect(inflated).toContain("2 earlier commands");
     // Execution counts match the run's own page.
     expect(honest).toContain("[3]");
     expect(honest).toContain("[4]");
@@ -271,7 +271,7 @@ describe("splitView", () => {
     expect(inflated).toContain("No duplicate removal here");
     expect(inflated).toContain("!python3 model.py");
     expect(inflated).not.toContain("nb-hl");
-    expect(html).not.toContain("earlier cell");
+    expect(html).not.toContain("earlier command");
   });
 
   it("draws claimed against measured per group, in the batch's own words, with the gap and the leaked share", () => {
@@ -321,14 +321,19 @@ describe("splitView", () => {
 
   it("says what the fork does next, escaped", () => {
     const html = splitView(withLogs());
-    expect(html).toContain("the fork copies run <b>r02</b> just before splitting into train and test and runs it both ways");
+    expect(html).toContain('<h3 class="ln-h3">What happens next</h3>');
+    expect(html).toContain("Orro copies run <b>r02</b> just before splitting into train and test and continues it both ways");
     expect(html).toContain("Remove duplicate rows from data.csv before the split");
     const odd = splitView(vmOf({ split: { ...demo.split!, label: "<i>x" as StepLabel, intervention: "<b>bold</b>" } }));
     expect(odd).toContain("&lt;b&gt;bold&lt;/b&gt;");
     expect(odd).toContain("did the &lt;i&gt;x step before splitting");
     expect(odd).not.toContain("<i>x");
     const none = splitView(vmOf({ split: { ...demo.split!, fork_run_id: null, fork_at: null } }));
-    expect(none).toContain("so there is no run to fork");
+    expect(none).toContain("so there is no run to copy and test");
+    // A step the experiment cannot add to a copy: said plainly, with no word about arms or interventions.
+    const cannot = splitView(vmOf({ split: { ...demo.split!, intervention: null } }));
+    expect(cannot).toContain("is not tested directly. The Fork page shows what was tested instead.");
+    expect(cannot).not.toMatch(/intervention|forced arm/);
   });
 
   it("says no step separates the groups when there is no split, and still shows the scores and the runs", () => {
@@ -421,7 +426,7 @@ describe("splitView on a real batch", () => {
     // The script is about 40 lines; the view shows the window around the two lines, not the rest.
     expect(count(honest, 'class="nb-ln')).toBe(7);
     expect(honest).not.toContain("RandomForestClassifier(n_estimators");
-    expect(honest).toContain("3 earlier cells");
+    expect(honest).toContain("3 earlier commands");
     expect(honest).not.toContain("Then it split into train and test");
   });
 
@@ -433,7 +438,7 @@ describe("splitView on a real batch", () => {
     expect(inflated).not.toContain("nb-hl");
     expect(inflated).not.toContain("drop_duplicates");
     expect(count(inflated, 'class="nb-ln')).toBe(5);
-    expect(inflated).toContain("2 earlier cells");
+    expect(inflated).toContain("2 earlier commands");
     // The slot and the split share the band row, so the split row below is empty on both sides.
     expect(inflated.indexOf("ln-missing")).toBeLessThan(inflated.indexOf("train_test_split"));
     expect(inflated).toContain('<div class="ln-row ln-row--split"></div>');

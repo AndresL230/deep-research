@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import caseRaw from "../../fixtures/robot-live-investigation/case/case.json?raw";
 import type { AgentEvent, CaseFile } from "../src/api";
-import { fixView, forkView, investigatorView, verdictView } from "../src/batch/lanes";
+import { diagnosisView, fixView, forkView, investigatorView, verdictView } from "../src/batch/lanes";
 import type { BatchVm } from "../src/batch/model";
 import { caseAt, replaySchedule } from "../src/batch/replay";
 
@@ -41,7 +41,27 @@ describe("the live robot recording", () => {
     for (const id of ["h1", "h2", "h3"]) expect(html).toContain(`Hypothesis ${id}`);
     // The fold that holds them counts them.
     expect(html).toContain("its log and 3 hypotheses");
-    for (const s of ["Predicts", "Falsified if", "Inconclusive", "Untested", "Contradicted", "Fork f1", "The measured fix"]) expect(html).toContain(s);
+    // Closed, the page is one picture: the count in a line, a row for each explanation with its state and what tested
+    // it, and a key for the marks drawn. The full cards wait behind the fold.
+    expect(html).toContain("3 explanations. 2 tested. None confirmed yet.");
+    expect(html.match(/class="ln-ip-row[ "]/g)).toHaveLength(3);
+    for (const s of ["Inconclusive", "Untested", "Contradicted", "Fork f1", "The measured fix"]) expect(html).toContain(s);
+    for (const s of ["inconclusive", "untested", "contradicted"]) expect(html).toContain(`ln-ip-mk--${s}`);
+    const closed = investigatorView({ ...vm, open: { inv: false } });
+    expect(closed).toContain("3 explanations. 2 tested. None confirmed yet.");
+    expect(closed).not.toContain("ln-hyps");
+    const open = investigatorView({ ...vm, open: { inv: true } });
+    for (const s of ["Why", "Expects", "Wrong if", "Tested by"]) expect(open).toContain(`<span class="ln-q-k">${s}</span>`);
+    // The grader speaks in JSON (the recording's own two lines): the log reads it out in words.
+    const grader: AgentEvent[] = [
+      { t: 68, type: "thought", agent: "RubricMiddleware.after_agent", text: '{"result":"needs_revision","explanation":"Criteria 1-4 and 6 pass.","failing":[]}' },
+      { t: 86, type: "thought", agent: "RubricMiddleware.after_agent", text: '{"result":"satisfied","explanation":"The last recorded verdict names test_table_edges."}' },
+    ] as AgentEvent[];
+    const logged = investigatorView({ ...vm, events: { investigator: grader }, open: { inv: true } });
+    expect(logged).not.toContain("{&quot;result&quot;");
+    expect(logged).toContain("Sent the verdict back. Criteria 1-4 and 6 pass.");
+    expect(logged).toContain("Passed the verdict. The last recorded verdict names test_table_edges.");
+    expect(logged).not.toContain("RubricMiddleware");
     // Competing hypotheses have no example commands: no empty code boxes.
     expect(html).not.toContain("No example");
   });
@@ -66,10 +86,23 @@ describe("the live robot recording", () => {
     const html = fixView(vm);
     const m = live.fix!.measured!;
     expect([m.before.true_accuracy, m.after.true_accuracy, m.gained, m.lost]).toEqual([0.65, 0.25, 0, 8]);
+    // The result in one line, from the computed level, and the counts in one short line under the bars.
+    expect(html).toContain("The fix made it worse.");
+    expect(html).toContain("Run on 20 hidden setups, no agent in between: 0 fixed, 8 broken.");
     expect(html).toContain("Worse:");
     expect(html).toContain("0 setups gained, 8 lost");
     expect(html).toContain("not the accuracy of any report");
     expect(html).not.toMatch(/fix (improved|worked)/i);
+  });
+
+  it("groups the diagnosis by run, the blamed line first, with quotes read as quotes", () => {
+    const html = diagnosisView(vm);
+    expect(html).toContain("3 runs traced. Partly the same cause.");
+    expect(html.match(/class="ln-dx-run"/g)).toHaveLength(3);
+    expect(html.match(/class="ln-card ln-dx-entry"/g)).toHaveLength(6);
+    // r06's excerpts were saved with their quotes as HTML entities: they are drawn once, not twice.
+    expect(html).toContain('(&quot;close&quot;, None, 0.8, GRIPPER_CLOSED),');
+    expect(html).not.toContain("&amp;quot;");
   });
 
   it("shows a verdict that is open and claims no cause, and says what the fork measures", () => {
@@ -100,8 +133,8 @@ describe("the live recording's Investigator page", () => {
     expect(() => { html = investigatorView(vm); }).not.toThrow();
     for (const id of ["h1", "h2", "h3"]) expect(html).toContain(`Hypothesis ${id}`);
     expect(html).toContain("A defect in run r06&#39;s code");
-    expect(html).toContain('<span class="ln-q-k">Predicts</span>');
-    expect(html).toContain('<span class="ln-q-k">Falsified if</span>');
+    expect(html).toContain('<span class="ln-q-k">Expects</span>');
+    expect(html).toContain('<span class="ln-q-k">Wrong if</span>');
     // No empty "No example" boxes for hypotheses that never quoted actions.
     expect(html).not.toContain("No example");
   });
