@@ -18,8 +18,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import aiosqlite
 from langchain_core.messages import messages_from_dict, messages_to_dict
 from langchain_daytona import DaytonaSandbox
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 from . import domains, hub
@@ -410,6 +412,7 @@ class Batch:
         self._last_cost_push = 0.0
         self._investigator = None
         self._inv_config: dict | None = None
+        self._checkpoint_conn = None
         self._pending_requests = 1
         # VM creations cancelled midway (a stop): their VMs are deleted once they exist (`_create_vm`).
         self._orphans: set[asyncio.Future] = set()
@@ -463,11 +466,14 @@ class Batch:
         if problem:
             raise ValueError(problem)
         b = cls(BatchConfig(**case["config"]), batch_id=batch_id, root=root, resume=True)
-        if "pending" in b.case.data["forks"]:
+        # The investigator's checkpoints are on disk (checkpoints.sqlite): a request waiting for approval survives a
+        # restart, and answering it (`decide`) continues the same investigator thread.
+        waiting = "pending" in b.case.data["forks"] and b.checkpoints_path.is_file()
+        if "pending" in b.case.data["forks"] and not waiting:
             b.case.remove_fork("pending")
         b._close_unfinished_forks()
         b._forget_lab_pages()  # the VMs behind them are long gone
-        b.case.set_phase("ready")
+        b.case.set_phase("awaiting_approval" if waiting else "ready")
         return b
 
     @classmethod
@@ -1025,6 +1031,8 @@ class Batch:
             return {"error": str(e)}
 
         fork_id = self._next_fork_id()
+        if self.case.suspect(suspect_id) is not None:
+            self.case.set_suspect_status(suspect_id, "testing")
         plan = {xp.CONTROL_ARM: None, xp.CHANGED_ARM: ch.step}
         # Saved on the fork before the base VM exists, so before any copy starts: what was predicted, fixed in time.
         record = {"suspect_id": suspect_id, "change": ch.spec, "change_kind": ch.kind,
@@ -1046,6 +1054,8 @@ class Batch:
         cost = self._scope_usd(f"fork:{fork_id}:")
         self.case.update_fork(fork_id, status="done", arms=arms, pairs=kept, dropped_pairs=dropped,
                               score=scored["score"], p_exact=scored["p_exact"], level=scored["level"], cost_usd=cost)
+        # The same `evidence` record a fork from the old path carries (`_fork_evidence`): one rule, one shape.
+        self.case.update_fork(fork_id, evidence=_fork_evidence(self.case.data["forks"][fork_id]))
         self._fork_findings(fork_id, arms)
         mine = [{"id": fid, **f} for fid, f in self.case.data["forks"].items()
                 if fid != "pending" and isinstance(f, dict) and f.get("suspect_id") == suspect_id
@@ -1714,23 +1724,65 @@ class Batch:
         return True
 
     # ---- the investigator ----
-    async def investigate(self, opening: str = "Investigate this batch.") -> None:
+    @property
+    def checkpoints_path(self) -> Path:
+        """The investigator's durable checkpoints (plan Phase 6): one SQLite file per batch."""
+        return self.dir / "checkpoints.sqlite"
+
+    async def _ensure_investigator(self, thread_id: str | None = None) -> None:
+        """Build the investigator on this batch's SQLite checkpointer, once per process. Its thread id is saved in the
+        case file (`investigator.thread_id`), so a new process (a server restart) picks the same thread up where it
+        stopped, a pending approval included. `thread_id` starts a new thread (a new investigation)."""
         self._loop = asyncio.get_running_loop()
-        self._investigator = build_investigator(self, self.cfg.investigator_model)
+        saved = (self.case.data.get("investigator") or {}).get("thread_id")
+        if thread_id is not None and thread_id != saved:
+            await self._close_checkpointer()
+            self.case.set_investigator(thread_id=thread_id)
+        elif saved is None:
+            self.case.set_investigator(thread_id=f"{self.id}-investigator")
+        if self._investigator is not None:
+            return
+        self._checkpoint_conn = await aiosqlite.connect(str(self.checkpoints_path))
+        saver = AsyncSqliteSaver(self._checkpoint_conn)
+        self._investigator = build_investigator(self, self.cfg.investigator_model, checkpointer=saver)
         self._inv_config = {
-            "configurable": {"thread_id": f"{self.id}-investigator"},
+            "configurable": {"thread_id": self.case.data["investigator"]["thread_id"]},
             "callbacks": [UsageCallback(self.tracker, "investigator", self.cfg.investigator_model)],
             "recursion_limit": INVESTIGATOR_RECURSION_LIMIT,
         }
+
+    async def _close_checkpointer(self) -> None:
+        conn, self._checkpoint_conn = getattr(self, "_checkpoint_conn", None), None
+        self._investigator = None
+        if conn is not None:
+            try:
+                await conn.close()
+            except Exception as e:  # noqa: BLE001 - closing a file never stops the batch
+                logger.warning("could not close the checkpoint file: %s", e)
+
+    async def investigate(self, opening: str = "Investigate this batch.") -> None:
+        # A new investigation of a batch investigated before starts a new thread: the old one stays in the file.
+        before = (self.case.data.get("investigator") or {}).get("thread_id")
+        await self._ensure_investigator(None if before is None else f"{self.id}-investigator-{int(time.time())}")
         self.case.set_phase("investigating")
         # The rubric turns on the grader (RubricMiddleware) that checks the verdict before the investigator finishes.
         await self._stream_investigator(
             {"messages": [{"role": "user", "content": opening}], "rubric": RUBRIC}
         )
 
-    async def decide(self, approve: bool) -> None:
-        """Answer the investigator's pending request_forks approval."""
+    async def decide(self, approve: bool, pairs: int | None = None) -> None:
+        """Answer the investigator's pending approval. `pairs` (approve only) edits the experiment's size first: the
+        `edit` decision, with the tool call's other arguments unchanged."""
+        await self._ensure_investigator()
         decision = {"type": "approve"} if approve else {"type": "reject", "message": "The person declined the cost."}
+        action = (self.case.data["forks"].get("pending") or {}).get("action") or {}
+        size_key = {"run_experiment": "pairs", "request_forks": "n_per_arm"}.get(action.get("name"))
+        if approve and pairs is not None and size_key:
+            args = {**(action.get("args") or {}), size_key: int(pairs)}
+            decision = {"type": "edit", "edited_action": {"name": action["name"], "args": args}}
+        pending_lesson = (self.case.data["forks"].get("pending") or {}).get("lesson_id")
+        if pending_lesson and not approve:
+            self.case.update_lesson(pending_lesson, status="rejected")
         # One answer covers one experiment. If the investigator asked for several in one turn, the rest are declined.
         rest = {"type": "reject", "message": "Only one experiment is approved at a time. Ask again if you still need it."}
         decisions = [decision] + [rest] * (self._pending_requests - 1)
@@ -1743,20 +1795,35 @@ class Batch:
         log = self._log(self.dir / "investigator" / "events.jsonl", "investigator")
         try:
             self._check_budget()
-            async for chunk in self._investigator.astream(inp, self._inv_config, stream_mode="updates", subgraphs=True):
+            interrupted = None
+            # The stream is read to its end, even after an interrupt: the checkpoint that holds the pending approval
+            # is written to SQLite as the run winds down, and leaving the loop early could cut that write off.
+            # `durability="sync"` saves each step before the next one starts, so a restart loses nothing.
+            async for chunk in self._investigator.astream(inp, self._inv_config, stream_mode="updates", subgraphs=True,
+                                                          durability="sync"):
                 ns, update = chunk if isinstance(chunk, tuple) else ((), chunk)
                 if "__interrupt__" in update:
-                    self._on_interrupt(update["__interrupt__"])
-                    return
+                    interrupted = update["__interrupt__"] if interrupted is None else interrupted
+                    continue
+                if interrupted is not None:
+                    continue
+                agent = self._agent_name(ns, update)
                 for ev in events_from_update(update):
-                    ev = log.write({**ev, "agent": ns[-1].split(":")[0] if ns else "investigator"})
+                    ev = log.write({**ev, "agent": agent})
                     self._emit({"kind": "investigator", "event": ev})
+                    if ev.get("type") == "todos" and agent == "investigator":
+                        self.case.set_investigator(todos=ev["todos"])
+                self.case.set_investigator(subagent=None if agent == "investigator" else agent)
                 self.push_costs()
                 self._check_budget()
+            if interrupted is not None:
+                self._on_interrupt(interrupted)
+                return
             try:
                 self.write_audit()
             except Exception as e:  # noqa: BLE001 - the audit sheet is for the screens; it never stops the batch
                 logger.warning("could not write the audit sheet: %s: %s", type(e).__name__, e)
+            self.case.set_investigator(subagent=None)
             self.case.set_phase("done")
             # The investigator has finished and the verdict is in: the batch is over, so stop paying for its VMs.
             await self.close()
@@ -1772,7 +1839,30 @@ class Batch:
             log.close()
             self.push_costs(force=True)
 
+    def _agent_name(self, ns: tuple, update: dict) -> str:
+        """Who an update comes from: the investigator, or the subagent by its name (a subgraph's namespace is
+        `tools:<uuid>`; its model's AIMessage carries the subagent's name), remembered per namespace."""
+        if not ns:
+            return "investigator"
+        key = ns[-1]
+        names = self.__dict__.setdefault("_ns_names", {})
+        if key not in names:
+            for delta in (update or {}).values():
+                for m in (delta.get("messages") or []) if isinstance(delta, dict) else []:
+                    if getattr(m, "type", None) == "ai" and getattr(m, "name", None):
+                        names[key] = m.name
+                        break
+        return names.get(key, "subagent")
+
     def _on_interrupt(self, interrupts) -> None:
+        try:
+            first = interrupts[0].value["action_requests"][0]
+            action = {"name": first.get("name"), "args": dict(first.get("args") or {})}
+        except Exception:  # noqa: BLE001
+            action = {}
+        if action.get("name") in ("run_experiment", "propose_lesson"):
+            self._pending_requests = max(1, len(interrupts[0].value.get("action_requests") or []))
+            return self._on_new_interrupt(action)
         n, kind = 4, "method"
         self._pending_requests = 1
         try:
@@ -1809,12 +1899,41 @@ class Batch:
         est = self.estimate_forks_usd(n, n_arms)
         self.case.update_fork(
             "pending", status="awaiting_approval", kind=kind, n_per_arm=n, vm_count=n_arms * n + 1,
-            estimate_usd=usd_up(est), **about,
+            estimate_usd=usd_up(est), **about, action=action,
+        )
+        self.case.set_phase("awaiting_approval")
+
+    def _on_new_interrupt(self, action: dict) -> None:
+        """`forks.pending` for a paired experiment (`run_experiment`) or a lesson (`propose_lesson`): what the person
+        is asked to approve, and what it costs. The estimate is per pair, so an edited `pairs` is priced the same way."""
+        args = action["args"]
+        if action["name"] == "propose_lesson":
+            lid = self.case.add_lesson(str(args.get("name") or "")[:60], str(args.get("rule") or "")[:1000],
+                                       args.get("suspect_id"))
+            self.case.update_fork("pending", status="awaiting_approval", kind="lesson", lesson_id=lid,
+                                  name=args.get("name"), rule=args.get("rule"), n_per_arm=0, pairs=0, vm_count=0,
+                                  estimate_usd=0.0, action=action)
+            self.case.set_phase("awaiting_approval")
+            return
+        try:
+            n = max(1, min(int(args.get("pairs", 3)), xp.MAX_PAIRS_PER_CALL))
+        except (TypeError, ValueError):
+            n = 3
+        sid = args.get("suspect_id")
+        per_pair = self.estimate_forks_usd(1, 2)
+        self.case.update_fork(
+            "pending", status="awaiting_approval", kind="experiment", suspect_id=sid,
+            suspect=self.case.suspect(sid) if sid else None, change=args.get("change"),
+            anchor=args.get("anchor") or "before_split", source_run=args.get("source_run"),
+            prediction=args.get("prediction"), reason=args.get("reason") or "", pairs=n, n_per_arm=n,
+            vm_count=2 * n + 1, estimate_usd=usd_up(self.estimate_forks_usd(n, 2)),
+            cost_per_pair_usd=None if per_pair is None else round(per_pair, 4), action=action,
         )
         self.case.set_phase("awaiting_approval")
 
     async def close(self) -> None:
         """Delete every VM this batch still has: runs, fork bases and fork children. Safe to call again."""
+        await self._close_checkpointer()
         left, self.vms = self.vms, {}
         if left:
             await asyncio.gather(*(asyncio.to_thread(vms.delete_vm, sb) for sb in left.values()))

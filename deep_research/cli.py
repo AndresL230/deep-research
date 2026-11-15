@@ -143,7 +143,18 @@ async def investigate(batch_id: str, auto_approve: bool) -> None:
         while b.case.data.get("phase") == "awaiting_approval":
             pending = b.case.data["forks"].get("pending", {})
             about = f" to test {pending['hypothesis_id']} ({pending.get('prediction')})" if pending.get("hypothesis_id") else ""
-            if pending.get("direct"):
+            if pending.get("kind") == "lesson":
+                question = f"The investigator proposes the lesson '{pending.get('name')}': {pending.get('rule')} Save it? [y/N] "
+                approve = auto_approve or input(question).strip().lower() in ("y", "yes")
+                if auto_approve:
+                    print(question + "yes (auto)")
+                await b.decide(approve)  # a lesson costs nothing, so it does not count against the auto-approvals
+                continue
+            if pending.get("kind") == "experiment":
+                about = f" to test {pending.get('suspect_id')} with {pending.get('change')} ({pending.get('prediction')})"
+                question = (f"The investigator asks for a paired experiment{about}: {pending.get('pairs')} pairs, "
+                            f"{pending.get('vm_count')} VMs, about ${pending.get('estimate_usd')}. Approve? [y/N] ")
+            elif pending.get("direct"):
                 question = f"The investigator asks to run its patched code on the held-out setups{about}, no VMs, $0. Approve? [y/N] "
             else:
                 question = (

@@ -24,7 +24,7 @@ from dotenv import dotenv_values, load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import ROOT_DIR
 
@@ -38,6 +38,7 @@ from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_price
 from .cost_report import cost_report  # noqa: E402
 from .costs import CostTracker, OverBudget, estimate_batch_usd, run_rate  # noqa: E402
 from .events import read_events  # noqa: E402
+from .experiments import MAX_PAIRS_PER_CALL as MAX_EXPERIMENT_PAIRS  # noqa: E402
 from .gateway_guard import GatewayGuard  # noqa: E402
 
 log = logging.getLogger("deep_research.api")
@@ -1007,6 +1008,8 @@ async def investigate(batch_id: str):
 
 class Decision(BaseModel):
     approve: bool
+    # The edit path (plan 6.5): approve a paired experiment with another number of pairs. Plain {"approve"} still works.
+    pairs: int | None = Field(default=None, ge=1, le=MAX_EXPERIMENT_PAIRS)
 
 
 @app.post("/api/batches/{batch_id}/decision")
@@ -1014,6 +1017,24 @@ async def decision(batch_id: str, d: Decision):
     b = _live(batch_id)
     if b.case.data.get("phase") != "awaiting_approval":
         raise HTTPException(409, "nothing is waiting for approval")
+    pending = b.case.data["forks"].get("pending") or {}
+    if d.pairs is not None and pending.get("kind") not in ("experiment", "method"):
+        raise HTTPException(409, "only an experiment's number of pairs can be changed")
+    _spawn(batch_id, b.decide(d.approve, d.pairs if d.approve else None))
+    return {"ok": True}
+
+
+class LessonDecision(BaseModel):
+    approve: bool
+
+
+@app.post("/api/batches/{batch_id}/lessons/{lesson_id}")
+async def lesson_decision(batch_id: str, lesson_id: str, d: LessonDecision):
+    """Approve or reject the lesson the investigator proposed (`propose_lesson`): it answers that approval."""
+    b = _live(batch_id)
+    pending = b.case.data["forks"].get("pending") or {}
+    if b.case.data.get("phase") != "awaiting_approval" or pending.get("lesson_id") != lesson_id:
+        raise HTTPException(409, f"lesson {lesson_id} is not waiting for approval")
     _spawn(batch_id, b.decide(d.approve))
     return {"ok": True}
 
