@@ -9,6 +9,9 @@
 /** The case file's sections, in order. */
 export const CASE_SECTIONS = [
   "config", "phase", "runs", "step_labels", "split", "hypotheses", "forks", "verdict", "trace", "fix", "trace_comparison", "rubric", "feed", "baseline", "costs",
+  // The experiments engine (MASTER_PLAN 6.1). Absent until written; `candidates` and `audit` are never in the
+  // investigator's view.
+  "candidates", "evidence", "interaction", "audit",
 ] as const;
 export type CaseSection = (typeof CASE_SECTIONS)[number];
 
@@ -23,8 +26,8 @@ export type Phase = KnownPhase | (string & {});
  *  step (`deduplicate`, `drop_leak`, `group_split`). A trap added later brings a label that is not listed here, so
  *  `StepLabel` is open; the batch's `config.trap_info` says what its step is. */
 export const STEP_LABELS = [
-  "load", "inspect", "deduplicate", "drop_leak", "group_split", "deduplicate_near", "clean", "split", "preprocess",
-  "train", "evaluate", "plot", "predict", "report",
+  "load", "inspect", "deduplicate", "drop_leak", "group_split", "deduplicate_near", "clean", "drop_column",
+  "select_features", "split", "preprocess", "train", "evaluate", "plot", "predict", "report",
 ] as const;
 export type KnownStepLabel = (typeof STEP_LABELS)[number];
 export type StepLabel = KnownStepLabel | (string & {});
@@ -286,7 +289,7 @@ export type ForkArm = "control" | "placebo" | "show" | "forced" | "fixed";
 
 /** What a fork experiment tests: `method`, which step caused the inflation (the default), or `fix`, whether the
  *  investigator's proposed patch makes the code better. */
-export type ForkKind = "method" | "fix";
+export type ForkKind = "method" | "fix" | "interaction";
 
 export interface ForkChild extends Partial<Omit<RunScore, "status">> {
   arm: ForkArm;
@@ -362,6 +365,86 @@ export interface ForkExperiment {
   score?: number;
   p_exact?: number;
   level?: "open" | "supported" | "cleared";
+  // -- a paired experiment (`Batch.run_experiment`, MASTER_PLAN 6.5) --
+  /** The suspect this experiment tests (`evidence.<suspect_id>`). */
+  suspect_id?: string;
+  /** The registry change, `<kind>:<name>`: `force_step:deduplicate`, `fake_result:no_duplicates`, `control`, ... */
+  change?: string;
+  change_kind?: ChangeKind;
+  /** The fork point: `before_split`, `before_label:<label>`, `index:<n>` (`before_check:<label>` for a made-up result). */
+  anchor?: string;
+  reason?: string;
+  pairs_requested?: number;
+  /** Pairs left out because a copy failed, with why. */
+  dropped_pairs?: { i: number; reason: string }[];
+  cost_usd?: number | null;
+  /** A two-factor grid's changes (kind "interaction"); its arms are `neither`, `a`, `b` and `both`. */
+  change_a?: string;
+  change_b?: string;
+}
+
+/** The five kinds of change an experiment can make (deep_research/forks.py `CHANGE_KINDS`). */
+export type ChangeKind = "control" | "force_step" | "fake_result" | "edit_context" | "swap_model";
+
+/** One plain-Python suspect (`candidates`, deep_research/analysis.py `rank_candidates`). UI and fallback only. */
+export interface Candidate {
+  /** A step label, or an attribute as `<key>=<value>` (`model_family=random forest`). */
+  target: string;
+  kind: "omission" | "commission" | "attribute";
+  honest_rate: number;
+  inflated_rate: number;
+  /** honest_rate - inflated_rate; the list is sorted by its absolute value, largest first. */
+  diff: number;
+  n_honest: number;
+  n_inflated: number;
+  fork_run_id: string | null;
+  fork_at: number | null;
+}
+
+/** A suspect's running evidence over its experiments (`evidence.<suspect_id>`). */
+export interface SuspectEvidence {
+  pairs: number;
+  agree: number;
+  score: number;
+  p_exact: number | null;
+  level: "open" | "supported" | "cleared";
+  cost_usd: number | null;
+  /** Fork ids, oldest first. */
+  experiments: string[];
+}
+
+/** The two-factor grid (`interaction`, deep_research/interaction.py). Gaps are reported minus true. */
+export interface Interaction {
+  fork_id: string;
+  change_a: string;
+  change_b: string;
+  suspects: string[];
+  source_run: string;
+  fork_at: number;
+  anchor: string;
+  per_cell: number;
+  cells: Record<"neither" | "a" | "b" | "both", { mean_gap: number | null; n: number }>;
+  /** Gap reductions: positive means the change shrinks the gap. Null when a cell has no scored copy. */
+  effect_a: number | null;
+  effect_b: number | null;
+  interaction: number | null;
+  cost_usd: number | null;
+  budget_left_usd: number | null;
+}
+
+/** One answer of an audit sheet (deep_research/audit.py). */
+export interface AuditAnswer {
+  id: "test_touched_training" | "columns_fair" | "test_matches_claim";
+  question: string;
+  answer: "yes" | "no" | "unknown";
+  evidence: string[];
+  numbers: Record<string, unknown>;
+}
+
+/** The audit (`audit`): one sheet per scored run, written after the verdict. Never in the investigator's view. */
+export interface Audit {
+  at: number;
+  runs: Record<string, { run_id: string; status: string; questions: AuditAnswer[] }>;
 }
 
 /** One round of more pairs on a fork (`ForkExperiment.more_pairs`). */
@@ -723,6 +806,11 @@ export interface CaseFile {
    *  saved before it existed. */
   baseline?: Baseline | null;
   costs: Costs;
+  /** The experiments engine (MASTER_PLAN 6.1), each absent until written. */
+  candidates?: Candidate[];
+  evidence?: Record<string, SuspectEvidence>;
+  interaction?: Interaction | null;
+  audit?: Audit;
 }
 
 /** One item of the commentary feed (deep_research/commentary.py). */
