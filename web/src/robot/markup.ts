@@ -104,91 +104,40 @@ interface MeasuredRun { status?: unknown; hidden_results?: unknown }
 const SCORED = new Set(["honest", "inflated", "unclear"]);
 const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
-/** How many rows of dots a gauge has at most, and how far apart (percent of the scale) two dots of one row are. */
-const GAUGE_ROWS = 4;
-const GAUGE_APART = 4.5;
-
-/** One agent's own value of a measure, for its dot on the gauge: null when it has none. */
-interface AgentValue { id: string; status: string; value: number | null }
-/** A measure's scale: where it ends, the limit an episode must stay under (if it has one), and how a value reads. */
-interface Scale { max: number; limit?: number; text: (v: number) => string; endText: string }
-
-/**
- * A measure's gauge: a track from 0 to the scale's end, filled to the batch's mean, with the limit marked where the
- * measure has one, and a dot for each scored agent at its own value in its status's color. A value past the end is
- * drawn at the end. The dots are keyed by agent, so each shows when its agent is scored and stays where it is after.
- */
-function gauge(scale: Scale, value: number | null, agents: AgentValue[]): string {
-  const share = (v: number): number => Math.max(0, Math.min(1, v / scale.max)) * 100;
-  const at = (v: number): string => `${share(v).toFixed(1)}%`;
-  // Agents with the same value would sit on each other: each takes the lowest row with room, up to GAUGE_ROWS.
-  const rows: number[][] = [];
-  const have = agents.filter((a) => a.value != null);
-  const rowOf = new Map<string, number>();
-  for (const a of [...have].sort((x, y) => (x.value as number) - (y.value as number) || x.id.localeCompare(y.id, undefined, { numeric: true }))) {
-    const x = share(a.value as number);
-    let row = rows.findIndex((taken) => taken.every((t) => Math.abs(t - x) >= GAUGE_APART));
-    if (row < 0) row = rows.length < GAUGE_ROWS ? rows.length : rows.reduce((best, taken, i) => (taken.length < rows[best].length ? i : best), 0);
-    (rows[row] ??= []).push(x);
-    rowOf.set(a.id, row);
-  }
-  const dots = have.map((a) =>
-    `<i class="rp-dot rp-dot--${esc(a.status)}" data-morph-key="${attr(`dot:${a.id}`)}" style="left:${at(a.value as number)};--row:${rowOf.get(a.id) ?? 0}" title="${attr(`${a.id}, ${a.status}: ${scale.text(a.value as number)}`)}"></i>`).join("");
-  const limit = scale.limit == null ? "" : `<i class="rp-limit" style="left:${at(scale.limit)}"></i>`;
-  const limitText = scale.limit == null ? "" : `<span class="rp-scale-l" style="left:${at(scale.limit)}">${esc(`limit ${scale.text(scale.limit)}`)}</span>`;
-  return `<div class="rp-gauge" style="--rows:${Math.max(1, rows.length)}" data-morph-list><i class="rp-fill" data-morph-key="fill" style="width:${value == null ? "0%" : at(value)}"></i>${limit}${dots}</div>`
-    + `<div class="rp-scale" aria-hidden="true"><span>0</span>${limitText}<span>${esc(scale.endText)}</span></div>`;
-}
-
-const tile = (label: string, value: string, unit: string, sub: string, bar: string): string =>
-  `<div class="rp-tile"><dt><span class="rp-tile-l">${label}</span><span class="rp-tile-s">${esc(sub)}</span></dt>`
-  + `<dd><span class="rp-num">${value}</span>${unit ? `<span class="rp-unit">${esc(unit)}</span>` : ""}</dd>${bar}</div>`;
+const tile = (label: string, value: string, unit: string, sub: string): string =>
+  `<div class="rp-tile"><dt>${esc(label)}</dt><dd><span class="rp-num">${value}</span>${unit ? `<span class="rp-unit">${esc(unit)}</span>` : ""}</dd><span class="rp-tile-s">${esc(sub)}</span></div>`;
 
 /**
  * The paper's measures, taken on this batch's hidden episodes so far: for a tracking batch ExBody2's three errors,
  * for a LIBERO-PRO batch the share of episodes that ended in the basket. The numbers are means over every hidden
  * episode of every scored run, so they fill in and move as agents are scored; before the first, the tiles are empty
- * and say so. Under each number is its gauge: the limit an episode must stay under, and where each agent is. A
- * tracking error of an episode where the robot fell is measured up to the fall, as the sim does.
+ * and say so. Under a measure with a limit an episode must stay under, the limit is named. A tracking error of an
+ * episode where the robot fell is measured up to the fall, as the sim does.
  */
 export function measuredTiles(config: unknown, runs: Record<string, MeasuredRun> | null | undefined): string {
   const source = researchSource(config);
   if (!source) return "";
-  const scored = Object.entries(runs ?? {}).filter(([, r]) => SCORED.has(String(r.status)) && Array.isArray(r.hidden_results) && r.hidden_results.length)
-    .map(([id, r]) => ({ id, status: String(r.status), episodes: r.hidden_results as Record<string, unknown>[] }))
-    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-  const episodes = scored.flatMap((r) => r.episodes);
+  const scored = Object.values(runs ?? {}).filter((r) => SCORED.has(String(r.status)) && Array.isArray(r.hidden_results) && r.hidden_results.length);
+  const episodes = scored.flatMap((r) => r.hidden_results as Record<string, unknown>[]);
   const n = episodes.length;
-  const nums = (eps: Record<string, unknown>[], key: string): number[] => eps.map((e) => e[key]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-  const share = (eps: Record<string, unknown>[], result: string): number | null => (eps.length ? eps.filter((e) => e.result === result).length / eps.length : null);
+  const nums = (key: string): number[] => episodes.map((e) => e[key]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
   const shown = (v: number | null, fmt: "dec2" | "dec3" | "pct0" | "int", text: string): string => (v == null ? "–" : count(v, fmt, text));
-  const each = (of: (eps: Record<string, unknown>[]) => number | null): AgentValue[] => scored.map((r) => ({ id: r.id, status: r.status, value: of(r.episodes) }));
-  const percent: Scale = { max: 1, text: (v) => `${Math.round(v * 100)}%`, endText: "100%" };
   let tiles: string;
   if ((config as { domain?: unknown } | null)?.domain === "humanoid_track") {
-    const cmOf = (eps: Record<string, unknown>[]): number | null => { const m = mean(nums(eps, "e_mpkpe")); return m == null ? null : m * 100; };
-    const kp = cmOf(episodes), jp = mean(nums(episodes, "e_mpjpe")), vel = mean(nums(episodes, "e_vel"));
+    const kp = mean(nums("e_mpkpe")), jp = mean(nums("e_mpjpe")), vel = mean(nums("e_vel"));
     const tracked = episodes.filter((e) => e.result === "tracked").length;
-    tiles = tile("Position error", shown(kp, "dec2", kp == null ? "" : kp.toFixed(2)), kp == null ? "" : "cm", "key body positions",
-        gauge({ max: TRACK_CM * 2, limit: TRACK_CM, text: (v) => `${Number(v.toFixed(1))} cm`, endText: `${TRACK_CM * 2}+ cm` }, kp, each(cmOf)))
-      + tile("Joint error", shown(jp, "dec3", jp == null ? "" : jp.toFixed(3)), jp == null ? "" : "rad", "joint angles",
-        gauge({ max: TRACK_RAD * 2, limit: TRACK_RAD, text: (v) => `${Number(v.toFixed(3))} rad`, endText: `${TRACK_RAD * 2}+ rad` }, jp, each((eps) => mean(nums(eps, "e_mpjpe")))))
-      + tile("Velocity error", shown(vel, "dec2", vel == null ? "" : vel.toFixed(2)), vel == null ? "" : "m/s", "root velocity",
-        gauge({ max: 0.5, text: (v) => `${v.toFixed(2)} m/s`, endText: "0.5+ m/s" }, vel, each((eps) => mean(nums(eps, "e_vel")))))
-      + tile("Tracked", n ? `${count(tracked, "int", String(tracked))}<span class="rp-of"> of ${n}</span>` : "–", "", "hidden episodes",
-        gauge(percent, share(episodes, "tracked"), each((eps) => share(eps, "tracked"))));
+    tiles = tile("Position error", shown(kp == null ? null : kp * 100, "dec2", kp == null ? "" : (kp * 100).toFixed(2)), kp == null ? "" : "cm", `key body positions · limit ${TRACK_CM} cm`)
+      + tile("Joint error", shown(jp, "dec3", jp == null ? "" : jp.toFixed(3)), jp == null ? "" : "rad", `joint angles · limit ${TRACK_RAD} rad`)
+      + tile("Velocity error", shown(vel, "dec2", vel == null ? "" : vel.toFixed(2)), vel == null ? "" : "m/s", "root velocity")
+      + tile("Tracked", n ? `${count(tracked, "int", String(tracked))}<span class="rp-of"> of ${n}</span>` : "–", "", "hidden episodes");
   } else {
     const placed = episodes.filter((e) => e.result === "placed").length;
-    const rate = share(episodes, "placed");
-    tiles = tile("In the basket", n ? `${count(placed, "int", String(placed))}<span class="rp-of"> of ${n}</span>` : "–", "", "hidden episodes",
-        gauge(percent, rate, each((eps) => share(eps, "placed"))))
-      + tile("Success rate", shown(rate, "pct0", rate == null ? "" : `${Math.round(rate * 100)}%`), "", "under the position changes",
-        gauge(percent, rate, each((eps) => share(eps, "placed"))));
+    tiles = tile("In the basket", n ? `${count(placed, "int", String(placed))}<span class="rp-of"> of ${n}</span>` : "–", "", "hidden episodes")
+      + tile("Success rate", shown(n ? placed / n : null, "pct0", n ? `${Math.round((placed / n) * 100)}%` : ""), "", "under the position changes");
   }
   const note = n ? `Mean over ${n} hidden ${n === 1 ? "episode" : "episodes"} of ${scored.length} ${scored.length === 1 ? "agent" : "agents"}` : "Fills in as agents are scored";
-  const key = scored.length ? `<span class="rp-keys"><span><i class="rp-dot rp-dot--honest"></i>honest</span><span><i class="rp-dot rp-dot--unclear"></i>unclear</span><span><i class="rp-dot rp-dot--inflated"></i>inflated</span><span>one dot per agent</span></span>` : "";
   return `<div class="rp-measured" data-morph-key="measured">`
-    + `<h4 class="rp-sub">${esc(`${source.name}'s measures on this batch`)}<span class="rp-sub-n">${esc(note)}</span>${key}</h4>`
+    + `<h4 class="rp-sub">${esc(`${source.name}'s measures on this batch`)}<span class="rp-sub-n">${esc(note)}</span></h4>`
     + `<dl class="rp-tiles">${tiles}</dl>`
     + `</div>`;
 }

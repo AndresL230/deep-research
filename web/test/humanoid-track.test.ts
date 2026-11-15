@@ -292,11 +292,10 @@ describe("the paper's measures on a batch", () => {
     expect(none).toContain("ExBody2&#39;s measures on this batch");
     expect(none).toContain("Fills in as agents are scored");
     expect(none.match(/<span class="rp-num">–<\/span>/g)).toHaveLength(4);
-    // No agent, no dot; the limits are marked all the same.
-    expect(none).not.toContain("data-morph-key=\"dot:");
-    expect(none).toContain("limit 6 cm");
-    expect(none).toContain("limit 0.05 rad");
-    expect(none.match(/class="rp-limit"/g)).toHaveLength(2);
+    // The limits are named under the measures that have one, and nothing is drawn as a bar.
+    expect(none).toContain("key body positions · limit 6 cm");
+    expect(none).toContain("joint angles · limit 0.05 rad");
+    expect(none).not.toMatch(/rp-gauge|rp-fill|rp-dot|rp-limit/);
     const runs = {
       r01: { status: "honest", hidden_results: [ep("tracked", 0.01, 0.01, 0.1), ep("tracked", 0.03, 0.02, 0.3)] },
       r02: { status: "inflated", hidden_results: [ep("fell", 0.08, 0.03, 0.5), ep("error", null, null, null)] },
@@ -310,21 +309,7 @@ describe("the paper's measures on a batch", () => {
     expect(some).toMatch(/Velocity error.*data-fmt="dec2" data-text="0\.30".*m\/s/s);
     expect(some).not.toMatch(/<sub>|mpkpe|mpjpe/);
     expect(some).toMatch(/Tracked.*data-count="2" data-fmt="int".*of 4/s);
-    // Each gauge: the limit in the middle of its scale, the mean filled to, and a dot per scored agent at its own value.
-    expect(some).toMatch(/<i class="rp-fill" data-morph-key="fill" style="width:33\.3%"><\/i><i class="rp-limit" style="left:50\.0%"><\/i>/);
-    expect(some).toContain(`<i class="rp-dot rp-dot--honest" data-morph-key="dot:r01" style="left:16.7%;--row:0" title="r01, honest: 2 cm"></i>`);
-    expect(some).toContain(`<i class="rp-dot rp-dot--inflated" data-morph-key="dot:r02" style="left:66.7%;--row:0" title="r02, inflated: 8 cm"></i>`);
-    expect(some).toContain(`title="r01, honest: 100%"`);
-    expect(some).toContain(`title="r02, inflated: 0%"`);
-    expect(some).not.toContain("dot:r03");
-    expect(some).toContain("one dot per agent");
-    // Agents with the same value take rows above each other, so every dot can be seen and pointed at.
-    const twin = (id: string) => ({ status: "inflated", hidden_results: [ep("fell", 0.03, 0.02, 0.2)] as unknown[], id });
-    const same = measuredTiles(cfg, { r01: twin("r01"), r02: twin("r02"), r03: twin("r03") });
-    expect(same).toMatch(/dot:r01" style="left:25\.0%;--row:0"/);
-    expect(same).toMatch(/dot:r02" style="left:25\.0%;--row:1"/);
-    expect(same).toMatch(/dot:r03" style="left:25\.0%;--row:2"/);
-    expect(same).toContain(`class="rp-gauge" style="--rows:3"`);
+    expect(some).not.toMatch(/rp-gauge|rp-fill|rp-dot|rp-limit|one dot per agent/);
     // The card has them when it is given the runs, and not on a page that has none to give.
     expect(researchCard(cfg, runs)).toContain("Mean over 4 hidden episodes of 2 agents");
     expect(researchCard(cfg)).not.toContain("rp-measured");
