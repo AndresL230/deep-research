@@ -6,12 +6,16 @@ Checks the committed fixtures, the local `batches/` folder when there is one, an
 1 and lists every failure when:
 
 - a banned key (MASTER_PLAN 6.2) is in what the investigator can read: its case file view, any file under `/runs/` it
-  is not denied, or the skills; or its read denies under `/runs/` no longer cover score.json and the hidden folders;
-- `holdout_labels` is reachable through an API route (the files and case routes) or an agent route (a file or text
-  under a folder the investigator mounts);
+  is not denied, the skills, its notebooks under `/memory/`, the casebook under `/memories/`, or any other route its
+  backend mounts; or its read denies under `/runs/` no longer cover score.json and the hidden folders;
+- `holdout_labels` is reachable through any API route (every GET route FastAPI has, each path parameter filled in and
+  the file routes probed with every spelling) or any agent route (every route of the investigator's backend, found by
+  building one, and every file given to the analyst's VM);
 - a fork has a changed copy (any arm but control) and no control copy;
 - something is `supported` with a running score under 20: a verdict, a method fork, or a method hypothesis whose
   experiment's score is under 20 (all read the way the server reads them, `case_file.with_evidence`);
+- a suspect's status disagrees with `evidence.<id>` under the running-score rule (the ledger's level is not its
+  score's, or the status is not the level), or `verdict.supported` names a suspect whose ledger score is under 20;
 - a case section or field `docs/api-contract.md` lists is missing from a batch's case file;
 - a simulated batch lacks its flag: every fixture is either `config.simulated` or a recording
   (`config.recording.kind = "live"`), and a batch whose costs say simulated is flagged simulated.
@@ -35,7 +39,7 @@ from deep_research import domains  # noqa: E402
 from deep_research.agents.investigator import RUNS_READ_DENY  # noqa: E402
 from deep_research.case_file import BANNED_VIEW_KEYS, investigator_view, with_evidence  # noqa: E402
 from deep_research.config import FIXTURES_DIR  # noqa: E402
-from deep_research.evidence import SUPPORTED_SCORE  # noqa: E402
+from deep_research.evidence import SUPPORTED_SCORE, score_level  # noqa: E402
 
 CONTRACT = ROOT / "docs" / "api-contract.md"
 # The sections `CaseFile.__init__` sets to their default when an older case file lacks them.
@@ -131,6 +135,33 @@ def check_case(name: str, root: Path, raw: dict, sections: list[str], ev_fields:
         if fid != "pending" and isinstance(fork, dict) and fork.get("level") == "supported" \
                 and float(fork.get("score") or 0) < SUPPORTED_SCORE:
             fail(name, f"fork {fid} supported at a score of {fork.get('score')}")
+    # 4b. a suspect's status follows its ledger, `evidence.<id>`, under the running-score rule (plan 6.4): the level is
+    # the score's, and the status is the level (or `testing` while one of its experiments is still running).
+    ledger = case.get("evidence") or {}
+    for s in case.get("suspects") or []:
+        if not isinstance(s, dict):
+            continue
+        sid, status = s.get("id"), s.get("status")
+        ev = ledger.get(sid) if isinstance(ledger.get(sid), dict) else None
+        if ev is None:
+            if status in ("supported", "cleared"):
+                fail(name, f"suspect {sid} is {status} with no evidence.{sid} behind it")
+            continue
+        score, n_pairs = float(ev.get("score") or 0), int(ev.get("pairs") or 0)
+        level = score_level(score, n_pairs)
+        if ev.get("level") != level:
+            fail(name, f"evidence.{sid} says {ev.get('level')}, but a score of {score:g} over {n_pairs} pairs is {level}")
+        running = any(isinstance(f, dict) and f.get("suspect_id") == sid and f.get("status") not in ("done", "failed")
+                      for fid, f in forks.items() if fid != "pending")
+        if status != level and (status in ("supported", "cleared") or level != "open") \
+                and not (status == "testing" and running):
+            fail(name, f"suspect {sid} is {status}, but its evidence (score {score:g}, {n_pairs} pairs) is {level}")
+    # 4c. a verdict names no suspect as supported whose ledger score is under 20
+    if isinstance(v, dict):
+        for sid in v.get("supported") or []:
+            score = float((ledger.get(sid) or {}).get("score") or 0) if isinstance(ledger.get(sid), dict) else 0.0
+            if score < SUPPORTED_SCORE:
+                fail(name, f"verdict.supported names {sid}, whose ledger score is {score:g} (under {SUPPORTED_SCORE:g})")
     for h in case.get("hypotheses") or []:
         if not isinstance(h, dict) or h.get("status") != "supported":
             continue
@@ -157,22 +188,113 @@ def check_case(name: str, root: Path, raw: dict, sections: list[str], ev_fields:
         fail(name, "costs say simulated but config.simulated is not set")
 
 
-def check_api(batch_ids: list[str], fail) -> None:
-    """The files and case routes never serve holdout labels, by any spelling, for any batch the server lists."""
+def investigator_routes() -> list[tuple[str, str, Path]]:
+    """Every route the investigator's backend mounts (`build_investigator`'s CompositeBackend), found by building one
+    for a throwaway batch, so a route added later is checked without editing this script. Each as
+    `(prefix, anchor, path)`: anchor `batch` (path under the batch folder), `root` (under the batches folder) or
+    `abs`. Also the files the analyst's VM is given (`Domain.upload_files`), as the route `vm:`."""
+    import os
+    import tempfile
+
+    from deep_research.agents import investigator as inv
+    from deep_research.batch import Batch
+    from deep_research.config import BatchConfig
+
+    os.environ.setdefault("ANTHROPIC_API_KEY", "dummy")  # nothing calls a model: the agent is never built
+    seen: dict = {}
+    real = inv.create_deep_agent
+    inv.create_deep_agent = lambda *a, **kw: seen.update(kw)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            b = Batch(BatchConfig(), batch_id="0000-000000-rout", root=root)
+            inv.build_investigator(b, "unused")
+            out = []
+            for prefix, backend in seen["backend"].routes.items():
+                path = Path(getattr(backend, "cwd")).resolve()
+                if path.is_relative_to(b.dir.resolve()):
+                    out.append((prefix, "batch", path.relative_to(b.dir.resolve())))
+                elif path.is_relative_to(root):
+                    out.append((prefix, "root", path.relative_to(root)))
+                else:
+                    out.append((prefix, "abs", path))
+            for local, remote in b.domain.upload_files(b.task):
+                out.append((f"vm:{remote}", "batch", Path(local).resolve().relative_to(b.dir.resolve())))
+            return out
+    finally:
+        inv.create_deep_agent = real
+
+
+def check_agent_routes(name: str, batch_dir: Path, routes: list[tuple[str, str, Path]], fail) -> None:
+    """No file under any investigator route, and no file given to the analyst's VM, is or names the holdout labels or
+    holds a banned key written as a key. `/runs/` keeps its read denies (score.json); `/skills/` is checked once."""
+    for prefix, anchor, rel in routes:
+        if anchor == "abs" or prefix == "/runs/":
+            continue  # the skills are checked once in main; /runs/ by check_runs_folder, with its denies
+        base = (batch_dir / rel) if anchor == "batch" else (batch_dir.parent / rel)
+        if prefix == "/memory/":
+            base = base.parent  # the route mounts one domain's notebook; check every domain's
+        files = [base] if base.is_file() else (sorted(p for p in base.rglob("*") if p.is_file()) if base.is_dir() else [])
+        for f in files:
+            where = f"{prefix} {f.name}"
+            if "holdout_labels" in f.name.lower():
+                fail(name, f"{where}: a holdout labels file on an agent route")
+            if f.suffix not in TEXT_SUFFIXES or f.stat().st_size > MAX_BYTES or prefix.startswith("vm:"):
+                continue
+            text = f.read_text(errors="replace")
+            m = QUOTED_KEY.search(text)
+            if m:
+                fail(name, f"{where}: banned key {m.group(1)} is readable by the investigator")
+            if "holdout_labels" in text:
+                fail(name, f"{where}: names holdout_labels on an agent route")
+
+
+# A value for each path parameter of a GET route, by name. A new parameter makes the check fail until it is added.
+def _route_values(param: str, case: dict) -> list[str] | None:
+    runs = sorted(case.get("runs") or {}) or ["r01"]
+    forks = [f for f in (case.get("forks") or {}) if f != "pending"] or ["f1"]
+    children = sorted(((case.get("forks") or {}).get(forks[0]) or {}).get("children") or {}) or ["control-1"]
+    probes = ["task/holdout_labels.csv", "task/HOLDOUT_LABELS.csv", "task/./holdout_labels.csv",
+              "runs/../task/holdout_labels.csv", "holdout_labels.csv", "../task/holdout_labels.csv"]
+    return {"run_id": runs[:1], "fork_id": forks[:1], "child": children[:1], "path": probes, "rest": probes,
+            "domain": [(case.get("config") or {}).get("domain") or "tabular"]}.get(param)
+
+
+def check_api(batch_ids: list[str], fail, app=None) -> None:
+    """No GET route of the API (every one FastAPI has, enumerated) serves or names the holdout labels, for any batch
+    the server lists, with each path parameter filled in, and the file routes probed with every spelling."""
+    import itertools
+
+    from fastapi.routing import APIRoute
     from fastapi.testclient import TestClient
 
-    from deep_research import api
+    if app is None:
+        from deep_research import api
 
-    with TestClient(api.app) as client:
+        app = api.app
+    routes = [r for r in app.routes if isinstance(r, APIRoute) and "GET" in r.methods]
+    with TestClient(app) as client:
         for bid in batch_ids:
-            for path in ("task/holdout_labels.csv", "task/HOLDOUT_LABELS.csv", "task/./holdout_labels.csv",
-                         "runs/../task/holdout_labels.csv"):
-                res = client.get(f"/api/batches/{bid}/files/{path}")
-                if res.status_code == 200:
-                    fail(bid, f"GET /api/batches/{bid}/files/{path} served the holdout labels")
-            res = client.get(f"/api/batches/{bid}/case")
-            if res.status_code == 200 and "holdout_labels" in res.text:
-                fail(bid, f"GET /api/batches/{bid}/case names holdout_labels")
+            case_path = FIXTURES_DIR / bid / "case" / "case.json"
+            case = json.loads(case_path.read_text()) if case_path.is_file() else {}
+            for route in routes:
+                params = [p for p in route.param_convertors if p != "batch_id"]
+                values = [_route_values(p, case) for p in params]
+                if any(v is None for v in values):
+                    fail("api", f"GET {route.path}: no probe for its parameter(s) {params}; add one to _route_values")
+                    continue
+                for combo in itertools.product(*values):
+                    url = route.path.replace("{batch_id}", bid)
+                    for p, val in zip(params, combo):
+                        url = re.sub(r"\{%s(:[a-z]+)?\}" % p, val, url)
+                    res = client.get(url)
+                    if res.status_code != 200:
+                        continue
+                    # An API file route that answers a holdout-labels path has served it. (The web app's catch-all
+                    # answers every path with its own page, which is checked like any other answer.)
+                    served = "path" in params and route.path.startswith("/api/")
+                    if served or "holdout_labels" in res.text:
+                        fail(bid, f"GET {url} serves or names holdout_labels")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -211,6 +333,14 @@ def main(argv: list[str] | None = None) -> int:
     folders += [(p, False) for p in args.batches]
     n = 0
     fixture_ids = []
+    routes = investigator_routes()
+    prefixes = {p for p, _, _ in routes}
+    for must in ("/case/", "/runs/", "/skills/", "/memory/", "/memories/"):
+        if must not in prefixes:
+            fail("investigator", f"route {must} was not found on the investigator's backend; the check is out of date")
+    for folder, _ in folders:
+        # The memories shared by every batch in the folder (the casebook, the notebooks), once per folder.
+        check_agent_routes(folder.name, folder / "_routes_probe", [r for r in routes if r[1] == "root"], fail)
     for folder, is_fixture in folders:
         for case_path in sorted(folder.glob("*/case/case.json")):
             root = case_path.parent.parent
@@ -220,6 +350,7 @@ def main(argv: list[str] | None = None) -> int:
             if is_fixture:
                 fixture_ids.append(root.name)
             check_case(root.name, root, json.loads(case_path.read_text()), sections, ev_fields, is_fixture, fail)
+            check_agent_routes(root.name, root, [r for r in routes if r[1] == "batch"], fail)
     if not args.no_api:
         check_api(fixture_ids, fail)
 
