@@ -12,8 +12,10 @@ import logging
 import mimetypes
 import os
 import re
+import threading
 import time
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -736,7 +738,7 @@ def _in_hidden_folder(rel: str) -> bool:
         len(parts) > 4 and parts[0] == "forks" and parts[3] == "hidden")
 
 
-def _hidden_listed(batch_id: str, rel: str) -> bool:
+def _hidden_listed(batch_id: str, rel: str, case: dict | None = None) -> bool:
     """Whether the case lists `rel` as a hidden episode's recording of a scored run or fork child.
 
     The recordings are written while a run is being scored and hold the hidden can positions, so a file is only
@@ -745,7 +747,7 @@ def _hidden_listed(batch_id: str, rel: str) -> bool:
     if m is None:
         return False
     try:
-        case = _case(batch_id)
+        case = case if case is not None else _case(batch_id)
     except (HTTPException, OSError, ValueError):
         return False
     owner = m.group(1).split("/")
@@ -774,11 +776,12 @@ def memory_notebook(domain: str):
 
 # ---- the robot viewer (robot_view.py): the 3D scene and each motion file's poses ----
 
-# Where a run or fork child keeps its outputs: the only places a motion file is read from (never task/).
+# Where a run or fork child keeps its outputs: the only places a motion file is read from (never task/). A name
+# may hold commas: agents name practice episodes by their can positions (`v5_0.3,0.25_0.25,-0.25_s0.motion.json`).
 # A run's, or the starting code's, recorded episodes on another test set (`Batch.other_benchmarks`): LIBERO-PRO's
 # positions. Not the hidden test, so nothing to keep back.
 BENCH_PATH = re.compile(r"^(runs/[A-Za-z0-9._-]+|baseline)/benchmarks/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.motion\.json$")
-MOTION_PATH = re.compile(r"^(runs/[A-Za-z0-9._-]+|forks/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/outputs/[A-Za-z0-9._/ -]+\.json$")
+MOTION_PATH = re.compile(r"^(runs/[A-Za-z0-9._-]+|forks/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/outputs/[A-Za-z0-9._/, -]+\.json$")
 
 
 def _gzipped_json(packed: bytes, request: Request, cache: str) -> Response:
@@ -814,8 +817,12 @@ def batch_motion(batch_id: str, path: str, request: Request):
 
     `path` is batch-relative, as in `motion_files`. Only a run's or a fork child's outputs are read, never task/ (the
     hidden can positions live there) or anything a domain keeps secret. A scored run's hidden episodes
-    (`runs/<run>/hidden/...`, listed in its `hidden_results`) are read too, once the run is scored."""
-    full = _motion_file(_batch_dir(batch_id).resolve(), path, batch_id)
+    (`runs/<run>/hidden/...`, listed in its `hidden_results`) are read too, once the run is scored.
+    A batch another machine ran is read from the team hub's copy (`_hub_motion_file`)."""
+    if _is_local(batch_id):
+        full = _motion_file(_batch_dir(batch_id).resolve(), path, batch_id)
+    else:
+        full = _hub_motion_file(batch_id, path, _hub_case(batch_id))
     try:
         packed = robot_view.motion_poses(full)
     except robot_view.MotionError as e:
@@ -833,25 +840,45 @@ def batch_motion_summaries(batch_id: str, path: list[str] = Query(default=[])):
     """For the viewer's file picker: each motion file's can start, place target, length and result, without frames.
 
     `?path=...&path=...`, the same paths as `/motion`. A file that cannot be read has `error` instead."""
-    root = _batch_dir(batch_id).resolve()
-    out: dict[str, dict] = {}
-    for p in path[:MAX_SUMMARIES]:
+    paths = path[:MAX_SUMMARIES]
+    local = _is_local(batch_id)
+    if local:
+        root = _batch_dir(batch_id).resolve()
+        find = lambda p: _motion_file(root, p, batch_id)  # noqa: E731
+    else:
+        case = _hub_case(batch_id)
+        find = lambda p: _hub_motion_file(batch_id, p, case)  # noqa: E731
+
+    def one(p: str) -> dict:
         try:
-            out[p] = robot_view.motion_summary(_motion_file(root, p, batch_id))
+            return robot_view.motion_summary(find(p))
         except HTTPException as e:
-            out[p] = {"error": str(e.detail)}
+            return {"error": str(e.detail)}
         except robot_view.MotionError as e:
-            out[p] = {"error": str(e)}
-    return out
+            return {"error": str(e)}
+
+    if local:
+        return {p: one(p) for p in paths}
+    # From the hub: a few at a time, so a picker of 60 files does not wait on 60 reads one after the other.
+    return dict(zip(paths, _HUB_FILE_POOL.map(one, paths)))
+
+
+def _motion_rel(path: str) -> tuple[str, bool]:
+    """Batch-relative `path` checked as a motion file's, and whether it is a hidden episode's recording."""
+    rel = path.strip()
+    hidden = bool(HIDDEN_PATH.match(rel))
+    if ".." in rel.split("/") or not (MOTION_PATH.match(rel) or hidden or BENCH_PATH.match(rel)):
+        raise HTTPException(400, "not a motion file path: it must be under runs/<run>/outputs or forks/<fork>/<child>/outputs")
+    secret = ("holdout_labels", *domains.secret_files())
+    if any(s in rel.rsplit("/", 1)[-1] for s in secret):
+        raise HTTPException(404, "no such motion file")
+    return rel, hidden
 
 
 def _motion_file(root: Path, path: str, batch_id: str) -> Path:
     """The motion file at batch-relative `path`: only under a run's or fork child's outputs, never a secret, or a
     hidden episode's recording that the case lists for a scored run or fork child (`_hidden_listed`)."""
-    rel = path.strip()
-    hidden = bool(HIDDEN_PATH.match(rel))
-    if ".." in rel.split("/") or not (MOTION_PATH.match(rel) or hidden or BENCH_PATH.match(rel)):
-        raise HTTPException(400, "not a motion file path: it must be under runs/<run>/outputs or forks/<fork>/<child>/outputs")
+    rel, hidden = _motion_rel(path)
     secret = ("holdout_labels", *domains.secret_files())
     full = (root / rel).resolve()
     if root not in full.parents or not full.is_file() or any(s in full.name for s in secret):
@@ -859,6 +886,75 @@ def _motion_file(root: Path, path: str, batch_id: str) -> Path:
     if (hidden or _in_hidden_folder(full.relative_to(root).as_posix())) and not _hidden_listed(batch_id, rel):
         raise HTTPException(404, "no such motion file")
     return full
+
+
+# ---- motion files of a batch another machine ran: from the team hub (hub.get_file), kept on disk here ----
+
+NOT_ON_HUB = ("This episode's recording isn't on the hub: the batch was run before recordings were shared, "
+              "or is still uploading")
+HUB_UNREACHABLE = "The team hub could not be reached to fetch this episode's recording: try again in a moment"
+BATCH_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+_HUB_FILE_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="hub-files")
+# When each copy was last confirmed against the hub, by its path here, and whether its batch was over by then (the
+# copy is then final).
+_hub_file_checked: dict[Path, tuple[float, bool]] = {}
+_hub_file_lock = threading.Lock()
+
+
+def hub_files_dir() -> Path:
+    """Where the hub's motion files are kept once fetched: `batches/_hub_files/<batch>/<path>`. Safe to delete."""
+    return BATCHES_DIR / "_hub_files"
+
+
+def _hub_case(batch_id: str) -> dict:
+    """A hub batch's case file, shared for a few seconds between the motion routes' reads."""
+    if not hub.enabled():
+        raise HTTPException(404, f"no batch {batch_id}")
+    case = _hub_cached(f"case:{batch_id}", lambda: hub.get_case(batch_id))
+    if not isinstance(case, dict):
+        raise HTTPException(404, f"no batch {batch_id}")
+    return case
+
+
+def _hub_motion_file(batch_id: str, path: str, case: dict) -> Path:
+    """A hub batch's motion file, checked like a local one (`_motion_rel`, `_hidden_listed`), as a file on disk.
+
+    Fetched from the hub once, then asked again (with its ETag, so an unchanged file is not sent) only after
+    HUB_CACHE_SECONDS while the batch is still going. A copy confirmed once the batch was over is kept as it is."""
+    rel, hidden = _motion_rel(path)
+    if (hidden or _in_hidden_folder(rel)) and not _hidden_listed(batch_id, rel, case):
+        raise HTTPException(404, "no such motion file")
+    if not hub.is_motion_path(rel) or not BATCH_ID.match(batch_id):
+        raise HTTPException(404, NOT_ON_HUB)
+    base = hub_files_dir().resolve()
+    local = (base / batch_id / rel).resolve()
+    if base not in local.parents:
+        raise HTTPException(404, "no such motion file")
+    etag_file = local.with_name(local.name + ".etag")
+    have = local.is_file()
+    over = _is_over(case.get("phase"))
+    if have:
+        with _hub_file_lock:
+            checked_at, final = _hub_file_checked.get(local, (float("-inf"), False))
+        if final or time.monotonic() - checked_at < HUB_CACHE_SECONDS:
+            return local
+    etag = etag_file.read_text().strip() if have and etag_file.is_file() else None
+    got = hub.get_file(batch_id, rel, etag=etag)
+    if got.status == "ok" and got.content is not None:
+        local.parent.mkdir(parents=True, exist_ok=True)
+        tmp = local.with_name(f".{local.name}.{threading.get_ident()}.tmp")
+        tmp.write_bytes(got.content)
+        os.replace(tmp, local)
+        if got.etag:
+            etag_file.write_text(got.etag)
+    elif got.status == "missing":
+        raise HTTPException(404, NOT_ON_HUB)
+    elif got.status in ("error", "off") and not have:
+        raise HTTPException(503, HUB_UNREACHABLE)
+    if got.status in ("ok", "unchanged"):
+        with _hub_file_lock:
+            _hub_file_checked[local] = (time.monotonic(), over)
+    return local
 
 
 def _case(batch_id: str) -> dict:

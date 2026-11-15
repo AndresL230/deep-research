@@ -323,6 +323,32 @@ npm run dev
 
 The development frontend runs at `http://localhost:5173` and connects to the backend on port `8000`.
 
+### The team hub
+
+`hub/` is a Cloudflare Worker (D1 for batches and events, R2 for motion files) that is the team's shared record.
+With `HUB_URL` and `HUB_TOKEN` in `.env` (see `.env.example`), a local server:
+
+- sends each batch to the hub as it runs: every change to the case file, every agent event, and every robot
+  episode recording (a run's practice motion files as they are pulled from its VM, its hidden episodes' recordings
+  once it is scored, the same for fork children). This happens on a background thread, so a slow or unreachable hub
+  never holds up a run; what fails is retried;
+- lists the whole team's batches, opens other people's as replays read from the hub, and plays their robot
+  episodes from the hub's copy of the motion files (kept under `batches/_hub_files/`, safe to delete);
+- takes any runner key it does not have locally from the hub at startup. A key in the local `.env` always wins.
+
+Without those settings nothing changes. A robot batch run before recordings were shared shows "This episode's
+recording isn't on the hub" until its folder is backfilled from the machine that has it:
+
+```bash
+uv run python -m deep_research.hub status                                # what the hub holds
+uv run python -m deep_research.hub push-all                              # every batch saved in batches/
+uv run python -m deep_research.hub push batches/<id> --files-only        # one batch folder's motion files only
+```
+
+The owner deploys the Worker from `hub/`: `npx wrangler r2 bucket create deep-research-hub-files` once, then
+`npm run deploy` (D1 migrations, then `wrangler deploy`); `npm test` runs its tests. Anyone holding the team token
+can read every batch and fetch the runner keys, so share it privately and rotate it if it leaks.
+
 To replay the real investigation with no keys and no VMs, open `http://localhost:5173/#/b/robot-live-investigation`. With a built frontend (`cd web && npm run build`), the backend serves the page itself at `http://localhost:8000/#/b/robot-live-investigation`.
 
 For simulator internals, see [`sim/README.md`](sim/README.md), [`sim/CALIBRATION.md`](sim/CALIBRATION.md), and [`sim/MOTION_FORMAT.md`](sim/MOTION_FORMAT.md).

@@ -26,8 +26,8 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | GET | `/api/batches/{id}/investigator/events` | The investigator's events, each with an `agent` field |
 | GET | `/api/batches/{id}/files/{path}` | A file saved with the batch, such as a run's `charts` entry. Served with a CSP that blocks scripts. The holdout labels and hidden can positions are never served, and a run's `hidden/` recordings only once the case lists them for the scored run |
 | GET | `/api/robot/scene` | The robot scene for the 3D viewer (`deep_research/robot_view.py`): `{"bodies", "meshes", "geoms"}`, every visual geom with its body, type, size, local pose and color, meshes decimated to flat `v`/`f` arrays. About 1.4 MB, 0.45 MB gzipped (sent gzipped when accepted). `503` without mujoco or the panda meshes |
-| GET | `/api/batches/{id}/motion?path=<motion file>` | One motion file as body poses: `{"t", "bodies", "frames": [[x, y, z, qw, qx, qy, qz per body], ...], "static", "result", "can_start", "place_target"}`, from `mj_kinematics` on each frame's qpos. `path` must be under `runs/<run>/outputs/` or `forks/<fork>/<child>/outputs/`, or be a scored run's hidden episode listed in its `hidden_results` (`400` otherwise, never `task/`; `404` for a hidden episode of a run not scored yet); `422` when the file is not a motion file |
-| GET | `/api/batches/{id}/motion-summaries?path=...&path=...` | For the viewer's file picker: per path, `{"can_start", "place_target", "duration", "n", "result"}` or `{"error"}` |
+| GET | `/api/batches/{id}/motion?path=<motion file>` | One motion file as body poses: `{"t", "bodies", "frames": [[x, y, z, qw, qx, qy, qz per body], ...], "static", "result", "can_start", "place_target"}`, from `mj_kinematics` on each frame's qpos. `path` must be under `runs/<run>/outputs/` or `forks/<fork>/<child>/outputs/`, or be a scored run's hidden episode listed in its `hidden_results` (`400` otherwise, never `task/`; `404` for a hidden episode of a run not scored yet); `422` when the file is not a motion file. A team hub batch's file comes from the hub (see [Motion files on the hub](#motion-files-on-the-hub)) |
+| GET | `/api/batches/{id}/motion-summaries?path=...&path=...` | For the viewer's file picker: per path, `{"can_start", "place_target", "duration", "n", "result"}` or `{"error"}`. Same paths, checks and hub fallback as `/motion` |
 | POST | `/api/batches/{id}/investigate` | Live only. Starts the investigator (phase `ready`) |
 | POST | `/api/batches/{id}/decision` | Live only. `{"approve": bool}` answers `forks.pending` (phase `awaiting_approval`) |
 | POST | `/api/batches/{id}/stop` | Live only. Cancels the work and stops every VM |
@@ -403,6 +403,32 @@ scored. Step labels, the split finder and the forks read `tool_call` events only
 
 The conversation view will show one log: `thought` maps onto thinking, `tool_call` and `tool_result` onto an
 activity step's run and done, and `todos` onto the plan step.
+
+## Motion files on the hub
+
+A robot batch another machine ran (`remote` in the list) is not on this disk, so `/motion` and `/motion-summaries`
+read its motion files from the team hub. The path is checked exactly as for a local batch first (a hidden episode
+only once the hub's case file lists it for a scored run); then the file is fetched and kept under
+`batches/_hub_files/<id>/<path>`. While the batch is still going a kept file is asked for again (with its ETag, so an
+unchanged one is not sent) after 10 s; once it is over it is kept as it is.
+
+- The hub has no such file: `404 {"detail": "This episode's recording isn't on the hub: the batch was run before
+  recordings were shared, or is still uploading"}` (in `/motion-summaries`, that text as the path's `error`).
+- The hub cannot be reached and nothing is kept: `503 {"detail": "The team hub could not be reached ..."}`.
+- A batch that is neither here nor on the hub is still `404 {"detail": "no batch <id>"}`.
+
+The server that runs a batch sends each motion file the case names (`motion_files`, and `hidden_results[].motion`
+once a run is scored, fork children too) as it is saved, and again when it changes on disk; `python -m
+deep_research.hub push <batch folder> [--files-only]` sends a saved batch's. The hub's own routes (`hub/src/index.ts`,
+`Authorization: Bearer <team token>`):
+
+| Method | Path | What it does |
+|---|---|---|
+| PUT | `/v1/batches/{id}/files/{path}` | Store one motion file (the JSON, plain or `Content-Encoding: gzip`, at most 4 MB as sent) in R2 under `<id>/<path>`. `path` must be under `runs/<run>/outputs/`, `runs/<run>/hidden/` or the same of `forks/<fork>/<child>/`, named `*.motion.json` or `motion*.json`, no part starting with a dot: `400` otherwise, `413` too large, `415` another encoding. Returns `{"ok", "size", "etag"}` |
+| GET | `/v1/batches/{id}/files/{path}` | That file, `application/json`, gzipped when stored so and the client takes gzip, with its `ETag`; `If-None-Match` answers `304`; `404` when the hub has none |
+
+`DELETE /v1/batches/{id}` removes the batch's files too. A hub deployed before these routes answers `404`: a server
+then stops sending files for the rest of its run, and case files and events go as before.
 
 ## Websocket
 
