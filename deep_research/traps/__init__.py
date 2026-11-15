@@ -92,7 +92,8 @@ class Trap:
             "at_split": self.at_split,
             "did": self.did,
             "missing": self.missing,
-            "intervention": dict(self.intervention),
+            # The step the UI shows; the rationale is only the forced call's text in the agent's history.
+            "intervention": {k: self.intervention[k] for k in ("description", "command")},
             "evidence_text": self.evidence_text if self.evidence is not None else None,
         }
 
@@ -111,8 +112,11 @@ def register(trap: Trap) -> Trap:
     if trap.name in _REGISTRY:
         raise ValueError(f"two traps are named '{trap.name}'")
     re.compile(trap.pattern)
-    if set(trap.intervention) != {"description", "command"}:
-        raise ValueError(f"trap '{trap.name}': the intervention needs a description and a command")
+    # `rationale` (optional): the forced call's text, why the agent takes the step, in its own voice (forks.forced_turn).
+    keys = set(trap.intervention)
+    if not {"description", "command"} <= keys <= {"description", "command", "rationale"}:
+        raise ValueError(f"trap '{trap.name}': the intervention needs a description and a command, and may have a "
+                         "rationale")
     _REGISTRY[trap.name] = trap
     return trap
 

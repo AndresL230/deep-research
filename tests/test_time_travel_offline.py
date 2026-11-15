@@ -18,6 +18,8 @@ from deep_research.config import BatchConfig
 from tests.local_vm import COUNT_DUPLICATES, LOOK, install_local_vms, model_script
 from tests.scripted import ScriptedModel, call, say
 
+RATIONALE = ("Before splitting, I'll remove exact duplicate rows, so the same record can't land in both train and "
+             "test.")
 TODOS = [{"content": "Look at the data", "status": "completed"},
          {"content": "Train and report", "status": "in_progress"}]
 
@@ -117,6 +119,18 @@ async def test_a_checkpoint_mode_copy_starts_like_a_messages_mode_copy_and_keeps
         assert isinstance(a["messages"][0], HumanMessage) and a["messages"][1].tool_calls[0]["name"] == "write_todos"
         if arm == "forced-1":
             assert isinstance(a["messages"][-1], ToolMessage) and "Removed" in a["messages"][-1].content
+        # The forced call is a reasoned step in the agent's voice, in both modes: its text says why, then the call.
+        # The control has no forced message, so neither the call nor the rationale.
+        for state in (a, m):
+            calls = [x for x in state["messages"] if isinstance(x, AIMessage) and x.tool_calls]
+            forced = [x for x in calls if x.tool_calls[0]["id"].startswith("forced-")]
+            texts = [str(x.content) for x in state["messages"]]
+            if arm == "forced-1":
+                assert len(forced) == 1 and forced[0] is state["messages"][-2]
+                assert forced[0].content == RATIONALE and forced[0].tool_calls[0]["name"] == "execute"
+                assert "drop_duplicates" in forced[0].tool_calls[0]["args"]["command"]
+            else:
+                assert not forced and RATIONALE not in texts
         # And only checkpoint mode keeps the source run's todo list. The changed copy's plan also lists its forced
         # step as done, so its plan agrees with its history; the control's is the snapshot's own.
         if arm == "forced-1":
@@ -286,3 +300,37 @@ async def test_cli_foolrate_counts_inflated_runs_per_setting(vms, tmp_path, monk
     assert learned["runs"]["r01"]["lessons"]["path"] == "skills"
     assert list((tmp_path / "batches" / "_foolrate").glob("*.json"))
     assert "1/2 inflated" in capsys.readouterr().out
+
+
+def test_every_force_step_carries_its_own_rationale_in_the_agents_voice():
+    from deep_research import forks
+    from deep_research.traps import leaky_column
+
+    specs = ["force_step:deduplicate", "force_step:deduplicate_near", "force_step:deduplicate_fuzzy",
+             "force_step:drop_column:age", "force_step:group_split:patient_id"]
+    rationales = {}
+    for spec in specs:
+        step = forks.parse_change(spec).step
+        r = step["rationale"]
+        assert r.startswith("Before splitting, I'll") and len(r) < 200, spec
+        # Neither the experiment nor the trap is named to the agent.
+        assert not any(w in r.lower() for w in ("experiment", "trap", "leak", "forced", "planted")), spec
+        msgs = forks.forced_turn(step, "ok")
+        assert isinstance(msgs[0], AIMessage) and msgs[0].content == r and msgs[0].tool_calls[0]["name"] == "execute"
+        assert isinstance(msgs[1], ToolMessage) and msgs[1].content == "ok"
+        rationales[spec] = r
+    assert rationales["force_step:deduplicate"] == RATIONALE
+    assert "near-duplicate" in rationales["force_step:deduplicate_near"]
+    assert rationales["force_step:deduplicate_near"] == rationales["force_step:deduplicate_fuzzy"]
+    assert "drop the age column" in rationales["force_step:drop_column:age"]
+    assert "shouldn't be used as a feature" in rationales["force_step:drop_column:age"]
+    assert "one row per patient_id value" in rationales["force_step:group_split:patient_id"]
+    # The leak column's own step says the same neutral thing, never why the column is a problem.
+    leak = forks.intervention_for(leaky_column.TRAP.label)["rationale"]
+    assert "shouldn't be used as a feature" in leak and leaky_column.COLUMN in leak
+    # The method experiment's forced arm carries it too; the control, placebo and show arms get no rationale.
+    plan = forks.arm_plan("deduplicate")
+    assert plan["control"] is None and plan["forced"]["rationale"] == RATIONALE
+    assert all("rationale" not in (plan[a] or {}) for a in ("placebo", "show"))
+    # A made-up result is not a step the agent chose, so it carries no text.
+    assert forks.forced_turn({"command": "x"}, "y")[0].content == ""

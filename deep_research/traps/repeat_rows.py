@@ -148,6 +148,8 @@ TRAP = Trap(
     plant=plant,
     intervention={
         "description": "Keep one visit per subject in data.csv before the split",
+        "rationale": ("Before splitting, I'll keep one visit per subject, so visits from the same subject can't land "
+                      "in both train and test."),
         "command": in_workspace(
             # Read as text so the rows that stay are written back exactly as they were.
             "import pandas as pd; d = pd.read_csv('data.csv', dtype=str, keep_default_na=False); n = len(d); "
