@@ -45,6 +45,12 @@ _BASE_RULES: list[tuple[str, re.Pattern | _TopLevel]] = [
         r"|NearestNeighbors|np\.isclose|cdist\("
     )),
     ("clean", re.compile(r"fillna|dropna|replace\(\s*0|\.median\(\)")),
+    # Leaving a column out: dropped, deleted or popped (a trap's own column is its own label, `drop_leak`).
+    ("drop_column", _TopLevel(r"\.drop\(\s*columns\s*=|\.drop\([^)\n]*axis\s*=\s*1|\bdel\s+\w+\[|\.pop\(\s*['\"]")),
+    # Choosing features by how they relate to the target: fitted before the split, it sees the test rows.
+    ("select_features", re.compile(
+        r"SelectKBest|SelectPercentile|SelectFromModel|\bRFE(?:CV)?\(|SequentialFeatureSelector|VarianceThreshold"
+        r"|mutual_info_classif|f_classif|chi2\b|\.corrwith\(")),
     ("split", re.compile(r"train_test_split|(?:Stratified)?(?:Group)?(?:KFold|ShuffleSplit)|\.sample\(\s*frac")),
     ("preprocess", re.compile(r"StandardScaler|MinMaxScaler|fit_transform|SimpleImputer")),
     ("train", re.compile(r"\.fit\(")),
@@ -333,12 +339,9 @@ def find_split(
     def did(r: str, label: str) -> bool:
         return _did_before_split(runs[r], label, steps)
 
+    # The omission direction of `rank_candidates`, on the same exact rates: the step honest runs do most often more.
     best: tuple[float, str] | None = None
-    for label in steps.labels:
-        if label == steps.anchor or label in steps.skip:
-            continue
-        h = sum(did(r, label) for r in honest) / len(honest)
-        i = sum(did(r, label) for r in inflated) / len(inflated)
+    for label, (h, i) in _label_rates(runs, honest, inflated, steps).items():
         if best is None or (h - i) > best[0] or ((h - i) == best[0] and label == prefer):
             best = (h - i, label)
     assert best is not None
@@ -381,6 +384,104 @@ def find_split(
         honest_example=honest_example,
         inflated_example=inflated_example,
     )
+
+
+@dataclass
+class Candidate:
+    """One suspect the plain-Python baseline ranks (plan Phase 1.2). For the UI and the fallback only: the
+    investigator never sees this list.
+
+    `kind` is `omission` (a good step inflated runs skip: honest runs do it more), `commission` (a bad step inflated
+    runs add: they do it more) or `attribute` (a run property, `target` = `<key>=<value>`, more common in one group).
+    `diff` is honest_rate - inflated_rate; candidates rank by its absolute value. For a step, `fork_run_id` and
+    `fork_at` are where to test it: the first inflated run that skipped an omission (or the first honest run that
+    skipped a commission), just before its claim."""
+
+    target: str
+    kind: str
+    honest_rate: float
+    inflated_rate: float
+    diff: float
+    n_honest: int
+    n_inflated: int
+    fork_run_id: str | None = None
+    fork_at: int | None = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def _label_rates(runs: dict[str, list[Action]], honest: list[str], inflated: list[str],
+                 steps: "Steps") -> dict[str, tuple[float, float]]:
+    """Per step label, in label order: the exact share of honest and of inflated runs that did it before the claim."""
+    rates = {}
+    for label in steps.labels:
+        if label == steps.anchor or label in steps.skip:
+            continue
+        h = sum(_did_before_split(runs[r], label, steps) for r in honest) / len(honest)
+        i = sum(_did_before_split(runs[r], label, steps) for r in inflated) / len(inflated)
+        rates[label] = (h, i)
+    return rates
+
+
+def _first_claim(actions: list[Action], anchor: str) -> int | None:
+    return next((a.index for a in actions if anchor in a.labels), None)
+
+
+def rank_candidates(runs: dict[str, list[Action]], statuses: dict[str, str], steps: "Steps | None" = None,
+                    attributes: dict[str, dict[str, str]] | None = None) -> list[Candidate]:
+    """Every step label in both directions, plus run attributes, ranked by |honest rate - inflated rate|.
+
+    A label counts for a run when the run did it before its claim (`_did_before_split`). `attributes` are per run
+    `{key: value}`, such as `model_family` read from the run's report.json (`run_attributes`); each value that appears
+    becomes one candidate. Ties keep the label order, then attributes in key and value order. Labels no run in either
+    group did are left out. Empty without at least one honest and one inflated run.
+    """
+    steps = steps or STEPS
+    honest = [r for r, s in statuses.items() if s == "honest" and r in runs]
+    inflated = [r for r, s in statuses.items() if s == "inflated" and r in runs]
+    if not honest or not inflated:
+        return []
+    out: list[Candidate] = []
+    for label, (h, i) in _label_rates(runs, honest, inflated, steps).items():
+        if h == 0 and i == 0:
+            continue
+        did = {r: _did_before_split(runs[r], label, steps) for r in honest + inflated}
+        kind = "omission" if h >= i else "commission"
+        # Where to test it: a run of the group that went wrong without it (omission) or right without it (commission).
+        group = inflated if kind == "omission" else honest
+        fork_run, fork_at = None, None
+        for r in group:
+            if not did[r]:
+                at = _first_claim(runs[r], steps.anchor)
+                if at is not None:
+                    fork_run, fork_at = r, at
+                    break
+        out.append(Candidate(label, kind, round(h, 3), round(i, 3), round(h - i, 3), len(honest), len(inflated),
+                             fork_run, fork_at))
+    attributes = attributes or {}
+    keys = sorted({k for r in honest + inflated for k in (attributes.get(r) or {})})
+    for key in keys:
+        values = sorted({str(attributes[r][key]) for r in honest + inflated if key in (attributes.get(r) or {})})
+        for v in values:
+            h = sum(str((attributes.get(r) or {}).get(key)) == v for r in honest) / len(honest)
+            i = sum(str((attributes.get(r) or {}).get(key)) == v for r in inflated) / len(inflated)
+            out.append(Candidate(f"{key}={v}", "attribute", round(h, 3), round(i, 3), round(h - i, 3),
+                                 len(honest), len(inflated)))
+    order = {id(c): n for n, c in enumerate(out)}
+    return sorted(out, key=lambda c: (-abs(c.diff), order[id(c)]))
+
+
+def run_attributes(report: dict | None, model: str | None = None) -> dict[str, str]:
+    """A run's attributes for `rank_candidates`: `model_family` from its report.json's `model` (lowercased, trimmed),
+    and `analyst_model`, the LLM the run used, when known."""
+    out: dict[str, str] = {}
+    fam = (report or {}).get("model") if isinstance(report, dict) else None
+    if isinstance(fam, str) and fam.strip():
+        out["model_family"] = " ".join(fam.lower().split())[:60]
+    if model:
+        out["analyst_model"] = model
+    return out
 
 
 def label_table(runs: dict[str, list[Action]], statuses: dict[str, str], steps: "Steps | None" = None) -> list[dict]:

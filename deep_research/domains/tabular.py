@@ -22,6 +22,8 @@ _BASE_STEPS = {
     "inspect": StepWords("looking at the data", "looked at the data", "No look at the data here"),
     "deduplicate_near": StepWords("removing near-duplicate rows", "removed near-duplicate rows", "No near-duplicate removal here"),
     "clean": StepWords("cleaning up missing values", "cleaned up missing values", "No cleaning here"),
+    "drop_column": StepWords("leaving out a column", "dropped a column", "No column dropped here"),
+    "select_features": StepWords("choosing features", "chose features by their link to the target", "No feature selection here"),
     "split": StepWords("splitting into train and test", "split the data", "No split here"),
     "preprocess": StepWords("scaling the features", "scaled or imputed the features", "No preprocessing here"),
     "train": StepWords("training a model", "trained a model", "No model trained here"),
