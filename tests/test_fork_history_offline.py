@@ -138,7 +138,10 @@ async def test_a_forced_copy_appends_the_forced_step_and_changes_nothing_before_
     assert forced["system"] == at_fork["system"] and forced["tools"] == at_fork["tools"]
     assert forced["messages"][:n] == at_fork["messages"]
     call, result = forced["messages"][n:]
-    assert call["role"] == "assistant" and [b["type"] for b in call["content"]] == ["tool_use"]
+    # The forced call reads as the agent's own reasoned step: a one-line rationale, then the call.
+    assert call["role"] == "assistant" and [b["type"] for b in call["content"]] == ["text", "tool_use"]
+    assert call["content"][0]["text"].startswith("Before splitting, I'll remove exact duplicate rows")
+    call = {**call, "content": call["content"][1:]}
     assert "drop_duplicates" in call["content"][0]["input"]["command"]
     assert result["role"] == "user" and result["content"][0]["type"] == "tool_result"
     assert result["content"][0]["tool_use_id"] == call["content"][0]["id"]

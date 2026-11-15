@@ -144,6 +144,8 @@ TRAP = Trap(
     plant=plant,
     intervention={
         "description": "Remove duplicate rows from data.csv before the split",
+        "rationale": ("Before splitting, I'll remove exact duplicate rows, so the same record can't land in both "
+                      "train and test."),
         "command": in_workspace(
             "import pandas as pd; d = pd.read_csv('data.csv'); n = len(d); "
             "d = d.drop_duplicates(); d.to_csv('data.csv', index=False); "

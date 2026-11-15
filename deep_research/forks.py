@@ -31,6 +31,8 @@ INTERVENTIONS: dict[str, dict] = {
     "deduplicate_near": {
         "description": "Remove near-duplicate rows from data.csv before the split",
         "todo": "Remove near-duplicate rows from data.csv",
+        "rationale": ("Before splitting, I'll remove near-duplicate rows (rows that match another row up to small "
+                      "numeric differences), so the same record can't land in both train and test."),
         "command": traps.in_workspace(
             "import pandas as pd, numpy as np; d = pd.read_csv('data.csv'); n = len(d); "
             "d = d.drop_duplicates(); "
@@ -116,7 +118,8 @@ def arms(
     weak = iv.get("show") or weak
     if show and weak:
         plan["show"] = weak
-    plan["forced"] = {"description": iv["description"], "command": iv["command"]}
+    plan["forced"] = {"description": iv["description"], "command": iv["command"],
+                      **({"rationale": iv["rationale"]} if iv.get("rationale") else {})}
     return plan
 
 
@@ -193,7 +196,9 @@ def forced_turn(step: dict | str, output: str) -> list[BaseMessage]:
 
     `step` is an arm's step (`arm_plan`, `fix_plan`); a plain string is a shell command. A command becomes an
     `execute` call, an edit an `edit_file` call: the agent then sees exactly what it would have seen had it
-    done the step itself.
+    done the step itself. A step's `rationale` is the call's text, in the agent's voice, so the step reads as one it
+    chose and why (batch 1115-033734-e892 f1: a bare call in a resumed checkpoint read to the agent as its own
+    unexplained mistake, and it stopped).
     """
     call_id = f"forced-{uuid.uuid4().hex[:12]}"
     if isinstance(step, str):
@@ -204,7 +209,7 @@ def forced_turn(step: dict | str, output: str) -> list[BaseMessage]:
     else:
         name, args = "execute", {"command": step["command"]}
     return [
-        AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": call_id}]),
+        AIMessage(content=step.get("rationale") or "", tool_calls=[{"name": name, "args": args, "id": call_id}]),
         ToolMessage(content=output, tool_call_id=call_id, name=name),
     ]
 
@@ -281,12 +286,19 @@ class ChangeError(ValueError):
     """A change that cannot be built, with the reason in words for the caller."""
 
 
+def drop_column_rationale(column: str) -> str:
+    """Why the agent drops `column`, in its own voice and neutral words: no reason that names a trap."""
+    return (f"Before splitting, I'll drop the {column} column from data.csv and holdout_features.csv, because it "
+            "shouldn't be used as a feature.")
+
+
 def drop_column_step(column: str) -> dict:
     """The forced step that drops `column` from data.csv and holdout_features.csv, before the split."""
     if not _COLUMN_NAME.match(column or ""):
         raise ChangeError(f"'{column}' is not a column name a change can drop (letters, digits, _ . - and spaces)")
     return {
         "description": f"Drop the {column} column from data.csv and holdout_features.csv before the split",
+        "rationale": drop_column_rationale(column),
         "check": {"rule": "no_column", "column": column},
         "command": traps.in_workspace(
             "import pandas as pd; "
@@ -306,6 +318,8 @@ def group_split_step(column: str) -> dict:
     return {
         "description": f"Keep one row per {column} value in data.csv before the split, so no group is in both train "
                        "and test",
+        "rationale": (f"Before splitting, I'll keep one row per {column} value, so rows that share a {column} can't "
+                      "land in both train and test."),
         "check": {"rule": "group_split", "column": column},
         "command": traps.in_workspace(
             "import pandas as pd; d = pd.read_csv('data.csv', dtype=str, keep_default_na=False); n = len(d); "
@@ -367,7 +381,7 @@ def parse_change(spec: str, force: Callable[[str], dict | None] | None = None,
             raise ChangeError(f"no forced step exists for '{name}'; choose one of {force_steps(force)} "
                               "or 'drop_column:<name>'")
         step = {"description": iv["description"], "command": iv["command"],
-                **({"todo": iv["todo"]} if iv.get("todo") else {})}
+                **{k: iv[k] for k in ("todo", "rationale") if iv.get(k)}}
         check = check_for(label, iv)
         if check:
             step["check"] = check
@@ -547,7 +561,8 @@ def change_messages(backend, step: dict | list | None) -> tuple[list[BaseMessage
         else:
             output = apply_step(backend, s)
             msgs += forced_turn(s, output)
-            events.append({"type": "forced", "command": step_text(s), "output": output[:2000]})
+            events.append({"type": "forced", "command": step_text(s), "output": output[:2000],
+                           **({"rationale": s["rationale"]} if s.get("rationale") else {})})
     return msgs, events
 
 

@@ -81,7 +81,10 @@ def test_each_kind_builds_the_right_messages():
 
     forced, ev = forks.change_messages(Ran(), forks.parse_change("force_step:deduplicate").step)
     assert forced[1].content == "Removed 3 rows" and ev == [{"type": "forced", "command": forced[0].tool_calls[0]["args"]["command"],
-                                                             "output": "Removed 3 rows"}]
+                                                             "output": "Removed 3 rows",
+                                                             "rationale": forced[0].content}]
+    # The forced call carries its rationale as text, in the agent's voice.
+    assert forced[0].content.startswith("Before splitting, I'll remove exact duplicate rows")
     # A two-factor cell applies both steps in order.
     both, _ = forks.change_messages(Ran(), [forks.parse_change("force_step:deduplicate").step,
                                             forks.parse_change("edit_context:hint_quality").step])

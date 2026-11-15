@@ -133,7 +133,7 @@ Replace `INTERVENTIONS` with a registry. Five kinds, named after the published m
 | Kind | What it does | First entries |
 | --- | --- | --- |
 | `control` | Nothing. The copy continues unchanged | always the other half of a pair |
-| `force_step` | We run a command in the copy's VM and append the call and its real output | `deduplicate` (exists), `deduplicate_fuzzy`, `drop_column:<name>` |
+| `force_step` | We run a command in the copy's VM and append the call, its real output, and a one-line rationale in the agent's voice | `deduplicate` (exists), `deduplicate_fuzzy`, `drop_column:<name>` |
 | `fake_result` | Append a tool call and a made-up result without running it | `no_duplicates`: the check "found 0 duplicate rows" |
 | `edit_context` | Append a short message to the agent | `hint_quality`, `use_logistic`, or free text up to 300 characters |
 | `swap_model` | Build the copy's analyst with another model from an allowlist | the investigator model |

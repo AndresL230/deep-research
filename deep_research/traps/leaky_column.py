@@ -67,6 +67,8 @@ TRAP = Trap(
     plant=plant,
     intervention={
         "description": f"Drop the {COLUMN} column from data.csv and holdout_features.csv before the split",
+        "rationale": (f"Before splitting, I'll drop the {COLUMN} column from data.csv and holdout_features.csv, "
+                      "because it shouldn't be used as a feature."),
         "command": in_workspace(
             # Read as text so nothing else in the files changes.
             "import pandas as pd; "
