@@ -17,7 +17,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { attr, esc } from "../ui";
 import { fetchMotion, fetchScene, fetchSummaries, type MotionData, type MotionSummary, type SceneData, type SceneGeom } from "./data";
-import { SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, motionName, noWebglView, resultFacts, resultText, resultTone, seconds, xy } from "./markup";
+import { SUCCESS_LEGEND, SUCCESS_RADIUS_CM, cm, episodeError, motionName, noWebglView, resultFacts, resultText, resultTone, seconds, summaryErrorText, xy } from "./markup";
 
 // ── WebGL, checked once ──────────────────────────────────────────────────────
 
@@ -514,7 +514,7 @@ export function mountPlayer(el: HTMLElement): { dispose(): void } {
     } catch (e) {
       if (disposed || my !== seq) return;
       loadingEl.hidden = false;
-      loadingEl.textContent = `Couldn't load this episode: ${e instanceof Error ? e.message : String(e)}`;
+      loadingEl.textContent = episodeError(e);
     }
   };
 
@@ -692,7 +692,7 @@ function fileButton(path: string, i: number, s: MotionSummary | null): string {
   const tone = s?.error ? "none" : resultTone(s?.result);
   const meta = s && !s.error
     ? [s.can_start ? `can ${xy(s.can_start)}` : "", resultText(s.result)].filter(Boolean).join(" · ")
-    : s?.error ? "can't be read" : "";
+    : s?.error ? summaryErrorText(s.error) : "";
   return `<button type="button" class="rb-file" role="option" data-rb-file="${i}" aria-selected="false" title="${attr(path)}">`
     + `<span class="rb-dot rb-dot--${tone}" aria-hidden="true"></span>`
     + `<span class="rb-file-n">${esc(motionName(path))}</span>`

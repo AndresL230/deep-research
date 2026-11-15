@@ -14,7 +14,10 @@
       "database_id": "0541e366-8063-4af7-816d-9f02f767216a",
       "migrations_dir": "migrations"
     }
-  ]
+  ],
+  // Robot runs' motion files (PUT/GET /v1/batches/:id/files/...), one object per file under `<batch id>/<path>`.
+  // Create it once: wrangler r2 bucket create deep-research-hub-files
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "deep-research-hub-files" }]
   // Secrets (wrangler secret put NAME): TEAM_TOKEN, plus the runner keys the hub hands out
   // (ANTHROPIC_API_KEY, DAYTONA_API_KEY, and optionally DAYTONA_API_URL, DAYTONA_TARGET, DAYTONA_SNAPSHOT, LANGSMITH_API_KEY).
 }
