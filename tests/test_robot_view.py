@@ -111,3 +111,41 @@ def test_motion_summaries_for_the_file_picker(client):
     assert first["n"] > 10 and first["duration"] > 0 and first["can_start"] and "success" in first["result"]
     assert data[paths[1]]["can_start"] != first["can_start"]
     assert "error" in data[paths[2]] and len(data[paths[2]]) == 1
+
+
+def test_motion_files_are_built_one_at_a_time(tmp_path, monkeypatch):
+    """A run's page asks for several motion files at once. Built side by side they ran a 1 GB server out of memory, so
+    only one is built at a time, and a file asked for twice is built once."""
+    import threading
+    import time
+
+    from deep_research import robot_view
+
+    running = {"now": 0, "most": 0, "calls": 0}
+    guard = threading.Lock()
+
+    def slow_poses(motion):
+        with guard:
+            running["now"] += 1
+            running["calls"] += 1
+            running["most"] = max(running["most"], running["now"])
+        time.sleep(0.05)
+        with guard:
+            running["now"] -= 1
+        return {"frames": []}
+
+    monkeypatch.setattr(robot_view, "poses", slow_poses)
+    files = []
+    for i in range(4):
+        f = tmp_path / f"m{i}.motion.json"
+        f.write_text('{"frames": [], "n": %d}' % i)
+        files.append(f)
+    # Four different files, and the first one asked for three times.
+    asks = [*files, files[0], files[0]]
+    threads = [threading.Thread(target=robot_view.motion_poses, args=(f,)) for f in asks]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert running["most"] == 1
+    assert running["calls"] == 4
