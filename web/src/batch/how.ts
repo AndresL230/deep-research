@@ -323,7 +323,8 @@ export function howView(demo: Loadable<CaseFile>, at = 0): string {
   const stage = pic
     ? `<div class="hw-stage" data-how-stage data-how-target="${attr(target)}">`
       + `<div class="hw-pic" data-morph-key="how:pic:${s ? s.key : START.key}">${pic}</div>`
-      + `<span class="hw-ring" data-how-ring aria-hidden="true"></span>`
+      // `data-keep`: tour.ts owns the ring's place and its lit state, so a repaint leaves them as they are.
+      + `<span class="hw-ring" data-how-ring data-keep aria-hidden="true"></span>`
       + (tip ? `<p class="hw-tip" data-how-tip>${esc(tip)}</p>` : "")
       + `</div>`
     : "";
