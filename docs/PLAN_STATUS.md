@@ -37,6 +37,30 @@ The audit below is kept as it was written. These are the fixes landed on top of 
 Gate at the push: `uv run pytest -q` 503 passed, 14 skipped (4 of them the mesh skips); `npm run typecheck` clean;
 `npm test` 791 passed; `scripts/check_invariants.py` ok.
 
+## The investigator rebuilt on Deep Agents (Sun Nov 15, from 01:00 Eastern)
+
+Merged `upgrade/experiments` (change registry, `Batch.run_experiment`, grid, audit) and `upgrade/ui` (suspect board,
+approval card with pairs, lessons, investigator panel). Checked against the installed deepagents 0.7.38,
+langgraph 1.2.22, langchain 1.5.0 and langgraph-checkpoint-sqlite 3.1.3. All offline; no real run yet.
+
+| Plan item | Now | Where |
+| --- | --- | --- |
+| 6.4 one evidence rule | `experiments.py` has no math of its own: pairs, agreement, score, level and the exact test are `evidence.py` (`pair_up`, `agrees`, `score_pairs`). The fork path (`run_forks`, more pairs) and `run_experiment` score through the same function, and an experiment's fork carries the same `evidence` record | `evidence.py`, `experiments.py`, `batch.py` |
+| 3.3 todo list | `TodoListMiddleware` on the investigator (it was missing: planning is opt-in since deepagents 0.7; the line below that said "default" was wrong). The plan reaches `investigator.todos` | `agents/investigator.py`, `batch.py` |
+| Review bugs | Explicit read-only `general-purpose` subagent (no tools, no writes); no `execute` tool (`FilesystemMiddleware(tools=[...])` on the investigator and every subagent); the grader gets the verdict first, then the evidence, compact JSON, in pieces under its 4,000-character cut; subagent events carry the subagent's name, and `investigator.subagent` names the one at work | same |
+| 6.5 tools | `record_suspects` (`suspects` section, linked to a hypothesis on the same label; `hypotheses` kept), `list_changes`, `run_experiment` (approve, edit, reject; `forks.pending` has suspect, change, anchor, prediction, reason, pairs, `estimate_usd`, `cost_per_pair_usd`; `POST /decision` takes an optional `pairs`), `record_verdict` with `supported`, `cleared`, `open`, `limits` (refuses a supported suspect under 20 or one whose evidence is not its own experiments; a cleared one must be `cleared`), `request_forks` unchanged | `case_file.py`, `batch.py`, `api.py` |
+| 3.2 typed subagents | `step-tagger` (one per run, `StepTags`), `lens-omission`, `lens-commission`, `lens-data`, `skeptic` (`LensReport`, `SkepticReport`), each with `skills=["/skills/"]`, read-only, no tool that spends or writes. `lens-data` reads each run's own `outputs/` (train.csv, test.csv) under `/runs/`; `score.json` and hidden folders stay denied. No `run_python` lab VM (cut: not cheap) | `agents/investigator.py` |
+| 3.1 prompt | Role, method (observe, suspects, predict, experiment, update, conclude) and rules; no numbered script, no trap | `main_prompt` |
+| Phase 6 durable checkpointer | `AsyncSqliteSaver` per batch at `batches/<id>/checkpoints.sqlite`, `durability="sync"`, the stream read to its end after an interrupt. `Batch.resume` keeps a pending approval when the file exists, and `decide` continues the same thread (`investigator.thread_id`). Tested across a simulated restart | `batch.py` |
+| Phase 5 casebook and lessons | `memory=[notebook, "/memories/casebook.md"]`; writes allowed only on `/memory/**` and `/memories/**` (investigator only), denied everywhere else. `propose_lesson` with approval writes `skills/learned/<name>/SKILL.md` and `lessons`; `POST /api/batches/{id}/lessons/{lesson_id}` answers it | same, `api.py` |
+| `investigator_assist` | `BatchConfig.investigator_assist: none \| baseline`; `baseline` puts `candidates` in the view | `config.py`, `case_file.py` |
+| Verdict view wording | The verdict page's evidence line says the running score decides and the Fisher p is shown only | `web/src/batch/lanes.ts` |
+
+Cut: fork copies keeping the source run's todo list (`aupdate_state(..., as_node="tools")`), the analysts loading
+learned lessons (`lessons="learned"`), the fool-rate run, a cheaper grader with an evidence tool, the `run_python` lab VM.
+Offline tests: `tests/test_investigator_science.py` (two suspects, a predicted experiment approved with edited pairs, a
+supported suspect under 20 refused; restart; lesson; subagent shapes and names).
+
 The biggest divergence is that the flagship moved from the tabular trap to the **robot arm domain**
 (`deep_research/domains/robot_arm.py`, `sim/`). It also has a code-trace and patch path the plan does not have. The README's
 2-minute demo is built on `fixtures/robot-live-investigation`, a real run.
@@ -142,7 +166,7 @@ Added beyond the plan: more pairs for an open verdict (`batch.py:1389-1450`), re
 | Rules: at least 2 suspects, predict first, no cause below the bar | met | Enforced in code: `batch.py:863-878`, `evidence.py:90-102` |
 | Subagents `step-tagger`, `lens-omission`, `lens-commission`, `lens-data`, `skeptic`, typed | **diverged** | `step-tagger`, `hypothesis`, `code-tracer` (`agents/investigator.py:450-476`). Typed tool arguments in place of `response_format`, with the reason given (`agents/investigator.py:19-25`). No `run_python` lab VM |
 | `step-tagger` in parallel | unknown | Parallel `code-tracer` is tested (`tests/test_investigator_upgrades.py:419`) |
-| Todo list | met | Default in `create_deep_agent` (`agents/investigator.py:499-512`) |
+| Todo list | met (since 01:00) | Was **not** met: planning is opt-in since deepagents 0.7. `TodoListMiddleware` added |
 | `/case/`, `/runs/`, `/skills/` read-only | met | `agents/investigator.py:444` |
 | Offline: 2 or more suspects, an experiment with a prediction, a verdict under the bar refused | met | `tests/test_experiments.py:64`, `:78`, `tests/test_investigator_upgrades.py:274` |
 | Real: blind, tests 2 or more, ends with one supported and one cleared or open | **partial** | Robot run: 3 hypotheses, h1 forked (inconclusive), h3 fix measured (contradicted). Nothing supported. Not blind to `split`. No tabular run of this investigator |

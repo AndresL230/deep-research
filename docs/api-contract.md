@@ -29,7 +29,8 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | GET | `/api/batches/{id}/motion?path=<motion file>` | One motion file as body poses: `{"t", "bodies", "frames": [[x, y, z, qw, qx, qy, qz per body], ...], "static", "result", "can_start", "place_target"}`, from `mj_kinematics` on each frame's qpos. `path` must be under `runs/<run>/outputs/` or `forks/<fork>/<child>/outputs/`, or be a scored run's hidden episode listed in its `hidden_results` (`400` otherwise, never `task/`; `404` for a hidden episode of a run not scored yet); `422` when the file is not a motion file. A team hub batch's file comes from the hub (see [Motion files on the hub](#motion-files-on-the-hub)) |
 | GET | `/api/batches/{id}/motion-summaries?path=...&path=...` | For the viewer's file picker: per path, `{"can_start", "place_target", "duration", "n", "result"}` or `{"error"}`. Same paths, checks and hub fallback as `/motion` |
 | POST | `/api/batches/{id}/investigate` | Live only. Starts the investigator (phase `ready`) |
-| POST | `/api/batches/{id}/decision` | Live only. `{"approve": bool}` answers `forks.pending` (phase `awaiting_approval`) |
+| POST | `/api/batches/{id}/decision` | Live only. `{"approve": bool}` answers `forks.pending` (phase `awaiting_approval`); `{"approve": true, "pairs": n}` (1 to 6) approves a paired experiment with `n` pairs (the edit decision) |
+| POST | `/api/batches/{id}/lessons/{lesson_id}` | Live only. `{"approve": bool}` answers a lesson the investigator proposed (`forks.pending.lesson_id`) |
 | POST | `/api/batches/{id}/stop` | Live only. Cancels the work and stops every VM |
 | POST | `/api/batches/{id}/resume?investigate=<bool>` | Bring a saved batch of ours back live, in phase `ready`, so the investigator and the fork experiment can run on it after a server restart. With `investigate=true` the investigator starts in the same call. Only a batch whose runs are all scored, with a split and no verdict yet; `409 {"detail"}` says why otherwise. The list and the websocket snapshot flag such a batch with `resumable: true` |
 | GET | `/api/batches/{id}/more-pairs?n=<copies per arm>` | For a saved batch whose verdict is `open`: what running `n` more copies per arm of the verdict's fork experiment would add and cost, for the confirmation (`MorePairsQuote`, see More pairs below). Starts and loads nothing. `409 {"detail"}` says why more pairs cannot run; `422` for `n` below 1 |
@@ -278,7 +279,8 @@ view (`case/view/case.json`) leaves them out (`case_file.UPGRADE_HIDDEN`).
   numbers}`, `answer` `yes`, `no` or `unknown`, ids `test_touched_training`, `columns_fair`,
   `test_matches_claim`. Read from the run's own train.csv and test.csv, the task's holdout features and meta, and
   the case file; never the holdout labels.
-- Read by the UI (`web/src/batch/suspects.ts`), each optional; the server does not write them yet:
+- Written by the investigator's tools and the orchestrator (`case_file.py`), read by the UI
+  (`web/src/batch/suspects.ts`), each optional and absent on older case files:
   - `suspects`: `[{id, target, kind, rationale, proposed_by, status}]`, `kind` `omission`, `commission`, `attribute`
     or `data`; `status` `proposed`, `testing`, `supported`, `cleared` or `open`. Without it the UI reads `hypotheses`
     with an id. A level is shown only with a score behind it.
@@ -290,7 +292,14 @@ view (`case/view/case.json`) leaves them out (`case_file.UPGRADE_HIDDEN`).
   - `config.investigator_assist` `"none" | "baseline"`: the UI tags the batch when it is `baseline`.
 - `POST /decision` may carry `{"approve": true, "pairs": n}` (1 to 6) when a person edited the pairs; plain
   `{"approve": bool}` is unchanged. `POST /api/batches/{id}/lessons/{lesson_id}` `{"approve": bool}` answers a
-  proposed lesson (not served yet).
+  proposed lesson.
+- Also written: `forks.pending.kind` is `experiment` for `run_experiment` (with `suspect` the suspect's record,
+  `vm_count`, `n_per_arm` = `pairs`, and `action` {name, args}, the call being approved) and `lesson` for
+  `propose_lesson` (with `lesson_id`, `name`, `rule`, `estimate_usd` 0). An approved lesson gains `path`
+  (`skills/learned/<name>/SKILL.md`) and `approved_at`. `investigator.thread_id` names the investigator's thread in
+  `batches/<id>/checkpoints.sqlite`. A suspect may carry `hypothesis_id`, the hypothesis on the same step label.
+  `verdict` may carry `supported`, `cleared`, `open` (suspect ids), `limits`, and, when it rests on a supported
+  suspect, `suspect_id` and `fork_id`; its `evidence` is then over all that suspect's pairs.
 - `fixtures/suspects-demo-batch` (`scripts/make_suspects_fixture.py`, SIMULATED) has every section above.
 
 Changes (`forks.parse_change`, listed by `forks.registry()`): `control`; `force_step:<label>` (every label with a
