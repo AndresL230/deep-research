@@ -1980,7 +1980,8 @@ class Batch:
         """An analyst for a run or a fork copy on `backend`, on the batch's saver, with the lessons the batch's
         `lessons` setting gives it (lessons.for_analyst). Returns (agent, how the lessons reached it, or None)."""
         prompt, folder, record = lessons_mod.for_analyst(self.cfg.lessons, backend, self.domain.analyst_system_prompt,
-                                                         f"batch {self.id} {who}")
+                                                         f"batch {self.id} {who}", domain=self.domain.name,
+                                                         scratch=self.dir / "lessons")
         agent = build_analyst(backend, model, prompt, checkpointer=saver, learned_dir=folder)
         return agent, record
 

@@ -413,11 +413,18 @@ function mainRow(c: BatchConfig, trap: TrapInfo | null, locked = false): string 
   </div>`;
 }
 
+/** The approved lessons for the draft's domain: a lesson is learned in one domain and only its analysts get it. */
+export const lessonsFor = (c: BatchConfig, all: readonly ApprovedLesson[]): ApprovedLesson[] =>
+  all.filter((l) => (l.domain || DEFAULT_DOMAIN) === domainOf(c));
+
 /** The line under the Lessons choice: what the analysts get, or why "Approved lessons" cannot be picked. */
 function lessonsHelp(c: BatchConfig, list: Loadable<ApprovedLesson[]> | undefined): string {
   if (!list || list.state === "loading") return "Looking for approved lessons.";
   if (list.state === "error") return "Couldn't load the approved lessons.";
-  if (!list.value.length) return "No approved lessons yet in skills/learned/.";
+  if (!lessonsFor(c, list.value).length) {
+    const task = DOMAIN_SHORT[domainOf(c)] ?? domainOf(c);
+    return isTabular(c) ? "No approved lessons yet in skills/learned/." : `No approved lessons yet for ${task}: lessons from other tasks do not apply.`;
+  }
   return c.lessons === "learned"
     ? "Each analyst gets the approved lessons below as Deep Agents skills."
     : "The analysts start with no lessons from earlier batches.";
@@ -426,8 +433,9 @@ function lessonsHelp(c: BatchConfig, list: Loadable<ApprovedLesson[]> | undefine
 /** Which lessons the analysts get (lessons), with its line. "Approved lessons" can only be picked once the server
  *  lists at least one (GET /api/lessons). Experiments always rewind by time travel (`FORK_MODE`): no choice here. */
 function agentRows(c: BatchConfig, list: Loadable<ApprovedLesson[]> | undefined): string {
-  const cfg = { ...c, lessons: c.lessons ?? "none" } as BatchConfig;
-  const approved = list?.state === "ready" ? list.value : [];
+  const approved = list?.state === "ready" ? lessonsFor(c, list.value) : [];
+  // With none for this domain, "Approved lessons" cannot be on (a draft that had it on in another domain reads None).
+  const cfg = { ...c, lessons: approved.length ? c.lessons ?? "none" : "none" } as BatchConfig;
   const n = list?.state === "ready" ? String(approved.length) : "…";
   const names = approved.length
     ? `<ul class="hm-lessons" aria-label="Approved lessons">${approved.map((l) =>

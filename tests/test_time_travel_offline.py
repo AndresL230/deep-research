@@ -218,6 +218,37 @@ def test_lessons_fall_back_to_the_system_prompt_when_the_backend_cannot_serve_sk
         "p", None, {"setting": "learned", "path": "none", "names": []})
 
 
+def test_a_lesson_only_reaches_analysts_of_the_domain_it_was_learned_in(tmp_path, monkeypatch):
+    from deepagents.backends import LocalShellBackend
+
+    _lesson(tmp_path, monkeypatch)  # a tabular lesson: write_lesson's default domain
+    learned = tmp_path / "learned"
+    inv_mod.write_lesson("test-edge-positions", "Test the can at the table edges too.", "b1", domain="robot_arm")
+    # A lesson saved before lessons named their domain is a tabular one.
+    legacy = learned / "old-rule" / "SKILL.md"
+    legacy.parent.mkdir()
+    legacy.write_text("---\nname: old-rule\ndescription: x\n---\n\n# old-rule\n\nCheck the rows.\n")
+    assert "domain: robot_arm" in (learned / "test-edge-positions" / "SKILL.md").read_text()
+    names = lambda rules: sorted(r["name"] for r in rules)  # noqa: E731
+    assert names(lessons.approved()) == ["dedupe-before-split", "old-rule", "test-edge-positions"]
+    assert names(lessons.approved(domain="tabular")) == ["dedupe-before-split", "old-rule"]
+    assert names(lessons.approved(domain="robot_arm")) == ["test-edge-positions"]
+    assert lessons.approved(domain="humanoid") == []
+
+    # Skills: a folder of just the domain's lessons, made in the batch's scratch folder.
+    (tmp_path / "vm").mkdir()
+    vm = LocalShellBackend(root_dir=tmp_path / "vm", virtual_mode=True)
+    _, folder, record = lessons.for_analyst("learned", vm, "p", "test", domain="robot_arm", scratch=tmp_path / "b" / "lessons")
+    assert folder == tmp_path / "b" / "lessons" and record["names"] == ["test-edge-positions"]
+    assert sorted(p.parent.name for p in folder.glob("*/SKILL.md")) == ["test-edge-positions"]
+    # The system prompt: only the domain's rules.
+    prompt, _, _ = lessons.for_analyst("learned", StateBackend(), "p", "test", domain="tabular")
+    assert "dedupe-before-split" in prompt and "old-rule" in prompt and "test-edge-positions" not in prompt
+    # A domain with no lessons of its own gets none, and the record says so.
+    assert lessons.for_analyst("learned", vm, "p", "test", domain="humanoid") == (
+        "p", None, {"setting": "learned", "path": "none", "names": []})
+
+
 # ---- the command line: --fork-mode, and the fool rate (Phase 5.3) ----
 
 async def test_cli_experiment_takes_the_fork_mode(vms, tmp_path, monkeypatch, capsys):

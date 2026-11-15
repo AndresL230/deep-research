@@ -1150,7 +1150,9 @@ export interface FoolrateLesson {
   opens_as?: string;
 }
 /** One approved lesson (GET /api/lessons, deep_research/lessons.py `approved`): a skill under skills/learned/. */
-export interface ApprovedLesson { name: string; rule: string; learned_from?: string | null }
+/** An approved lesson, and the domain it is for: only that domain's analysts get it (deep_research/lessons.py). A
+ *  server older than the field sends none: its lessons are tabular ones. */
+export interface ApprovedLesson { name: string; rule: string; learned_from?: string | null; domain?: string }
 export interface FoolrateReport {
   /** The report's file stem (`<mmdd-HHMMSS>`). */
   id: string;

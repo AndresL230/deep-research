@@ -153,7 +153,7 @@ def test_api_lessons_lists_the_approved_lessons_without_paths(dirs, tmp_path):
                               "1115-033734-e892", root=tmp_path / "learned")
     assert client.get("/api/lessons").json() == [
         {"name": "remove-near-duplicates-before-split", "rule": "Drop near-duplicate rows before the split.",
-         "learned_from": "1115-033734-e892"}]
+         "learned_from": "1115-033734-e892", "domain": "tabular"}]
 
 
 def test_check_invariants_rules_on_reports(tmp_path, capsys):
