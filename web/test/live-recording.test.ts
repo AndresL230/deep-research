@@ -27,7 +27,9 @@ describe("the live robot recording", () => {
     expect(html).toContain("Hypothesis h1");
     expect(html).toContain("Saved before any copy ran:");
     for (const id of ["h1", "h2", "h3"]) expect(html).toContain(`<span class="ln-tag">${id}</span>`);
-    expect(html).toContain("Inconclusive");
+    // The server's "inconclusive" outcome is an open score, said as on the fork's own evidence.
+    expect(html).toContain("chip:Open:");
+    expect(html).not.toContain("Inconclusive");
     // All 16 copies were rebuilt by replay (Daytona refused to fork): the page must not call them forks.
     expect(html).toContain("Each copy is a fresh VM that replayed the run");
     expect(html).toContain("0 of 16 forked, 16 rebuilt by replay");
@@ -46,7 +48,10 @@ describe("the live robot recording", () => {
     // it, and a key for the marks drawn. The full cards wait behind the fold.
     expect(html).toContain("3 explanations. 2 tested. None confirmed yet.");
     expect(html.match(/class="ln-ip-row[ "]/g)).toHaveLength(3);
-    for (const s of ["Inconclusive", "Untested", "Contradicted", "Fork f1", "The measured fix"]) expect(html).toContain(s);
+    for (const s of ["Open", "Untested", "Contradicted", "Fork f1 · score 13.03 of 20", "The measured fix"]) expect(html).toContain(s);
+    // Open is the fork's level (4 of 4 pairs agree, short of 20), not the evidence level "inconclusive".
+    expect(html).toContain("Open: tested, not enough pairs yet to decide");
+    expect(html).not.toContain("Inconclusive");
     for (const s of ["inconclusive", "untested", "contradicted"]) expect(html).toContain(`ln-ip-mk--${s}`);
     const closed = investigatorView({ ...vm, open: { inv: false } });
     expect(closed).toContain("3 explanations. 2 tested. None confirmed yet.");
