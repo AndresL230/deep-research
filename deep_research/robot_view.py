@@ -18,11 +18,15 @@ Both results are cached in memory as gzipped JSON, ready to send.
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
+import os
 import threading
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
+
+from .config import BATCHES_DIR
 
 # Geoms in this group are the panda's collision shapes (menagerie's `collision` class): never drawn.
 COLLISION_GROUP = 3
@@ -35,7 +39,15 @@ POS_DECIMALS = 4
 QUAT_DECIMALS = 4
 # A motion file is at most 200 KB (sim.motion.MAX_BYTES); anything far bigger is not one.
 MAX_MOTION_BYTES = 2_000_000
-MOTION_CACHE_SIZE = 64
+# In memory: a robot batch's wall shows dozens of motion files at once, and 64 was fewer than one batch has.
+MOTION_CACHE_SIZE = 512
+# On disk, beside the saved batches (on the hosted server that folder is the persistent volume): a restart or a deploy
+# empties the memory cache, and rebuilding every file again made the first pages after it take minutes on a small
+# machine. A built file is named by a hash of the motion file's bytes, so it is found again whatever the file's path or
+# date. None turns it off. POSES_VERSION is part of the name: change it when `poses()` changes what it returns.
+POSES_VERSION = 1
+MOTION_DISK_CACHE: Path | None = BATCHES_DIR / "_cache" / "motion"
+MOTION_DISK_MAX_FILES = 6000
 GEOM_TYPES = {0: "plane", 2: "sphere", 3: "capsule", 5: "cylinder", 6: "box", 7: "mesh"}
 
 _lock = threading.Lock()
@@ -546,8 +558,43 @@ def _public_result(result: dict) -> dict:
     return out
 
 
+def _disk_file(raw: bytes) -> Path | None:
+    """Where the built poses of a motion file with these bytes are kept on disk, or None with the disk cache off."""
+    if MOTION_DISK_CACHE is None:
+        return None
+    return MOTION_DISK_CACHE / f"v{POSES_VERSION}-{hashlib.sha256(raw).hexdigest()}.json.gz"
+
+
+def _disk_read(file: Path | None) -> bytes | None:
+    if file is None:
+        return None
+    try:
+        data = file.read_bytes()
+    except OSError:
+        return None
+    # A file cut short by a crash is not gzip: it is built again.
+    return data if data[:2] == b"\x1f\x8b" else None
+
+
+def _disk_write(file: Path | None, packed: bytes) -> None:
+    """Keep `packed` on disk. Written beside its place and renamed, so a reader never sees half a file. A disk that
+    is full or read-only is not an error: the file is simply built again next time."""
+    if file is None:
+        return
+    try:
+        file.parent.mkdir(parents=True, exist_ok=True)
+        if sum(1 for _ in os.scandir(file.parent)) >= MOTION_DISK_MAX_FILES:
+            return
+        tmp = file.with_name(f"{file.name}.{os.getpid()}.tmp")
+        tmp.write_bytes(packed)
+        os.replace(tmp, file)
+    except OSError:
+        pass
+
+
 def motion_poses(path: Path) -> bytes:
-    """`poses()` of the motion file at `path`, as gzipped JSON, cached by path, size and modification time."""
+    """`poses()` of the motion file at `path`, as gzipped JSON. Kept in memory by path, size and modification time, and
+    on disk by the file's bytes (`MOTION_DISK_CACHE`), so a restart does not build it again."""
     st = path.stat()
     if st.st_size > MAX_MOTION_BYTES:
         raise MotionError("the file is too large to be a motion file")
@@ -564,11 +611,19 @@ def motion_poses(path: Path) -> bytes:
             if hit is not None:
                 return hit
         try:
-            motion = json.loads(path.read_text())
-        except (OSError, ValueError) as e:
+            raw = path.read_bytes()
+        except OSError as e:
             raise MotionError("the file is not JSON") from e
-        packed = _pack(poses(motion))
-        del motion
+        saved = _disk_file(raw)
+        packed = _disk_read(saved)
+        if packed is None:
+            try:
+                motion = json.loads(raw)
+            except ValueError as e:
+                raise MotionError("the file is not JSON") from e
+            packed = _pack(poses(motion))
+            del motion
+            _disk_write(saved, packed)
         with _lock:
             _motion_cache[key] = packed
             while len(_motion_cache) > MOTION_CACHE_SIZE:

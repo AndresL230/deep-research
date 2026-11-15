@@ -149,3 +149,46 @@ def test_motion_files_are_built_one_at_a_time(tmp_path, monkeypatch):
         t.join()
     assert running["most"] == 1
     assert running["calls"] == 4
+
+
+def test_a_built_motion_file_survives_a_restart(tmp_path, monkeypatch):
+    """A restart empties the memory cache. The built file is also kept on disk, named by the motion file's bytes, so
+    it is not built a second time, and a half-written file on disk is built again."""
+    from deep_research import robot_view
+
+    calls = {"n": 0}
+
+    def counted(motion):
+        calls["n"] += 1
+        return {"frames": [], "n": motion["n"]}
+
+    monkeypatch.setattr(robot_view, "poses", counted)
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(robot_view, "MOTION_DISK_CACHE", cache)
+    f = tmp_path / "a.motion.json"
+    f.write_text('{"frames": [], "n": 7}')
+    first = robot_view.motion_poses(f)
+    assert calls["n"] == 1
+    saved = list(cache.iterdir())
+    assert len(saved) == 1 and saved[0].name.startswith(f"v{robot_view.POSES_VERSION}-") and saved[0].read_bytes() == first
+    # The restart: memory is empty, the disk is not.
+    robot_view._motion_cache.clear()
+    assert robot_view.motion_poses(f) == first
+    assert calls["n"] == 1
+    # The same bytes at another path are the same built file.
+    g = tmp_path / "copy.motion.json"
+    g.write_text('{"frames": [], "n": 7}')
+    assert robot_view.motion_poses(g) == first
+    assert calls["n"] == 1
+    # A file cut short on disk is not trusted.
+    saved[0].write_bytes(b"half")
+    robot_view._motion_cache.clear()
+    assert robot_view.motion_poses(f) == first
+    assert calls["n"] == 2
+    # With the disk cache off nothing is written.
+    monkeypatch.setattr(robot_view, "MOTION_DISK_CACHE", None)
+    robot_view._motion_cache.clear()
+    h = tmp_path / "b.motion.json"
+    h.write_text('{"frames": [], "n": 8}')
+    robot_view.motion_poses(h)
+    assert len(list(cache.iterdir())) == 1
