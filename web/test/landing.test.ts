@@ -67,10 +67,11 @@ describe("the landing page", () => {
     expect(html).toContain('<a class="lp-cta" href="#/start">Start a batch</a>');
     expect(html).toContain('href="#/b/robot-live-investigation"');
     // "Demo replay" opens the recorded robot arm run the page's numbers come from; the footer also links the
-    // recording of the real tabular run.
+    // recordings of the real tabular and humanoid runs.
     expect(html).toContain('<a class="lp-link" href="#/b/robot-live-investigation">Demo replay</a>');
     expect(html).toContain('<a class="lp-foot-a" href="#/b/robot-live-investigation">Demo replay</a>');
     expect(html).toContain('<a class="lp-foot-a" href="#/b/tabular-time-travel-investigation">Tabular replay</a>');
+    expect(html).toContain('<a class="lp-foot-a" href="#/b/humanoid-time-travel-investigation">Humanoid replay</a>');
     // "Batches" opens the batch list, which everyone can read; #/start opens on Needs you, which only admins have.
     expect(html).toContain('<a class="lp-link" href="#/batches">Batches</a>');
     expect(html).toContain('<a class="lp-brand" href="#/">');

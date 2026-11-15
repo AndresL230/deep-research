@@ -187,7 +187,7 @@ class _LiveBatch:
 
 
 # The committed recordings of real batches (config.recording.kind = "live").
-REAL_RECORDINGS = ("1115-041219-b0a7", "1115-041132-f331", "robot-live-investigation", "tabular-leaky-column-investigation",
+REAL_RECORDINGS = ("humanoid-time-travel-investigation", "1115-041219-b0a7", "1115-041132-f331", "robot-live-investigation", "tabular-leaky-column-investigation",
                    "tabular-live-investigation", "tabular-time-travel-investigation")
 
 
@@ -210,14 +210,15 @@ def test_costs_endpoint_reads_live_batches_from_memory_and_saved_ones_from_disk(
     report = res.json()
     rows = {b["id"]: b for b in report["batches"]}
     assert [b["id"] for b in report["batches"]] == [
-        "1115-041219-b0a7", "1115-041132-f331", "1114-093012-a1b2", "1113-080000-ffff", "robot-live-investigation", "tabular-leaky-column-investigation", "tabular-live-investigation",
+        "1115-041219-b0a7", "1115-041132-f331", "1114-093012-a1b2", "1113-080000-ffff", "humanoid-time-travel-investigation", "robot-live-investigation", "tabular-leaky-column-investigation", "tabular-live-investigation",
         "tabular-time-travel-investigation", "demo-batch", "humanoid-demo-batch", "robot-demo-batch", "suspects-demo-batch", "track-demo-batch"]
     assert rows["1114-093012-a1b2"]["kind"] == "live" and rows["1114-093012-a1b2"]["usd"]["total"] == 0.25
     assert rows["1113-080000-ffff"]["kind"] == "replay" and rows["1113-080000-ffff"]["started_at"].endswith("-11-13T08:00:00")
     assert rows["demo-batch"]["simulated"] is True and rows["demo-batch"]["usd"] is None and rows["demo-batch"]["started_at"] is None
     t = report["totals"]
     # The real recordings (fixtures/robot-live-investigation, fixtures/tabular-live-investigation,
-    # fixtures/tabular-time-travel-investigation, fixtures/tabular-leaky-column-investigation and the fool-rate arms
+    # fixtures/tabular-time-travel-investigation, fixtures/tabular-leaky-column-investigation,
+    # fixtures/humanoid-time-travel-investigation and the fool-rate arms
     # fixtures/1115-041132-f331 and fixtures/1115-041219-b0a7) are real spend, counted like any saved batch.
     recordings = [rows[k] for k in REAL_RECORDINGS]
     for r in recordings:
@@ -230,7 +231,7 @@ def test_costs_endpoint_reads_live_batches_from_memory_and_saved_ones_from_disk(
 
 def test_costs_endpoint_with_only_the_demo_batch(client):  # noqa: F811
     report = client.get("/api/costs").json()
-    assert [b["id"] for b in report["batches"]] == ["1115-041219-b0a7", "1115-041132-f331", "robot-live-investigation", "tabular-leaky-column-investigation", "tabular-live-investigation",
+    assert [b["id"] for b in report["batches"]] == ["1115-041219-b0a7", "1115-041132-f331", "humanoid-time-travel-investigation", "robot-live-investigation", "tabular-leaky-column-investigation", "tabular-live-investigation",
         "tabular-time-travel-investigation", "demo-batch",
                                                     "humanoid-demo-batch", "robot-demo-batch", "suspects-demo-batch",
                                                     "track-demo-batch"]

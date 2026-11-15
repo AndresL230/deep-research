@@ -77,6 +77,11 @@ export const LANDING = {
    *  (fixtures/tabular-time-travel-investigation, batch 1115-033734-e892): the investigator's plan and subagents, and a
    *  time-travel experiment that reached supported. None of the page's numbers come from it. */
   tabular: "tabular-time-travel-investigation",
+  /** The footer's third replay: the recording of a real humanoid run in checkpoint mode
+   *  (fixtures/humanoid-time-travel-investigation, batch 1115-045841-78b4): a Unitree G1 striking a hanging bag in
+   *  MuJoCo, every hidden episode replayable in 3D, and two time-travel experiments that reached supported. None of
+   *  the page's numbers come from it. */
+  humanoid: "humanoid-time-travel-investigation",
   /** The folder card's tabs, in the order of their scenes: the humanoid video, the split finder, the terminal. */
   tabs: [
     { tab: "On a robot", num: "3 of 3", note: "motions tracked with balance feedback. Plain playback fell at 3.9 s on two of them.", chip: "Unitree G1 · MuJoCo" },
@@ -418,6 +423,7 @@ function footView(cta: LandingCta): string {
   const batches = routeHash({ name: "home", at: "batches" });
   const demo = routeHash({ name: "batch", id: LANDING.demo });
   const tabular = routeHash({ name: "batch", id: LANDING.tabular });
+  const humanoid = routeHash({ name: "batch", id: LANDING.humanoid });
   const go = (to: string, words: string): string => `<li><button type="button" class="lp-foot-a" data-lp-go="${to}">${esc(words)}</button></li>`;
   const link = (href: string, words: string): string => `<li><a class="lp-foot-a" href="${attr(href)}">${esc(words)}</a></li>`;
   return `<footer class="lp-foot" data-keep>
@@ -427,7 +433,7 @@ function footView(cta: LandingCta): string {
           <a class="lp-cta" href="${attr(cta.href)}">${esc(cta.label)}</a>
         </div>
         <nav class="lp-foot-cols" aria-label="Footer">
-          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(batches, "Batches")}${link(demo, "Demo replay")}${link(tabular, "Tabular replay")}${link(routeHash({ name: "lessons" }), "Lessons")}${cta === START_CTA ? link(start, "Start a batch") : ""}</ul></div>
+          <div class="lp-foot-col"><span class="lp-eyebrow">Product</span><ul>${link(batches, "Batches")}${link(demo, "Demo replay")}${link(tabular, "Tabular replay")}${link(humanoid, "Humanoid replay")}${link(routeHash({ name: "lessons" }), "Lessons")}${cta === START_CTA ? link(start, "Start a batch") : ""}</ul></div>
           <div class="lp-foot-col"><span class="lp-eyebrow">On this page</span><ul>${go("how", "How it works")}${go("robots", "Robots")}${go("why", "Why Orro")}</ul></div>
           <div class="lp-foot-col"><span class="lp-eyebrow">Domains</span><ul>${link(batches, "Robot arm")}${link(batches, "Humanoid")}${link(batches, "Tabular data")}</ul></div>
         </nav>

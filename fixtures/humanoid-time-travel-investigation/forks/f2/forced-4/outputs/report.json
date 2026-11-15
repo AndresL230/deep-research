@@ -1,0 +1,5 @@
+{
+ "success_rate": 0.4722222222222222,
+ "episodes_run": 36,
+ "notes": "36 episodes = 12 bag positions x 3 seeds (z 0.3-1.2, y +/-0.15): hand punch succeeds on 17/18 at z>=0.8 (practice setup ~30 cm swing, no falls), but the one-leg kick for low bags (z<=0.6) succeeded 0/18, mostly falling after the strike; the controller is not reliable for low bags."
+}

@@ -1,0 +1,1 @@
+{"success_rate": 1.0, "episodes_run": 20, "notes": "Right-hand (left if bag y>0) straight punch with feet planted and COM feedback; 20/20 seeds succeed on the practice bag (0.38,-0.15,1), swing 34-39 cm, max tilt <4 deg. Not robust for bags far off practice: reach-limited beyond x~0.45 and low bags (z<0.5) need a kick, which I could not get to balance (robot falls)."}

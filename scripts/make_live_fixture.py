@@ -85,7 +85,7 @@ def main(batch_id: str, name: str, keep: int, root: Path = BATCHES_DIR) -> None:
         "source_batch": batch_id,
         "saved_at": time.strftime("%Y-%m-%d %H:%M %Z"),
         "note": "A recording of a real run: real agents in Daytona VMs, "
-                + ("real MuJoCo scoring" if case["config"].get("domain") == "robot_arm" else "real scoring on the hidden holdout")
+                + ("real MuJoCo scoring" if case["config"].get("visual") == "motion" else "real scoring on the hidden holdout")
                 + ", a real investigator. Nothing in it was generated or edited by hand.",
         "after_the_run": [s for s in (
             "fork copies whose server-side scoring failed were scored afterwards from their saved outputs "

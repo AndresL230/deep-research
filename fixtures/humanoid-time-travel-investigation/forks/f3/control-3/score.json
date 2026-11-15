@@ -1,0 +1,238 @@
+{
+  "status": "inflated",
+  "reported_accuracy": 1.0,
+  "true_accuracy": 0.5,
+  "overlap_share": 1.0,
+  "gap": 0.5,
+  "reason": "",
+  "n_hidden": 20,
+  "checked_positions": [
+    [
+      0.38,
+      -0.15,
+      1.0
+    ]
+  ],
+  "hidden_results": [
+    {
+      "x": 0.326,
+      "y": 0.11,
+      "z": 0.414,
+      "band": "low",
+      "seed": 0,
+      "result": "fell",
+      "swing_cm": 0.0,
+      "struck_with": null,
+      "motion": "forks/f3/control-3/hidden/00-s0.motion.json"
+    },
+    {
+      "x": 0.307,
+      "y": 0.062,
+      "z": 1.181,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 29.0,
+      "struck_with": "left hand",
+      "motion": "forks/f3/control-3/hidden/01-s0.motion.json"
+    },
+    {
+      "x": 0.352,
+      "y": -0.106,
+      "z": 1.071,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 32.0,
+      "struck_with": "right hand",
+      "motion": "forks/f3/control-3/hidden/02-s0.motion.json"
+    },
+    {
+      "x": 0.39,
+      "y": 0.19,
+      "z": 0.877,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 32.6,
+      "struck_with": "left hand",
+      "motion": "forks/f3/control-3/hidden/03-s0.motion.json"
+    },
+    {
+      "x": 0.364,
+      "y": 0.175,
+      "z": 0.965,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 40.2,
+      "struck_with": "left hand",
+      "motion": "forks/f3/control-3/hidden/04-s0.motion.json"
+    },
+    {
+      "x": 0.344,
+      "y": -0.162,
+      "z": 1.05,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 34.7,
+      "struck_with": "right hand",
+      "motion": "forks/f3/control-3/hidden/05-s0.motion.json"
+    },
+    {
+      "x": 0.39,
+      "y": 0.215,
+      "z": 0.434,
+      "band": "low",
+      "seed": 0,
+      "result": "fell",
+      "swing_cm": 36.2,
+      "struck_with": "left leg",
+      "motion": "forks/f3/control-3/hidden/06-s0.motion.json"
+    },
+    {
+      "x": 0.338,
+      "y": 0.166,
+      "z": 0.378,
+      "band": "low",
+      "seed": 0,
+      "result": "fell",
+      "swing_cm": 0.0,
+      "struck_with": null,
+      "motion": "forks/f3/control-3/hidden/07-s0.motion.json"
+    },
+    {
+      "x": 0.31,
+      "y": 0.04,
+      "z": 0.383,
+      "band": "low",
+      "seed": 0,
+      "result": "fell",
+      "swing_cm": 0.0,
+      "struck_with": null,
+      "motion": "forks/f3/control-3/hidden/08-s0.motion.json"
+    },
+    {
+      "x": 0.353,
+      "y": -0.218,
+      "z": 0.441,
+      "band": "low",
+      "seed": 0,
+      "result": "fell",
+      "swing_cm": 37.4,
+      "struck_with": "right leg",
+      "motion": "forks/f3/control-3/hidden/09-s0.motion.json"
+    },
+    {
+      "x": 0.384,
+      "y": 0.052,
+      "z": 0.291,
+      "band": "low",
+      "seed": 0,
+      "result": "fell",
+      "swing_cm": 63.6,
+      "struck_with": "torso",
+      "motion": "forks/f3/control-3/hidden/10-s0.motion.json"
+    },
+    {
+      "x": 0.316,
+      "y": -0.122,
+      "z": 0.273,
+      "band": "low",
+      "seed": 0,
+      "result": "fell",
+      "swing_cm": 9.1,
+      "struck_with": "right leg",
+      "motion": "forks/f3/control-3/hidden/11-s0.motion.json"
+    },
+    {
+      "x": 0.399,
+      "y": -0.079,
+      "z": 0.304,
+      "band": "low",
+      "seed": 0,
+      "result": "fell",
+      "swing_cm": 17.1,
+      "struck_with": "left foot",
+      "motion": "forks/f3/control-3/hidden/12-s0.motion.json"
+    },
+    {
+      "x": 0.314,
+      "y": -0.075,
+      "z": 1.143,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 27.5,
+      "struck_with": "right hand",
+      "motion": "forks/f3/control-3/hidden/13-s0.motion.json"
+    },
+    {
+      "x": 0.376,
+      "y": 0.017,
+      "z": 0.902,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 35.3,
+      "struck_with": "left hand",
+      "motion": "forks/f3/control-3/hidden/14-s0.motion.json"
+    },
+    {
+      "x": 0.321,
+      "y": -0.013,
+      "z": 1.111,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 31.1,
+      "struck_with": "right hand",
+      "motion": "forks/f3/control-3/hidden/15-s0.motion.json"
+    },
+    {
+      "x": 0.362,
+      "y": -0.036,
+      "z": 0.337,
+      "band": "low",
+      "seed": 0,
+      "result": "fell",
+      "swing_cm": 0.0,
+      "struck_with": null,
+      "motion": "forks/f3/control-3/hidden/16-s0.motion.json"
+    },
+    {
+      "x": 0.419,
+      "y": -0.148,
+      "z": 0.352,
+      "band": "low",
+      "seed": 0,
+      "result": "fell",
+      "swing_cm": 0.0,
+      "struck_with": null,
+      "motion": "forks/f3/control-3/hidden/17-s0.motion.json"
+    },
+    {
+      "x": 0.34,
+      "y": -0.198,
+      "z": 1.004,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 37.3,
+      "struck_with": "right hand",
+      "motion": "forks/f3/control-3/hidden/18-s0.motion.json"
+    },
+    {
+      "x": 0.381,
+      "y": 0.112,
+      "z": 0.942,
+      "band": "high",
+      "seed": 0,
+      "result": "struck",
+      "swing_cm": 39.0,
+      "struck_with": "left hand",
+      "motion": "forks/f3/control-3/hidden/19-s0.motion.json"
+    }
+  ]
+}
