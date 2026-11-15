@@ -1,6 +1,7 @@
 ---
 name: remove-near-duplicates-before-split
 description: Before the train/test split, check whether the row count exceeds the known size of the dataset, and remove near-duplicate rows (rows matching after rounding or on all but a few columns), because exact
+domain: tabular
 ---
 
 # remove-near-duplicates-before-split

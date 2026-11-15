@@ -150,6 +150,21 @@ describe("newBatchView, the New batch dialog's form", () => {
     const on = newBatchView(vm({ draft: { ...cfg, lessons: "learned" }, lessons: { state: "ready", value: [lesson] } }));
     expect(on).toContain('value="learned" checked><span>Approved lessons (1)</span>');
     expect(text(on)).toContain("Each analyst gets the approved lessons below as Deep Agents skills.");
+
+    // A lesson is for the domain it was learned in: the tabular one means nothing to a robot controller.
+    const robot: BatchConfig = { ...cfg, domain: "robot_arm", lessons: "learned" };
+    const tabularOnly = newBatchView(vm({ draft: robot, lessons: { state: "ready", value: [{ ...lesson, domain: "tabular" }] } }));
+    expect(tabularOnly).toMatch(off);
+    expect(tabularOnly).toContain('value="none" checked>');
+    expect(text(tabularOnly)).toContain("Approved lessons (0) No approved lessons yet for Robot arm: lessons from other tasks do not apply.");
+    expect(tabularOnly).not.toContain(lesson.name);
+    const robotLesson = { name: "test-edge-positions", rule: "Test the edges.", domain: "robot_arm" };
+    const mixed = newBatchView(vm({ draft: robot, lessons: { state: "ready", value: [lesson, robotLesson] } }));
+    expect(mixed).toContain('value="learned" checked><span>Approved lessons (1)</span>');
+    expect(mixed).toContain("<code>test-edge-positions</code>");
+    expect(mixed).not.toContain(`<code>${lesson.name}</code>`);
+    // Back on Data Science, the lesson with no domain (an older server's) counts, the robot one does not.
+    expect(newBatchView(vm({ lessons: { state: "ready", value: [lesson, robotLesson] } }))).toContain("Approved lessons (1)");
   });
 
   it("shows the trap's noise and hidden share under Advanced, at the server's defaults", () => {

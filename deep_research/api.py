@@ -531,8 +531,9 @@ def foolrate_reports():
 def approved_lessons():
     """The approved lessons a batch with `lessons="learned"` gives its analysts (`lessons.approved`), read-only from
     `skills/learned/*/SKILL.md` on each call, so a lesson approved or merged later shows without a restart. Only the
-    name, the rule and the batch it was learned from go out, never the path on disk."""
-    return [{"name": r["name"], "rule": r["rule"], "learned_from": r["learned_from"]} for r in lessons.approved()]
+    name, the rule, the batch it was learned from and the domain it is for go out, never the path on disk."""
+    return [{"name": r["name"], "rule": r["rule"], "learned_from": r["learned_from"], "domain": r["domain"]}
+            for r in lessons.approved()]
 
 
 @app.get("/api/costs")
