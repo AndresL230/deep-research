@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
-from langchain_core.messages import messages_from_dict, messages_to_dict
+from langchain_core.messages import HumanMessage, messages_from_dict, messages_to_dict
 from langchain_daytona import DaytonaSandbox
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
@@ -34,7 +34,7 @@ from .analysis import find_split, fork_point, label_table, rank_candidates, run_
 from .audit import build_audit
 from .case_file import CaseFile, with_evidence
 from .commentary import for_batch as commentary_for
-from .config import BATCHES_DIR, BatchConfig
+from .config import BATCHES_DIR, VM_WORKSPACE, BatchConfig
 from .costs import CostTracker, OverBudget, ScopeCost, UsageCallback, usd_up
 from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, prefix_events, read_events
 from .evidence import (current_verdict_evidence, fork_pairs, pairs_to_support, verdict_evidence, verdict_fork,
@@ -50,6 +50,12 @@ from .forks import ChangeError, anchor_error, change_messages, cut_history, fix_
 logger = logging.getLogger(__name__)
 
 RUN_TIMEOUT_S = 900
+# A fork copy that stops without its report is asked once to write it, then scored whatever it did. The rule is the
+# same for every arm (a control copy that stops early gets the same message as a changed one), so it never separates
+# the arms; without it, a copy that stopped one step short would count as failed and fall out of its arm.
+REPORT_FILE = "report.json"
+REPORT_NUDGE = f"Write {VM_WORKSPACE}/{REPORT_FILE} now with your result."
+NUDGE_TIMEOUT_S = 180
 # One investigator turn is four graph steps, and reading the case file a hundred lines at a time is a
 # turn per read, so the analysts' limit would end an investigation after about 48 turns, with the fork
 # money already spent. The budget check is what limits the investigator's spend.
@@ -1641,6 +1647,9 @@ class Batch:
                             self._drive(agent, inp, thread_id, scope, copy_model, log, on_event),
                             RUN_TIMEOUT_S,
                         )
+                        if await self._nudge_for_report(agent, vm, cdir / "outputs", thread_id, scope, copy_model,
+                                                        log, on_event):
+                            self._set_child(fork_id, cid, nudged=True)
                     if watch is not None:
                         await watch.stop()
                     motion = await asyncio.to_thread(vms.download_outputs, vm, cdir / "outputs", **self._vm_domain)
@@ -1679,6 +1688,26 @@ class Batch:
             asyncio.create_task(child(arm, number), context=contextvars.Context()) for arm, number in jobs
         ))
         return results
+
+    async def _nudge_for_report(self, agent, vm, outputs: Path, thread_id: str, scope: str, model: str,
+                                log: EventLog, on_event) -> bool:
+        """The one nudge a fork copy gets (`REPORT_NUDGE`): when its agent stopped and the VM has no report, one more
+        user message on the copy's own thread asks for it. True when it was sent. Arm-blind on purpose: it looks only
+        at the copy's files, never at its arm, so every arm is held to the same rule."""
+        await asyncio.to_thread(vms.download_outputs, vm, outputs, **self._vm_domain)
+        if (outputs / REPORT_FILE).is_file():
+            return False
+        on_event(log.write({"type": "nudge", "text": REPORT_NUDGE}))
+        try:
+            await asyncio.wait_for(
+                self._drive(agent, {"messages": [HumanMessage(content=REPORT_NUDGE)]}, thread_id, scope, model, log,
+                            on_event),
+                NUDGE_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            # Scored as it is: the scoring says what is missing.
+            logger.warning("%s: no answer to the report nudge within %ss", thread_id, NUDGE_TIMEOUT_S)
+        return True
 
     def _set_child(self, fork_id: str, cid: str, **fields: Any) -> None:
         children = dict(self.case.data["forks"][fork_id].get("children", {}))

@@ -12,19 +12,37 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 
 from . import traps
 
+# The forced near-duplicate removal keeps the file as it was under this name, in the VM workspace.
+DEDUP_BACKUP = "data_before_dedup.csv"
+# How far apart (relative) a non-integer value of a near-duplicate may be from the row it copies.
+NEAR_RTOL = 0.05
+
 # One forced action per label. "control" arms get nothing forced. Each trap brings the fix for its own
 # step (`deduplicate` comes from the duplicates trap); a step that is no trap's own is listed here.
 # `SHOW` holds the weaker version of a step for the `show` arm: tell the agent what the fix would fix, change nothing.
 INTERVENTIONS: dict[str, dict] = {
-    # Jittered copies differ only in their non-integer columns, so match rows on every other column.
+    # A jittered copy (traps/duplicates.py) equals its original exactly in every integer or text column and is
+    # within a small relative distance in each non-integer column (`trap_noise` scales a value by 1 + N(0, noise/20),
+    # so at most 2.5% at the largest noise). Rows are sorted on every column, and a row that matches the one before
+    # it that way is dropped: exact copies too. The file as it was is kept, and the output says what was done and
+    # that it is the intended step, so the copy reads it as a fix and not as damage.
     "deduplicate_near": {
-        "description": "Remove near-duplicate rows from data.csv before the split, matching on the exact columns",
+        "description": "Remove near-duplicate rows from data.csv before the split, keeping the original file",
         "command": traps.in_workspace(
-            "import pandas as pd; d = pd.read_csv('data.csv'); n = len(d); "
+            "import pandas as pd, numpy as np; d = pd.read_csv('data.csv'); n = len(d); "
+            f"d.to_csv('{DEDUP_BACKUP}', index=False); d = d.drop_duplicates(); "
             "num = d.select_dtypes('number'); "
-            "exact = [c for c in d.columns if c not in num.columns or (num[c].dropna() % 1 == 0).all()]; "
-            "d = d.drop_duplicates(subset=exact or None); d.to_csv('data.csv', index=False); "
-            "print(f'Removed {n - len(d)} near-duplicate rows, matching on {len(exact)} exact columns. {len(d)} rows remain.')"
+            "fz = [c for c in num.columns if not (num[c].dropna() % 1 == 0).all()]; "
+            "ex = [c for c in d.columns if c not in fz]; "
+            "s = d.sort_values(ex + fz, kind='stable'); p = s.shift(); "
+            "same = s[ex].astype(object).fillna('<NA>').eq(p[ex].astype(object).fillna('<NA>')).all(axis=1).to_numpy(); "
+            f"close = np.isclose(s[fz].to_numpy(float), p[fz].to_numpy(float), rtol={NEAR_RTOL}, atol=1e-9, "
+            "equal_nan=True).all(axis=1); "
+            "dup = same & close; dup[:1] = False; "
+            "d = d.drop(index=s.index[dup]); d.to_csv('data.csv', index=False); "
+            "print(f'Removed {n - len(d)} near-duplicate rows (copies of other rows with small numeric jitter). '"
+            "f'{len(d)} rows remain. This is the intended step. "
+            f"The original is saved as {DEDUP_BACKUP}. Continue the task with data.csv.')"
         ),
     },
 }
