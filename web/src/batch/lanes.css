@@ -86,6 +86,127 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 
 /* Reported against true accuracy: two bars on one 50% to 100% axis, the gap hatched and called out. */
 .ln-cons { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+
+/* What changed: two tracks that differ at one stop (lanes.ts `stepLanes`). Four columns: who, the steps before, the
+   stop, the steps after. Steps are dots without words; only the stop carries a name and a count. */
+.ln-lanes { min-width:0; margin:14px 0 6px; overflow-x:auto; }
+.ln-lanes-g { display:grid; grid-template-columns:max-content minmax(48px, 1fr) max-content minmax(48px, 1fr); align-items:center; row-gap:10px; min-width:520px; }
+.ln-lanes-tag { justify-self:center; padding:0 4px; font-size:13px; font-weight:500; color:var(--fg); text-align:center; }
+.ln-lane-who { display:inline-flex; align-items:center; gap:8px; padding-right:20px; font-size:13.5px; font-weight:500; white-space:nowrap; }
+/* The track: a hairline with a dot per step. */
+.ln-lane-seg { display:flex; align-items:center; justify-content:space-around; align-self:stretch; min-width:0; padding:0 6px; background:linear-gradient(var(--border-strong), var(--border-strong)) center / 100% 1px no-repeat; }
+.ln-lane-dot { display:block; flex:none; width:10px; height:10px; border-radius:50%; background:var(--fg-40); box-shadow:0 0 0 4px var(--surface); }
+.ln-lane-dot.is-off { background:var(--surface); box-shadow:inset 0 0 0 1.5px var(--fg-40), 0 0 0 4px var(--surface); }
+/* The stop: the one place the two tracks differ. One mark per run, then the count. */
+.ln-lane-stop { display:inline-flex; align-items:center; justify-content:space-between; gap:20px; min-width:230px; padding:14px 18px; border:1px solid var(--border-strong); border-radius:var(--r-card); background:var(--surface); box-shadow:var(--shadow); }
+.ln-lane-stop.is-skipped { border-style:dashed; border-color:var(--ln-tone); box-shadow:none; }
+.ln-lane-marks { display:flex; flex-wrap:wrap; gap:6px; max-width:150px; }
+.ln-lane-marks > i { display:block; width:14px; height:14px; border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--ln-tone); }
+.ln-lane-marks > i.is-on { background:var(--ln-tone); }
+.ln-lane-n { font-size:clamp(20px, 2.1vw, 26px); line-height:1.15; font-weight:400; letter-spacing:-0.03em; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.ln-lanes-end { padding:0 6px; font-size:12px; color:var(--fg-55); }
+.ln-lanes-end--last { text-align:right; }
+
+/* A mark per copy (lanes.ts `copyMarks`): a square for an inflated claim, a disc for an honest one. */
+.ln-mk { display:inline-flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.ln-mk > i { display:block; width:14px; height:14px; box-sizing:border-box; }
+.ln-mk > .is-bad { border-radius:3px; background:var(--bad); }
+.ln-mk > .is-ok { border-radius:50%; background:var(--ok); }
+.ln-mk > .is-unk { border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--fg-40); }
+.ln-mk > .is-wait { border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--border-strong); }
+.ln-mk > .is-fail { height:2px; background:var(--fg-40); }
+.ln-mk > .is-run { border-radius:50%; border:2px solid var(--accent-soft); border-top-color:var(--accent); animation:ln-mk-turn .9s linear infinite; }
+@keyframes ln-mk-turn { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ln-mk > .is-run { animation:none; } }
+
+/* The evidence as a meter (lanes.ts `pairMeter`). */
+.ln-meter { display:flex; align-items:center; flex-wrap:wrap; gap:10px 14px; }
+.ln-meter-s { display:inline-flex; gap:4px; }
+.ln-meter-s > i { display:block; width:18px; height:10px; border-radius:2px; box-shadow:inset 0 0 0 1px var(--border-strong); }
+.ln-meter-s > i.is-on { background:var(--fg); box-shadow:none; }
+.ln-meter-t { font-size:13px; font-variant-numeric:tabular-nums; color:var(--fg-70); }
+
+/* The fork as one picture (lanes.ts `forkPicture`): the source run's track, the cut, a branch per arm. */
+.ln-fk, .ln-vp { display:flex; flex-direction:column; gap:22px; min-width:0; padding:24px; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); }
+/* What the marks of a picture stand for (lanes.ts `markKey`, and the dots of `stepLanes`). */
+.ln-key { display:flex; flex-wrap:wrap; gap:6px 22px; margin:0; font-size:12.5px; color:var(--fg-55); }
+.ln-key-i { display:inline-flex; align-items:center; gap:8px; }
+.ln-key .ln-mk > i { width:11px; height:11px; }
+.ln-key .ln-lane-dot { box-shadow:none; }
+.ln-key .ln-lane-dot.is-off { box-shadow:inset 0 0 0 1.5px var(--fg-40); }
+.ln-lanes .ln-key { margin-top:14px; }
+
+/* The fork as a menu with a preview (lanes.ts `forkPicture`): the preview, a row per arm, where to go next. */
+.ln-md { display:grid; grid-template-columns:minmax(220px, 300px) minmax(0, 1fr) 190px; align-items:start; gap:0; min-width:0; }
+.ln-md-pv { display:grid; min-width:0; padding-right:28px; }
+.ln-md-p { grid-area:1 / 1; display:flex; flex-direction:column; gap:6px; min-width:0; opacity:0; visibility:hidden; filter:blur(6px); transition:opacity .25s ease, filter .25s ease, visibility 0s linear .25s; }
+.ln-md-art { border-radius:var(--r-card); overflow:hidden; background:linear-gradient(135deg, var(--pu-lav), var(--pu-wash) 46%, var(--pu-pink)); margin-bottom:10px; }
+.ln-md-pt { font-size:15.5px; font-weight:500; letter-spacing:-0.01em; }
+.ln-md-pd { margin:0; font-size:13.5px; line-height:1.5; color:var(--fg-70); text-wrap:pretty; }
+.ln-md-ran { margin:0; font-size:12.5px; line-height:1.45; color:var(--fg-55); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.ln-md-nums { display:flex; gap:28px; margin:10px 0 0; }
+.ln-md-nums dt { font-size:12px; color:var(--fg-55); }
+.ln-md-nums dd { margin:1px 0 0; font-size:26px; line-height:1.1; letter-spacing:-0.03em; font-variant-numeric:tabular-nums; color:var(--fg-55); }
+.ln-md-nums div:first-child dd { color:var(--fg); }
+.ln-md-nums div dd.is-high { color:var(--red); }
+/* The rows. One is lit: the one under the pointer or the keyboard, else the arm under test. */
+.ln-md-rows { display:flex; flex-direction:column; gap:4px; margin:0; padding:0 28px; list-style:none; min-width:0; border-left:1px solid var(--border); border-right:1px solid var(--border); }
+.ln-md-row { display:grid; grid-template-columns:auto minmax(0, 1fr) auto; align-items:center; gap:14px; padding:12px 14px; border-radius:var(--r-card); cursor:default; outline:none; transition:background var(--t-hover) ease; }
+.ln-md-ic { display:grid; place-items:center; width:36px; height:36px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface); color:var(--fg); transition:background var(--t-hover) ease, color var(--t-hover) ease, border-color var(--t-hover) ease; }
+.ln-md-t { display:flex; flex-direction:column; min-width:0; }
+.ln-md-t > b { font-size:15px; font-weight:500; letter-spacing:-0.01em; }
+.ln-md-t > small { font-size:13px; color:var(--fg-55); font-variant-numeric:tabular-nums; }
+.ln-md-row:focus-visible { box-shadow:0 0 0 2px var(--focus); }
+.ln-md-row:hover, .ln-md-row:focus-visible,
+.ln-md:not(:has(.ln-md-row:hover, .ln-md-row:focus-visible)) .ln-md-row.is-default { background:var(--muted); }
+.ln-md-row:hover .ln-md-ic, .ln-md-row:focus-visible .ln-md-ic,
+.ln-md:not(:has(.ln-md-row:hover, .ln-md-row:focus-visible)) .ln-md-row.is-default .ln-md-ic { background:var(--ink); border-color:var(--ink); color:var(--ink-fg); }
+/* The preview that shows: the lit row's. */
+.ln-md:not(:has(.ln-md-row:hover, .ln-md-row:focus-visible)) .ln-md-p.is-default,
+.ln-md:has(.ln-md-row[data-arm="control"]:is(:hover, :focus-visible)) .ln-md-p[data-arm="control"],
+.ln-md:has(.ln-md-row[data-arm="placebo"]:is(:hover, :focus-visible)) .ln-md-p[data-arm="placebo"],
+.ln-md:has(.ln-md-row[data-arm="show"]:is(:hover, :focus-visible)) .ln-md-p[data-arm="show"],
+.ln-md:has(.ln-md-row[data-arm="forced"]:is(:hover, :focus-visible)) .ln-md-p[data-arm="forced"],
+.ln-md:has(.ln-md-row[data-arm="fixed"]:is(:hover, :focus-visible)) .ln-md-p[data-arm="fixed"] { opacity:1; visibility:visible; filter:none; transition:opacity .25s ease, filter .25s ease; }
+/* More: where to go from here. */
+.ln-md-more { display:flex; flex-direction:column; gap:10px; padding:8px 0 0 28px; min-width:0; }
+.ln-md-more-h { font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-55); }
+.ln-md-more ul { display:flex; flex-direction:column; gap:2px; margin:0; padding:0; list-style:none; }
+.ln-md-link { display:inline-flex; align-items:center; gap:10px; margin-left:-8px; padding:7px 8px; border-radius:var(--r-ctl); font-size:14px; color:var(--fg); text-align:left; cursor:pointer; }
+.ln-md-link:hover { background:var(--hover); }
+.ln-md-link:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+
+/* An arm's diagram (lanes.ts `armDiagram`): the run in, the box, a line per copy out. */
+.ln-ad { display:block; width:100%; height:auto; }
+.ln-ad-l { fill:none; stroke:var(--border-strong); stroke-width:1.5; }
+.ln-ad-p { fill:none; stroke-width:3; stroke-linecap:round; stroke-dasharray:9 100; stroke-dashoffset:9; animation:ln-ad-flow 2.6s linear infinite; }
+.ln-ad-p--in { stroke:var(--fg-40); }
+.ln-ad-p--bad { stroke:var(--bad); }
+.ln-ad-p--ok { stroke:var(--ok); }
+.ln-ad-p--run { stroke:var(--accent); }
+@keyframes ln-ad-flow { to { stroke-dashoffset:-100; } }
+.ln-ad-box { fill:color-mix(in srgb, var(--surface) 72%, transparent); stroke:color-mix(in srgb, var(--surface) 90%, transparent); stroke-width:1.5; }
+.ln-ad-box--none { fill:none; stroke:var(--border-strong); stroke-dasharray:4 4; }
+.ln-ad-tile rect { fill:var(--ink); }
+.ln-ad-tile g { stroke:var(--ink-fg); }
+/* Still, the pulses rest where a line ends: the outcome is still drawn. */
+@media (prefers-reduced-motion: reduce) { .ln-ad-p { animation:none; stroke-dashoffset:-88; } .ln-md-p { transition:none; filter:none; } }
+.ln-fk-name { display:flex; flex-direction:column; min-width:0; font-size:14.5px; line-height:1.3; }
+.ln-fk-name > small { font-size:12px; font-weight:400; color:var(--fg-55); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ln-fk-n { font-size:13.5px; font-weight:400; font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+/* In focus: the arm under test. */
+.ln-vp-row.is-focus { color:var(--fg); }
+.ln-vp-row.is-focus { padding-block:14px; border-color:var(--border-strong); box-shadow:var(--shadow); }
+.ln-vp-row.is-focus .ln-fk-name { font-weight:500; }
+.ln-vp-row.is-focus .ln-fk-n { font-size:15px; font-weight:500; }
+
+/* The verdict as one picture (lanes.ts `verdictPicture`): the two arms that carry it, and how far each number moved. */
+.ln-vp-g { display:grid; grid-template-columns:minmax(0, 1.5fr) minmax(0, 1fr); align-items:center; gap:20px 40px; min-width:0; }
+.ln-vp-rows { display:flex; flex-direction:column; gap:6px; margin:0; padding:0; list-style:none; min-width:0; }
+.ln-vp-row { display:grid; grid-template-columns:minmax(0, 1fr) auto 132px; align-items:center; gap:8px 18px; min-width:0; padding:9px 16px; border:1px solid transparent; border-radius:var(--r-card); color:var(--fg-70); }
+.ln-vp-nums { display:flex; gap:36px; margin:0; }
+.ln-vp-nums dt { font-size:12.5px; color:var(--fg-55); }
+.ln-vp-nums dd { margin:2px 0 0; font-size:clamp(26px, 2.8vw, 36px); line-height:1.1; font-weight:400; letter-spacing:-0.03em; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .ln-grp { display:flex; flex-direction:column; gap:10px; min-width:0; padding:16px; border:1px solid var(--border); border-radius:var(--r-card); background:var(--bg); }
 .ln-grp-h { display:flex; align-items:center; gap:8px; font-size:13.5px; }
 .ln-grp-t { font-weight:500; }
@@ -404,10 +525,10 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 @media (max-width: 640px) {
   .ln-sec { padding:14px; }
   .ln-cmp, .ln-arms, .ln-cons, .ln-fix-diff { grid-template-columns:minmax(0, 1fr); }
+  .ln-fk, .ln-vp { padding:18px 16px; }
+  .ln-vp-g { grid-template-columns:minmax(0, 1fr); row-gap:14px; }
   .ln-dx-symptom { font-size:14px; }
   .ln-run { width:34px; }
-  .ln-vrow { grid-template-columns:56px 1fr; }
-  .ln-vrow-n { grid-column:2; }
   .ln-ev-k { display:none; }
 }
 
@@ -537,4 +658,94 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
   .ln-out-fill.ds-grow-x, .ln-fill.ds-grow-x { animation:none !important; }
   .ln-fill, .ln-over, .ln-out-fill, .ln-src-tick rect { transition:none !important; }
   .ln-src-mark.ds-beam::after, .ln-ev-pair.ds-beam::after, .ln-prov-i.ds-beam::after { animation:none !important; }
+}
+
+/* ── phone width: each picture laid out again for one column. Nothing here waits for a pointer to hover, body text
+   is 14px and nothing is under 12px, and whatever is tapped is at least 44px tall. ── */
+@media (max-width: 640px) {
+  /* Words. */
+  .ln-sec, .ln-sub, .ln-note, .ln-md-pd, .ln-fix-why, .ln-dx-why, .ln-ask-more, .ln-q-row, .ln-src-how, .ln-ev-stats, .ln-ev-ceil, .ln-rec-match, .ln-limits, .ln-vread, .ln-hyp-e, .ln-prov-i, .ln-v-open { font-size:14px; }
+  .ln-tag, .ln-ev-t, .ln-evs .ln-ev-x, .ln-nb-link, .ln-md-more-h, .ln-evc-ax, .ln-axis, .ln-gap-w, .ln-kid-id, .ln-kid-rec, .ln-exact-pre, .ln-prov-src, .ln-out-axis, .ln-fix-where, .ln-fix-pre, .ln-code-pre, .ln-run-id, .ln-fix-raised code, .ln-src-mark b { font-size:12px; }
+  .ln-tag { line-height:18px; }
+  .ln-kid-h { flex-wrap:wrap; gap:4px 6px; }
+  .ln-kid-id { white-space:nowrap; }
+  .ln-headline { max-width:none; font-size:23px; line-height:1.18; letter-spacing:-0.025em; }
+  .ln-q-t { font-size:20px; }
+  /* A chip that says who computed a number wraps inside its line and never pushes the page wider. */
+  .ln-prov-tag { max-width:100%; height:auto; min-height:24px; padding-block:4px; line-height:1.25; white-space:normal; }
+
+  /* What changed: each track's name on a line of its own, then the track across the full width, the stop in the
+     middle with its marks over its count. A track with more steps than fit scrolls sideways inside the figure. */
+  .ln-lanes-g { grid-template-columns:minmax(min-content, 1fr) max-content minmax(min-content, 1fr); row-gap:8px; min-width:0; }
+  .ln-lanes-g > span:empty:not([class]) { display:none; }
+  .ln-lanes-tag { grid-column:1 / -1; padding:0; text-wrap:balance; }
+  .ln-lane-who { grid-column:1 / -1; padding:8px 0 0; }
+  .ln-lane-seg { gap:8px; }
+  .ln-lane-dot { box-shadow:0 0 0 2px var(--surface); }
+  .ln-lane-dot.is-off { box-shadow:inset 0 0 0 1.5px var(--fg-40), 0 0 0 2px var(--surface); }
+  .ln-lane-stop { flex-direction:column; align-items:center; justify-content:center; gap:8px; min-width:0; padding:10px 12px; }
+  .ln-lane-marks { justify-content:center; max-width:114px; }
+  .ln-lane-n { font-size:17px; letter-spacing:-0.02em; }
+  .ln-lanes-end { grid-column:1; align-self:start; padding:0; }
+  .ln-lanes-end--last { grid-column:3; }
+
+  /* The fork: no preview to swap, since a phone has no hover. The rows come first, each followed by its own arm's
+     numbers (its preview, without the picture); the arm under test stays lit and says what it is for. The preview
+     and the list both dissolve into one column, where the nth row is followed by the nth preview. */
+  .ln-md { display:flex; flex-direction:column; align-items:stretch; gap:0; }
+  .ln-md-pv, .ln-md-rows { display:contents; }
+  .ln-md-row:nth-child(1) { order:1; } .ln-md-p:nth-child(1) { order:2; }
+  .ln-md-row:nth-child(2) { order:3; } .ln-md-p:nth-child(2) { order:4; }
+  .ln-md-row:nth-child(3) { order:5; } .ln-md-p:nth-child(3) { order:6; }
+  .ln-md-row:nth-child(4) { order:7; } .ln-md-p:nth-child(4) { order:8; }
+  .ln-md-row:nth-child(5) { order:9; } .ln-md-p:nth-child(5) { order:10; }
+  .ln-md-more { order:11; }
+  .ln-md-row { gap:10px; min-height:56px; margin-top:4px; padding:10px; }
+  .ln-md-row:first-child { margin-top:0; }
+  .ln-md-t > b { text-wrap:balance; }
+  .ln-md-row .ln-mk { justify-content:flex-end; gap:4px; max-width:92px; }
+  .ln-md-row .ln-mk > i { width:12px; }
+  .ln-md-row .ln-mk > i:not(.is-fail) { height:12px; }
+  .ln-md-p { grid-area:auto; gap:8px; padding:0 10px 12px 56px; opacity:1; visibility:visible; filter:none; transition:none; }
+  .ln-md-art, .ln-md-pt, .ln-md-ran, .ln-md-p:not(.is-default) .ln-md-pd, .ln-md-p:not(.is-default):not(:has(.ln-md-nums)) { display:none; }
+  .ln-md-nums { flex-wrap:wrap; gap:2px 18px; margin:0; }
+  .ln-md-nums > div { display:flex; align-items:baseline; gap:6px; }
+  .ln-md-nums dt { font-size:12.5px; }
+  .ln-md-nums dd { margin:0; font-size:17px; line-height:1.2; letter-spacing:-0.02em; }
+  /* One block is lit, the arm under test: its row and its numbers share the ground. A tap lights nothing else. */
+  .ln-md .ln-md-row:not(.is-default):is(:hover, :focus-visible) { background:none; }
+  .ln-md .ln-md-row:not(.is-default) .ln-md-ic { background:var(--surface); border-color:var(--border-strong); color:var(--fg); }
+  .ln-md .ln-md-row.is-default { border-radius:var(--r-card) var(--r-card) 0 0; background:var(--muted); }
+  .ln-md .ln-md-row.is-default .ln-md-ic { background:var(--ink); border-color:var(--ink); color:var(--ink-fg); }
+  .ln-md .ln-md-p.is-default { border-radius:0 0 var(--r-card) var(--r-card); background:var(--muted); }
+  /* More: a list of full-width links, a rule between them. */
+  .ln-md-more { gap:4px; margin-top:16px; padding:14px 0 0; border-top:1px solid var(--border); }
+  .ln-md-more ul { gap:0; }
+  .ln-md-more li + li { border-top:1px solid var(--border); }
+  .ln-md-link { display:flex; width:100%; min-height:44px; margin-left:0; padding:0 4px; }
+
+  /* The verdict: each arm is one block, its name on the left, its marks over its count on the right. The two
+     numbers sit side by side, as wide as each other. */
+  .ln-vp-row { grid-template-columns:minmax(0, 1fr) auto; gap:4px 14px; padding:10px 12px; }
+  .ln-vp-row.is-focus { padding-block:12px; }
+  .ln-vp-row .ln-fk-name { grid-row:1 / span 2; align-self:center; }
+  .ln-vp-row .ln-mk { justify-self:end; justify-content:flex-end; max-width:134px; }
+  .ln-vp-row .ln-fk-n { grid-column:2; }
+  .ln-vp-nums { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; padding:0 12px; }
+  .ln-vp-nums > div + div { padding-left:12px; border-left:1px solid var(--border); }
+  .ln-vp-nums dd { font-size:clamp(20px, 6.4vw, 26px); }
+
+  /* The meter in two lines: the level and the slots, which take the width left; under them the count and what it
+     still needs. */
+  .ln-meter { display:grid; grid-template-columns:auto minmax(0, 1fr); gap:8px 12px; }
+  .ln-meter-s { display:flex; }
+  .ln-meter-s > i { flex:1 1 0; width:auto; min-width:0; max-width:28px; }
+  .ln-meter-w { font-size:13px; }
+
+  /* The other arms under the verdict: name, marks, count, on one line. */
+  .ln-vrow { grid-template-columns:64px minmax(0, 1fr) auto; gap:6px 12px; }
+
+  /* A fold's button: the full width, tall enough for a thumb. The one in a table row keeps its own width. */
+  .ln-fold.ask-ghostbtn { display:flex; justify-content:center; width:100%; height:44px; font-size:14px; }
+  .ln-bm-see .ln-fold.ask-ghostbtn { display:inline-flex; width:auto; }
 }

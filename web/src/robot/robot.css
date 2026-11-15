@@ -60,15 +60,45 @@
 .rb-thumb-l { position:absolute; left:6px; right:6px; bottom:6px; display:flex; align-items:center; gap:5px; min-width:0; padding:3px 7px; border-radius:var(--r-ctl); background:color-mix(in srgb, var(--bg) 80%, transparent); font-family:var(--label); font-size:10.5px; color:var(--fg-70); white-space:nowrap; overflow:hidden; }
 .rb-thumb-r { margin-left:auto; padding-left:6px; color:var(--fg-55); overflow:hidden; text-overflow:ellipsis; }
 
-@media (max-width: 560px) {
-  .rb-stage { aspect-ratio:4 / 3; }
+/* A phone: the view at 4:3, then the time line with the clock at its end, then one row of 44px controls (play, the
+   five speeds sharing what is left, loop, the key). A swipe up or down over the view scrolls the page; a drag
+   sideways still turns the robot and a pinch still zooms (OrbitControls sets `touch-action:none` on the canvas
+   itself, which would hold the page still under a thumb, so this has to outrank it). */
+@media (max-width: 640px) {
+  .rb-stage { aspect-ratio:4 / 3; min-height:0; }
+  .rb-stage.rb-stage--nogl { min-height:160px; }
+  .rb-canvas { touch-action:pan-y !important; }
   .rb-hint { display:none; }
-  .rb-bar { flex-wrap:wrap; row-gap:6px; }
-  .rb-seek { flex:1 1 100%; order:-1; margin:6px 4px 2px; }
-  .rb-time { min-width:0; margin-right:auto; text-align:left; font-size:11.5px; }
-  /* five speeds, the play and loop buttons and the time on one row at phone width */
-  .rb-bar { column-gap:4px; }
-  .rb-speed { padding:3px 5px; }
+  .rb-loading, .rb-none, .rb.is-error, .rb-nogl-t { font-size:14px; }
+  .rb-nogl-r { font-size:12.5px; }
+  .rb-reset { right:4px; top:4px; width:44px; height:44px; }
+  .rb-result { gap:4px 8px; font-size:14px; }
+  .rb-result-f, .rb-tag { font-size:12px; }
+
+  .rb-bar { display:grid; grid-template-columns:44px minmax(0, 1fr) 44px 44px; grid-template-areas:"seek seek time time" "play speeds loop info"; align-items:center; gap:0 6px; }
+  .rb-bar > .rb-icon, .rb-bar > .rb-info { width:44px; height:44px; }
+  .rb-play { grid-area:play; }
+  .rb-loop { grid-area:loop; }
+  .rb-info { grid-area:info; }
+  /* The line is still 4px; the 20px above and under it take the press. */
+  .rb-seek { grid-area:seek; box-sizing:content-box; min-width:0; width:calc(100% - 4px); height:4px; margin:0 2px; padding:20px 0; background-clip:content-box; }
+  .rb-seek::-webkit-slider-thumb { width:18px; height:18px; }
+  .rb-seek::-moz-range-thumb { width:14px; height:14px; }
+  .rb-time { grid-area:time; min-width:0; font-size:12px; }
+  /* A speed takes a press on the group's whole 44px; the chosen one is drawn 3px inside it. */
+  .rb-speeds { grid-area:speeds; display:flex; height:44px; padding:0 3px; }
+  .rb-speed { flex:1 1 0; min-width:0; height:44px; padding:3px 0; background-clip:content-box; font-size:13px; text-align:center; }
+  .rb-speed[aria-pressed="true"] { box-shadow:none; }
+  /* The key's words open on a press as well as under a pointer. */
+  .rb-info:focus .rb-info-tip, .rb-info:focus-within .rb-info-tip { opacity:1; transform:none; }
+  .rb-info-tip { width:min(260px, calc(100vw - 48px)); font-size:13px; }
+
+  /* the episode list inside a player (where the page has no side column for it): one row each */
+  .rb-files-h { font-size:12.5px; }
+  .rb-files { grid-template-columns:minmax(0, 1fr); }
+  .rb-file { min-height:44px; padding:6px 12px; }
+  .rb-file-n { font-size:14px; }
+  .rb-file-m { font-size:12px; }
 }
 
 /* the can's end mark's label (viewer.ts placeEnd): under the dot, centered on it */

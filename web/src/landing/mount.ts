@@ -98,7 +98,7 @@ const ribbon = scene<Ribbon>("[data-lp-ribbon]", (host, root) =>
   import("./ribbon").then((m) => m.mountRibbon(host, { tone: tone(host), scroller: scroller(root) })), true);
 
 const devices = scene<Devices>("[data-lp-devices]", (host) =>
-  import("./devices").then((m) => m.mountDevices(host, { tone: tone(host), shown: deviceFor(currentTab(host)) })));
+  import("./devices").then((m) => m.mountDevices(host, { tone: tone(host), shown: TERMINAL })));
 
 const finder = scene<Finder>("[data-lp-net]", (host, root) =>
   import("./finder").then((m) => m.mountFinder(host, { tone: tone(host), pin: null, scroller: scroller(root), runs: demoRuns(), split: DEMO_SPLIT, play: true })));
@@ -114,13 +114,24 @@ const factory = scene<Factory>("[data-lp-floor]", (host, root) =>
 
 // ── the folder's tabs ────────────────────────────────────────────────────────
 
-/** The device each tab shows: the terminal for the runs, the data bench for your own data. The split's tab shows
- *  the split finder's web instead. */
-const deviceFor = (tab: number): number => (tab === 2 ? 1 : 0);
+/** The tabs, in order: the humanoid video, the split finder's web, the terminal (the first of the devices). */
+const VIDEO_TAB = 0;
+const SPLIT_TAB = 1;
+const TERMINAL = 0;
 const currentTab = (inside: HTMLElement): number => Number(inside.closest<HTMLElement>("[data-lp-folder]")?.dataset.tab) || 0;
-/** How long each tab stays open before the next one opens on its own: the split's long enough for the split finder
- *  to play through to the step it finds. */
-const TAB_SECONDS = [7, 13, 8];
+/** How long each tab stays open before the next one opens on its own: the video's long enough to show one motion
+ *  to its end, the split's long enough for the split finder to play through to the step it finds. */
+const TAB_SECONDS = [14, 13, 8];
+
+/** Play the folder's video while its tab is open and the folder is on screen, and pause it otherwise. Under reduced
+ *  motion it never plays: its poster frame stays. `rewind` starts it from the beginning (its tab was just opened). */
+function syncVideo(folder: HTMLElement, onScreen: boolean, rewind = false): void {
+  const video = folder.querySelector<HTMLVideoElement>("[data-lp-video] video");
+  if (!video) return;
+  if (currentTab(folder) !== VIDEO_TAB || !onScreen || calm()) { video.pause(); return; }
+  if (rewind) video.currentTime = 0;
+  void video.play().catch(() => undefined);
+}
 
 function setTab(folder: HTMLElement, tab: number, focus = false): void {
   const tabs = Array.from(folder.querySelectorAll<HTMLElement>("[data-lp-tab]"));
@@ -142,8 +153,9 @@ function setTab(folder: HTMLElement, tab: number, focus = false): void {
   }
   for (const chip of folder.querySelectorAll<HTMLElement>("[data-lp-chip]")) chip.classList.toggle("is-on", Number(chip.dataset.lpChip) === i);
   const root = folder.closest(".pg-scroll") ?? document;
-  if (i === 1) void finder.sync(root)?.then((f) => f?.restart());
-  else void devices.sync(root)?.then((d) => d?.show(deviceFor(i)));
+  if (i === SPLIT_TAB) void finder.sync(root)?.then((f) => f?.restart());
+  else if (i !== VIDEO_TAB) void devices.sync(root)?.then((d) => d?.show(TERMINAL));
+  syncVideo(folder, folder.dataset.seen === "1", i === VIDEO_TAB);
 }
 
 /** Wire a folder's tabs once: pressing one, the arrow keys, and opening the next on its own while the folder is on
@@ -172,7 +184,12 @@ function wireFolder(folder: HTMLElement, root: ParentNode): void {
   folder.addEventListener("pointerleave", () => { held = false; since = performance.now(); });
   folder.addEventListener("focusin", () => { held = true; });
   folder.addEventListener("focusout", () => { held = false; since = performance.now(); });
-  new IntersectionObserver((entries) => { seen = entries[entries.length - 1].isIntersecting; since = performance.now(); },
+  new IntersectionObserver((entries) => {
+    seen = entries[entries.length - 1].isIntersecting;
+    since = performance.now();
+    folder.dataset.seen = seen ? "1" : "0";
+    syncVideo(folder, seen);
+  },
     { root: root instanceof Element ? root : null, threshold: 0.35 }).observe(folder);
   const tick = (): void => {
     if (!folder.isConnected) return;

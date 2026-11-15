@@ -68,6 +68,18 @@
 .nb--tail .nb-code, .nb--tail .nb-out { white-space:pre; overflow:hidden; }
 .nb--tail { -webkit-mask-image:linear-gradient(to bottom, transparent, #000 22px); mask-image:linear-gradient(to bottom, transparent, #000 22px); }
 
+/* A phone, the full notebook (a run's Notebook panel): prose at reading size, nothing in it under 12px. Code and
+   output keep wrapping inside their boxes, so no line is wider than the panel. */
+@media (max-width: 640px) {
+  .nb:not(.nb--compact) { gap:12px; }
+  .nb:not(.nb--compact) .nb-gut { width:28px; font-size:12px; }
+  .nb:not(.nb--compact) .nb-file, .nb:not(.nb--compact) .nb-tag { font-size:12px; }
+  .nb:not(.nb--compact) .nb-cell--note { padding-left:36px; }
+  .nb:not(.nb--compact) .nb-note, .nb:not(.nb--compact) .nb-md, .nb:not(.nb--compact) .nb-md .ask-p, .nb:not(.nb--compact) .nb-md .ask-ul > li { font-size:14px; }
+  .nb:not(.nb--compact) .nb-md .ask-h { font-size:15px; }
+  .nb:not(.nb--compact) .nb-out { max-height:300px; }
+  .nb:not(.nb--compact) .nb-img { max-width:100%; height:auto; }
+}
 @media (prefers-reduced-motion: reduce) { .nb-caret { animation:none; } }
 .nb-md .ask-p, .nb-md .ask-ul > li { font-size:13px; line-height:1.55; color:var(--fg-70); }
 .nb-md .ask-p { margin-bottom:8px; }

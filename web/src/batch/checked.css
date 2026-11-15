@@ -92,6 +92,15 @@
   .ck-legend { flex-direction:row; flex-wrap:wrap; gap:6px 14px; }
   .ck-num-v { font-size:19px; }
 }
+/* A phone: the words at reading size, the map's own labels at about 12px on a map the screen's width. */
+@media (max-width: 640px) {
+  .ck-num-s, .ck-hint, .ck-key, .ck-row-s { font-size:13px; }
+  .ck-sum { font-size:14px; }
+  .ck-row-n { font-size:14px; }
+  .ck-legend--tab .ck-key { font-size:12.5px; }
+  .ck-t { font-size:4px; }
+  .ck-t--ring { font-size:3.6px; }
+}
 @media (prefers-reduced-motion: reduce) { .ck-dot { transition:none; } }
 
 /* the tracking chart: hidden motions by distance from the reference across, demanding and calm in two rows */
