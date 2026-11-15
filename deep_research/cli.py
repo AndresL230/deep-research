@@ -8,6 +8,10 @@
     python -m deep_research.cli runs --domain robot_arm --robot-start colleague --n 12
     python -m deep_research.cli forks <batch_id> --n 4
     python -m deep_research.cli experiment <batch_id> --suspect s1 --change force_step:deduplicate --pairs 3 --auto-approve
+    python -m deep_research.cli experiment <batch_id> --suspect s1 --change force_step:deduplicate --fork-mode checkpoint
+    python -m deep_research.cli runs --n 6 --lessons learned   # analysts get the approved lessons (skills/learned/)
+    python -m deep_research.cli foolrate --n 12 --settings none,learned --budget 1      # prints the estimate, exits
+    python -m deep_research.cli foolrate --n 12 --settings none,learned --budget 1 --yes
     python -m deep_research.cli investigate <batch_id>                  # asks before each experiment
     python -m deep_research.cli investigate <batch_id> --auto-approve   # unattended, small budgets only
     python -m deep_research.cli vms                 # count the running VMs on the Daytona key
@@ -29,6 +33,8 @@ from . import hub  # noqa: E402
 hub.load_runner_env()  # keys this machine does not have come from the team hub
 
 from . import domains  # noqa: E402
+from . import foolrate as fr  # noqa: E402
+from . import lessons as lessons_mod  # noqa: E402
 from .batch import Batch  # noqa: E402
 from .config import BATCHES_DIR, BatchConfig  # noqa: E402
 from .domains.robot_arm import BENCH_DIR  # noqa: E402
@@ -64,11 +70,11 @@ def _reopen(batch_id: str) -> Batch:
 
 async def runs(n: int, strength: float, hint: str, noise: float, hidden: float, budget: float,
                domain: str = domains.DEFAULT, robot_prompt: str = "default", robot_start: str = "blank",
-               robot_positions: str = "default") -> None:
+               robot_positions: str = "default", lessons: str = "none") -> None:
     b = Batch(
         BatchConfig(domain=domain, n_runs=n, trap_strength=strength, hint_level=hint, trap_noise=noise,
                     trap_hidden_share=hidden, budget_usd=budget, robot_prompt=robot_prompt,
-                    robot_start=robot_start, robot_positions=robot_positions),
+                    robot_start=robot_start, robot_positions=robot_positions, lessons=lessons),
         root=BATCHES_DIR,
     )
     print("batch", b.id)
@@ -90,7 +96,7 @@ async def forks(batch_id: str, n: int) -> None:
 
 
 async def experiment(batch_id: str, suspect: str, change: str, prediction: str, pairs: int, source_run: str | None,
-                     anchor: str, reason: str, auto_approve: bool) -> None:
+                     anchor: str, reason: str, auto_approve: bool, fork_mode: str | None = None) -> None:
     """One paired experiment on a saved batch (`Batch.run_experiment`). It costs money, so it asks first;
     `auto_approve` answers yes for it under a small budget."""
     cfg = _saved_config(batch_id)
@@ -108,18 +114,74 @@ async def experiment(batch_id: str, suspect: str, change: str, prediction: str, 
         n = max(1, min(pairs, MAX_EXPERIMENT_PAIRS))
         est = b.estimate_forks_usd(n, 2)
         question = (f"Run {n} pairs ({2 * n} copies and 1 base VM) of {change} to test {suspect} "
-                    f"(predicted {prediction}), about ${'?' if est is None else f'{est:.2f}'}. Approve? [y/N] ")
+                    f"(predicted {prediction}), about ${'?' if est is None else f'{est:.2f}'}"
+                    f"{f', fork mode {fork_mode}' if fork_mode else ''}. Approve? [y/N] ")
         if auto_approve:
             print(question + "yes (auto)")
         elif input(question).strip().lower() not in ("y", "yes"):
             print("declined: nothing ran")
             return
         out = await b.run_experiment(suspect, change, prediction, pairs=pairs, source_run=source_run,
-                                     anchor=anchor, reason=reason)
+                                     anchor=anchor, reason=reason, fork_mode=fork_mode)
         print(json.dumps(out, indent=2, default=str))
     finally:
         await b.close()
     _print_case(b)
+
+
+async def foolrate(n: int, settings: list[str], budget: float, yes: bool, domain: str = domains.DEFAULT,
+                   noise: float | None = None, hidden: float | None = None, root=None) -> dict | None:
+    """MASTER_PLAN Phase 5.3: one batch of `n` runs per setting, the inflated runs counted, the table written to each
+    batch's `foolrate` section and to `batches/_foolrate/<stamp>.json`. Real runs cost money, so without `yes` it
+    prints the estimate and exits. Returns the table (None when it only estimated)."""
+    root = BATCHES_DIR if root is None else root
+    trap = {k: v for k, v in (("trap_noise", noise), ("trap_hidden_share", hidden)) if v is not None}
+    from .costs import CostTracker
+
+    per_run = None
+    for case_path in sorted(root.glob("*/case/case.json"))[-20:]:  # what recent real runs cost on this machine
+        try:
+            case = json.loads(case_path.read_text())
+        except (OSError, ValueError):
+            continue
+        if (case.get("config") or {}).get("domain", domains.DEFAULT) != domain or (case.get("config") or {}).get("simulated"):
+            continue
+        t = CostTracker(budget_usd=1.0)
+        t.restore(case.get("costs") or {})
+        if (avg := t.average_run_usd()) is not None:
+            per_run = avg if per_run is None else max(per_run, avg)
+    est = fr.estimate_usd(n, settings, per_run)
+    basis = "the most a run cost on average in a recent batch here" if per_run is not None else \
+        f"${fr.DEFAULT_RUN_USD} a run"
+    print(f"fool rate: {len(settings)} batches ({', '.join(settings)}) of {n} runs = {n * len(settings)} real runs, "
+          f"about ${est:.2f} ({basis}); budget ${budget:.2f} per batch")
+    no_lessons = "learned" in settings and not lessons_mod.approved()
+    if no_lessons:
+        print(f"warning: no approved lesson in {lessons_mod.learned_dir()}, so 'learned' would be the same as 'none'")
+    if no_lessons and yes:
+        raise SystemExit("approve a lesson first (the investigator's propose_lesson), or leave 'learned' out")
+    if est > budget * len(settings):
+        raise SystemExit(f"the estimate ${est:.2f} is over the budget ${budget * len(settings):.2f}; raise --budget")
+    if not yes:
+        print("nothing ran: pass --yes to run it")
+        return None
+    rows, batches = [], []
+    for setting in settings:
+        b = Batch(BatchConfig(domain=domain, n_runs=n, budget_usd=budget, **trap, **fr.config_for(setting)), root=root)
+        print(f"setting {setting}: batch {b.id}")
+        try:
+            await b.run_all()
+        finally:
+            await b.close()
+        batches.append(b)
+        rows.append(fr.row(setting, b.case.data["runs"], b.id))
+    table = fr.table(rows, n=n, domain=domain, trap=trap, estimate=est)
+    for b in batches:
+        b.case.set_foolrate(table)
+    path = fr.save_report(table, root)
+    print("\n".join(fr.lines(table)))
+    print("report:", path)
+    return table
 
 
 async def investigate(batch_id: str, auto_approve: bool) -> None:
@@ -250,6 +312,8 @@ def main(argv: list[str] | None = None) -> None:
                    help="robot_arm only: 'colleague' starts the agent from a colleague's working controller")
     r.add_argument("--robot-positions", choices=["default", "libero_pro"], default="default",
                    help="robot_arm only: 'libero_pro' practises at LIBERO's spot and measures at LIBERO-PRO's positions")
+    r.add_argument("--lessons", choices=["none", "learned"], default="none",
+                   help="'learned' gives the analysts the approved lessons under skills/learned/")
     f = sub.add_parser("forks")
     f.add_argument("batch_id")
     f.add_argument("--n", type=int, default=4)
@@ -264,6 +328,17 @@ def main(argv: list[str] | None = None) -> None:
     e.add_argument("--reason", default="")
     e.add_argument("--auto-approve", action="store_true",
                    help=f"approve the spend unattended (budget ${AUTO_APPROVE_MAX_BUDGET_USD:.0f} or less)")
+    e.add_argument("--fork-mode", choices=["messages", "checkpoint"], default=None,
+                   help="how the copies get the source run's agent state (default: the batch's fork_mode); "
+                        "the VM is rebuilt by replay either way")
+    fo = sub.add_parser("foolrate", help="the fool rate per setting; prints the cost and exits unless --yes")
+    fo.add_argument("--n", type=int, default=12, help="runs per setting")
+    fo.add_argument("--settings", default="none,learned", help=f"comma separated, of {list(fr.SETTINGS)}")
+    fo.add_argument("--domain", choices=domains.names(), default=domains.DEFAULT)
+    fo.add_argument("--noise", type=float, default=None)
+    fo.add_argument("--hidden", type=float, default=None)
+    fo.add_argument("--budget", type=float, default=1.0, help="each batch's budget in US dollars")
+    fo.add_argument("--yes", action="store_true", help="really run it (real runs cost money)")
     i = sub.add_parser("investigate")
     i.add_argument("batch_id")
     i.add_argument("--auto-approve", action="store_true",
@@ -286,6 +361,8 @@ def main(argv: list[str] | None = None) -> None:
             on["robot_start"] = a.robot_start
         if a.robot_positions != "default":
             on["robot_positions"] = a.robot_positions
+        if a.lessons != "none":
+            on["lessons"] = a.lessons
         asyncio.run(runs(a.n, a.strength, a.hint, a.noise, a.hidden, a.budget, **on))
     elif a.cmd == "benchmarks":
         asyncio.run(benchmarks(a.batch_id))
@@ -293,7 +370,13 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(forks(a.batch_id, a.n))
     elif a.cmd == "experiment":
         asyncio.run(experiment(a.batch_id, a.suspect, a.change, a.prediction, a.pairs, a.source_run, a.anchor,
-                               a.reason, a.auto_approve))
+                               a.reason, a.auto_approve, **({"fork_mode": a.fork_mode} if a.fork_mode else {})))
+    elif a.cmd == "foolrate":
+        try:
+            settings = fr.parse_settings(a.settings)
+        except ValueError as e:
+            raise SystemExit(f"error: {e}") from None
+        asyncio.run(foolrate(a.n, settings, a.budget, a.yes, a.domain, a.noise, a.hidden))
     else:
         asyncio.run(investigate(a.batch_id, a.auto_approve))
 
