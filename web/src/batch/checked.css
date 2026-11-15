@@ -22,6 +22,10 @@
 /* the robot map */
 .ck-body { display:grid; grid-template-columns:minmax(0, 360px) minmax(0, 1fr); gap:14px 18px; align-items:start; }
 .ck-map { position:relative; width:100%; aspect-ratio:110 / 95; }
+/* The humanoid's map: the bags from behind the robot, side to side by height (1.1 m by 1.4 m). */
+.ck-map--front { aspect-ratio:110 / 140; }
+.ck-map--front .ck-base { opacity:.3; stroke:none; }
+.ck-floor { stroke:var(--border-strong); stroke-width:1.5; vector-effect:non-scaling-stroke; }
 .ck-svg { position:absolute; inset:0; width:100%; height:100%; display:block; overflow:visible; }
 .ck-table { fill:color-mix(in srgb, var(--fg) 4%, var(--surface)); stroke:var(--border-strong); stroke-width:.5; vector-effect:non-scaling-stroke; }
 .ck-zone { fill:color-mix(in srgb, var(--green) 16%, transparent); stroke:var(--green); stroke-width:1.5; stroke-dasharray:3 2; vector-effect:non-scaling-stroke; }

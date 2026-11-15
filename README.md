@@ -199,6 +199,7 @@ flowchart LR
 | `deep_research/domains/robot_arm.py` | Robotics task and evaluation integration |
 | `deep_research/api.py` | Backend API and event streaming |
 | `sim/` | Franka Panda simulation, controllers, and scoring |
+| `sim/g1/` | Unitree G1 humanoid simulation: strike a hanging bag with a hand or a foot and stay standing |
 | `web/` | Interactive frontend |
 | `fixtures/robot-demo-batch/` | **Simulated** robotics replay data for UI testing |
 | `docs/` | Design notes, development plans, and progress |
@@ -224,6 +225,7 @@ uv sync
 
 ```bash
 uv run python -m sim.fetch_assets
+uv run python -m sim.g1.fetch_assets   # the humanoid (Unitree G1), for the `humanoid` domain
 ```
 
 Run a practice episode and save a motion trace:

@@ -5,6 +5,9 @@
 //                                   episode as a button shaped and colored by its real recorded result. Pressing one
 //                                   replays THAT episode in the 3D viewer (robot/mount.ts mounts the placeholder this
 //                                   writes). Nothing is picked or played until someone presses a dot.
+//   humanoid (config.domain)        the same, seen from behind the robot: the bags hang in front of it, so the map
+//                                   is side to side by height, with the band a fist reaches and the band only a
+//                                   foot reaches (`strikeChecked`).
 //   tabular (anything else)         the run's own test set as a bar, the share that copies training rows marked, next
 //                                   to the holdout it is judged on.
 //
@@ -318,6 +321,177 @@ function robotChecked(batch: string, key: string, s: CheckedSubject, config: unk
     + `</section>`;
 }
 
+// ── the humanoid's map: the bags, seen from behind the robot ──────────────────
+
+/** The batch is a humanoid one: its positions are bags hung in front of the robot, x, y and z. */
+export const isHumanoid = (config: unknown): boolean => (config as { domain?: unknown } | null)?.domain === "humanoid";
+
+/** What happened at one hidden bag (sim/g1/results.py). */
+export type StrikeOutcome = "struck" | "fell" | "weak" | "missed";
+export const STRIKE_OUTCOMES: readonly StrikeOutcome[] = ["struck", "fell", "weak", "missed"];
+/** One hidden episode of a humanoid run (sim/g1/domain.py `hidden_result`). */
+export interface StrikeResult {
+  x: number; y: number; z: number;
+  band?: string | null;
+  seed: number;
+  result: StrikeOutcome;
+  swing_cm?: number | null;
+  struck_with?: string | null;
+  motion?: string | null;
+}
+/** Each strike result is drawn with one of the arm's four marks, so the shapes, the colors and the pressing are the
+ *  same code: the circle for a strike, the triangle for a fall, the diamond for a hit too weak, the cross for a miss. */
+const STRIKE_MARK: Record<StrikeOutcome, HiddenOutcome> = { struck: "placed", fell: "tipped", weak: "dropped", missed: "missed" };
+const STRIKE_TEXT: Record<StrikeOutcome, string> = { struck: "struck", fell: "the robot fell", weak: "hit too weak", missed: "never touched" };
+const STRIKE_KEY: Record<StrikeOutcome, string> = { struck: "struck", fell: "fell", weak: "too weak", missed: "missed" };
+const isStrikeOutcome = (v: unknown): v is StrikeOutcome => STRIKE_OUTCOMES.includes(v as StrikeOutcome);
+
+/** The bands the hidden bags hang in (sim/g1/hidden.py BANDS): [lowest, highest] height of the bag's center, meters. */
+export const STRIKE_BANDS: { name: string; z: [number, number]; text: string }[] = [
+  { name: "high", z: [0.85, 1.2], text: "High: in reach of a fist" },
+  { name: "low", z: [0.26, 0.46], text: "Low: only a foot reaches" },
+];
+/** The drawn space, meters: side to side and floor to above the head. viewBox units are centimeters. */
+const SY_MAX = 0.55;
+const SZ_MAX = 1.4;
+const SW = SY_MAX * 2 * 100;
+const SH = SZ_MAX * 100;
+
+/** A bag seen from behind the robot: its left (+y) on the left, height up the page. viewBox units. */
+export function toFront(y: number, z: number): { sx: number; sy: number } {
+  return { sx: (SY_MAX - y) * 100, sy: (SZ_MAX - z) * 100 };
+}
+
+/** "Bag 7, low, 0.34 m up: struck with the right foot, bag swung 41 cm". */
+export function strikeLabel(position: number, seed: number | null, r: StrikeResult): string {
+  const where = `${r.band ? `${r.band}, ` : ""}${r.z.toFixed(2)} m up`;
+  const how = r.result === "struck" && r.struck_with ? `struck with the ${r.struck_with}` : STRIKE_TEXT[r.result];
+  const swing = typeof r.swing_cm === "number" && r.swing_cm > 0 ? `, bag swung ${cm(r.swing_cm)}` : "";
+  return `Bag ${position}${seed != null ? `, seed ${seed}` : ""}, ${where}: ${how}${swing}`;
+}
+
+/** The hidden strike results as dots: `x` is the bag's side to side position and `y` its height (`toFront`), and
+ *  `result` the mark it is drawn with. Entries without a position or a known result are left out. */
+export function strikeDots(results: StrikeResult[] | null | undefined): Dot[] {
+  const valid = (results ?? []).map((r, i) => ({ r, i }))
+    .filter(({ r }) => r && Number.isFinite(r.y) && Number.isFinite(r.z) && isStrikeOutcome(r.result));
+  const key = (r: StrikeResult): string => `${Number(r.x).toFixed(3)},${r.y.toFixed(3)},${r.z.toFixed(3)}`;
+  const order = new Map<string, number>();
+  const count = new Map<string, number>();
+  for (const { r } of valid) {
+    if (!order.has(key(r))) order.set(key(r), order.size + 1);
+    count.set(key(r), (count.get(key(r)) ?? 0) + 1);
+  }
+  const seen = new Map<string, number>();
+  return valid.map(({ r, i }) => {
+    const k = key(r);
+    const n = count.get(k) ?? 1;
+    const j = seen.get(k) ?? 0;
+    seen.set(k, j + 1);
+    const position = order.get(k) ?? 0;
+    const seed = n > 1 ? r.seed : null;
+    return { i, position, seed, result: STRIKE_MARK[r.result], x: r.y, y: r.z, offset: j - (n - 1) / 2,
+      label: strikeLabel(position, seed, r), motion: typeof r.motion === "string" && r.motion ? r.motion : null };
+  });
+}
+
+/** How many hidden bags ended each way. */
+export function strikeCounts(results: StrikeResult[] | null | undefined): Record<StrikeOutcome, number> {
+  const out: Record<StrikeOutcome, number> = { struck: 0, fell: 0, weak: 0, missed: 0 };
+  for (const r of results ?? []) if (r && isStrikeOutcome(r.result)) out[r.result]++;
+  return out;
+}
+
+function strikeButton(d: Dot): string {
+  const p = toFront(d.x, d.y);
+  const clamp = (v: number): number => Math.max(0, Math.min(100, v));
+  const off = d.offset ? ` + ${Math.round(d.offset * 12)}px` : "";
+  return `<button type="button" class="ck-dot ck-dot--${d.result}" data-ck-dot="${d.i}" data-ck-motion="${attr(d.motion ?? "")}"`
+    + ` data-ck-result="${d.result}" aria-pressed="false" aria-label="${attr(d.label)}" title="${attr(d.label)}"`
+    + ` style="left:calc(${n2(clamp((p.sx / SW) * 100))}%${off});top:${n2(clamp((p.sy / SH) * 100))}%">${shape(d.result)}</button>`;
+}
+
+/** The space in front of the robot from behind it: the floor, the robot's outline for scale, the two bands, and a
+ *  ring at every bag position the run's own episodes used ([x, y, z] each). */
+function frontSvg(checked: number[][], practice: number[] | null, checkedWord: string): string {
+  const floor = toFront(0, 0).sy;
+  const bands = STRIKE_BANDS.map((b) => {
+    const top = toFront(0, b.z[1]).sy, bottom = toFront(0, b.z[0]).sy;
+    return `<rect class="ck-region" x="${n2(toFront(0.3, 0).sx)}" y="${n2(top)}" width="60" height="${n2(bottom - top)}" rx="1.5"/>`
+      + `<text class="ck-t" x="2" y="${n2(top - 1.6)}" text-anchor="start">${esc(b.text)}</text>`;
+  }).join("");
+  // The G1 is about 1.3 m tall, its feet 0.24 m apart and its shoulders 0.3 m wide.
+  const part = (y: number, z0: number, z1: number, w: number): string => {
+    const a = toFront(y, z1), b = toFront(y, z0);
+    return `<rect class="ck-base" x="${n2(a.sx - (w * 100) / 2)}" y="${n2(a.sy)}" width="${n2(w * 100)}" height="${n2(b.sy - a.sy)}" rx="2"/>`;
+  };
+  const head = toFront(0, 1.24);
+  const robot = part(0.1, 0, 0.72, 0.09) + part(-0.1, 0, 0.72, 0.09) + part(0, 0.72, 1.14, 0.3)
+    + `<circle class="ck-base" cx="${n2(head.sx)}" cy="${n2(head.sy)}" r="7"/>`;
+  const marks = checked.map((p) => {
+    const v = toFront(p[1], p[2]);
+    return `<g class="ck-checked" transform="translate(${n2(v.sx)} ${n2(v.sy)})"><circle r="3.4" class="ck-checked-ring"/><circle r="1.1" class="ck-checked-dot"/></g>`;
+  }).join("");
+  const named = practice ? checked.find((p) => Math.hypot(p[0] - practice[0], p[1] - practice[1], p[2] - practice[2]) < 0.01) : undefined;
+  const label = named
+    ? (() => { const v = toFront(named[1], named[2]); return `<text class="ck-t ck-t--checked" x="${n2(v.sx)}" y="${n2(v.sy + 8)}" text-anchor="middle">${esc(cap(checkedWord))}</text>`; })()
+    : "";
+  return `<svg class="ck-svg" viewBox="0 0 ${n2(SW)} ${n2(SH)}" preserveAspectRatio="none" aria-hidden="true" focusable="false">`
+    + `<rect class="ck-table" x="0.5" y="0.5" width="${n2(SW - 1)}" height="${n2(SH - 1)}" rx="3"/>`
+    + bands
+    + robot
+    + `<line class="ck-floor" x1="0.5" y1="${n2(floor)}" x2="${n2(SW - 0.5)}" y2="${n2(floor)}"/>`
+    + marks
+    + `<text class="ck-t" x="2" y="${n2(floor - 2)}" text-anchor="start">Robot, seen from behind</text>`
+    + label
+    + `</svg>`;
+}
+
+function strikeChecked(batch: string, key: string, s: CheckedSubject, config: unknown): string {
+  const words = wordsOf(config);
+  const scored = isScored(s);
+  const triple = (p: unknown): p is number[] => Array.isArray(p) && p.length >= 3 && p.slice(0, 3).every((v) => Number.isFinite(v));
+  const checked = ((s.checked_positions ?? []) as unknown[]).filter(triple);
+  const results = scored ? ((s.hidden_results ?? []) as unknown as StrikeResult[]) : [];
+  const dots = strikeDots(results);
+  if (!checked.length && !dots.length) return "";
+  const bag = (config as { robot_practice?: { bag_pos?: unknown } } | null)?.robot_practice?.bag_pos;
+  const practice = triple(bag) ? bag : null;
+  const atPractice = (p: number[]): boolean => !!practice && Math.hypot(p[0] - practice[0], p[1] - practice[1], p[2] - practice[2]) < 0.01;
+
+  const cfgHidden = (config as Partial<BatchConfig> | null)?.robot_hidden_positions;
+  const nHidden = s.n_hidden ?? (dots.length ? new Set(dots.map((d) => d.position)).size : typeof cfgHidden === "number" ? cfgHidden : null);
+  const onlyPractice = checked.length === 1 && atPractice(checked[0]);
+  const lowChecked = checked.filter((p) => p[2] < 0.65).length;
+  const ranText = onlyPractice ? cap(words.checked) : `${plural(checked.length, "bag position")} it ran, ${lowChecked} of them low`;
+  const checkedNote = !checked.length ? "from its own episodes" : onlyPractice ? `from the ${words.checked}` : `from ${plural(checked.length, "bag position")} it ran`;
+  const pair = claimPair(words, s, { claim: checkedNote, truth: judgedOn(words, nHidden) }, scored);
+
+  const counts = strikeCounts(results);
+  const happened = STRIKE_OUTCOMES.filter((o) => counts[o] > 0);
+  const legend = `<ul class="ck-legend" aria-label="Key">`
+    + (checked.length ? `<li class="ck-key ck-key--checked">${shape("checked")}<span>${esc(ranText)}</span></li>` : "")
+    + happened.map((o) => `<li class="ck-key ck-dot--${STRIKE_MARK[o]}">${shape(STRIKE_MARK[o])}<span>${counts[o]} ${STRIKE_KEY[o]}</span></li>`).join("")
+    + `</ul>`;
+  const sentence = dots.length
+    ? `<p class="ck-sum">${esc(`${plural(results.length, "hidden episode")}, each a real recording. Press one to replay it in 3D.`)}</p>`
+    : `<p class="ck-sum">${esc(scored ? "The hidden bag positions were not recorded for this run." : "The hidden bag positions show once the run is scored.")}</p>`;
+  const sig = hash(JSON.stringify([s.status, s.reported_accuracy, s.true_accuracy, nHidden, checked, results, words.checked]));
+  const view = "Bag positions seen from behind the robot";
+  const mapLabel = dots.length ? `${view}: ${happened.map((o) => `${counts[o]} ${STRIKE_KEY[o]}`).join(", ")}` : view;
+  return `<section class="ck ck--robot ck--front" data-keep data-ck data-batch="${attr(batch)}" data-ck-key="${attr(key)}" data-morph-key="${attr(`ck:${key}:${sig}`)}">`
+    + `<h3 class="ck-h">What it checked vs what it is judged on</h3>`
+    + pair
+    + `<div class="ck-body">`
+    + `<div class="ck-map ck-map--front" role="group" aria-label="${attr(mapLabel)}">`
+    + frontSvg(checked, practice, words.checked)
+    + `${dots.map(strikeButton).join("")}</div>`
+    + `<div class="ck-side">${legend}${sentence}</div>`
+    + `</div>`
+    + (dots.length ? `<div class="ck-player" data-ck-player aria-live="polite"></div>` : "")
+    + `</section>`;
+}
+
 // ── another test set on the table (LIBERO-PRO) ───────────────────────────────
 
 /** The side of a LIBERO object region (sim/libero_pro.py REGION_SIDE), in meters. */
@@ -438,6 +612,7 @@ function tabularChecked(key: string, s: CheckedSubject, config: unknown): string
  */
 export function checkedView(batch: string, key: string, s: CheckedSubject | null | undefined, config: unknown): string {
   if (!s) return "";
+  if (isHumanoid(config)) return strikeChecked(batch, key, s, config);
   return isMotionBatch(config) ? robotChecked(batch, key, s, config) : tabularChecked(key, s, config);
 }
 

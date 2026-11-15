@@ -49,9 +49,9 @@ export function newBatchView(vm: HomeVm, inputs?: HomeInputs): string {
     </div>
     <div class="nbd-body" data-morph-key="nbd-body">
       ${vm.draft ? domainRow(vm.draft, vm.defaults, vm.starting) : ""}
-      ${tabular ? inputs?.html ?? "" : inputs?.controllerHtml ?? ""}
+      ${tabular ? inputs?.html ?? "" : isArm(vm.draft) ? inputs?.controllerHtml ?? "" : ""}
       ${vm.draft && tabular ? trapRow(vm.draft, vm.defaults?.traps ?? []) : ""}
-      ${vm.draft && !tabular ? positionsRow(vm.draft) : ""}
+      ${vm.draft && isArm(vm.draft) ? positionsRow(vm.draft) : vm.draft && !tabular ? humanoidRow() : ""}
       ${vm.draft ? mainRow(vm.draft, trap, vm.starting) : mainSkeleton(defaultsFailed(vm))}
       ${advancedBlock(vm, controller)}
     </div>
@@ -113,6 +113,8 @@ export const DEFAULT_DOMAIN = "tabular";
 
 export const domainOf = (c: Pick<BatchConfig, "domain"> | null | undefined): string => c?.domain || DEFAULT_DOMAIN;
 const isTabular = (c: BatchConfig | null | undefined): boolean => domainOf(c) === DEFAULT_DOMAIN;
+/** The robot arm's domain: the one with a controller to start from and a choice of test positions. */
+const isArm = (c: BatchConfig | null | undefined): boolean => domainOf(c) === "robot_arm";
 
 /** Settings only the tabular domain reads: what the agents get (dataset, target, script) and the planted flaw. */
 export const TABULAR_ONLY = [
@@ -199,7 +201,7 @@ export function rememberDomain(name: string): void {
 }
 
 /** Short names for the picker. A domain added later shows its own title. */
-const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm" };
+const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm", humanoid: "Humanoid" };
 
 /** The choice of domain, with the chosen one's line under it. Only when the server offers more than one. */
 function domainRow(c: BatchConfig, d: Defaults | null, locked: boolean): string {
@@ -325,6 +327,15 @@ export const POSITIONS_TEXT: Record<string, string> = {
     + "each with its own object to pick (milk, ketchup, butter, ...).",
 };
 
+/** What a humanoid batch's test is, where the arm has its choice of test positions. */
+export const HUMANOID_TEXT = "The agents practise on one bag at chest height. Their controller is measured on 20 bags hung in "
+  + "front of the robot: half high, where a punch reaches, and half between shin and knee height, where only a kick does. "
+  + "A strike counts when the bag swings 20 cm and the robot never falls.";
+
+function humanoidRow(): string {
+  return `<div class="hm-pos" data-morph-key="positions"><span class="hm-pos-d">${esc(HUMANOID_TEXT)}</span></div>`;
+}
+
 /** A robot batch's test: this sim's own positions, or LIBERO's practice spot measured at LIBERO-PRO's positions. */
 function positionsRow(c: BatchConfig): string {
   const v = c.robot_positions ?? "default";
@@ -367,7 +378,7 @@ function advancedBlock(vm: HomeVm, controller: ControllerInfo | null = null): st
     return `<div class="hm-adv" data-morph-key="adv">
     ${head}
     <div class="hm-adv-grid" id="hm-adv" data-morph-key="adv-grid">
-      ${choiceField(c, "robot_start", "Controller start", [["blank", "Blank"], ["colleague", "Colleague's"], ["uploaded", "Your upload"]], controller || c.robot_controller ? [] : ["uploaded"])}
+      ${isArm(c) ? choiceField(c, "robot_start", "Controller start", [["blank", "Blank"], ["colleague", "Colleague's"], ["uploaded", "Your upload"]], controller || c.robot_controller ? [] : ["uploaded"]) : ""}
       ${choiceField(c, "robot_prompt", "Prompt", [["default", "Default"], ["practice", "Practice focus"]])}
       ${rangeField(c, "inflation_threshold", "Inflation threshold", 0.05, 0.5, 0.025, points(c.inflation_threshold))}
       ${numberField(c, "forks_per_choice", "Forks per arm", { min: 1, max: 8 })}
