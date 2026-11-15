@@ -115,6 +115,37 @@ async def test_a_pending_experiment_survives_a_restart(local_vms, tmp_path, monk
     assert answer and "declined" in str(answer[0].content)
 
 
+async def test_two_requests_in_one_turn_survive_a_restart_and_a_lost_pending_entry(local_vms, tmp_path, monkeypatch):
+    # A real run asked for two experiments in one turn, the server restarted, and the answer sent one decision for two
+    # hanging calls (the in-memory count was gone): LangGraph refused it. The count now comes from the checkpoint, and
+    # a resume rebuilds `forks.pending` from it when the case file lost the entry.
+    from langchain_core.messages import AIMessage
+    b = await _run_batch(tmp_path, placebo_arm=False, show_arm=False, investigator_strict=False)
+    second = {**EXPERIMENT, "suspect_id": "s2", "change": "force_step:deduplicate"}
+    both = AIMessage(content="", tool_calls=[{"name": "run_experiment", "args": EXPERIMENT, "id": "x1"},
+                                             {"name": "run_experiment", "args": second, "id": "x2"}])
+    script_investigator(monkeypatch, [call("record_suspects", SUSPECTS, "s"), both])
+    await b.investigate()
+    assert _case(b)["phase"] == "awaiting_approval"
+    await b.close()
+
+    # The case file loses its pending entry (as when an answer was sent and failed), the checkpoint keeps it.
+    again = Batch.resume(b.id, b.root)
+    again.case.remove_fork("pending")
+    again.case.set_phase("ready")
+    script_investigator(monkeypatch, [call("record_verdict", {**HONEST, "arms": {}, "open": ["s1", "s2"],
+                                                              "sentence": "No experiment ran: both were declined."}, "v"),
+                                      say("Done.")])
+    assert await again.restore_pending() is True
+    assert again.case.data["phase"] == "awaiting_approval" and "pending" in again.case.data["forks"]
+    await again.decide(False)  # one answer for two hanging calls: the second is declined, not an error
+    case = _case(again)
+    assert case["phase"] == "done", case["phase"]
+    msgs = await saved_messages(again)
+    answered = {m.tool_call_id for m in msgs if isinstance(m, ToolMessage)}
+    assert {"x1", "x2"} <= answered
+
+
 async def test_a_lesson_waits_for_approval_and_becomes_a_skill(local_vms, tmp_path, monkeypatch):
     monkeypatch.setattr(inv_mod, "LEARNED_DIR", tmp_path / "learned")
     b = await _run_batch(tmp_path, placebo_arm=False, show_arm=False)

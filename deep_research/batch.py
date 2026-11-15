@@ -2060,12 +2060,47 @@ class Batch:
         if pending_lesson and not approve:
             self.case.update_lesson(pending_lesson, status="rejected")
         # One answer covers one experiment. If the investigator asked for several in one turn, the rest are declined.
+        # The count comes from the saved checkpoint, not this process's memory: after a server restart the in-memory
+        # count is gone, and LangGraph refuses a resume whose decisions do not match the hanging tool calls.
+        hanging = await self._hanging_interrupts()
+        count = sum(len((i.value or {}).get("action_requests") or []) for i in hanging) or self._pending_requests
         rest = {"type": "reject", "message": "Only one experiment is approved at a time. Ask again if you still need it."}
-        decisions = [decision] + [rest] * (self._pending_requests - 1)
+        decisions = [decision] + [rest] * (count - 1)
         self._pending_requests = 1
         self.case.remove_fork("pending")
         self.case.set_phase("investigating")
         await self._stream_investigator(Command(resume={"decisions": decisions}))
+
+    async def _hanging_interrupts(self) -> list:
+        """The interrupts waiting on the investigator's saved thread (LangGraph state), or [] when none or unreadable."""
+        if getattr(self, "_investigator", None) is None:
+            return []
+        try:
+            state = await self._investigator.aget_state(self._inv_config)
+        except Exception as e:  # noqa: BLE001 - a missing thread is simply nothing waiting
+            logger.warning("could not read the investigator's state: %s", e)
+            return []
+        found = list(getattr(state, "interrupts", ()) or ())
+        if not found:
+            for task in getattr(state, "tasks", ()) or ():
+                found.extend(getattr(task, "interrupts", ()) or ())
+        return [i for i in found if isinstance(getattr(i, "value", None), dict) and i.value.get("action_requests")]
+
+    async def restore_pending(self) -> bool:
+        """After a restart, make the case file follow the checkpoint: when the investigator's saved thread is waiting
+        on an approval but `forks.pending` is gone (it is removed before a resume is sent), rebuild it and set the
+        phase back to `awaiting_approval`. Returns True when it did."""
+        if "pending" in self.case.data["forks"] or not (self.case.data.get("investigator") or {}).get("thread_id"):
+            return False
+        if not self.checkpoints_path.is_file():
+            return False
+        await self._ensure_investigator()
+        hanging = await self._hanging_interrupts()
+        if not hanging:
+            return False
+        self._on_interrupt(hanging)
+        self.case.set_phase("awaiting_approval")
+        return True
 
     async def _stream_investigator(self, inp) -> None:
         log = self._log(self.dir / "investigator" / "events.jsonl", "investigator")

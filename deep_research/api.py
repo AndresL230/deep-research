@@ -555,6 +555,12 @@ async def _resume(batch_id: str, investigate: bool) -> dict:
         except ValueError as e:
             raise HTTPException(409, f"this batch cannot be resumed: {e}") from e
         BATCHES[b.id] = b
+        # The checkpoint, not the case file, says whether an approval is still waiting (plan Phase 6: a pending
+        # approval survives a restart, even one interrupted mid-answer).
+        try:
+            await b.restore_pending()
+        except Exception as e:  # noqa: BLE001 - a resume never fails on this repair
+            log.warning("could not restore the pending approval of %s: %s", b.id, e)
     # Only when nothing is already running for it: a second click must not start a second investigator.
     task = TASKS.get(b.id)
     if investigate and b.case.data.get("phase") == "ready" and (task is None or task.done()):
