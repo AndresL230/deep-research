@@ -4,10 +4,16 @@ import copy
 
 import pytest
 
-from deep_research import robot_view as rv
-from sim import libero_scene as ls
-from sim.episode import run_episode
-from sim.run import LAYOUT_FPS
+from tests.conftest import MESH_SKIPS, mesh_missing
+
+# sim.episode loads the panda model when it is imported, so the whole module needs the meshes.
+if mesh_missing(MESH_SKIPS["needs_panda"][0]):
+    pytest.skip(MESH_SKIPS["needs_panda"][1], allow_module_level=True)
+
+from deep_research import robot_view as rv  # noqa: E402
+from sim import libero_scene as ls  # noqa: E402
+from sim.episode import run_episode  # noqa: E402
+from sim.run import LAYOUT_FPS  # noqa: E402
 
 TEMPLATE = "sim/controllers/template.py"
 

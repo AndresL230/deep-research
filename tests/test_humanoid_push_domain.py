@@ -141,6 +141,7 @@ def test_registering_the_domains_imports_no_sim(tmp_path):
     assert out.strip() == "Humanoid push recovery False False"
 
 
+@pytest.mark.needs_g1
 def test_check_config_and_starts(monkeypatch):
     HUMANOID.check_config(BatchConfig(domain="humanoid_push"))  # the sim and the G1 meshes are here
     with pytest.raises(ConfigError):

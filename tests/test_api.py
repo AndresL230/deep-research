@@ -782,6 +782,7 @@ class Controller:
 '''
 
 
+@pytest.mark.needs_panda
 def test_upload_a_controller_and_start_checks_it(client, tmp_path, monkeypatch):
     from deep_research import controllers
     from deep_research import config as cfg_mod

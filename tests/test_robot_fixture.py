@@ -299,6 +299,7 @@ def test_the_api_serves_the_robot_batch_but_not_its_hidden_positions(client, cas
     assert json.dumps(hidden, separators=(",", ":")) not in client.get("/api/batches/robot-demo-batch/case").text
 
 
+@pytest.mark.needs_panda
 def test_the_api_serves_a_scored_runs_hidden_episodes(client, case):  # noqa: F811
     row = case["runs"]["r02"]["hidden_results"][7]
     res = client.get(f"/api/batches/robot-demo-batch/files/{row['motion']}")
