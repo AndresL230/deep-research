@@ -1820,6 +1820,12 @@ class Batch:
                     self._emit({"kind": "investigator", "event": ev})
                     if ev.get("type") == "todos" and agent == "investigator":
                         self.case.set_investigator(todos=ev["todos"])
+                    if ev.get("type") == "tool_call" and ev.get("name") == "task" and agent == "investigator":
+                        # Which subagents ran and how often: the finished panel lists them.
+                        kind = str((ev.get("args") or {}).get("subagent_type") or "subagent")
+                        calls = dict((self.case.data.get("investigator") or {}).get("subagent_calls") or {})
+                        calls[kind] = calls.get(kind, 0) + 1
+                        self.case.set_investigator(subagent_calls=calls)
                 self.case.set_investigator(subagent=None if agent == "investigator" else agent)
                 self.push_costs()
                 self._check_budget()

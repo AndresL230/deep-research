@@ -158,13 +158,27 @@ Nobody has told you why. Find out, with evidence, and say how sure the evidence 
 evidence for neither) and every experiment so far. `/runs/<id>/` holds each run's actions and the files it wrote. Your
 casebook, `/memories/casebook.md`, holds what earlier cases taught; use it for where to look, never as evidence here.
 
+## How you work
+You lead a small team. The people watching see two things: your plan and which of your team is at work.
+- Keep a plan. Your first action is `write_todos`: the investigation as a short list of items (observe, suspects,
+  each experiment, verdict). Keep it true as you go: mark an item `in_progress` when you start it and `completed` when
+  it is done, and add or drop items when a result changes what you will do next. A plan that is not written down or
+  not kept current counts as no plan.
+- Delegate the reading. Your subagents work in parallel when you call `task` several times in ONE turn, and each
+  returns a typed report:
+  `step-tagger` checks one run's step labels. Send it every run whose labels you will rely on (at least the inflated
+  runs, and the honest ones when there are any), one run per call, all in the same turn, before you trust `split`.
+  `lens-omission` looks for good steps the inflated runs skip, `lens-commission` for bad steps they add, `lens-data`
+  for differences in the data the runs trained and tested on. Ask all three, in one turn, before you record any
+  suspect: your own reading is one more lens, not a replacement for them.
+  `skeptic` names, for the suspects you give it, the cheapest experiment that could prove each one wrong and one
+  thing that could fool you. Ask it before every experiment, and design the experiment from its answer.
+  `general-purpose` reads files and answers one question when nothing else fits.
+- Reading files yourself is fine for checking a report or a number; it is not a reason to skip the team.
+
 ## The method
-Work like a scientist, in your own order, keeping a todo list (`write_todos`) of what you plan and what is done.
-- Observe. Read the runs and how honest and inflated runs differ. Your subagents help, and they work in parallel when
-  you call `task` several times in one turn: `step-tagger` checks one run's step labels (one call per run);
-  `lens-omission` looks for good steps the inflated runs skip, `lens-commission` for bad steps they add, `lens-data` for
-  differences in the data the runs trained and tested on; `skeptic` names, for each suspect, the cheapest experiment
-  that could prove it wrong and one thing that could fool you. Each returns a typed report.
+Work like a scientist, in your own order, with the plan above as your record of what is planned and what is done.
+- Observe. Read the case file and how honest and inflated runs differ, with the step-tagger and the lenses.
 - Propose suspects with `record_suspects`: each a target (a step label, a run attribute as `<key>=<value>`, or a
   property of the data), its kind (omission, commission, attribute or data), why it is a suspect, and who proposed it.
   Keep several alive: a step tied with the top one, a defect in the code, a difference in the data.
@@ -180,6 +194,9 @@ Work like a scientist, in your own order, keeping a todo list (`write_todos`) of
   `open`, and the main limit of the result.
 
 ## The rules
+- Plan with `write_todos` before anything else, and update it whenever an item starts or finishes.
+- No suspect is recorded before the lenses have reported, and none is tested before the skeptic has named its
+  cheapest disproof. Say in `record_suspects` which lens proposed each one.
 - Test at least two suspects when the budget allows, so the one you believe is chosen over an alternative.
 - Always state the prediction before the experiment, never after seeing a result.
 - Never claim a cause below a running score of {SUPPORTED_SCORE:g}. `record_verdict` refuses a supported suspect whose
@@ -737,17 +754,20 @@ def build_investigator(batch: "Batch", model: str, checkpointer=None):
         # only reads.
         reader("general-purpose", "Reads files and answers one question about them. Cannot record, run, approve or "
                "write anything.", GENERAL_PROMPT, []),
-        reader("step-tagger", "Checks and corrects the step labels of ONE run and saves them. Give it one run id; call "
-               "it once per run in the same turn and they run in parallel.", tagger_prompt(labels, words),
-               [record_step_labels], StepTags),
-        reader("lens-omission", "Looks for good steps that inflated runs skip. Returns suspects; records nothing.",
+        reader("step-tagger", "Checks and corrects the step labels of ONE run and saves them. Use it early, before "
+               "trusting `split`: one run id per call, every run in the same turn, and they run in parallel.",
+               tagger_prompt(labels, words), [record_step_labels], StepTags),
+        reader("lens-omission", "Looks for good steps that inflated runs skip. Returns suspects; records nothing. Ask it "
+               "(with the other lenses, in one turn) before recording suspects.",
                lens_prompt("omission", words), [], LensReport),
-        reader("lens-commission", "Looks for bad steps that inflated runs add. Returns suspects; records nothing.",
+        reader("lens-commission", "Looks for bad steps that inflated runs add. Returns suspects; records nothing. Ask it "
+               "(with the other lenses, in one turn) before recording suspects.",
                lens_prompt("commission", words), [], LensReport),
         reader("lens-data", "Compares the data each run trained and tested on (its own files only). Returns suspects; "
-               "records nothing.", lens_prompt("data", words), [], LensReport),
+               "records nothing. Ask it (with the other lenses, in one turn) before recording suspects.",
+               lens_prompt("data", words), [], LensReport),
         reader("skeptic", "For each suspect it is given: the cheapest experiment that could prove it wrong and one thing "
-               "that could fool us.", SKEPTIC_PROMPT, [], SkepticReport),
+               "that could fool us. Ask it before every experiment.", SKEPTIC_PROMPT, [], SkepticReport),
         reader("hypothesis", "Compares honest and inflated runs and records competing hypotheses (the older form of "
                "suspects, for request_forks).", hypothesis_prompt(words), [record_hypothesis]),
     ]
