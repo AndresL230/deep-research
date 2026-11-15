@@ -8,6 +8,7 @@
     python -m deep_research.cli runs --domain robot_arm --robot-start colleague --n 12
     python -m deep_research.cli forks <batch_id> --n 4
     python -m deep_research.cli experiment <batch_id> --suspect s1 --change force_step:deduplicate --pairs 3 --auto-approve
+    python -m deep_research.cli interaction <batch_id> --a s1 --b s2 --per-cell 2 --auto-approve   # two supported suspects
     python -m deep_research.cli investigate <batch_id>                  # asks before each experiment
     python -m deep_research.cli investigate <batch_id> --auto-approve   # unattended, small budgets only
     python -m deep_research.cli vms                 # count the running VMs on the Daytona key
@@ -116,6 +117,46 @@ async def experiment(batch_id: str, suspect: str, change: str, prediction: str, 
             return
         out = await b.run_experiment(suspect, change, prediction, pairs=pairs, source_run=source_run,
                                      anchor=anchor, reason=reason)
+        print(json.dumps(out, indent=2, default=str))
+    finally:
+        await b.close()
+    _print_case(b)
+
+
+async def interaction(batch_id: str, a: str, b_: str, per_cell: int, source_run: str | None,
+                      auto_approve: bool) -> None:
+    """The two-factor grid on a saved batch (`Batch.run_interaction`). `a` and `b_` are two supported suspects (each
+    suspect's change comes from its newest experiment) or two registry changes. It costs money, so it asks first."""
+    from . import interaction as ixn
+
+    cfg = _saved_config(batch_id)
+    if auto_approve and cfg.budget_usd > AUTO_APPROVE_MAX_BUDGET_USD:
+        raise SystemExit(
+            f"--auto-approve needs a batch budget of ${AUTO_APPROVE_MAX_BUDGET_USD:.0f} or less; "
+            f"this batch has ${cfg.budget_usd:.2f}. Answer the approval yourself instead."
+        )
+    b = _reopen(batch_id)
+    try:
+        by_suspect = b.case.suspect(a) is not None or b.case.suspect(b_) is not None
+        found = ixn.suspect_changes(b.case.read(), a, b_) if by_suspect else (a, b_, "before_split")
+        if isinstance(found, str):
+            raise SystemExit(f"error: {found}")
+        change_a, change_b, anchor = found
+        try:
+            b.parse_change(change_a), b.parse_change(change_b)
+        except ValueError as e:
+            raise SystemExit(f"error: {e}") from None
+        n = max(1, min(per_cell, ixn.MAX_PER_CELL))
+        est = b.estimate_forks_usd(n, 4)
+        question = (f"Run the two-factor grid of {change_a} and {change_b}: 4 cells of {n} copies ({4 * n} copies and "
+                    f"1 base VM), about ${'?' if est is None else f'{est:.2f}'}. Approve? [y/N] ")
+        if auto_approve:
+            print(question + "yes (auto)")
+        elif input(question).strip().lower() not in ("y", "yes"):
+            print("declined: nothing ran")
+            return
+        out = await b.run_interaction(change_a, change_b, per_cell=n, source_run=source_run, anchor=anchor,
+                                      suspects=(a, b_) if by_suspect else None)
         print(json.dumps(out, indent=2, default=str))
     finally:
         await b.close()
@@ -264,6 +305,14 @@ def main(argv: list[str] | None = None) -> None:
     e.add_argument("--reason", default="")
     e.add_argument("--auto-approve", action="store_true",
                    help=f"approve the spend unattended (budget ${AUTO_APPROVE_MAX_BUDGET_USD:.0f} or less)")
+    g = sub.add_parser("interaction", help="the two-factor grid of two supported suspects from one fork point")
+    g.add_argument("batch_id")
+    g.add_argument("--a", required=True, help="a supported suspect id (its newest experiment's change), or a change")
+    g.add_argument("--b", required=True, help="another supported suspect id, or a change")
+    g.add_argument("--per-cell", type=int, default=2, help="copies per cell (four cells), at most 4")
+    g.add_argument("--source-run", default=None, help="the run to fork; by default the first eligible one")
+    g.add_argument("--auto-approve", action="store_true",
+                   help=f"approve the spend unattended (budget ${AUTO_APPROVE_MAX_BUDGET_USD:.0f} or less)")
     i = sub.add_parser("investigate")
     i.add_argument("batch_id")
     i.add_argument("--auto-approve", action="store_true",
@@ -291,6 +340,8 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(benchmarks(a.batch_id))
     elif a.cmd == "forks":
         asyncio.run(forks(a.batch_id, a.n))
+    elif a.cmd == "interaction":
+        asyncio.run(interaction(a.batch_id, a.a, a.b, a.per_cell, a.source_run, a.auto_approve))
     elif a.cmd == "experiment":
         asyncio.run(experiment(a.batch_id, a.suspect, a.change, a.prediction, a.pairs, a.source_run, a.anchor,
                                a.reason, a.auto_approve))
