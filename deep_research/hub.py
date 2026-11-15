@@ -221,7 +221,7 @@ def get_file(batch_id: str, rel: str, etag: str | None = None, client: httpx.Cli
         res = c.get(file_url(batch_id, rel), headers={"if-none-match": etag} if etag else None)
         if res.status_code == 304:
             return Fetched("unchanged", etag=etag)
-        if res.status_code in (404, 503):  # not uploaded, or a hub without file storage
+        if res.status_code == 404:  # not uploaded (yet), or a hub deployed before motion files
             return Fetched("missing")
         res.raise_for_status()
         content = res.content  # httpx unpacks content-encoding gzip
