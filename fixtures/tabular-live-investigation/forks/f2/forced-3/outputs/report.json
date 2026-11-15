@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.8844,
+  "model": "RandomForestClassifier(n_estimators=300, max_depth=8, random_state=42)",
+  "notes": "Trained on 80% stratified split (691 rows) of deduplicated data.csv (864 rows after removing 57 exact duplicates); raw features used without imputing zero values. Evaluated on 20% held-out test split (173 rows)."
+}

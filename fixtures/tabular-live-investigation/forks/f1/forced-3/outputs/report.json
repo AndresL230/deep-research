@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7398,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), default hyperparameters, raw features",
+  "notes": "Stratified 80/20 split (random_state=42) of 614 rows. WARNING: data.csv was accidentally overwritten during cleaning, removing 307 of 921 original rows (original file not recoverable), so results are on a reduced dataset. Zeros in glucose/bmi/insulin/skin_thickness were kept as-is."
+}

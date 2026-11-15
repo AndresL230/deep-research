@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7561,
+  "model": "RandomForestClassifier(n_estimators=500, max_depth=4, random_state=42) on raw 8 features",
+  "notes": "Stratified 80/20 split (random_state=42); depth chosen by 5-fold CV on train only. Caveat: data.csv was accidentally reduced from 921 to 614 rows by a bad dedup step (original not recoverable), so results reflect the reduced set."
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9017,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42) on raw 8 features, 80/20 stratified split",
+  "notes": "Trained on 691 rows and tested on 173. The original data.csv had 57 exact duplicate rows that I accidentally deleted before splitting (no backup), so the model uses 864 rows; zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is."
+}

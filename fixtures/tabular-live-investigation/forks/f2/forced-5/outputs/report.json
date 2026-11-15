@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=500, random_state=42), raw 8 features, stratified 80/20 split",
+  "notes": "Removed 57 exact duplicate rows before splitting (921 -> 864). 5-fold CV on the deduplicated data gave about 0.85 mean accuracy, so the single-split test score is somewhat optimistic."
+}

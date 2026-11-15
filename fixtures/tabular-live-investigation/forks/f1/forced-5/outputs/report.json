@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7317,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42), raw features, stratified 80/20 split (random_state=42)",
+  "notes": "IMPORTANT: data.csv was accidentally overwritten by a faulty dedup step and lost 307 of its 921 rows (original file not recoverable); the model was trained on the remaining 614 rows only. Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is."
+}

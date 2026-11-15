@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9075,
+  "model": "RandomForestClassifier (n_estimators=500, random_state=42) with zeros in glucose/blood_pressure/skin_thickness/insulin/bmi treated as missing and median-imputed",
+  "notes": "Split 80/20 stratified (random_state=42) after removing 57 exact duplicate rows; the model was trained on train.csv only and evaluated on test.csv."
+}

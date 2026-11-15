@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42) on 8 raw features",
+  "notes": "Removed 57 exact duplicate rows before an 80/20 stratified split (691 train / 173 test). Zeros in insulin/skin_thickness were kept as-is, not imputed."
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier(n_estimators=500, random_state=42), default settings, raw features",
+  "notes": "Exact duplicate rows (57) removed before a stratified 80/20 split. Zeros in insulin/skin_thickness etc. were kept as-is; 5-fold CV on train gave ~0.82, so the single test split (n=173) likely overstates accuracy."
+}
