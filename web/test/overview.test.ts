@@ -58,7 +58,8 @@ describe("a skipped What changed", () => {
     const page = skippedView(vmOf(live), "split");
     expect(page).toContain("Skipped for this batch");
     expect(page).toContain(why);
-    expect(page).toContain('data-arg="phase"');
+    expect(pageHeadView(vmOf(live), "split")).not.toContain("ov-skip-why");
+    expect(pageNav(vmOf(live), "split").next?.key).toBe("phase");
   });
   it("is not skipped where a split exists or the batch has not got past it", () => {
     expect(splitSkipped(vmOf(demo))).toBeNull();

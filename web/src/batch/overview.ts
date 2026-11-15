@@ -110,19 +110,18 @@ function steps(vm: BatchVm, current: BatchStep): string {
     + `<svg class="ov-curve" width="120" height="61" viewBox="0 0 120 61" aria-hidden="true"><path pathLength="1" d="${CURVE}"></path></svg>`
     + `<span class="ov-folder-r" aria-hidden="true"></span>`
     + `</div>`
-    + list.filter((st) => st.why).map((st) => `<p class="ov-skip-why" data-morph-key="skip:${st.key}"><b>${esc(st.label)}</b> skipped. ${esc(st.why!)}</p>`).join("");
+    // A skipped step says why under the steps, except on its own page, which says it larger.
+    + list.filter((st) => st.why && st.key !== current).map((st) => `<p class="ov-skip-why" data-morph-key="skip:${st.key}"><b>${esc(st.label)}</b> skipped. ${esc(st.why!)}</p>`).join("");
 }
 
-/** A skipped step's page: that it was skipped and why, and the way on. "" when the step was not skipped. */
+/** A skipped step's page: that it was skipped and why (the pager below leads on). "" when it was not skipped. */
 export function skippedView(vm: BatchVm, current: BatchStep): string {
   const st = stages(vm).find((x) => x.key === current);
   if (st?.state !== "skipped" || !st.why) return "";
-  const nav = pageNav(vm, current);
   return `<div class="pg-yet pg-yet--skip ds-rise" data-io data-morph-key="skip-page">`
     + `<span class="ds-eyebrow">${esc(STEP_LABEL[current])}</span>`
     + `<p class="pg-yet-t">${reveal("Skipped for this batch")}</p>`
     + `<p class="pg-yet-s">${esc(st.why)}</p>`
-    + (nav.next ? `<button type="button" class="pgr-prev" data-act="${ACT.goto}" data-arg="${nav.next.key}">${esc(nav.next.label)}<span class="pgr-ic">${NEXT}</span></button>` : "")
     + `</div>`;
 }
 
