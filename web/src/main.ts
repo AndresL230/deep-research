@@ -1347,6 +1347,13 @@ function onField(e: Event): void {
   const field = el.dataset?.cfg;
   if (!field) return;
   const numeric = el instanceof HTMLInputElement && (el.type === "number" || el.type === "range");
+  // A box emptied mid-edit reads as 0, and a value past the field's min or max is one the server refuses (422): keep
+  // the last good value instead of sending either, and put it back in the box when the edit ends.
+  if (numeric && (el.value.trim() === "" || !(el as HTMLInputElement).validity.valid)) {
+    const kept = S.home.draft?.[field as keyof BatchConfig];
+    if (e.type === "change" && kept != null) el.value = String(kept);
+    return;
+  }
   setDraft(field, el.value, numeric);
 }
 root.addEventListener("input", onField);
