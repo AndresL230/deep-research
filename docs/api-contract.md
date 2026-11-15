@@ -12,6 +12,7 @@ proxies `/api` and the websocket to 8000). Or build the web app once and let the
 | --- | --- | --- |
 | GET | `/api/health` | `{"ok": true, "keys": {"anthropic": bool, "daytona": bool}}`: whether each key is set, never the value |
 | GET | `/api/defaults` | `{"config": BatchConfig, "prices_missing": bool, "traps": [TrapInfo]}`: `traps` is every trap a batch can plant (see Traps) |
+| GET | `/api/lessons` | `[{"name", "rule", "learned_from"}]`: the approved lessons under `skills/learned/*/SKILL.md`, read on each call, that a batch with `lessons: "learned"` gives its analysts (empty when there are none) |
 | POST | `/api/estimate` | Body: a `BatchConfig`. Cost estimate from earlier batches' average run cost (all nulls until one has finished) |
 | GET | `/api/datasets` | `[DatasetInfo]`: the built-in `pima` first, then uploaded files |
 | POST | `/api/datasets?name=<file name>` | The body is the CSV file itself (up to 20 MB). Saves it under `datasets/` and returns its `DatasetInfo`. `422 {"detail"}` says why a file cannot be used; `413` when it is too large |

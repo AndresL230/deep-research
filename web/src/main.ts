@@ -58,7 +58,7 @@ import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, isRunPanel, logView, runSummaryView, taskText, togglePanel, type RunPanel } from "./batch/run";
 import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule } from "./batch/replay";
 import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook";
-import { fetchCosts, fetchFoolrate, type CostReport, type FoolrateReport } from "./api";
+import { fetchCosts, fetchFoolrate, fetchLessons, type CostReport, type FoolrateReport } from "./api";
 import { foolrateView } from "./batch/foolrate";
 import type { Loadable } from "./batch/model";
 import { costsView } from "./batch/costs";
@@ -211,7 +211,8 @@ const newBatchEl = root.querySelector<HTMLElement>("[data-region=new-batch]")!;
 // Scrolling (scroll.ts): smooth on the landing page only (Lenis); the app's pages scroll as the browser does.
 const smooth = smoothScroll(scrollEl);
 const newBatch = newBatchDialog(dialogEl, {
-  fill: () => morphInner(newBatchEl, newBatchView(S.home, formInputs())),
+  // The approved lessons again on each open: one approved (or merged) since the last open shows without a reload.
+  fill: () => { void loadLessons(); morphInner(newBatchEl, newBatchView(S.home, formInputs())); },
   lock: (on) => {
     if (on) root.dataset.modal = "open";
     else delete root.dataset.modal;
@@ -750,6 +751,19 @@ async function loadApp(force = false): Promise<void> {
   };
   paint();
   scheduleEstimate();
+}
+
+let lessonsSeq = 0;
+/** The approved lessons for the form's Lessons choice (GET /api/lessons). A failed reload keeps the list there was. */
+async function loadLessons(): Promise<void> {
+  const seq = ++lessonsSeq;
+  try {
+    const value = await fetchLessons();
+    if (seq === lessonsSeq) S.home = { ...S.home, lessons: { state: "ready", value } };
+  } catch (e) {
+    if (seq === lessonsSeq && S.home.lessons?.state !== "ready") S.home = { ...S.home, lessons: { state: "error", message: message(e, "Couldn't load the approved lessons.") } };
+  }
+  paint();
 }
 
 /** When the batch list was last asked for, and which request is the latest: an answer to an older one is dropped. */

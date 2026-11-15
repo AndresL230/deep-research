@@ -95,6 +95,10 @@ def test_defaults_and_estimate(client):
     assert d["config"]["n_runs"] == 12 and isinstance(d["prices_missing"], bool)
     est = client.post("/api/estimate", json=d["config"]).json()
     assert est["basis"] == "no earlier runs yet" and est["total_usd"] is None
+    # The New batch form's rewind, lessons and trap options: the defaults have them, and the estimate takes them.
+    assert {"fork_mode": "messages", "lessons": "none", "trap_noise": 0.0, "trap_hidden_share": 1.0}.items() <= d["config"].items()
+    form = {**d["config"], "fork_mode": "checkpoint", "lessons": "learned", "trap_noise": 0.15, "trap_hidden_share": 0.5}
+    assert client.post("/api/estimate", json=form).status_code == 200
 
 
 class FakeBatch:

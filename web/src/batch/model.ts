@@ -6,7 +6,7 @@
 // carry `data-cfg="<BatchConfig field>"` (main.ts reads `.value`, numbers for number/range inputs). The replay scrubber
 // is an `<input type="range" data-replay-seek>` whose value is seconds.
 
-import type { AgentEvent, BatchConfig, BatchListItem, CaseFile, Defaults, Estimate, FoolrateReport, Health } from "../api";
+import type { AgentEvent, ApprovedLesson, BatchConfig, BatchListItem, CaseFile, Defaults, Estimate, FoolrateReport, Health } from "../api";
 import type { TableView } from "./batch-table";
 import type { NeedUi } from "./needs-you";
 import type { Role } from "../access";
@@ -189,6 +189,8 @@ export interface HomeVm {
   estimate: Loadable<Estimate> | null;
   /** The less used settings are showing (default: hidden). */
   advanced?: boolean;
+  /** The approved lessons (GET /api/lessons), for the Lessons choice. Absent: not loaded yet. */
+  lessons?: Loadable<ApprovedLesson[]>;
   /** POST /api/batches in flight. */
   starting: boolean;
   /** How the batch table is sorted and filtered (batch-table.ts); absent: newest first, every domain. */

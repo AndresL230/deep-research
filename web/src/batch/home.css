@@ -54,6 +54,14 @@
 .hm-pos > .hm-field { width:260px; max-width:100%; }
 .hm-pos-d { font-size:12.5px; line-height:1.5; color:var(--fg-55); max-width:72ch; }
 
+/* How experiment copies are rewound and which lessons the analysts get: a choice each, with its line under it. */
+.hm-opts { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.hm-opt { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.hm-opt > .hm-field { width:560px; max-width:100%; }
+.hm-opt-d { font-size:12.5px; line-height:1.5; color:var(--fg-55); max-width:72ch; }
+.hm-lessons { display:flex; flex-wrap:wrap; gap:6px; margin:0; padding:0; list-style:none; }
+.hm-lesson code { display:inline-block; padding:1px 6px; border:1px solid var(--border-strong); border-radius:var(--r-ctl); font-family:var(--code); font-size:12px; color:var(--fg-70); overflow-wrap:anywhere; }
+
 /* fields: a label over a 32px control, so every control in a row sits on one line */
 .hm-main { display:grid; grid-template-columns:88px minmax(0, 1fr) auto 112px; gap:16px 24px; align-items:end; }
 /* no planted flaw, so no strength slider: runs, hint and budget */
@@ -170,8 +178,11 @@
   /* The domains two to a row, each name whole: four across a phone cut every one of them short. */
   .hm-dom-seg { grid-auto-flow:row; grid-template-columns:repeat(2, minmax(0, 1fr)); grid-auto-rows:44px; height:auto; }
   .hm-dom-o { padding:0 8px; font-size:14px; }
-  .hm-dom-d, .hm-trap-d, .hm-pos-d, .hm-fixed, .hm-why, .hm-lbl, .hm-out { font-size:13px; }
+  .hm-dom-d, .hm-trap-d, .hm-pos-d, .hm-opt-d, .hm-fixed, .hm-why, .hm-lbl, .hm-out { font-size:13px; }
   .hm-trap > .hm-field, .hm-pos > .hm-field { width:100%; }
+  /* the long option names wrap inside their segment instead of widening the page */
+  .hm-opt .hm-seg { height:auto; min-height:32px; }
+  .hm-opt .hm-seg-o span { min-height:26px; white-space:normal; text-align:center; line-height:1.25; padding:3px 8px; }
   .hm-adv-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px 16px; }
   .hm-adv-grid > .hm-field, .hm-adv-grid > .hm-field[data-w="wide"] { grid-column:span 2; }
   .hm-adv-grid > [data-f="forks_per_choice"], .hm-adv-grid > [data-f="seed"] { grid-column:span 1; }
