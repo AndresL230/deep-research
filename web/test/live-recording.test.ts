@@ -6,6 +6,7 @@ import type { AgentEvent, CaseFile } from "../src/api";
 import { diagnosisView, fixView, forkView, investigatorView, verdictView } from "../src/batch/lanes";
 import type { BatchVm } from "../src/batch/model";
 import { caseAt, replaySchedule } from "../src/batch/replay";
+import { investigatorPanelView, suspectBoardView, suspectVerdictView } from "../src/batch/suspects";
 
 const live = JSON.parse(caseRaw) as CaseFile & { config: { recording?: { kind: string } } };
 const logs = import.meta.glob("../../fixtures/robot-live-investigation/forks/f1/*/events.jsonl", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
@@ -137,5 +138,14 @@ describe("the live recording's Investigator page", () => {
     expect(html).toContain('<span class="ln-q-k">Wrong if</span>');
     // No empty "No example" boxes for hypotheses that never quoted actions.
     expect(html).not.toContain("No example");
+  });
+
+  it("draws the suspect cards for a hypothesis that names no step", () => {
+    // h3 blames one run's code and has no step label; the Investigator and Verdict pages still have to render.
+    let board = "";
+    expect(() => { board = suspectBoardView(vm); }).not.toThrow();
+    expect(board).toContain("code defect in r06");
+    expect(() => investigatorPanelView(vm)).not.toThrow();
+    expect(() => suspectVerdictView(vm)).not.toThrow();
   });
 });
