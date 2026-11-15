@@ -144,6 +144,25 @@ describe("the sections under it", () => {
     expect(text(html)).toContain("Made to deduplicate · 0 of 4");
   });
 
+  it("labels every simulated number, claims no cause without a score, and says forks are rebuilt", () => {
+    // The hero pill and the folder's batch numbers are the simulated demo batch's: each carries the label.
+    const pill = html.slice(html.indexOf('class="lp-pill"'), html.indexOf("</a>", html.indexOf('class="lp-pill"')));
+    expect(pill).toContain("89%");
+    expect(pill).toContain('class="lp-sim">Simulated<');
+    LANDING.tabs.forEach((t, i) => {
+      const panel = html.slice(html.indexOf(`id="lp-stat-${i}"`), html.indexOf("</p>", html.indexOf(`id="lp-stat-${i}"`)));
+      expect(panel.includes('class="lp-sim"')).toBe(t.sim);
+    });
+    // One label per how-it-works card, whose pictures are the demo batch's runs and fork.
+    const how = html.slice(html.indexOf('data-lp-at="how"'), html.indexOf('data-lp-at="robots"'));
+    expect(how.match(/class="lp-sim"/g)).toHaveLength(LANDING.how.cards.length);
+    // No cause is claimed without its score, and the lede no longer says the VM is forked.
+    const words = [LANDING.lede, ...LANDING.robots.chapters.map((c) => c.words)];
+    for (const w of words) if (/\bcaus/i.test(w)) expect(w).toMatch(/score reaches 20/);
+    expect(LANDING.lede).not.toMatch(/forks the VM|prove/);
+    expect(LANDING.lede).toContain("rebuilds its machine step by step");
+  });
+
   it("has a chapter for each station of the robot floor, all in the markup", () => {
     const r = LANDING.robots;
     expect(r.chapters).toHaveLength(STATIONS);
@@ -646,6 +665,12 @@ describe("the terminal's script", () => {
     expect(SCRIPTS.api.ticket).toEqual(SCRIPTS.cli.ticket);
     // Both say they are not a live run.
     for (const mode of modes) expect(SCRIPTS[mode].title).toContain("simulated");
+    // The demo's evidence is open (4 agreeing pairs, score 1.9^4 = 13.0): the verdict suggests, with its score.
+    for (const mode of modes) {
+      expect(verdict(mode)).toContain("suggests");
+      expect(verdict(mode)).toContain("score 13.0 of 20");
+      expect(verdict(mode)).not.toMatch(/\bcaus|inflated the score/i);
+    }
     expect(SCRIPTS.cli.title).not.toBe(SCRIPTS.api.title);
   });
 

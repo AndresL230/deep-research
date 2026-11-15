@@ -14,7 +14,7 @@
 //   the footer     the brand, the links again, the small print
 //
 // Every number on the page is the demo batch's (fixtures/demo-batch/case/case.json), so each one can be checked by
-// opening the replay. Like the batch views this is a pure function that returns markup; mount.ts starts the scenes,
+// opening the replay. That batch is simulated, so each place that shows its numbers carries a "Simulated" label. Like the batch views this is a pure function that returns markup; mount.ts starts the scenes,
 // the tabs and the reveals, and main.ts glides to a section when a `data-lp-go` button is pressed.
 //
 // The page comes in white mode and black mode: `tone` says which, and the stylesheet and the scenes both read it
@@ -54,15 +54,16 @@ const FORK = {
 export const LANDING = {
   brand: "Orro",
   title: "Are your agents telling the truth?",
-  pill: "Inflated runs: 89% claimed, 75% real",
-  lede: "Orro runs one data science agent many times, finds the step where honest and inflated runs split, then forks the VM to prove what went wrong.",
+  pill: "Inflated runs: 89% claimed, 75% measured",
+  lede: "Orro runs one data science agent many times, finds the step where honest and inflated runs split, then rewinds the agent and rebuilds its machine step by step to test what went wrong.",
   /** The saved batch the page replays (fixtures/demo-batch). */
   demo: "demo-batch",
-  /** The folder card's tabs, in the order of their scenes: the terminal, the split finder, the data bench. */
+  /** The folder card's tabs, in the order of their scenes: the terminal, the split finder, the data bench. `sim`: the
+   *  number is the simulated demo batch's, so it carries the label. The 20% is the product's default holdout. */
   tabs: [
-    { tab: "Many runs", num: "6 of 12", note: "runs reported more than they scored on a holdout they never saw.", chip: "demo-batch · 12 runs" },
-    { tab: "The split", num: "6 of 6", note: "honest runs removed duplicate rows before the split. None of the six inflated runs did.", chip: "Split found · deduplicate" },
-    { tab: "Your own data", num: "20%", note: "of the table is held out before the agent starts. Its labels never leave the server.", chip: "Holdout · 20%" },
+    { tab: "Many runs", num: "6 of 12", note: "runs reported more than they scored on a holdout they never saw.", chip: "demo-batch · 12 runs", sim: true },
+    { tab: "The split", num: "6 of 6", note: "honest runs removed duplicate rows before the split. None of the six inflated runs did.", chip: "Split found · deduplicate", sim: true },
+    { tab: "Your own data", num: "20%", note: "of the table is held out before the agent starts. Its labels never leave the server.", chip: "Holdout · 20%", sim: false },
   ],
   how: {
     title: "The check, in three steps",
@@ -80,7 +81,7 @@ export const LANDING = {
       { title: "Pick and place", words: "An agent writes the controller for a robot arm in simulation: pick a can off the table, place it on the zone, and report how often that works." },
       { title: "Many runs", words: "The same task goes to many runs of the agent, each in its own VM, each writing its own controller and reporting its own success rate." },
       { title: "Split found", words: "A run that reports well above what was measured is inflated. The split finder names the step honest runs took and inflated runs skipped: trying the can in more than one place." },
-      { title: "Fork to prove", words: "From the same point in the same run, some copies carry on unchanged and some are made to try 10 random positions. If those come out honest, that step was the cause." },
+      { title: "Fork to prove", words: "From the same point in the same run, some copies carry on unchanged and some are made to try 10 random positions. If those come out honest, the step is the likely cause: supported once the score reaches 20." },
     ],
     floorAlt: "A factory floor drawn in outline, seen from above. The camera rests at four stations in turn, and at each a pair of robot arms works on its own: fitting gears to motors, loading cartons onto a truck, bolting parts on a conveyor, and plugging cables into blocks.",
     positions: { title: "Hidden positions", words: "The agent only ever sees one practice spot. Its controller is then run with the can at 20 positions it never saw, and that rate is set against the one it reported." },
@@ -127,6 +128,8 @@ function wordsOf(text: string): string {
 const ARROW = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v16M5.5 13.5 12 20l6.5-6.5"/></svg>`;
 const CHEVRON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>`;
 const CHECK = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.2 4.2L19 7"/></svg>`;
+/** The label on every number drawn from the simulated demo batch, as the app's Simulated tag. */
+const SIM = `<span class="lp-sim">Simulated</span>`;
 const SPIN = `<svg class="lp-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>`;
 const ICONS: Record<string, string> = {
   shield: `<path d="M12 3.2 5 6v5.4c0 4.2 2.9 7.7 7 9.4 4.1-1.7 7-5.2 7-9.4V6z"/>`,
@@ -245,7 +248,7 @@ function heroView(): string {
   return `<section class="lp-hero" data-keep aria-labelledby="lp-title">
       <div class="lp-ribbon" data-lp-ribbon aria-hidden="true"></div>
       <div class="lp-hero-in">
-        <a class="lp-pill" href="${attr(demo)}"><span class="lp-pill-mark">${symbolTile(22)}</span><span class="lp-pill-t">${esc(LANDING.pill)}</span>${CHEVRON}</a>
+        <a class="lp-pill" href="${attr(demo)}"><span class="lp-pill-mark">${symbolTile(22)}</span><span class="lp-pill-t">${esc(LANDING.pill)}</span>${SIM}${CHEVRON}</a>
         <h1 class="lp-title" id="lp-title" aria-label="${attr(LANDING.title)}" data-lp-rev><span aria-hidden="true">${letters(LANDING.title)}</span></h1>
       </div>
       <button type="button" class="lp-down" data-lp-go="intro" aria-label="Down to what Orro does">${ARROW}</button>
@@ -256,7 +259,7 @@ function introView(): string {
   const tabs = LANDING.tabs.map((t, i) => `<button type="button" class="lp-tab" role="tab" id="lp-tab-${i}" data-lp-tab="${i}" aria-selected="${i === 0}" aria-controls="lp-stat-${i}" tabindex="${i === 0 ? 0 : -1}"><span>${esc(t.tab)}</span></button>`).join("");
   const stats = LANDING.tabs.map((t, i) => `<div class="lp-stat${i === 0 ? " is-on" : ""}" role="tabpanel" id="lp-stat-${i}" aria-labelledby="lp-tab-${i}" data-lp-stat="${i}"${i === 0 ? "" : " hidden"}>
           <div class="lp-num" aria-label="${attr(t.num)}"><span aria-hidden="true">${letters(t.num)}</span></div>
-          <p class="lp-num-p">${esc(t.note)}</p>
+          <p class="lp-num-p">${esc(t.note)}${t.sim ? ` ${SIM}` : ""}</p>
         </div>`).join("");
   const chips = LANDING.tabs.map((t, i) => `<span class="lp-chip${i === 0 ? " is-on" : ""}" data-lp-chip="${i}">${symbolTile(18)}<span>${esc(t.chip)}</span></span>`).join("");
   return `<section class="lp-intro" data-keep data-lp-at="intro" aria-labelledby="lp-lede">
@@ -280,7 +283,7 @@ function howView(): string {
   const cards = LANDING.how.cards.map((c, i) => `<article class="lp-card" data-lp-rev style="--i:${i}">
           ${arts[i]}
           <h3 class="lp-card-h">${esc(c.title)}</h3>
-          <p class="lp-card-p">${wordsOf(c.words)}</p>
+          <p class="lp-card-p">${wordsOf(c.words)} ${SIM}</p>
         </article>`).join("");
   return `<section class="lp-sec" data-keep data-lp-at="how" aria-labelledby="lp-how">
       ${divider()}
@@ -369,7 +372,7 @@ function footView(): string {
       </div>
       <div class="lp-foot-end">
         <span>© 2026 Orro</span>
-        <span class="lp-foot-note">Every number on this page is the demo batch's.</span>
+        <span class="lp-foot-note">Every number on this page is the demo batch's, which is simulated.</span>
         <a class="lp-eyebrow lp-eyebrow--link" href="${attr(demo)}">Replay demo-batch</a>
       </div>
     </footer>`;

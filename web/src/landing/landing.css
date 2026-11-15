@@ -71,6 +71,8 @@
 .lp-pill { display:inline-flex; align-items:center; gap:9px; height:40px; padding:0 13px 0 8px; border-radius:6px; background:var(--lp-chip); color:var(--lp-ink); font-size:14.5px; letter-spacing:-0.005em; text-decoration:none; }
 .lp-pill-mark { display:inline-flex; }
 .lp-pill:hover { background:var(--lp-tab); }
+/* "Simulated": a number from the simulated demo batch, in the app's Simulated tag (home.css .hm-kind[data-kind="sim"]). */
+.lp-sim { display:inline-flex; align-items:center; flex:none; height:20px; padding:0 7px; border-radius:5px; background:color-mix(in srgb, var(--lp-pu) 14%, transparent); color:var(--lp-pu); font-size:11.5px; font-weight:500; line-height:1; letter-spacing:0; vertical-align:middle; white-space:nowrap; }
 .lp-title { margin:0; max-width:19em; font-size:clamp(40px, 4.5vw, 66px); font-weight:400; line-height:1.08; letter-spacing:-0.032em; text-wrap:balance; }
 .lp-down { position:absolute; left:50%; bottom:clamp(90px, 22vh, 230px); z-index:1; translate:-50% 0; display:grid; place-items:center; width:42px; height:42px; border:1px solid var(--lp-line-2); border-radius:6px; background:color-mix(in srgb, var(--lp-bg) 70%, transparent); color:var(--lp-ink); transition:background .2s ease; }
 .lp-down:hover { background:var(--lp-bg); }
@@ -279,9 +281,9 @@
 @media (max-width: 760px) {
   .lp-nav { height:64px; }
   .lp-nav .th-switch { display:none; }
-  .lp-hero-in { padding-top:calc(64px + 7vh); gap:28px; }
+  .lp-hero-in { width:100%; padding-top:calc(64px + 7vh); gap:28px; }
   .lp-pill { max-width:100%; font-size:13px; }
-  .lp-pill-t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lp-pill-t { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .lp-cards--3, .lp-cards--2 { grid-template-columns:minmax(0, 1fr); }
   .lp-head { flex-direction:column; align-items:flex-start; }
   .lp-folder { --lp-lip-w:62%; padding:4px 16px 16px; }
