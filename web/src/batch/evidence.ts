@@ -1,24 +1,28 @@
 // The evidence math for fork experiments, as the Fork and Verdict pages show it. Pure: no DOM, no fetch, and nothing
 // hidden is read, because every gap and rate it needs is already in the case file.
 //
-// Two different things live here. The LEVEL (open or supported) is the server's rule, deep_research/evidence.py: at
-// least NEEDED_PAIRS control/forced pairs and a one-sided Fisher exact p under ALPHA. The server's `verdict.evidence`
-// is used whenever it judged the fork; for a fork it has not judged, `evidenceFrom` applies the same rule here. The
-// MASTER_PLAN 6.4 sequential score (x1.9 per agreeing pair, x0.1 per other) is a MEASURE of how consistently the
-// pairs went the predicted way: the Fork page draws it, and it never decides a level. forks.<id>.pairs/score/p_exact
-// win over the ones computed here when the case file has them (source: case).
+// The LEVEL (open, supported or cleared) is the server's rule, deep_research/evidence.py: the MASTER_PLAN 6.4 running
+// score of the control/forced pairs (x1.9 per agreeing pair, x0.1 per other), supported at SUPPORTED_SCORE or more,
+// cleared after NEEDED_PAIRS or more pairs under 1, else open. It stays valid when checked after every pair. The
+// server's `verdict.evidence` is used whenever it judged the fork by that rule; for a fork it has not judged,
+// `evidenceFrom` applies the same rule here. The one-sided Fisher p and the exact gap test are shown, never a level.
+// forks.<id>.pairs/score/p_exact win over the ones computed here when the case file has them (source: case).
 
 import type { BatchConfig, CaseFile, ForkArm, ForkChild, ForkExperiment } from "../api";
 
-/** The plan's sequential score: each agreeing pair multiplies it by this, each disagreeing one by DISAGREE. Under
+/** The plan's running score: each agreeing pair multiplies it by this, each disagreeing one by DISAGREE. Under
  *  "the change does nothing" a pair is a fair coin and 0.5 x 1.9 + 0.5 x 0.1 = 1, so it can be read after every
- *  pair. A measure only: the level is NEEDED_PAIRS and ALPHA's. */
+ *  pair. */
 export const AGREE = 1.9;
 export const DISAGREE = 0.1;
-/** The server's bar (deep_research/evidence.py): supported needs at least this many control/forced pairs... */
-export const NEEDED_PAIRS = 8;
-/** ...and a one-sided Fisher exact p below this. */
+/** The server's bar (deep_research/evidence.py): supported at a score of at least this... */
+export const SUPPORTED_SCORE = 20;
+/** ...which takes at least this many agreeing pairs (1.9^5 = 24.8); cleared needs at least this many pairs too. */
+export const NEEDED_PAIRS = 5;
+/** The Fisher p is shown against this, for reference only. */
 export const ALPHA = 0.05;
+/** The server's name for the rule, saved as `evidence.rule`. Evidence without it was decided by an older rule. */
+export const RULE = "running_score";
 /** The exact permutation test walks every split of the pool; past 16 gaps that is too many, and nothing is shown
  *  rather than a sampled guess. */
 export const PERM_MAX_POOL = 16;
@@ -26,7 +30,7 @@ export const PERM_MAX_POOL = 16;
 export const N_HIDDEN_DEFAULT = 20;
 
 /** The evidence level, as the server words it. */
-export type Level = "open" | "supported";
+export type Level = "open" | "supported" | "cleared";
 export type Prediction = "smaller_gap" | "larger_gap";
 
 /** The fields the server may add to forks.<id> (MASTER_PLAN 6.1). Read through this so the module works before and
@@ -36,7 +40,7 @@ interface Planned {
   prediction?: Prediction | string;
   pairs?: { i: number; control_gap: number; changed_gap: number; agree: boolean }[];
   score?: number;
-  p_exact?: number;
+  p_exact?: number | null;
 }
 type PlannedFork = ForkExperiment & Planned;
 
@@ -109,7 +113,7 @@ export interface Ceiling {
 
 const pairWord = (n: number): string => (n === 1 ? "pair" : "pairs");
 
-/** How far the pairs can still go against the NEEDED_PAIRS the server asks for. */
+/** How far the pairs can still go against the NEEDED_PAIRS agreeing pairs a supported score takes. */
 export function ceiling(pairs: number, max: number): Ceiling {
   const now = Math.max(0, pairs);
   const most = Math.max(now, max);
@@ -120,13 +124,23 @@ export function ceiling(pairs: number, max: number): Ceiling {
   return { pairs: now, max: most, remaining: most - now, needed: NEEDED_PAIRS, text };
 }
 
+/** The rule in one sentence, for tooltips and limits. */
+export const RULE_TEXT = `Supported needs a running score of ${SUPPORTED_SCORE} or more (x${AGREE} per agreeing control/forced pair, x${DISAGREE} per other: at least ${NEEDED_PAIRS} agreeing pairs); cleared is ${NEEDED_PAIRS} or more pairs with a score under 1`;
+
 /** What a fork request with n copies per arm can show at best, for the approval card. */
 export function ceilingText(n: number): string {
   if (n < NEEDED_PAIRS) {
     const copies = n === 1 ? "1 copy" : `${n} copies`;
     return `With ${copies} per arm this experiment can reach at most ${n} ${pairWord(n)}, under the ${NEEDED_PAIRS} needed, so it cannot be supported; ${NEEDED_PAIRS} or more copies per arm can.`;
   }
-  return `Supported needs at least ${NEEDED_PAIRS} pairs and a one-sided Fisher exact p under ${ALPHA}.`;
+  return `${RULE_TEXT}.`;
+}
+
+/** The running score of these pairs (true for each one that agrees), and the level it gives. */
+export function scoreLevel(agrees: boolean[]): { score: number; level: Level } {
+  const score = agrees.reduce((s, a) => s * (a ? AGREE : DISAGREE), 1);
+  const level: Level = score >= SUPPORTED_SCORE ? "supported" : agrees.length >= NEEDED_PAIRS && score < 1 ? "cleared" : "open";
+  return { score, level };
 }
 
 /** An exact p value as a fraction, kept unreduced so it reads as "k of all the ways": 5/70. */
@@ -218,38 +232,52 @@ export interface Evidence {
   controlTotal: number;
   forcedInflated: number;
   forcedTotal: number;
-  /** One-sided Fisher exact p that forced inflates less often than control, to four places; null with an empty arm. */
+  /** One-sided Fisher exact p that forced inflates less often than control, to four places; null with an empty arm.
+   *  Shown only: it does not decide the level. */
   p: number | null;
+  /** The running score the level rests on. */
+  score: number;
   /** "server" when it is the case file's verdict.evidence, "derived" when the same rule was applied here. */
   source: "server" | "derived";
 }
 
-/** The server's rule on a fork's control and forced counts: supported with at least NEEDED_PAIRS pairs and p below
- *  ALPHA, else open. */
-export function evidenceFrom(controlInflated: number, controlTotal: number, forcedInflated: number, forcedTotal: number): Evidence {
-  const pairs = Math.min(controlTotal, forcedTotal);
+/** The server's rule on a fork's control and forced counts: the running score of `agrees` (one per complete pair)
+ *  when the pairs are known, else of the least favourable pairing the counts allow (inflated standing in for the
+ *  gap), which is never cleared. */
+export function evidenceFrom(controlInflated: number, controlTotal: number, forcedInflated: number, forcedTotal: number,
+  agrees?: boolean[]): Evidence {
   const p = controlTotal > 0 && forcedTotal > 0
     ? Math.round(fisherOneSided(controlInflated, controlTotal, forcedInflated, forcedTotal).p * 1e4) / 1e4 : null;
-  return {
-    level: pairs >= NEEDED_PAIRS && p != null && p < ALPHA ? "supported" : "open",
-    pairs, needed: NEEDED_PAIRS, controlInflated, controlTotal, forcedInflated, forcedTotal, p, source: "derived",
-  };
+  let pairs: number;
+  let level: Level;
+  let score: number;
+  if (agrees) {
+    pairs = agrees.length;
+    ({ score, level } = scoreLevel(agrees));
+  } else {
+    pairs = Math.min(controlTotal, forcedTotal);
+    const agree = Math.max(0, Math.max(0, controlInflated - (controlTotal - pairs)) - Math.min(forcedInflated, pairs));
+    score = scoreLevel([...Array(agree).fill(true), ...Array(pairs - agree).fill(false)]).score;
+    level = score >= SUPPORTED_SCORE ? "supported" : "open";
+  }
+  return { level, pairs, needed: NEEDED_PAIRS, controlInflated, controlTotal, forcedInflated, forcedTotal, p, score, source: "derived" };
 }
 
-/** A fork's evidence: the server's verdict.evidence when the verdict was judged on this fork, else the server's rule
- *  applied here to the fork's control and forced counts. */
+/** A fork's evidence: the server's verdict.evidence when the verdict was judged on this fork by today's rule, else
+ *  the server's rule applied here to the fork's pairs (or, without gaps, its control and forced counts). */
 export function forkEvidence(c: Pick<CaseFile, "forks" | "verdict"> | null, f: ForkExperiment): Evidence {
   const e = c?.verdict?.evidence;
-  if (e && c && verdictFork(c as CaseFile)?.id === f.id) {
+  if (e && e.rule === RULE && c && verdictFork(c as CaseFile)?.id === f.id) {
     return {
-      level: e.level === "supported" ? "supported" : "open", pairs: e.pairs, needed: e.needed_pairs ?? NEEDED_PAIRS,
+      level: e.level, pairs: e.pairs, needed: e.needed_pairs ?? NEEDED_PAIRS,
       controlInflated: e.control_inflated, controlTotal: e.control_total, forcedInflated: e.forced_inflated, forcedTotal: e.forced_total,
-      p: e.p_value ?? null, source: "server",
+      p: e.p_value ?? null, score: e.score ?? 1, source: "server",
     };
   }
   const a = armCounts(f, "control");
   const b = armCounts(f, "forced");
-  return evidenceFrom(a.inflated, a.scored, b.inflated, b.scored);
+  const done = compare(f, "control", "forced").done;
+  return evidenceFrom(a.inflated, a.scored, b.inflated, b.scored, done.length ? done.map((d) => d.agree) : undefined);
 }
 
 /** The gaps of an arm's copies that count, by copy number. */
@@ -326,7 +354,9 @@ export function compare(fork: ForkExperiment, base: ForkArm, changed: ForkArm): 
 function compareNow(fork: ForkExperiment, base: ForkArm, changed: ForkArm): Comparison {
   const f = fork as PlannedFork;
   const dir = direction(f);
-  const recorded = base === "control" && changed === "forced";
+  // The server records control vs forced when a round ends; while a round of more pairs runs, those are the last
+  // round's, so the pairs are read from the copies instead.
+  const recorded = base === "control" && changed === "forced" && f.status !== "running" && f.status !== "rebuilding";
   const ps: Pair[] = recorded && f.pairs?.length
     ? f.pairs.map((p) => ({
       i: p.i, base: `${base}-${p.i}`, changed: `${changed}-${p.i}`, baseGap: p.control_gap, changedGap: p.changed_gap,

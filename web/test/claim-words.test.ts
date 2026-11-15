@@ -220,11 +220,12 @@ const verdict = (more: Partial<Verdict> = {}): Verdict => ({
 describe("verdict wording", () => {
   it("says suggests, with the score and the pairs, while the evidence is open (or absent)", () => {
     const c = caseOf(ROBOT_CONFIG, robotRuns(), { verdict: verdict() });
-    const want = "The fork suggests that not testing other can positions inflates the claim: 4 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 8 pairs.";
+    const want = "The fork suggests that not testing other can positions inflates the claim: 4 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 5 pairs.";
     expect(verdictText(c)).toBe(want);
-    expect(verdictEvidence(c)).toMatchObject({ level: "open", pairs: 4, needed: 8 });
+    expect(verdictEvidence(c)).toMatchObject({ level: "open", pairs: 4, needed: 5 });
     const open = caseOf(ROBOT_CONFIG, robotRuns(), { verdict: verdict({ evidence: {
-      level: "open", pairs: 4, needed_pairs: 8, control_inflated: 4, control_total: 4, forced_inflated: 0, forced_total: 4, p_value: 0.014,
+      level: "open", pairs: 4, needed_pairs: 5, control_inflated: 4, control_total: 4, forced_inflated: 0, forced_total: 4, p_value: 0.014,
+      rule: "running_score", score: 13.0321,
     } }) });
     expect(verdictText(open)).toBe(want);
     const html = verdictView(vmOf(open));
@@ -237,7 +238,8 @@ describe("verdict wording", () => {
 
   it("says caused only when supported", () => {
     const c = caseOf(ROBOT_CONFIG, robotRuns(), { verdict: verdict({ evidence: {
-      level: "supported", pairs: 10, needed_pairs: 8, control_inflated: 9, control_total: 10, forced_inflated: 1, forced_total: 10, p_value: 0.0005,
+      level: "supported", pairs: 10, needed_pairs: 5, control_inflated: 9, control_total: 10, forced_inflated: 1, forced_total: 10, p_value: 0.0005,
+      rule: "running_score", score: 32.3,
     } }) });
     expect(verdictText(c)).toBe("Not testing other can positions caused the inflated claims: 9 of 10 inflated without it, 1 of 10 with it, 10 pairs (p < 0.001).");
     const html = verdictView(vmOf(c));
@@ -245,13 +247,25 @@ describe("verdict wording", () => {
     expect(html).toContain("The investigator wrote: Testing only the practice can position caused");
   });
 
-  it("says open when there are enough pairs but the difference could be chance, and says so when the fork shows nothing", () => {
+  it("says open when there are enough pairs but the score is under 20, cleared under 1, and says so when the fork shows nothing", () => {
     const enough = caseOf(ROBOT_CONFIG, robotRuns(), { verdict: verdict({ evidence: {
-      level: "open", pairs: 8, needed_pairs: 8, control_inflated: 4, control_total: 8, forced_inflated: 2, forced_total: 8, p_value: 0.31,
+      level: "open", pairs: 8, needed_pairs: 5, control_inflated: 4, control_total: 8, forced_inflated: 2, forced_total: 8, p_value: 0.31,
+      rule: "running_score", score: 3.61,
     } }) });
-    expect(verdictText(enough)).toContain("Open: the difference could still be chance (p = 0.31).");
+    expect(verdictText(enough)).toContain("Open: the score is 3.61, under the 20 supported needs (Fisher p = 0.31, shown only).");
+    // A Fisher p under 0.05 does not make it supported: only the score does.
+    const fisher = caseOf(ROBOT_CONFIG, robotRuns(), { verdict: verdict({ evidence: {
+      level: "open", pairs: 8, needed_pairs: 5, control_inflated: 6, control_total: 8, forced_inflated: 1, forced_total: 8, p_value: 0.02,
+      rule: "running_score", score: 0.0248,
+    } }) });
+    expect(verdictText(fisher)).not.toMatch(/caused/);
+    const cleared = caseOf(ROBOT_CONFIG, robotRuns(), { verdict: verdict({ evidence: {
+      level: "cleared", pairs: 5, needed_pairs: 5, control_inflated: 4, control_total: 5, forced_inflated: 4, forced_total: 5, p_value: 0.72,
+      rule: "running_score", score: 0.00001,
+    } }) });
+    expect(verdictText(cleared)).toContain("Cleared: the score is 0.00001 after 5 pairs, under 1.");
     const none = caseOf(ROBOT_CONFIG, robotRuns(), { verdict: verdict({ numbers: { control_inflated: 2, control_total: 4, forced_inflated: 2, forced_total: 4 } }) });
-    expect(verdictText(none)).toBe("The fork does not show that not testing other can positions inflates the claim: 2 of 4 inflated without it, 2 of 4 with it, 4 pairs. Open: supported needs 8 pairs.");
+    expect(verdictText(none)).toBe("The fork does not show that not testing other can positions inflates the claim: 2 of 4 inflated without it, 2 of 4 with it, 4 pairs. Open: supported needs 5 pairs.");
   });
 
   it("softens a sentence it cannot compose from numbers, and keeps one that does not overclaim", () => {

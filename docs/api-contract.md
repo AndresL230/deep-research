@@ -176,12 +176,24 @@ One JSON file per batch (`case/case.json`), written only by `deep_research/case_
   changed) or `stopped` (stopped, or the server stopped: its scored copies count, the others are failed children).
   The fork's `children` gain the round's copies, `arms` counts every copy of every round, and `n_per_arm` becomes
   the copies per arm over all rounds.
+  A finished method fork also has (MASTER_PLAN 6.1, added with the running score) `evidence` (the same shape as the
+  verdict's below), `pairs` (`[{i, control_gap, changed_gap, agree}]`: control copy i and forced copy i, both
+  scored with a gap; `agree` when the forced gap is smaller, a tie disagrees), `score`, `p_exact` and `level`. A fork
+  saved before these gets them when read, and keeps the evidence it was saved with as `evidence_old_rule`.
 - `verdict`: `{sentence, step_label, numbers, evidence}` or null. `evidence` (`deep_research/evidence.py`,
   `VerdictEvidence` in `web/src/api.ts`): `{level, pairs, needed_pairs, control_inflated, control_total,
-  forced_inflated, forced_total, p_value}`. `pairs` is min(control, forced scored copies); `level` is `supported`
-  when pairs >= 8 and a one-sided Fisher exact test of fewer inflated forced copies than control copies gives
-  p < 0.05, else `open`. The sentence says "suggests", with the score and the pairs, while it is open, and "caused"
-  only when supported (`record_verdict` refuses a causal word while open). Verdicts saved before it get it when read.
+  forced_inflated, forced_total, p_value, rule, score, needed_score, agree, disagree, basis, p_exact}`. The level is
+  the MASTER_PLAN 6.4 running score (`rule`: `running_score`): it starts at 1 and is multiplied by 1.9 per agreeing
+  pair and 0.1 per other pair of the fork it rests on. `level` is `supported` at `score` >= `needed_score` (20),
+  `cleared` after `needed_pairs` (5) or more pairs with a score under 1, else `open`. The score stays valid when it
+  is checked after every pair, so more pairs never inflate it. `basis` is `pairs` when the fork's copies were paired
+  by their gaps, `counts` when only arm counts were known (then the least favourable pairing, inflated standing in for
+  the gap, and never `cleared`). `p_value` (one-sided Fisher exact on the counts) and `p_exact` (exact permutation test
+  on the gaps) are shown only. The sentence says "suggests", with the score and the pairs, unless it is supported,
+  and "caused" only when supported, naming the step the supporting fork forced (`record_verdict` refuses a causal
+  word otherwise, and a cause on any other step). Verdicts saved before it get it when read; evidence saved by the
+  older Fisher rule (no `rule`: supported at 8 pairs and p < 0.05) is read by the running score and kept as
+  `verdict.evidence_old_rule`. The sentence it was saved with is never changed.
   More pairs (below) change `sentence`, `arms`, `numbers` and `evidence` and add `revisions`: `[{at, by:
   "more_pairs", fork_id, sentence, evidence}]`, what the verdict said before each such change, oldest first.
 - `trace`: what the investigator's `code-tracer` subagent found, in order: `[]` until it records something (absent on
@@ -241,9 +253,9 @@ the same arms with the same steps, forked from the same moment of the same run. 
 reworded in plain code by the new level, the same rule the investigator follows (`evidence.verdict_sentence`):
 
 - open: `Skipping the step of removing duplicate rows suggests why the claims were inflated: forcing it left 1 of 6
-  copies inflated, against 4 of 6 without (6 pairs of the 8 needed, p = 0.121).`
+  copies inflated, against 4 of 6 without (6 pairs, score 0.01 of the 20 needed).`
 - supported: `Skipping the step of removing duplicate rows caused the inflated claims: forcing it left 0 of 8 copies
-  inflated, against 8 of 8 without (8 pairs, one-sided Fisher p < 0.001).`
+  inflated, against 8 of 8 without (8 pairs, score 169.84).`
 
 The step is its words from `config.domain_info.words.steps`; when `placebo` or `show` ran, their counts follow
 control's (`..., 5 of 5 after the placebo step, and 2 of 5 when only shown the problem`). The sentence it replaces
@@ -258,11 +270,11 @@ New children continue each arm's numbers: after `control-1..4` and `forced-1..4`
 {"fork_id": "f1", "n_per_arm": 4, "max_per_arm": 8, "arms": ["control", "forced"], "vm_count": 9,
  "estimate_usd": 0.03, "basis": "8 new copies at $0.0025 each (the average of 8 earlier finished copies of f1),
  plus $0.0011 for the base VM (what f1's base VM cost). Model tokens and VM time, rounded up to the cent.",
- "pairs_now": 4, "pairs_after": 8, "needed_pairs": 8, "level_now": "open", "p_value_now": 0.2143,
+ "pairs_now": 4, "pairs_after": 8, "needed_pairs": 5, "level_now": "open", "p_value_now": 0.2143,
  "budget_usd": 10.0, "spent_usd": 0.55, "over_budget": false, "budget_problem": null}
 ```
 
-`n` defaults to `needed_pairs - pairs_now`, at least 1, and is held to 1..8 (`max_per_arm`). `vm_count` is one base
+`n` defaults to the fewest agreeing pairs that would take the score to 20 (`evidence.pairs_to_support`), at least 1, and is held to 1..8 (`max_per_arm`). `vm_count` is one base
 VM plus `n` per arm. `pairs_after` assumes every new copy is scored.
 
 `estimate_usd` is one copy's spend, model tokens and VM time, times the new copies, plus one base VM; rounded up to
@@ -285,7 +297,7 @@ the same messages a first experiment does: `case` sections (`phase` `forking`, `
 Both answer `409 {"detail": "cannot run more pairs: <why>"}` when:
 
 - the batch is a fixture (`fixtures/`), or simulated;
-- it has no verdict yet, or its evidence is already `supported`;
+- it has no verdict yet, or its evidence is already `supported` or `cleared`;
 - no method experiment finished with a `control` and a `forced` arm, or the files needed to fork its run are gone;
 - it is running something else in this server (any phase but an ended one), or an experiment is running or waiting
   for approval: one experiment at a time;

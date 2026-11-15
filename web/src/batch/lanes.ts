@@ -21,7 +21,7 @@ import { LABEL_PATTERNS, cellView, chartUrl, counts, logOf, notebookCells, parse
 import { evidenceParts, trapMark, trapOf, type Mark } from "./trap";
 import { isMotionBatch, motionName, robotThumb, scoreWords, type ScoreWords } from "../robot/markup";
 import {
-  ALPHA, NEEDED_PAIRS, causeWords, ceilingText, compare, evidenceFrom, fmtFrac, forkEvidence, isDone, isDropped, isPending, kOfN, nHidden,
+  NEEDED_PAIRS, RULE, RULE_TEXT, SUPPORTED_SCORE, causeWords, ceilingText, compare, evidenceFrom, fmtFrac, forkEvidence, isDone, isDropped, isPending, kOfN, nHidden,
   verdictFork, type Comparison, type Evidence, type Level, type Pair,
 } from "./evidence";
 import { bestMotion, copyStory, forcedCheck, forcedEvent, investigatorCounts, type StepTest } from "./forkread";
@@ -847,11 +847,11 @@ const andList = (xs: readonly string[]): string =>
 const LEVEL: Record<Level, { text: string; tone: ChipTone; mark: ChipMark }> = {
   open: { text: "Open", tone: "warn", mark: "hold" },
   supported: { text: "Supported", tone: "ok", mark: "check" },
+  cleared: { text: "Cleared", tone: "idle", mark: "dot" },
 };
 /** The rule behind the chip, said once in its tooltip. */
-const RULE = `Supported needs at least ${NEEDED_PAIRS} control/forced pairs and a one-sided Fisher exact p under ${ALPHA}`;
 const levelChip = (l: Level): string =>
-  `<span class="ln-ev-lv-w" title="${attr(RULE)}">${chip(LEVEL[l].text, LEVEL[l].tone, LEVEL[l].mark, `ln-ev-level ln-ev-level--${l}`)}</span>`;
+  `<span class="ln-ev-lv-w" title="${attr(RULE_TEXT)}">${chip(LEVEL[l].text, LEVEL[l].tone, LEVEL[l].mark, `ln-ev-level ln-ev-level--${l}`)}</span>`;
 /** "p = 0.014", "p < 0.001", or "p n/a" with an empty arm. */
 const pText = (p: number | null): string => (p == null ? "p n/a" : p < 0.001 ? "p < 0.001" : `p = ${p.toFixed(p < 0.1 ? 3 : 2)}`);
 /** "4 of the 8 pairs needed, one-sided Fisher p = 0.014". */
@@ -1157,7 +1157,7 @@ function forkPoint(f: ForkExperiment, vm: BatchVm): string {
 function ceilingLine(cmp: Comparison, f: Pick<ForkExperiment, "n_per_arm" | "status">): string {
   const k = cmp.ceiling;
   const pairs = (n: number): string => `${n} ${n === 1 ? "pair" : "pairs"}`;
-  if (k.pairs >= k.needed) return `${pairs(k.pairs)}, at least the ${k.needed} needed: the level rests on the Fisher test, which must come under ${ALPHA}.`;
+  if (k.pairs >= k.needed) return `${pairs(k.pairs)}, at least the ${k.needed} needed: the level rests on the running score, which must reach ${SUPPORTED_SCORE}.`;
   if (f.status === "stopped") return `The fork stopped with ${pairs(k.pairs)}, under the ${k.needed} needed, so it cannot be supported.`;
   if (k.remaining > 0 && k.max >= k.needed) return `${capital(k.text)}.`;
   if (k.remaining > 0) return `With ${pairs(k.remaining)} still to come it can reach at most ${pairs(k.max)}, under the ${k.needed} needed, so it cannot be supported.`;
@@ -1238,11 +1238,11 @@ function evidenceSoFar(f: ForkExperiment, c: CaseFile): string {
     `<div class="ov-card ln-ev-head ds-pop" data-io data-morph-key="ev-score">` +
     `<div class="ln-ev-lv">${levelChip(ev.level)}${stopped}</div>` +
     `<p class="ln-ev-n" title="${attr(`${ev.pairs} of the ${ev.needed} pairs needed`)}"><b>${count(ev.pairs, "int", String(ev.pairs))}</b><span class="ln-muted"> of ${ev.needed} pairs</span></p>` +
-    `<p class="ln-ev-what">${esc(`Supported needs at least ${ev.needed} control/forced pairs and a one-sided Fisher exact p under ${ALPHA}.`)}</p>` +
+    `<p class="ln-ev-what">${esc(`${RULE_TEXT}. The Fisher p is shown only.`)}</p>` +
     `</div>` +
     `<div class="ov-card ln-ev-chart-c ds-pop" data-io data-morph-key="ev-chart-c">` +
     `<p class="ln-ev-sq">The plan's sequential score: <b>${count(cmp.score, "dec2", two(cmp.score), { linear: true })}</b>` +
-    `<span class="ln-muted"> each pair that goes the predicted way multiplies it by 1.9, each other by 0.1 (MASTER_PLAN 6.4). A measure of how consistently the pairs agree; it does not set the level.</span></p>` +
+    `<span class="ln-muted"> each pair that goes the predicted way multiplies it by 1.9, each other by 0.1 (MASTER_PLAN 6.4). It sets the level: supported at ${SUPPORTED_SCORE} or more.</span></p>` +
     chart +
     (rows ? `<ul class="ln-ev-pairs" data-morph-list>${rows}</ul>` : "") + `</div>` +
     `</div>` +
@@ -1591,13 +1591,20 @@ export function verdictEvidence(c: CaseFile): EvidenceNumbers | null {
   const forcedInflated = e?.forced_inflated ?? num("forced", "inflated") ?? dots?.forced?.inflated ?? 0;
   const forcedTotal = e?.forced_total ?? num("forced", "total") ?? dots?.forced?.total ?? 0;
   const derived = evidenceFrom(controlInflated, controlTotal, forcedInflated, forcedTotal);
-  if (!e) return derived;
+  // No evidence, or evidence saved by the older Fisher rule: today's rule, on the verdict's fork's pairs when it has
+  // them (its counts must be the verdict's), else on the counts.
+  if (!e || e.rule !== RULE) {
+    const f = verdictFork(c);
+    const fe = f ? forkEvidence(null, f) : null;
+    return fe && fe.controlTotal === controlTotal && fe.forcedTotal === forcedTotal ? fe : derived;
+  }
   return {
-    level: e.level === "supported" ? "supported" : "open",
+    level: e.level,
     pairs: e.pairs ?? derived.pairs,
     needed: e.needed_pairs ?? NEEDED_PAIRS,
     controlInflated, controlTotal, forcedInflated, forcedTotal,
     p: e.p_value ?? null,
+    score: e.score ?? derived.score,
     source: "server",
   };
 }
@@ -1608,7 +1615,7 @@ const OVERCLAIM = /\b(caus(e|es|ed|ing)|prov(e|es|ed|ing))\b/i;
 /**
  * The verdict as displayed, composed from the fork's numbers and the domain's words rather than the investigator's
  * sentence, which may say "caused" on a batch whose evidence is open. While open: "The fork suggests that not testing
- * other can positions inflates the claim: 4 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 8
+ * other can positions inflates the claim: 4 of 4 inflated without it, 0 of 4 with it, 4 pairs. Open: supported needs 5
  * pairs." Only a supported verdict says "caused".
  */
 export function verdictText(c: CaseFile): string {
@@ -1626,9 +1633,11 @@ export function verdictText(c: CaseFile): string {
     return `${capital(`not ${name}`)} caused the inflated claims: ${counts}${ev.p != null ? ` (${pText(ev.p)})` : ""}.`;
   }
   const lower = ev.forcedInflated / ev.forcedTotal < ev.controlInflated / ev.controlTotal;
-  const open = ev.pairs < ev.needed
-    ? `Open: supported needs ${ev.needed} pairs.`
-    : `Open: the difference could still be chance${ev.p != null ? ` (${pText(ev.p)})` : ""}.`;
+  const open = ev.level === "cleared"
+    ? `Cleared: the score is ${two(ev.score)} after ${ev.pairs} pairs, under 1.`
+    : ev.pairs < ev.needed
+      ? `Open: supported needs ${ev.needed} pairs.`
+      : `Open: the score is ${two(ev.score)}, under the ${SUPPORTED_SCORE} supported needs${ev.p != null ? ` (Fisher ${pText(ev.p)}, shown only)` : ""}.`;
   return lower
     ? `The fork suggests that not ${name} inflates the claim: ${counts}. ${open}`
     : `The fork does not show that not ${name} inflates the claim: ${counts}. ${open}`;
@@ -1874,11 +1883,11 @@ function limits(c: CaseFile, f: ForkExperiment | null, cmp: Comparison | null, e
     if (f.measures === "reporting_accuracy") out.push("The evidence level counts honest reports only. The copies could also edit their code, so what each one measured is shown beside it, outside the level.");
     const failed = Object.values(f.children ?? {}).filter((k) => k.status === "failed").length;
     if (failed) out.push(`${failed} ${failed === 1 ? "copy" : "copies"} failed and ${failed === 1 ? "was" : "were"} left out.`);
-    if (typeof f.score !== "number") out.push("The sequential score and the permutation p are computed in the browser by MASTER_PLAN 6.4, as measures; they do not set the level.");
+    if (typeof f.score !== "number") out.push("The running score and the permutation p are computed in the browser by MASTER_PLAN 6.4.");
   }
   out.push(ev.source === "server"
     ? "The level is the server's (verdict.evidence)."
-    : `The server saved no evidence level with this verdict: its rule (at least ${NEEDED_PAIRS} pairs and a one-sided Fisher exact p under ${ALPHA}) was applied in the browser.`);
+    : `The server saved no evidence level by today's rule with this verdict: that rule (${RULE_TEXT}) was applied in the browser.`);
   if (isMotionBatch(c.config)) {
     out.push(`Measured ${judgedOn(domainWords(c.config), nHidden(c.config))}. A scored run's page shows each of those positions with its real result; the investigator never sees them.`);
   }

@@ -358,10 +358,15 @@ export interface ForkExperiment {
   measures?: "reporting_accuracy" | "controller_performance";
   /** Control and changed copies matched before the run, with whether each pair went the predicted way. */
   pairs?: { i: number; control_gap: number; changed_gap: number; agree: boolean }[];
-  /** The paired score: x1.9 per agreeing pair, x0.1 per disagreeing one. */
+  /** The paired score: x1.9 per agreeing pair, x0.1 per disagreeing one. Recorded by the server since the running
+   *  score decides the level (evidence.py); read through `with_evidence` on older forks. */
   score?: number;
-  p_exact?: number;
+  p_exact?: number | null;
   level?: "open" | "supported" | "cleared";
+  /** The fork's evidence by the running score (the same shape as a verdict's), and, on a fork saved before it, the
+   *  evidence the older Fisher rule gave. */
+  evidence?: VerdictEvidence;
+  evidence_old_rule?: VerdictEvidence;
 }
 
 /** One round of more pairs on a fork (`ForkExperiment.more_pairs`). */
@@ -491,6 +496,8 @@ export interface Verdict extends SplitFields {
   /** How strong the fork evidence is (deep_research/evidence.py). The words follow it: "suggests" while open,
    *  "caused" only when supported. Absent on verdicts saved before it: read it as open. */
   evidence?: VerdictEvidence;
+  /** The evidence as it was saved by the older Fisher rule, kept when the server read it by the new one. */
+  evidence_old_rule?: VerdictEvidence;
   /** What the verdict said before each change that did not come from the investigator, oldest first: more pairs
    *  reword `sentence` by the new evidence level and update `arms`, `numbers` and `evidence`. Absent until then. */
   revisions?: VerdictRevision[];
@@ -506,18 +513,32 @@ export interface VerdictRevision {
   evidence: VerdictEvidence;
 }
 
-/** "supported": at least `needed_pairs` control and forced pairs, and the forced arm's inflated count is lower than
- *  the control arm's by a one-sided Fisher exact test at p < 0.05. Anything else is "open". */
+/** The level follows MASTER_PLAN 6.4's running score of the control/forced pairs, matched by copy number (`rule`:
+ *  "running_score"): "supported" at a score of `needed_score` (20) or more, "cleared" after `needed_pairs` (5) or
+ *  more pairs with a score under 1, else "open". Evidence without `rule` was saved by the older Fisher rule
+ *  (supported at 8 pairs and p < 0.05); the server now reads it by the new rule and keeps it as
+ *  `Verdict.evidence_old_rule`. `p_value` (one-sided Fisher on the counts) and `p_exact` (exact test on the gaps)
+ *  are shown only. */
 export interface VerdictEvidence {
-  level: "open" | "supported";
-  /** Scored control and forced copies, paired: min(control_total, forced_total). */
+  level: "open" | "supported" | "cleared";
+  /** Complete control/forced pairs; from counts alone, min(control_total, forced_total). */
   pairs: number;
+  /** The fewest agreeing pairs a supported score takes (5); 8 on evidence saved by the old rule. */
   needed_pairs: number;
   control_inflated: number;
   control_total: number;
   forced_inflated: number;
   forced_total: number;
   p_value: number | null;
+  /** Added with the running score; absent on evidence saved by the old rule. */
+  rule?: "running_score";
+  score?: number;
+  needed_score?: number;
+  agree?: number;
+  disagree?: number;
+  /** "pairs" when the fork's copies were paired by their gaps, "counts" when only the arm counts were known. */
+  basis?: "pairs" | "counts";
+  p_exact?: number | null;
 }
 
 /** Whether the runs the code-tracer traced fail at the same line with the same symptom. */
@@ -815,7 +836,7 @@ export interface BatchListItem {
 
 /** Where the fork experiment and the verdict are. `open` and `supported` are the verdict's evidence level
  *  (deep_research/evidence.py); `fork_stopped` is a fork the batch stopped before it finished. */
-export type VerdictState = "none" | "awaiting_approval" | "fork_running" | "fork_stopped" | "forked" | "open" | "supported";
+export type VerdictState = "none" | "awaiting_approval" | "fork_running" | "fork_stopped" | "forked" | "open" | "supported" | "cleared";
 
 export interface BatchSummary {
   /** The domain's name (`config.domain`, "tabular" for batches saved before domains) and title. */
