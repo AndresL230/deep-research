@@ -1,4 +1,4 @@
-"""The humanoid evaluation: episodes in worker processes through sim.evaluate.run_jobs with runner "humanoid"."""
+"""The humanoid evaluation: episodes in worker processes through sim.evaluate.run_jobs with runner "humanoid_push"."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def test_record_dir_keeps_every_episode(tmp_path):
 def test_a_hanging_controller_is_a_timeout_with_the_humanoid_keys(tmp_path):
     hang = tmp_path / "hang.py"
     hang.write_text("class Controller:\n    def reset(self, task): pass\n    def act(self, obs):\n        while True: pass\n")
-    [r] = run_jobs([{"controller_path": str(hang), "push": [0, 50], "seed": 0, "runner": "humanoid"}], timeout=3, workers=1)
+    [r] = run_jobs([{"controller_path": str(hang), "push": [0, 50], "seed": 0, "runner": "humanoid_push"}], timeout=3, workers=1)
     assert r["end_reason"] == "timeout" and r["outcome"] == "error" and not r["success"]
     assert r["push"] == {"angle_deg": 0.0, "force_n": 50.0} and "Timeout" in r["exception"]
 

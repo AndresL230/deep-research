@@ -1,4 +1,4 @@
-"""The 3D viewer's routes for the humanoid: the G1 scene, and the poses and push of a `g1-motion/1` file."""
+"""The 3D viewer's routes for the humanoid: the G1 scene, and the poses and push of a `g1-push-motion/1` file."""
 
 import gzip
 import json
@@ -26,7 +26,7 @@ def batch(tmp_path_factory):
     root = tmp_path_factory.mktemp("batches")
     d = root / "hb"
     (d / "case").mkdir(parents=True)
-    (d / "case" / "case.json").write_text(json.dumps({"config": {"domain": "humanoid", "visual": "motion"}, "phase": "done",
+    (d / "case" / "case.json").write_text(json.dumps({"config": {"domain": "humanoid_push", "visual": "motion"}, "phase": "done",
                                                       "runs": {"r01": {"status": "inflated", "motion_files": [MOTION]}}}))
     _, motion = run_episode("sim/humanoid/controllers/one_spot.py", [180, 35])
     write_motion(motion, d / MOTION)

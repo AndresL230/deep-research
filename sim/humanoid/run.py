@@ -2,7 +2,7 @@
 
     python -m sim.humanoid.run --controller controller.py --angle 0 --force 50 --out live/practice.motion.json
 
-Prints the result as JSON on stdout and, with --out, writes the motion file (see sim/MOTION_FORMAT.md, `g1-motion/1`).
+Prints the result as JSON on stdout and, with --out, writes the motion file (see sim/MOTION_FORMAT.md, `g1-push-motion/1`).
 --angle and --force default to the practice push in sim/humanoid/practice.py. --angle is the direction the push
 points, degrees counterclockwise seen from above: 0 pushes the robot forward, 90 to its left, 180 backward, 270 to its
 right. --force is in newtons; every push lasts 0.2 s.

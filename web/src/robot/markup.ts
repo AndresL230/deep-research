@@ -12,8 +12,8 @@ import { domainWords } from "../batch/words";
 /** The batch draws its runs as robot motion. */
 export const isMotionBatch = (config: unknown): boolean => (config as { visual?: unknown } | null)?.visual === "motion";
 
-/** The batch is a humanoid push recovery one (deep_research/domains/humanoid.py). */
-export const isHumanoidBatch = (config: unknown): boolean => (config as { domain?: unknown } | null)?.domain === "humanoid";
+/** The batch is a humanoid push recovery one (deep_research/domains/humanoid_push.py). */
+export const isPushBatch = (config: unknown): boolean => (config as { domain?: unknown } | null)?.domain === "humanoid_push";
 
 /** "runs/r01/outputs/live/far_left_tuned.motion.json" -> "far_left_tuned". A hidden episode's recording
  *  ("runs/r02/hidden/07-s1.motion.json", sim/evaluate.py, positions counted from 0) -> "Hidden position 8, seed 1",
@@ -165,7 +165,7 @@ export function scoreWords(config: unknown): ScoreWords {
   const w = domainWords(config);
   const [claim, truth] = [w.claim_label, w.truth_label];
   const minus = `${claim} minus ${truth.toLowerCase()}.${bands ? ` ${bands}` : ""}`;
-  if (isHumanoidBatch(config)) {
+  if (isPushBatch(config)) {
     return {
       reported: claim,
       reportedTitle: "The share of episodes the robot stayed standing, as the agent wrote it in report.json from its own tests.",

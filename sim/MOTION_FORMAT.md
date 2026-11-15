@@ -110,7 +110,7 @@ The `result` object is exactly what `run_episode` returns. Keys always present:
            "end_reason":"controller_done"}}
 ```
 
-# Humanoid motion files (`g1-motion/1`)
+# Humanoid motion files (`g1-push-motion/1`)
 
 The push recovery sim (`sim/humanoid/`) records its episodes in a sibling format: the same file rules (one compact
 JSON object, at most `sim.motion.MAX_BYTES`, written and read by `sim.motion`'s `write_motion` and `read_motion`, the

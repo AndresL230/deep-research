@@ -1,6 +1,6 @@
-"""Motion files of the push recovery sim: `g1-motion/1`, documented in `sim/MOTION_FORMAT.md` next to `panda-motion/1`.
+"""Motion files of the push recovery sim: `g1-push-motion/1`, documented in `sim/MOTION_FORMAT.md` next to `panda-motion/1`.
 
-    {"format": "g1-motion/1",
+    {"format": "g1-push-motion/1",
      "header": {"model_id", "joint_names", "actuator_names", "push", "fps", "nq"},
      "frames": [{"t", "qpos", "ctrl", "com", "feet"}, ...],
      "result": {...}}
@@ -14,7 +14,7 @@ import math
 
 from sim.motion import DECIMALS, LOW_DECIMALS, LOW_FPS, MAX_BYTES, MOTION_FPS, _is_num_list, dumps, read_motion, round_list, write_motion
 
-FORMAT = "g1-motion/1"
+FORMAT = "g1-push-motion/1"
 
 HEADER_KEYS = ("model_id", "joint_names", "actuator_names", "push", "fps", "nq")
 FRAME_KEYS = ("t", "qpos", "ctrl", "com", "feet")
@@ -27,7 +27,7 @@ __all__ = [
 
 
 def validate_motion(motion) -> list[str]:
-    """Return a list of problems with `motion` (empty if it matches `g1-motion/1`)."""
+    """Return a list of problems with `motion` (empty if it matches `g1-push-motion/1`)."""
     problems: list[str] = []
     if not isinstance(motion, dict):
         return ["motion is not a dict"]

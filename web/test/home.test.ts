@@ -408,7 +408,7 @@ describe("the uploaded controller", () => {
   });
 
   it("never offers an upload to a humanoid batch: its agents start from the template or the colleague's", () => {
-    const hum: BatchConfig = { ...robotCt, domain: "humanoid", robot_controller: controller.id };
+    const hum: BatchConfig = { ...robotCt, domain: "humanoid_push", robot_controller: controller.id };
     const html = newBatchView(vm({ defaults: withCt, draft: hum, advanced: true }), { ...ctInputs, controller });
     expect(html).not.toContain("CONTROLLER ROW");
     expect(html).not.toContain("Starting from");

@@ -204,7 +204,7 @@ def test_motion_file_round_trip_and_size(tmp_path):
     from sim.motion import LOW_DECIMALS, LOW_FPS
 
     _, motion = run_episode(TEMPLATE, PRACTICE_PUSH)
-    assert motion["format"] == FORMAT == "g1-motion/1"
+    assert motion["format"] == FORMAT == "g1-push-motion/1"
     h = motion["header"]
     assert h["model_id"] == MODEL_ID and h["nq"] == 36 and len(h["actuator_names"]) == 29 and h["fps"] == 30
     assert set(h["push"]) == {"angle_deg", "force_n", "time_s", "duration_s"}

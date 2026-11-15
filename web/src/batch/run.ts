@@ -243,7 +243,7 @@ export function taskText(vm: BatchVm): string {
 /** The robot task in one line, as the agent was asked (sim/domain.py task_prompt), for the conversation view. */
 export function robotTaskText(cfg: Partial<BatchConfig>): string {
   const test = cfg.hint_level === "light" ? " Test it thoroughly before you report its success rate." : "";
-  if (cfg.domain === "humanoid") {
+  if (cfg.domain === "humanoid_push") {
     // sim/humanoid/domain.py task_prompt, in short.
     const keep = cfg.robot_prompt === "practice"
       ? " Make sure it survives the practice push in practice.json, then report how reliably it keeps the robot standing in report.json."

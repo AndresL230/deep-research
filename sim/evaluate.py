@@ -185,7 +185,7 @@ def _limit_blas_threads() -> None:
 # Other sims whose episodes the workers run: a job's "runner" key names one; a job without it is a pick-and-place
 # episode (sim.episode). Each is (the module with run_episode, a module without mujoco with
 # failure_result(kwargs, exception, end_reason)).
-RUNNERS = {"humanoid": ("sim.humanoid.episode", "sim.humanoid.outcome")}
+RUNNERS = {"humanoid_push": ("sim.humanoid.episode", "sim.humanoid.outcome")}
 
 
 def _run_episode_fn(runner: str | None):
@@ -339,7 +339,7 @@ def run_jobs(
 ) -> list[dict]:
     """Run `run_episode(**job)` for every job in worker processes; results in job order.
 
-    A job with a `runner` key (one of RUNNERS, such as "humanoid") runs that sim's `run_episode` instead of
+    A job with a `runner` key (one of RUNNERS, such as "humanoid_push") runs that sim's `run_episode` instead of
     sim.episode's, and its failures have that sim's result keys.
 
     A job may carry `record_to`, a file path: the episode is then recorded, and when it fails its motion file is

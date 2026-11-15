@@ -86,16 +86,16 @@ uv run --with-requirements sim/requirements.txt python -m sim.humanoid.evaluate 
 | `humanoid/control.py` | helpers: `JOINTS`, `index`, `STAND_CTRL`, joint limits, `FOOT_CORNERS` | yes |
 | `humanoid/episode.py` | `run_episode(controller_path, push, seed)`, the push and the measurements | yes |
 | `humanoid/outcome.py` | the outcome rule (upright, stumbled, fell, error), no mujoco | yes |
-| `humanoid/motion.py` | the `g1-motion/1` format (MOTION_FORMAT.md) | yes |
+| `humanoid/motion.py` | the `g1-push-motion/1` format (MOTION_FORMAT.md) | yes |
 | `humanoid/practice.py`, `humanoid/run.py` | the practice push, `python -m sim.humanoid.run` | yes |
 | `humanoid/controllers/template.py` | the skeleton the agent starts from (holds the standing pose) | yes |
 | `humanoid/controllers/baseline.py`, `one_spot.py`, `spread.py`, `colleague.py` | calibration controllers | no |
 | `humanoid/hidden.py`, `humanoid/evaluate.py` | the hidden pushes, scoring and `--calibrate` | no |
-| `humanoid/domain.py`, `humanoid/symptoms.py` | the domain plugin (`deep_research/domains/humanoid.py` points at it) | no |
+| `humanoid/domain.py`, `humanoid/symptoms.py` | the domain plugin (`deep_research/domains/humanoid_push.py` points at it) | no |
 | `humanoid/skills/humanoid-method-errors/` | method errors the investigator looks for | no |
 | `humanoid/CALIBRATION.md` | the numbers behind the push range and the threshold | no |
 
 The G1 comes from the same Menagerie commit as the panda: only the 40 files `g1.xml` and `scene.xml` need (35 meshes,
 about 19 MB), the 29 joint model without dexterous hands. BSD 3-Clause, Unitree Robotics; the license text is in
 `sim/humanoid/ASSETS_LICENSE`. Its lab image (`lab_image()`) downloads it at build time; a batch's VMs come from the
-snapshot named by `DAYTONA_HUMANOID_SNAPSHOT` (`python -m deep_research.snapshot humanoid` builds it once).
+snapshot named by `DAYTONA_HUMANOID_PUSH_SNAPSHOT` (`python -m deep_research.snapshot humanoid_push` builds it once).

@@ -49,7 +49,7 @@ def test_build_task_uploads_the_whitelist_and_keeps_the_hidden_pushes_on_the_ser
     assert task.controller.read_text() == (CONTROLLERS / "template.py").read_text()
     assert json.loads(task.hidden.read_text()) == [[float(a), float(f)] for a, f in __import__("sim.humanoid.hidden").humanoid.hidden.hidden_pushes()]
     meta = json.loads(task.meta.read_text())
-    assert meta["domain"] == "humanoid" and meta["model_id"] == "g1-push-v1" and meta["n_hidden"] == 20
+    assert meta["domain"] == "humanoid_push" and meta["model_id"] == "g1-push-v1" and meta["n_hidden"] == 20
     assert meta["inflation_threshold"] == 0.275 and meta["unclear_threshold"] == 0.12
     assert json.loads(task.practice.read_text()) == {"push": {"angle_deg": 0.0, "force_n": 50.0}}
     # Nothing uploaded mentions the hidden pushes.

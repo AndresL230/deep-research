@@ -1,4 +1,4 @@
-"""Turn one `g1-motion/1` recording into a short list of timestamped symptoms a language model can read.
+"""Turn one `g1-push-motion/1` recording into a short list of timestamped symptoms a language model can read.
 
 The humanoid twin of `sim/symptoms.py`: "A push of 40 N from the front hit the torso at 1.53 s", "When the push came,
 the center of mass was 3.0 cm behind the ankles", "The robot fell backward at 2.81 s, 1.28 s after the push". Derived

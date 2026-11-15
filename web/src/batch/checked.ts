@@ -18,7 +18,7 @@ import type { BatchConfig, DomainWords, HiddenOutcome, HiddenResult, PushOutcome
 import { attr, esc } from "../ui";
 import { pct } from "./format";
 import { domainWords, judgedOn as judgedOnAll, TABULAR_WORDS } from "./words";
-import { cm, isHumanoidBatch, isMotionBatch, pushText, robotView } from "../robot/markup";
+import { cm, isPushBatch, isMotionBatch, pushText, robotView } from "../robot/markup";
 import "../robot/mount";
 
 // ── words ────────────────────────────────────────────────────────────────────
@@ -478,7 +478,7 @@ function tabularChecked(key: string, s: CheckedSubject, config: unknown): string
  */
 export function checkedView(batch: string, key: string, s: CheckedSubject | null | undefined, config: unknown): string {
   if (!s) return "";
-  if (isHumanoidBatch(config)) return pushChecked(batch, key, s, config);
+  if (isPushBatch(config)) return pushChecked(batch, key, s, config);
   return isMotionBatch(config) ? robotChecked(batch, key, s, config) : tabularChecked(key, s, config);
 }
 

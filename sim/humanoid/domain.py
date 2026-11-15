@@ -118,7 +118,7 @@ class HumanoidConfig:
     eval_seeds: tuple[int, ...] = (0,)
     max_time: float = 5.0
     inflation_threshold: float | None = None
-    domain: str = "humanoid"
+    domain: str = "humanoid_push"
 
 
 @dataclass
@@ -232,7 +232,7 @@ def build_task(cfg: HumanoidConfig, out_dir: Path) -> HumanoidTaskFiles:
     except Exception:  # noqa: BLE001 - informational only
         model_id = None
     files.meta.write_text(json.dumps({
-        "domain": "humanoid",
+        "domain": "humanoid_push",
         "model_id": model_id,
         "seed": cfg.seed,
         "hint_level": cfg.hint_level,
@@ -591,7 +591,7 @@ def trace_run(task: HumanoidTaskFiles, run_dir: Path, max_episodes: int = 3, wor
     out = run_dir / TRACE_DIR
     out.mkdir(parents=True, exist_ok=True)
     rel = run_dir.name
-    jobs = [{"controller_path": str(controller.resolve()), "push": [float(a), float(f)], "seed": seed, "runner": "humanoid",
+    jobs = [{"controller_path": str(controller.resolve()), "push": [float(a), float(f)], "seed": seed, "runner": "humanoid_push",
              "record_to": str(out / f"hidden_{i:02d}.motion.json")} for i, (a, f) in enumerate(pushes)]
     results = run_jobs(jobs, workers=workers or TRACE_WORKERS)
     episodes, successes = [], 0
