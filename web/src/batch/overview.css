@@ -175,3 +175,6 @@
 @media (prefers-reduced-motion: reduce) {
   .ov-step, .ov-step-line::after, .ov-ring-p, .ov-bar, .pgr-ic, .pgr-prev { transition:none; }
 }
+
+/* the paper a batch builds on, as the step before the agents: a link, drawn as a finished step */
+.ov-step--paper { text-decoration:none; }

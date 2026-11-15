@@ -6,6 +6,7 @@
 // attributes and in its `data-morph-key`: when the list of files changes, the key does, and a new one replaces it.
 
 import { attr, esc } from "../ui";
+import { count } from "../motion";
 import { ServerError, type EpisodeResult, type Push } from "./data";
 import { domainWords } from "../batch/words";
 
@@ -94,16 +95,62 @@ export function researchNote(config: unknown, compact = false): string {
 /** A table cell's text with the paper's symbols set as symbols: `E_vel` is an italic E with "vel" below the line. */
 const symbols = (text: string): string => esc(text).replace(/\bE_([a-z]+)\b/g, "<i>E</i><sub>$1</sub>");
 
+/** A setup as rows of one list, each with its place in the order they show in. */
+export function setupList(r: ResearchSource): string {
+  const rows = r.setup.map(([what, how], i) => `<div class="rp-row" style="--i:${i}"><dt>${esc(what)}</dt><dd>${symbols(how)}</dd></div>`).join("");
+  return `<dl class="rp-list" style="--rows:${Math.ceil(r.setup.length / 2)}">${rows}</dl>`;
+}
+
+/** What one scored run has of the hidden test, as far as the paper card reads it. */
+interface MeasuredRun { status?: unknown; hidden_results?: unknown }
+const SCORED = new Set(["honest", "inflated", "unclear"]);
+const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const tile = (label: string, value: string, unit: string, sub: string): string =>
+  `<div class="rp-tile"><dt>${label}</dt><dd><span class="rp-num">${value}</span>${unit ? `<span class="rp-unit">${esc(unit)}</span>` : ""}</dd><span class="rp-tile-s">${esc(sub)}</span></div>`;
+
+/**
+ * The paper's measures, taken on this batch's hidden episodes so far: for a tracking batch ExBody2's three errors,
+ * for a LIBERO-PRO batch the share of episodes that ended in the basket. The numbers are means over every hidden
+ * episode of every scored run, so they fill in and move as agents are scored; before the first, the tiles are empty
+ * and say so. A tracking error of an episode where the robot fell is measured up to the fall, as the sim does.
+ */
+export function measuredTiles(config: unknown, runs: Record<string, MeasuredRun> | null | undefined): string {
+  const source = researchSource(config);
+  if (!source) return "";
+  const scored = Object.values(runs ?? {}).filter((r) => SCORED.has(String(r.status)) && Array.isArray(r.hidden_results) && r.hidden_results.length);
+  const episodes = scored.flatMap((r) => r.hidden_results as Record<string, unknown>[]);
+  const n = episodes.length;
+  const nums = (key: string): number[] => episodes.map((e) => e[key]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  const shown = (v: number | null, fmt: "dec2" | "dec3" | "pct0" | "int", text: string): string => (v == null ? "–" : count(v, fmt, text));
+  let tiles: string;
+  if ((config as { domain?: unknown } | null)?.domain === "humanoid_track") {
+    const kp = mean(nums("e_mpkpe")), jp = mean(nums("e_mpjpe")), vel = mean(nums("e_vel"));
+    const tracked = episodes.filter((e) => e.result === "tracked").length;
+    tiles = tile("<i>E</i><sub>mpkpe</sub>", shown(kp == null ? null : kp * 100, "dec2", kp == null ? "" : (kp * 100).toFixed(2)), kp == null ? "" : "cm", "key body positions")
+      + tile("<i>E</i><sub>mpjpe</sub>", shown(jp, "dec3", jp == null ? "" : jp.toFixed(3)), jp == null ? "" : "rad", "joint angles")
+      + tile("<i>E</i><sub>vel</sub>", shown(vel, "dec2", vel == null ? "" : vel.toFixed(2)), vel == null ? "" : "m/s", "root velocity")
+      + tile("Tracked", n ? `${count(tracked, "int", String(tracked))}<span class="rp-of"> of ${n}</span>` : "–", "", "hidden episodes");
+  } else {
+    const placed = episodes.filter((e) => e.result === "placed").length;
+    tiles = tile("In the basket", n ? `${count(placed, "int", String(placed))}<span class="rp-of"> of ${n}</span>` : "–", "", "hidden episodes")
+      + tile("Success rate", shown(n ? placed / n : null, "pct0", n ? `${Math.round((placed / n) * 100)}%` : ""), "", "under the position changes");
+  }
+  const note = n ? `Mean over ${n} hidden ${n === 1 ? "episode" : "episodes"} of ${scored.length} ${scored.length === 1 ? "agent" : "agents"}` : "Fills in as agents are scored";
+  return `<div class="rp-measured" data-morph-key="measured">`
+    + `<h4 class="rp-sub">${esc(`${source.name}'s measures on this batch`)}<span class="rp-sub-n">${esc(note)}</span></h4>`
+    + `<dl class="rp-tiles">${tiles}</dl>`
+    + `</div>`;
+}
+
 /**
  * A batch's paper, as one of the batch page's own cards: a "Research paper" tag, the paper's title, a link to it on
- * arXiv, and the batch's setup as one list of what and how, in two columns. The rows show one after another when the
- * card first appears (robot.css; at once for a reader who asked for less motion). Empty for a batch that builds on
- * no paper.
+ * arXiv, the paper's measures taken on this batch so far (`measuredTiles`, with `runs`), and the batch's setup as one
+ * list of what and how, in two columns. The rows show one after another when the card first appears (robot.css; at
+ * once for a reader who asked for less motion). Empty for a batch that builds on no paper.
  */
-export function researchCard(config: unknown): string {
+export function researchCard(config: unknown, runs?: Record<string, MeasuredRun> | null): string {
   const r = researchSource(config);
   if (!r) return "";
-  const rows = r.setup.map(([what, how], i) => `<div class="rp-row" style="--i:${i}"><dt>${esc(what)}</dt><dd>${symbols(how)}</dd></div>`).join("");
   return `<section class="ov-card rp" data-morph-key="research" aria-label="${attr(`Research paper: ${r.name}`)}">`
     + `<div class="rp-head">`
     + `<div class="rp-id">`
@@ -112,9 +159,10 @@ export function researchCard(config: unknown): string {
     + `</div>`
     + `<a class="rp-open" href="${attr(r.url)}" target="_blank" rel="noopener" title="Open the paper on arXiv">${esc(r.paper)}${EXTERNAL}</a>`
     + `</div>`
+    + (runs === undefined ? "" : measuredTiles(config, runs))
     + `<div class="rp-setup">`
     + `<h4 class="rp-sub">Setup of this batch</h4>`
-    + `<dl class="rp-list" style="--rows:${Math.ceil(r.setup.length / 2)}">${rows}</dl>`
+    + setupList(r)
     + `</div>`
     + `</section>`;
 }

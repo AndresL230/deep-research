@@ -278,3 +278,41 @@ describe("the research a batch builds on", () => {
     expect(form({ ...base, domain: "robot_arm", robot_positions: "default" })).not.toContain("arxiv.org");
   });
 });
+
+describe("the paper's measures on a batch", () => {
+  const ep = (result: string, kp: number | null, jp: number | null, vel: number | null) => ({ result, e_mpkpe: kp, e_mpjpe: jp, e_vel: vel });
+
+  it("are empty until an agent is scored, then the means over every hidden episode so far", async () => {
+    const { measuredTiles, researchCard } = await import("../src/robot/markup");
+    const none = measuredTiles(cfg, { r01: { status: "running" } });
+    expect(none).toContain("ExBody2&#39;s measures on this batch");
+    expect(none).toContain("Fills in as agents are scored");
+    expect(none.match(/<span class="rp-num">–<\/span>/g)).toHaveLength(4);
+    const runs = {
+      r01: { status: "honest", hidden_results: [ep("tracked", 0.01, 0.01, 0.1), ep("tracked", 0.03, 0.02, 0.3)] },
+      r02: { status: "inflated", hidden_results: [ep("fell", 0.08, 0.03, 0.5), ep("error", null, null, null)] },
+      r03: { status: "running", hidden_results: [ep("tracked", 9, 9, 9)] },
+      r04: { status: "failed" },
+    };
+    const some = measuredTiles(cfg, runs);
+    expect(some).toContain("Mean over 4 hidden episodes of 2 agents");
+    expect(some).toMatch(/<i>E<\/i><sub>mpkpe<\/sub>.*data-count="4" data-fmt="dec2" data-text="4\.00".*<span class="rp-unit">cm<\/span>/s);
+    expect(some).toMatch(/<i>E<\/i><sub>mpjpe<\/sub>.*data-count="0\.02" data-fmt="dec3" data-text="0\.020".*rad/s);
+    expect(some).toMatch(/<i>E<\/i><sub>vel<\/sub>.*data-fmt="dec2" data-text="0\.30".*m\/s/s);
+    expect(some).toMatch(/Tracked.*data-count="2" data-fmt="int".*of 4/s);
+    // The card has them when it is given the runs, and not on a page that has none to give.
+    expect(researchCard(cfg, runs)).toContain("Mean over 4 hidden episodes of 2 agents");
+    expect(researchCard(cfg)).not.toContain("rp-measured");
+    expect(measuredTiles({ domain: "humanoid" }, runs)).toBe("");
+  });
+
+  it("for a LIBERO-PRO batch are the episodes that ended in the basket", async () => {
+    const { measuredTiles } = await import("../src/robot/markup");
+    const libero = { domain: "robot_arm", robot_positions: "libero_pro" };
+    const html = measuredTiles(libero, { r01: { status: "honest", hidden_results: [{ result: "placed" }, { result: "missed" }, { result: "placed" }, { result: "tipped" }] } });
+    expect(html).toContain("LIBERO-PRO&#39;s measures on this batch");
+    expect(html).toMatch(/In the basket.*data-count="2" data-fmt="int".*of 4/s);
+    expect(html).toMatch(/Success rate.*data-count="0\.5" data-fmt="pct0" data-text="50%"/s);
+    expect(html).toContain("Mean over 4 hidden episodes of 1 agent");
+  });
+});

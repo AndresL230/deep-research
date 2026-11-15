@@ -124,6 +124,15 @@
 .rp-open { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border:1px solid var(--border-strong); border-radius:var(--r-ctl); font-size:12px; font-weight:500; font-variant-numeric:tabular-nums; color:var(--fg-70); text-decoration:none; white-space:nowrap; }
 .rp-open:hover, .rp-open:focus-visible { background:var(--hover); color:var(--fg); }
 .rp-sub { margin:0 0 4px; font-size:12.5px; font-weight:400; color:var(--fg-55); }
+.rp-sub-n { margin-left:10px; color:var(--fg-40); }
+/* the paper's measures on this batch so far: one tile each, the number counting to its value as agents are scored */
+.rp-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin:0; }
+.rp-tile { display:flex; flex-direction:column; gap:2px; min-width:0; padding:12px 14px; border:1px solid var(--border); border-radius:var(--r-ctl); background:var(--bg); }
+.rp-tile dt { font-size:12.5px; color:var(--fg-55); }
+.rp-tile dt sub { font-size:.72em; }
+.rp-tile dd { margin:0; display:flex; align-items:baseline; gap:5px; font-size:24px; line-height:1.2; font-weight:500; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; }
+.rp-unit, .rp-of { font-size:13px; font-weight:400; letter-spacing:0; color:var(--fg-55); }
+.rp-tile-s { font-size:12px; color:var(--fg-40); }
 .rp-list { display:grid; grid-auto-flow:column; grid-template-rows:repeat(var(--rows), auto); grid-auto-columns:minmax(0, 1fr); column-gap:36px; margin:0; }
 .rp-row { display:grid; grid-template-columns:104px minmax(0, 1fr); gap:12px; padding:9px 0; border-top:1px solid var(--border); font-size:13.5px; line-height:1.4; animation:rp-in .3s var(--fx-ease, ease-out) calc(.15s + var(--i) * .07s) 1 both; }
 .rp-row dt { font-size:12.5px; color:var(--fg-55); }
