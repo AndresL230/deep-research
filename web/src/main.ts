@@ -56,7 +56,7 @@ import {
 } from "./batch/suspects";
 import { trapMark, trapOf } from "./batch/trap";
 import { eventsToConvo, isRunPanel, logView, runSummaryView, taskText, togglePanel, type RunPanel } from "./batch/run";
-import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule } from "./batch/replay";
+import { ScrollFollow, agentTimes, caseAt, eventsAt, isScrollKey, replayBar, replayDuration, replaySchedule, replayable } from "./batch/replay";
 import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook";
 import { fetchCosts, fetchFoolrate, fetchLessons, type CostReport, type FoolrateReport } from "./api";
 import { foolrateView } from "./batch/foolrate";
@@ -715,11 +715,17 @@ async function loadReplay(b: BatchState, full: CaseFile): Promise<void> {
     b.events = Object.fromEntries(keys.map((k, i) => [k, logs[i]]));
     b.full = full;
     b.live = false;
-    const duration = replayDuration(full, b.events);
-    // Opened straight onto a run or a later page: show it whole. Opened onto the batch: play it from the start.
-    const atEnd = S.route.name !== "batch" || !!S.route.step || params.has("end");
-    b.replay = { t: atEnd ? duration : replayStart(b), duration, playing: !atEnd && duration > 0, speed: DEFAULT_SPEED };
-    if (b.replay.playing) runClock();
+    // A batch run live on this platform is shown whole, never on a timeline (`replayable`): finished, or reached
+    // over HTTP because the websocket failed.
+    if (replayable(full)) {
+      const duration = replayDuration(full, b.events);
+      // Opened straight onto a run or a later page: show it whole. Opened onto the batch: play it from the start.
+      const atEnd = S.route.name !== "batch" || !!S.route.step || params.has("end");
+      b.replay = { t: atEnd ? duration : replayStart(b), duration, playing: !atEnd && duration > 0, speed: DEFAULT_SPEED };
+      if (b.replay.playing) runClock();
+    } else {
+      b.replay = null;
+    }
   } catch (e) {
     b.loadError = message(e, "Couldn't load the batch.");
   }

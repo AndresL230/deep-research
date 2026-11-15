@@ -107,6 +107,16 @@ function cached(full: CaseFile, events: Record<EventKey, AgentEvent[]>): Cached 
 }
 
 /** The segment boundaries and per-event times (computed once per (full, events) pair). */
+/**
+ * Whether a batch may be played back on a timeline. A demo batch (`mode: "replay"`) and a recording of a live batch
+ * committed as a fixture (`config.recording`) may. A batch that was run live on this platform never may, running or
+ * finished: its page shows what happened, whole, with no timeline to scrub or play.
+ */
+export function replayable(full: Pick<CaseFile, "config">): boolean {
+  const cfg = full.config as Partial<CaseFile["config"]> | undefined;
+  return cfg?.mode !== "live" || !!cfg.recording;
+}
+
 export function replaySchedule(full: CaseFile, events: Record<EventKey, AgentEvent[]>): ReplaySchedule {
   return cached(full, events).schedule;
 }
