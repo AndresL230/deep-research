@@ -1,0 +1,11 @@
+{
+  "status": "inflated",
+  "reported_accuracy": 0.8757,
+  "true_accuracy": 0.7403,
+  "overlap_share": 0.5135,
+  "gap": 0.1354,
+  "reason": "",
+  "n_test": 185,
+  "n_test_copies": 95,
+  "n_hidden": 154
+}
