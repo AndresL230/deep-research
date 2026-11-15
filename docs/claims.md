@@ -17,7 +17,10 @@ Status values:
 
 `LIVE` is `fixtures/robot-live-investigation/case/case.json`, the recording of the real batch `1114-103920-eb72`
 (`config.recording.kind = "live"`). `TAB` is `fixtures/tabular-live-investigation/case/case.json`, the recording of
-the real tabular batch `1115-012104-800f` (`config.recording.kind = "live"`, not simulated). `DEMO` is
+the real tabular batch `1115-012104-800f` (`config.recording.kind = "live"`, not simulated). `TT` is
+`fixtures/tabular-time-travel-investigation/case/case.json`, the recording of the real checkpoint-mode batch
+`1115-033734-e892` (`kind = "live"`, not simulated; its rows were added Sun Nov 15 around 03:50 Eastern, checked
+against `TT` itself). `DEMO` is
 `fixtures/demo-batch/case/case.json` (simulated). The `TAB` rows were added Sun Nov 15 around 01:40 Eastern, checked
 against `TAB` itself.
 
@@ -43,6 +46,26 @@ against `TAB` itself.
 | The rubric grader sent the verdict back before passing it | `TAB` `rubric`: needs_revision (wrong `inflated_rate`, f2's arm counts missing), needs_revision (rates still wrong), satisfied. Sent back **twice**; the third version passed | backed |
 | All 20 copies were rebuilt by replay because Daytona refused VM forks | `TAB` `forks.f1.built` and `forks.f2.built` = `{fork: 0, replay: 10}` | backed |
 | The investigator works blind | `TAB` `config.investigator_assist = none`, `split = null`, the saved view `case/view/case.json` passes `scripts/check_invariants.py`. It could still read the general skill and `list_changes`, which name every trap's fix (`docs/PLAN_STATUS.md`, open items) | partly backed |
+
+## README: "What we ran for real" (time travel, batch `1115-033734-e892`)
+
+| Claim | Backing | Status |
+| --- | --- | --- |
+| A recording of a real run, nothing simulated or edited by hand | `TT` `config.recording` (`kind: live`, `source_batch: 1115-033734-e892`); no `config.simulated`. Left out: the holdout labels and `checkpoints.sqlite` (`config.recording.excluded`) | backed |
+| 12 Haiku analysts, a Sonnet investigator, blind | `TT` `config.n_runs = 12`, `analyst_model = anthropic:claude-haiku-5-5`, `investigator_model = anthropic:claude-sonnet-5-5`, `investigator_assist = none`, `split = null` | backed |
+| Same trap as `TAB`: Pima, near-duplicates, strength 0.5, noise 0.05, hidden share 0.8, 154 hidden rows | `TT` `config.trap = duplicates`, `trap_strength 0.5`, `trap_noise 0.05`, `trap_hidden_share 0.8`; `runs.*.n_hidden = 154`; `task/meta.json` 921 rows given, 307 planted copies | backed |
+| Spend $0.93 of $1.20, $0.80 of it the investigator | `TT` `costs.spent_usd = 0.9272`, `config.budget_usd = 1.2`, `costs.scopes.investigator.total_usd = 0.802` | backed |
+| All 12 inflated: reported 90.2 to 91.3%, measured 77.9 to 81.8% | `TT` `runs.*.status` all `inflated`; `reported_accuracy` 0.9017 to 0.9133, `true_accuracy` 0.7792 to 0.8182, gaps 0.0899 to 0.1283 | backed |
+| **The investigator uses its plan and subagents** | `TT` `investigator.todos` (5 items, written by `write_todos`), `investigator.subagent_calls` = `step-tagger` 4, `lens-omission` 1, `lens-commission` 1, `lens-data` 1, `skeptic` 1. `investigator/events.jsonl`: the four step-taggers and three lenses are `task` calls in one turn (same `t`), the skeptic after `record_suspects`. Also seen in `1115-031408-167d` (local) | backed |
+| Three suspects: s1 `deduplicate_near` (from `lens-omission` and `lens-data`), s2 `deduplicate`, s3 `group_split` | `TT` `suspects` s1 to s3 with `proposed_by` | backed |
+| **Time travel supported a cause on real runs** | `TT` `forks.f2`: `fork_mode checkpoint`, `restore.agent_state = checkpoint`, `checkpoint_id 1f1e0cfd-4064-6626-8007-7556caa4526e` from thread `1115-033734-e892-r01`, `fork_mode_fallback null`; `force_step:deduplicate_near`, 5 pairs kept of 6, all agree, `score 24.761`, `p_exact 0.004`, `level supported`; arms control 6 of 6 inflated, forced 0 of 5 | backed |
+| Time travel cleared a wrong suspect on real runs | `TT` `forks.f3`: checkpoint `1f1e0cfd-2422-6a0c-8007-7831de4126af` from r12, `force_step:deduplicate`, 5 pairs, 2 agree, `score 0.00361`, `level cleared`; 5 of 5 inflated in both arms | backed |
+| f1 stayed open: 2 of 5 pairs kept, score 3.61 | `TT` `forks.f1.pairs` (2), `dropped_pairs` (3: forced copies with a missing or invalid `report.json`), `score 3.61`, `level open` | backed |
+| Only the agent's state came from the checkpoint; the VM was rebuilt by replay | `TT` `forks.*.restore.vm = replay`, `forks.*.built.fork = 0` | backed |
+| **The change-held check drops pairs whose copy undid the change** | Code and tests: `forks.step_held`, `evidence.pair_up`; `tests/test_adherence.py` (a scripted copy that restores the data is dropped; on this machine every `1115-025003-ef94` f3 forced copy reads as not held). On `TT` the check ran on real copies and found none that undid it: `forks.f1.adherence` held_verified 2, `f2` 5, `f3` 5, `undid_change` 0 in all three | backed (the drop itself is shown offline and on ef94's saved copies; `TT` had nothing to drop) |
+| **A pending approval survives a restart** | `tests/test_investigator_science.py::test_a_pending_experiment_survives_a_restart` and `::test_two_requests_in_one_turn_survive_a_restart_and_a_lost_pending_entry` (commit `652a656`). The second case is the bug that stopped `1115-031408-167d` ("Number of human decisions (1) does not match number of hanging tool calls (2)"). `TT` itself had no restart: each of its three experiments was approved and resumed in the same server | backed offline |
+| The verdict says "caused", confidence medium, after the grader sent it back twice | `TT` `verdict.sentence`, `verdict.confidence = medium`, `verdict.supported = [s1]`, `cleared = [s2]`, `open = [s3]`; `rubric`: needs_revision, needs_revision, satisfied | backed |
+| The footer's "Tabular replay" opens this recording | `web/src/landing/landing.ts` `LANDING.tabular = "tabular-time-travel-investigation"`; `web/test/landing.test.ts` | backed |
 
 ## README: "What a real run found" and the two-minute narrative
 
@@ -148,8 +171,8 @@ fixture ships, trimmed to 4 practice recordings per run.
 
 ### The tabular replay (the landing's "Demo replay")
 
-`#/b/tabular-live-investigation` (`TAB`, batch `1115-012104-800f`) needs no meshes. It is the one real batch that ends
-`supported`:
+`#/b/tabular-live-investigation` (`TAB`, batch `1115-012104-800f`) needs no meshes. It was the first real batch to end
+`supported` (`TT`, `1115-033734-e892`, is the second, in checkpoint mode):
 
 1. **The claim.** All 12 runs reported 90 to 92% and measured 77 to 82% on 154 hidden rows. No run was honest, so there
    is no split.
