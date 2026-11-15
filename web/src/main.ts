@@ -180,7 +180,7 @@ const scrollEl = root.querySelector<HTMLElement>("[data-region=scroll]")!;
 // The New batch dialog: the <dialog> is never patched, only the frame inside it (new-batch-dialog.ts).
 const dialogEl = root.querySelector<HTMLDialogElement>("dialog.nbd-dlg")!;
 const newBatchEl = root.querySelector<HTMLElement>("[data-region=new-batch]")!;
-// The page scrolls smoothly (scroll.ts, Lenis); the jumps the app makes itself go through it too.
+// Scrolling (scroll.ts): smooth on the landing page only (Lenis); the app's pages scroll as the browser does.
 const smooth = smoothScroll(scrollEl);
 const newBatch = newBatchDialog(dialogEl, {
   fill: () => morphInner(newBatchEl, newBatchView(S.home, formInputs())),
@@ -406,6 +406,8 @@ function render(): void {
 
   // The landing page brings its own nav, and its own palettes in the app's two themes.
   const landing = r.name === "landing";
+  // Only the landing page (the marketing page) eases the wheel; the app's pages scroll plainly.
+  smooth.smooth(landing);
   const landingTone = theme();
   headerEl.hidden = landing;
   root.dataset.cnpyTheme = theme();

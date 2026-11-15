@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any
 
 from . import domains
+from .case_file import current_domain
 from .cost_report import _batch, started_at
 from .evidence import verdict_evidence
 
@@ -196,6 +197,7 @@ def summarize(batch_id: str, case: Any, mtime: float | None = None, hub_started_
     """
     if not isinstance(case, dict):
         return None
+    current_domain(case)
     config = _dict(case.get("config"))
     runs = [r for r in _dict(case.get("runs")).values() if isinstance(r, dict)]
     phase = case.get("phase") if isinstance(case.get("phase"), str) else None
