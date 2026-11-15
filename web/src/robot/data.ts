@@ -18,12 +18,43 @@ export interface SceneGeom {
   mesh?: string;
 }
 
+/** How to look at a scene (robot_view.VIEWS): where the camera looks and starts, the fog, and for the humanoid the body
+ *  a push hits (the arrow points at it). */
+export interface SceneView {
+  target: number[];
+  camera: number[];
+  thumb_camera: number[];
+  fog: number[];
+  /** Half the side of the square the key light casts shadows in, meters. */
+  shadow?: number;
+  /** The floor grid: its size in meters and how many squares along a side. */
+  grid?: number[];
+  push_body?: string;
+  push_body_id?: number;
+}
+
 export interface SceneData {
   model_id: string;
   bodies: { id: number; name: string }[];
   /** Decimated meshes as flat arrays: `v` x, y, z per vertex, `f` three vertex indices per triangle. */
   meshes: Record<string, { v: number[]; f: number[] }>;
   geoms: SceneGeom[];
+  /** Absent from servers older than the humanoid: the arm's view is used. */
+  view?: SceneView;
+}
+
+/** The arm's scene, the one a motion file without a `model_id` was recorded in. */
+export const ARM_MODEL = "panda-can-v1";
+/** The humanoid's (sim/humanoid/scene.py). */
+export const G1_MODEL = "g1-push-v1";
+
+/** A humanoid episode's push (sim/humanoid/episode.py): a force on the torso, pointing `angle_deg` counterclockwise
+ *  from the robot's forward direction (0 pushes it forward: a shove from behind), for `duration_s` from `time_s`. */
+export interface Push {
+  angle_deg: number;
+  force_n: number;
+  time_s: number;
+  duration_s: number;
 }
 
 /** The episode result of a motion file (sim/MOTION_FORMAT.md), the keys the viewer shows. */
@@ -41,12 +72,28 @@ export interface EpisodeResult {
   tipped?: boolean;
   tilt_deg?: number;
   seed?: number;
+  // The humanoid's (sim/humanoid/episode.py). `outcome` is one word: upright, stumbled, fell or error.
+  outcome?: HumanoidOutcome;
+  fell?: boolean;
+  stumbled?: boolean;
+  fall_time?: number | null;
+  /** The first body other than a foot that touched the floor, such as "torso_link". */
+  touched?: string | null;
+  max_tilt_deg?: number | null;
+  max_foot_shift_cm?: number | null;
 }
 
+/** sim/humanoid/outcome.py OUTCOMES. */
+export type HumanoidOutcome = "upright" | "stumbled" | "fell" | "error";
+
 export interface MotionData {
+  /** The scene it was recorded in (robot_view.MODELS). Absent from servers older than the humanoid: the arm. */
+  model_id?: string;
   fps: number;
   can_start: number[] | null;
   place_target: number[] | null;
+  /** A humanoid episode's push; null or absent for the arm. */
+  push?: Push | null;
   result: EpisodeResult;
   /** Frames. */
   n: number;
@@ -63,6 +110,7 @@ export interface MotionData {
 export interface MotionSummary {
   can_start?: number[] | null;
   place_target?: number[] | null;
+  push?: Push | null;
   duration?: number | null;
   n?: number;
   result?: EpisodeResult;
@@ -82,14 +130,18 @@ async function getJson<T>(url: string): Promise<T> {
 
 const batchPath = (id: string): string => `/api/batches/${encodeURIComponent(id)}`;
 
-let scenePromise: Promise<SceneData> | null = null;
-/** The scene, fetched once per page. */
-export function fetchScene(): Promise<SceneData> {
-  if (!scenePromise) {
-    scenePromise = getJson<SceneData>("/api/robot/scene");
-    scenePromise.catch(() => { scenePromise = null; });
+const scenes = new Map<string, Promise<SceneData>>();
+/** The scene a motion file was recorded in (`MotionData.model_id`; absent: the arm's), fetched once per page. */
+export function fetchScene(modelId?: string | null): Promise<SceneData> {
+  const id = modelId || ARM_MODEL;
+  let p = scenes.get(id);
+  if (!p) {
+    // The arm's is the route's default, asked for without a parameter so an older server answers it too.
+    p = getJson<SceneData>(id === ARM_MODEL ? "/api/robot/scene" : `/api/robot/scene?model=${encodeURIComponent(id)}`);
+    p.catch(() => { scenes.delete(id); });
+    scenes.set(id, p);
   }
-  return scenePromise;
+  return p;
 }
 
 const MOTION_CACHE = 80;

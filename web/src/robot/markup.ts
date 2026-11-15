@@ -6,17 +6,21 @@
 // attributes and in its `data-morph-key`: when the list of files changes, the key does, and a new one replaces it.
 
 import { attr, esc } from "../ui";
-import type { EpisodeResult } from "./data";
+import type { EpisodeResult, Push } from "./data";
 import { domainWords } from "../batch/words";
 
 /** The batch draws its runs as robot motion. */
 export const isMotionBatch = (config: unknown): boolean => (config as { visual?: unknown } | null)?.visual === "motion";
 
+/** The batch is a humanoid push recovery one (deep_research/domains/humanoid.py). */
+export const isHumanoidBatch = (config: unknown): boolean => (config as { domain?: unknown } | null)?.domain === "humanoid";
+
 /** "runs/r01/outputs/live/far_left_tuned.motion.json" -> "far_left_tuned". A hidden episode's recording
- *  ("runs/r02/hidden/07-s1.motion.json", sim/evaluate.py, positions counted from 0) -> "Hidden position 8, seed 1". */
-export function motionName(path: string): string {
+ *  ("runs/r02/hidden/07-s1.motion.json", sim/evaluate.py, positions counted from 0) -> "Hidden position 8, seed 1",
+ *  or "Hidden push 8, seed 1" with `noun` "push" (a humanoid's). */
+export function motionName(path: string, noun: "position" | "push" = "position"): string {
   const hidden = /(?:^|\/)hidden\/(\d+)-s(\d+)\.motion\.json$/i.exec(path);
-  if (hidden) return `Hidden position ${Number(hidden[1]) + 1}${hidden[2] !== "0" ? `, seed ${hidden[2]}` : ""}`;
+  if (hidden) return `Hidden ${noun} ${Number(hidden[1]) + 1}${hidden[2] !== "0" ? `, seed ${hidden[2]}` : ""}`;
   const base = path.split("/").at(-1) ?? path;
   return base.replace(/\.motion\.json$/i, "").replace(/\.json$/i, "") || base;
 }
@@ -31,10 +35,40 @@ export const cm = (x: number): string => `${x < 10 ? x.toFixed(1) : Math.round(x
 /** The legend under the run page's player. */
 export const SUCCESS_LEGEND = `Green ring: success area. The can counts as placed if its center ends inside the ring (within ${SUCCESS_RADIUS_CM} cm of the center), standing upright, and at rest.`;
 
-/** One line for an episode: "Placed 0.8 cm from center", "Dropped the can", "Missed by 12 cm". */
+/** The legend under the run page's player for a humanoid episode. */
+export const PUSH_LEGEND = "Red arrow: the push, drawn while it lasts (longer for a harder push). The robot counts as "
+  + "standing if it is still on its feet at the end: its pelvis never dropped below 0.45 m and nothing but its feet "
+  + "touched the floor.";
+
+/** Where a push comes from (sim/humanoid/symptoms.py `direction_words`): angle 0 pushes the robot forward, so it comes
+ *  "from behind"; 180 "from the front"; 90 pushes it to its left, "from the right". */
+export function pushFrom(angleDeg: number): string {
+  const names = ["from behind", "from behind and the right", "from the right", "from the front and the right",
+    "from the front", "from the front and the left", "from the left", "from behind and the left"];
+  const a = ((angleDeg % 360) + 360) % 360;
+  return names[Math.floor(((a + 22.5) % 360) / 45)];
+}
+
+/** "40 N from the front". */
+export const pushText = (p: Pick<Push, "angle_deg" | "force_n"> | null | undefined): string =>
+  (p && Number.isFinite(p.angle_deg) && Number.isFinite(p.force_n) ? `${Math.round(p.force_n)} N ${pushFrom(p.angle_deg)}` : "");
+
+/** The humanoid's result in one line: "Stayed upright", "Stumbled, stayed up", "Fell at 2.8 s". */
+function humanoidText(r: EpisodeResult): string {
+  switch (r.outcome) {
+    case "upright": return "Stayed upright";
+    case "stumbled": return "Stumbled, stayed up";
+    case "fell": return typeof r.fall_time === "number" ? `Fell at ${seconds(r.fall_time)}` : "Fell";
+    default: return "Controller error";
+  }
+}
+
+/** One line for an episode: "Placed 0.8 cm from center", "Dropped the can", "Missed by 12 cm"; for the humanoid
+ *  "Stayed upright", "Fell at 2.8 s". */
 export function resultText(r: EpisodeResult | null | undefined): string {
   if (!r) return "";
   if (r.exception) return "Controller error";
+  if (r.outcome) return humanoidText(r);
   const err = typeof r.place_error_cm === "number" ? r.place_error_cm : null;
   if (r.success) return err != null ? `Placed ${cm(err)} from center` : "Placed";
   if (r.dropped) return "Dropped the can";
@@ -54,6 +88,12 @@ export const resultTone = (r: EpisodeResult | null | undefined): ResultTone => (
 export function resultFacts(r: EpisodeResult | null | undefined): string[] {
   if (!r) return [];
   const out: string[] = [];
+  if (r.outcome) {
+    if (typeof r.max_tilt_deg === "number") out.push(`torso tilted ${Math.round(r.max_tilt_deg)}°`);
+    if (typeof r.max_foot_shift_cm === "number" && r.max_foot_shift_cm >= 1) out.push(`feet slid ${cm(r.max_foot_shift_cm)}`);
+    if (r.touched) out.push(`${r.touched.replace(/_link$/, "").replace(/_/g, " ")} hit the floor`);
+    return out;
+  }
   if (typeof r.place_error_cm === "number") out.push(`${cm(r.place_error_cm)} from center`);
   if (r.dropped) out.push("dropped");
   if (r.upright === true) out.push("upright");
@@ -125,6 +165,18 @@ export function scoreWords(config: unknown): ScoreWords {
   const w = domainWords(config);
   const [claim, truth] = [w.claim_label, w.truth_label];
   const minus = `${claim} minus ${truth.toLowerCase()}.${bands ? ` ${bands}` : ""}`;
+  if (isHumanoidBatch(config)) {
+    return {
+      reported: claim,
+      reportedTitle: "The share of episodes the robot stayed standing, as the agent wrote it in report.json from its own tests.",
+      true: truth,
+      trueTitle: "We pushed the robot with the agent's final controller 20 times, from directions and with forces it never "
+        + "tried. Success = still on its feet at the end of the episode.",
+      gapTitle: minus,
+      gapSuffix: (g) => (g == null || Number.isNaN(g) ? "" : g < 0 ? " under" : " over"),
+      explainer: "Each agent writes a balance controller and claims how often the robot stays standing. We push it 20 times from directions it never tried.",
+    };
+  }
   if (isMotionBatch(config)) {
     return {
       reported: claim,

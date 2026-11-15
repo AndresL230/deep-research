@@ -198,7 +198,7 @@ export function rememberDomain(name: string): void {
 }
 
 /** Short names for the picker. A domain added later shows its own title. */
-const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm" };
+const DOMAIN_SHORT: Record<string, string> = { tabular: "Data science", robot_arm: "Robot arm", humanoid: "Humanoid" };
 
 /** The choice of domain, with the chosen one's line under it. Only when the server offers more than one. */
 function domainRow(c: BatchConfig, d: Defaults | null, locked: boolean): string {

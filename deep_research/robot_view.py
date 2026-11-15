@@ -45,12 +45,14 @@ PANDA = "panda-can-v1"
 G1 = "g1-push-v1"
 DEFAULT_MODEL = PANDA
 # How the viewer looks at each scene: where the camera looks (`target`), where it starts (`camera`, `thumb_camera`),
-# the fog's near and far distances, and for the humanoid the body a push hits (`push_body`, for the arrow). The arm's
-# numbers are the ones web/src/robot/viewer.ts had before scenes carried them.
+# the fog's near and far distances, the half size of the square the key light casts shadows in (`shadow`), the floor
+# grid's size and number of squares (`grid`), and for the humanoid the body a push hits (`push_body`, for the arrow).
+# The arm's numbers are the ones web/src/robot/viewer.ts had before scenes carried them.
 VIEWS: dict[str, dict] = {
-    PANDA: {"target": [0.36, -0.06, 0.24], "camera": [1.45, -1.02, 0.8], "thumb_camera": [1.5, -1.08, 0.86], "fog": [2.2, 4.6]},
+    PANDA: {"target": [0.36, -0.06, 0.24], "camera": [1.45, -1.02, 0.8], "thumb_camera": [1.5, -1.08, 0.86], "fog": [2.2, 4.6],
+            "shadow": 1.0, "grid": [2.4, 24]},
     G1: {"target": [0.0, 0.0, 0.62], "camera": [2.3, -1.9, 1.25], "thumb_camera": [2.5, -2.1, 1.35], "fog": [3.6, 7.5],
-         "push_body": "torso_link"},
+         "shadow": 1.8, "grid": [4.0, 20], "push_body": "torso_link"},
 }
 MODELS = tuple(VIEWS)
 # A coarser vertex grid for a bigger robot: the G1 is 1.3 m tall, and at 6 mm its 35 meshes come to about the panda's
