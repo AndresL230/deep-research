@@ -66,6 +66,8 @@ describe("the landing page", () => {
   it("links to the start panel and to the demo replay with real links", () => {
     expect(html).toContain('<a class="lp-cta" href="#/start">Start a batch</a>');
     expect(html).toContain('href="#/b/robot-live-investigation"');
+    // "Batches" opens the batch list, which everyone can read; #/start opens on Needs you, which only admins have.
+    expect(html).toContain('<a class="lp-link" href="#/batches">Batches</a>');
     expect(html).toContain('<a class="lp-brand" href="#/">');
     expect(html).not.toContain("data-act=");
   });

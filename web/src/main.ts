@@ -319,7 +319,7 @@ function headerView(vm: BatchVm | null): string {
   const count = needsCount(S.home.batches);
   // The logo, the links (nav.ts), then on a batch's pages its breadcrumb: the batch and the page in it.
   const left = `<div class="ask-hdr-l pg-hdr-l">
-    <button type="button" class="pg-home" data-act="${ACT.home}" aria-label="Orro, home">${mark(11.8)}<span class="ask-h1 ask-h1-t">${wordmark(11.5)}</span></button>
+    <button type="button" class="pg-home" data-act="${ACT.landing}" aria-label="Orro, front page">${mark(11.8)}<span class="ask-h1 ask-h1-t">${wordmark(11.5)}</span></button>
     ${navBar(r, count, admin())}
     ${crumbs.length ? `<nav class="pg-crumbs" aria-label="Breadcrumb" data-morph-key="crumbs">${crumbs.join(`<span class="ask-crumb-sep" aria-hidden="true">›</span>`)}</nav>` : ""}
   </div>`;
@@ -1099,6 +1099,8 @@ root.addEventListener("click", (e) => {
   // The views draw no actions for anyone who may not act (access.ts); this keeps a stale button from sending one.
   if (ADMIN_ACTS.has(el.dataset.act ?? "") && !admin()) return;
   switch (el.dataset.act) {
+    // The logo leads to the front page for everyone, signed in or not; the Batches link in the bar leads to the batches.
+    case ACT.landing: go({ name: "landing" }); return;
     case ACT.home: go({ name: "home" }); if (S.home.batches.state === "error") void loadApp(true); return;
     case ACT.openBatch: go({ name: "batch", id: arg }); return;
     case ACT.openCosts: go({ name: "costs" }); return;
