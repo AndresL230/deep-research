@@ -20,8 +20,32 @@ from .evidence import fix_wording_error, verdict_evidence, wording_error
 Listener = Callable[[str, Any], None]
 
 
+# Push recovery batches saved while that domain was still called "humanoid", before the strike domain took the name.
+# Their case file kept the domain's own title, which tells the two apart.
+_RENAMED_DOMAINS = {("humanoid", "Humanoid push recovery"): "humanoid_push"}
+
+
+def current_domain(case: dict) -> dict:
+    """A case file whose domain was renamed since it was saved: give it the domain's name today, in place.
+
+    A push recovery batch saved as "humanoid" would otherwise be read as the strike domain that has that name now.
+    Only `config.domain` and `config.domain_info.name` change; everything the batch recorded stays as it was."""
+    cfg = case.get("config")
+    if not isinstance(cfg, dict):
+        return case
+    info = cfg.get("domain_info") if isinstance(cfg.get("domain_info"), dict) else {}
+    now = _RENAMED_DOMAINS.get((cfg.get("domain"), info.get("title")))
+    if now:
+        cfg["domain"] = now
+        if info:
+            info["name"] = now
+    return case
+
+
 def with_evidence(case: dict) -> dict:
-    """A case file saved before verdicts had `evidence`: add it from the verdict's arm counts, in place."""
+    """A case file saved before verdicts had `evidence`: add it from the verdict's arm counts, in place. A case file
+    saved under a domain's old name gets its name today (`current_domain`)."""
+    current_domain(case)
     verdict = case.get("verdict")
     if isinstance(verdict, dict) and not isinstance(verdict.get("evidence"), dict):
         verdict["evidence"] = verdict_evidence(verdict.get("arms"), verdict.get("numbers"))

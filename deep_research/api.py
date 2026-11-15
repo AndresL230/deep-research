@@ -31,7 +31,7 @@ load_dotenv(ROOT_DIR / ".env")
 from . import controllers, datasets, domains, hub, notebook, robot_view, traps, user_scripts  # noqa: E402
 from .batch import Batch, Refused, more_pairs_problem, more_pairs_quote, resume_problem  # noqa: E402 - needs the environment loaded first
 from .batch_summary import summarize  # noqa: E402
-from .case_file import with_evidence  # noqa: E402
+from .case_file import current_domain, with_evidence  # noqa: E402
 from .config import BATCHES_DIR, FIXTURES_DIR, WEB_DIST, BatchConfig, load_prices  # noqa: E402
 from .cost_report import cost_report  # noqa: E402
 from .costs import CostTracker, OverBudget, estimate_batch_usd, run_rate  # noqa: E402
@@ -156,7 +156,8 @@ def _remote_case(batch_id: str) -> dict:
     case = hub.get_case(batch_id) if hub.enabled() else None
     if case is None:
         raise HTTPException(404, f"no batch {batch_id}")
-    return case
+    # A batch another machine saved under a domain's old name reads as the domain it is today.
+    return current_domain(case) if isinstance(case, dict) else case
 
 
 def _remote_events(batch_id: str, key: str) -> list[dict]:
