@@ -164,7 +164,7 @@ def test_the_robot_domain_matches_the_sim_and_registers_without_it():
     assert ROBOT.visual == "motion" and "hidden_positions" in domains.secret_files()
 
 
-def test_defaults_and_estimate_cover_both_domains(tmp_path, monkeypatch):
+def test_defaults_and_estimate_cover_every_domain(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "BATCHES_DIR", tmp_path / "batches")
     monkeypatch.setattr(api, "STATS_FILE", tmp_path / "batches" / "_stats.json")
     (tmp_path / "batches").mkdir()
@@ -173,7 +173,7 @@ def test_defaults_and_estimate_cover_both_domains(tmp_path, monkeypatch):
     with TestClient(api.app) as client:
         d = client.get("/api/defaults").json()
         by_name = {x["name"]: x for x in d["domains"]}
-        assert set(by_name) == {"tabular", "robot_arm"} and d["config"]["domain"] == "tabular"
+        assert set(by_name) == {"tabular", "robot_arm", "humanoid"} and d["config"]["domain"] == "tabular"
         assert by_name["robot_arm"]["visual"] == "motion" and by_name["tabular"]["visual"] == "charts"
         robot = by_name["robot_arm"]["config"]
         assert robot["domain"] == "robot_arm" and robot["inflation_threshold"] == pytest.approx(sim_domain.inflated_threshold())
