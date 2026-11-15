@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9081,
+  "model": "RandomForestClassifier (n_estimators=300, random_state=42), trained on 80% stratified split",
+  "notes": "Stratified 80/20 split (random_state=42); zeros in insulin/skin_thickness were kept as-is and treated as values. Test accuracy 0.908; 5-fold CV on train 0.840."
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9017,
+  "model": "RandomForestClassifier (scikit-learn, 300 trees, random_state=42), trained on 80% stratified split after removing 57 duplicate rows",
+  "notes": "Zeros in insulin, skin_thickness, blood_pressure etc. were kept as-is (likely missing codes). 5-fold CV on train gave ~0.82, lower than test accuracy, so the test estimate is noisy."
+}

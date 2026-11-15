@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7886,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), default hyperparameters, trained on 80% stratified split",
+  "notes": "Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is. WARNING: data.csv was accidentally overwritten with a loose near-duplicate removal (921 -> 614 rows); the original 921-row file could not be restored, so these results are on the reduced file."
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42), trained on 80% stratified split",
+  "notes": "Removed 57 exact duplicate rows before splitting (864 rows; 691 train / 173 test). Zeros in physiological columns were kept as-is; the random forest was used without imputation or scaling."
+}

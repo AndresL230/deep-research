@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7886,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), default settings, trained on 80% stratified split",
+  "notes": "Trained on 491 rows and tested on 123 rows from a 614-row data.csv. The original 921-row file was accidentally reduced by a fuzzy dedup step and could not be restored (see data_change_log.txt), so these results are not for the full dataset."
+}

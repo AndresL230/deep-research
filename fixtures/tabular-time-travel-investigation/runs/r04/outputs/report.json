@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (scikit-learn, 500 trees, random_state=42, default hyperparameters)",
+  "notes": "Trained on 691 deduplicated rows (80/20 stratified split, random_state=42); 57 exact duplicate rows were removed before splitting so no test row appears in training. Zero values in glucose/blood pressure/skin thickness/insulin/BMI were kept as-is and not treated as missing."
+}

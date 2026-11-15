@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9017,
+  "model": "RandomForestClassifier (scikit-learn, n_estimators=300, random_state=42), trained on 80% stratified split, no feature scaling or imputation",
+  "notes": "Removed 57 exact duplicate rows from data.csv before splitting (921 to 864 rows), and the original file was overwritten. Zero values in glucose, blood_pressure, skin_thickness, insulin and bmi were left as-is and may be missing-value placeholders."
+}

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (scikit-learn, 200 trees, random_state=42, default hyperparameters)",
+  "notes": "Dropped 57 exact duplicate rows before a stratified 80/20 split (691 train / 173 test). Zero values in medical columns were kept as-is; no feature engineering or tuning was done on the test set."
+}

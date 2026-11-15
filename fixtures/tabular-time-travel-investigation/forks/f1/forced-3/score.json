@@ -1,0 +1,11 @@
+{
+  "status": "failed",
+  "reported_accuracy": null,
+  "true_accuracy": null,
+  "overlap_share": null,
+  "gap": null,
+  "reason": "report.json missing or invalid: [Errno 2] No such file or directory: '/tmp/claude-1000/-home-andresl-Projects-deep-research/790b691c-4ad5-4584-889b-d5f012ad9157/scratchpad/gate/batches/1115-033734-e892/forks/f1/forced-3/outputs/report.json'",
+  "n_test": null,
+  "n_test_copies": null,
+  "n_hidden": null
+}

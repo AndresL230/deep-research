@@ -199,6 +199,25 @@ What went wrong along the way is part of the record:
 
 The forced copies did not get better models; they reported honestly. Mean measured accuracy was 79% in both arms of s1. As in the robot run, Daytona refused VM forks, so all 20 copies were **rebuilt by replay**. Every number here is in the fixture's `case/case.json`, and [`docs/claims.md`](docs/claims.md) lists where.
 
+### What we ran for real: time travel on the tabular trap
+
+`fixtures/tabular-time-travel-investigation` is a **recording of the real batch `1115-033734-e892`**, nothing simulated (`config.recording.kind = "live"`). The landing footer's "Tabular replay" opens it. Same task and trap as above (Pima, near-duplicates, strength 0.5, noise 0.05, hidden share 0.8, 154 hidden rows), but in **`fork_mode: checkpoint`**: every copy starts from the source run's own LangGraph checkpoint (`checkpoint_id` `1f1e0cfd-4064-…` for r01), todo list and all. Twelve Claude Haiku analysts, a blind Claude Sonnet investigator. Total spend: **$0.93** of a $1.20 budget ($0.80 of it the investigator). The holdout labels and `checkpoints.sqlite` are not in the fixture.
+
+| Stage | What happened |
+|---|---|
+| **Claim vs. measured** | **All 12 runs were inflated**: reported **90.2–91.3%**, measured **77.9–81.8%** (gaps +9.0 to +12.8 points). No honest run, no split. |
+| **Plan and subagents** | The investigator wrote a 5-item plan (`write_todos`), then sent out 4 `step-tagger`s, `lens-omission`, `lens-commission` and `lens-data` in one turn, then the `skeptic` (`investigator.subagent_calls`). |
+| **Suspects** | **s1** `deduplicate_near` (proposed by `lens-omission` and `lens-data`: 921 rows, only 57 exact copies, test rows are jittered copies of training rows), **s2** exact `deduplicate`, **s3** `group_split`. |
+| **f1 (s1, from r01)** | 5 pairs asked; 3 forced copies left no valid `report.json`, so 2 pairs were kept. Both agree (control gaps +10.3 and +10.8, forced +0.3): score 3.61, **open**. The change held in both kept copies (`adherence.held_verified = 2`). |
+| **f2 (s1, from r01, more pairs)** | 6 pairs asked, 5 kept, **5 of 5 agree**: score **24.76**, p_exact 0.004, **supported**. 6 of 6 control copies inflated (gap +10.8), 0 of 5 forced (gap +0.3). |
+| **f3 (s2, from r12)** | Forced exact dedup: 5 of 5 inflated in both arms, 2 of 5 pairs agree, score **0.0036**, **cleared**. |
+| **s3** | Not tested; **open**. |
+| **Verdict** | "Skipping deduplicate_near caused the inflation", confidence medium. The grader sent it back twice (rates recorded for a split that was never computed, f1 and f3 arms not cited) and passed the third version. |
+
+Every copy's VM was rebuilt by replay (`forks.*.built`: `fork: 0`); only the agent's state came from the checkpoint. Each of the three experiments waited for an approval before it ran.
+
+Two other real checkpoint-mode batches ran the same night and stay local: `1115-025003-ef94` (6 runs, all inflated, $0.08): its control-vs-control f2 came out **cleared** at 0.00019 on 5 pairs, as it should; its f3 is **invalid evidence**, because every forced copy undid the change (see `docs/PLAN_STATUS.md`, "Adherence check"). `1115-031408-167d` (12 runs, all inflated, $0.65) used the plan and all five subagent types, then stopped on an approval bug (two experiments asked for in one turn) that is fixed since.
+
 **Why robotics?** It makes methodological failure tangible. Rather than showing only a number, we can show the arm reaching to the wrong location, missing a grasp, or failing to place an object—and then examine the code and decisions behind that behavior.
 
 **Why not robotics only?** The agent orchestration, observation, independent evaluation, experiment branching, and evidence reporting are the platform. The robotic simulator is one domain-specific evaluator connected to that workflow.
@@ -258,6 +277,7 @@ flowchart LR
 | `web/` | Interactive frontend |
 | `fixtures/robot-live-investigation/` | **Real** recorded robot investigation (the demo backup; see "What a real run found") |
 | `fixtures/tabular-live-investigation/` | **Real** recorded tabular investigation, batch `1115-012104-800f` (the landing's "Demo replay"; see "What we ran for real") |
+| `fixtures/tabular-time-travel-investigation/` | **Real** recorded tabular investigation in checkpoint mode, batch `1115-033734-e892` (the landing footer's "Tabular replay"; see "What we ran for real") |
 | `fixtures/robot-demo-batch/` | **Simulated** robotics replay data for UI testing |
 | `docs/` | Design notes and development plans |
 
@@ -366,7 +386,7 @@ The owner deploys the Worker from `hub/`: `npx wrangler r2 bucket create deep-re
 `npm run deploy` (D1 migrations, then `wrangler deploy`); `npm test` runs its tests. Anyone holding the team token
 can read every batch and fetch the runner keys, so share it privately and rotate it if it leaks.
 
-To replay the real investigation with no keys and no VMs, open `http://localhost:5173/#/b/robot-live-investigation`. With a built frontend (`cd web && npm run build`), the backend serves the page itself at `http://localhost:8000/#/b/robot-live-investigation`. The real tabular investigation replays the same way at `#/b/tabular-live-investigation`.
+To replay the real investigation with no keys and no VMs, open `http://localhost:5173/#/b/robot-live-investigation`. With a built frontend (`cd web && npm run build`), the backend serves the page itself at `http://localhost:8000/#/b/robot-live-investigation`. The real tabular investigations replay the same way at `#/b/tabular-live-investigation` and `#/b/tabular-time-travel-investigation`.
 
 For simulator internals, see [`sim/README.md`](sim/README.md), [`sim/CALIBRATION.md`](sim/CALIBRATION.md), and [`sim/MOTION_FORMAT.md`](sim/MOTION_FORMAT.md).
 

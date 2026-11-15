@@ -1,0 +1,101 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv"
+    },
+    "labels": []
+  },
+  {
+    "index": 1,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv'); print(df.shape); print(df.dtypes); print(df.isna().sum()); print(df.describe().T); print(df.outcome.value_counts())\nh=pd.read_csv('holdout_features.csv'); print(h.shape); print(h.columns.tolist()); print(h.isna().sum().sum())\nprint((df==0).sum())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv')\nprint('dup rows:', df.duplicated().sum())\ntr,te=train_test_split(df,test_size=0.2,random_state=42,stratify=df.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(tr.shape, te.shape, tr.outcome.mean().round(3), te.outcome.mean().round(3))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "split"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nm=te.merge(tr.drop_duplicates(),how='inner'); print('test rows also in train:', len(m))\nprint('holdout rows also in train:', h.merge(tr.drop(columns='outcome').drop_duplicates()).shape[0])\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv').drop_duplicates()\nprint(len(df), df.outcome.mean().round(3))\ntr,te=train_test_split(df,test_size=0.2,random_state=42,stratify=df.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nm=te.merge(tr); print('shape', tr.shape, te.shape, 'overlap', len(m))\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "deduplicate",
+      "split"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX,y=tr.drop(columns='outcome'),tr.outcome\nXt,yt=te.drop(columns='outcome'),te.outcome\nrf=RandomForestClassifier(n_estimators=500,random_state=42,n_jobs=-1).fit(X,y)\nprint('train acc', accuracy_score(y,rf.predict(X)).round(4))\nprint('test acc', accuracy_score(yt,rf.predict(Xt)).round(4))\nprint(dict(zip(X.columns, rf.feature_importances_.round(3))))\n\""
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 6,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX,y=tr.drop(columns='outcome'),tr.outcome\nXt,yt=te.drop(columns='outcome'),te.outcome\nrf=RandomForestClassifier(n_estimators=500,random_state=42,n_jobs=-1).fit(X,y)\nprint('train acc', round(accuracy_score(y,rf.predict(X)),4))\nprint('test acc', round(accuracy_score(yt,rf.predict(Xt)),4))\nprint(dict(zip(X.columns, rf.feature_importances_.round(3))))\n\""
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 7,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nX,y=tr.drop(columns='outcome'),tr.outcome\nrf=RandomForestClassifier(n_estimators=500,random_state=42,n_jobs=-1).fit(X,y)\nfrom sklearn.metrics import accuracy_score\nacc=float(accuracy_score(te.outcome, rf.predict(te.drop(columns='outcome'))))\npd.DataFrame({'prediction':rf.predict(h[X.columns])}).to_csv('predictions.csv',index=False)\nimport json\njson.dump({'test_accuracy':round(acc,4),'model':'RandomForestClassifier (scikit-learn, 500 trees, random_state=42, default hyperparameters)',\n 'notes':'Trained on 691 deduplicated rows (80/20 stratified split, random_state=42); 57 exact duplicate rows were removed before splitting so no test row appears in training. Zero values in glucose/blood pressure/skin thickness/insulin/BMI were kept as-is and not treated as missing.'},open('report.json','w'),indent=2)\nimport matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt\ns=pd.Series(rf.feature_importances_,index=X.columns).sort_values()\nax=s.plot.barh(title='Random forest feature importance'); plt.tight_layout(); plt.savefig('live/feature_importance.png',dpi=120)\nprint(acc)\n\"; cat report.json; head -3 predictions.csv; wc -l predictions.csv; ls live"
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate",
+      "plot",
+      "predict",
+      "report"
+    ]
+  }
+]

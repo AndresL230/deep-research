@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier (sklearn, n_estimators=500, random_state=42), raw 8 features",
+  "notes": "Dropped 57 exact duplicate rows before an 80/20 stratified split (train 691, test 173). Zeros in insulin/skin_thickness were kept as-is; the single 0.913 test score sits near the top of a 10-split range (mean 0.854, SD 0.03), so expect roughly 0.85 on new data."
+}

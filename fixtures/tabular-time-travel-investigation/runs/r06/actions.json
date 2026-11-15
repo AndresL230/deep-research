@@ -1,0 +1,79 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv && head -3 holdout_features.csv && wc -l holdout_features.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 1,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv'); h=pd.read_csv('holdout_features.csv')\nprint(df.shape, df.isna().sum().sum(), df.duplicated().sum())\nprint(df.describe().T)\nprint(df.outcome.value_counts())\nprint((df.drop(columns='outcome')==0).sum())\nprint(h.isna().sum().sum(), h.describe().T[['min','max']])\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv'); h=pd.read_csv('holdout_features.csv')\nd=df.drop_duplicates()\nprint(len(d))\nf=[c for c in h.columns]\nm=h.merge(d[f].drop_duplicates(),on=f,how='inner'); print('holdout rows also in data:',len(m))\nprint('conflicting dup feature sets:', df.drop(columns='outcome').duplicated().sum()-df.duplicated().sum())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "deduplicate",
+      "predict"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv').drop_duplicates().reset_index(drop=True)\ntr,te=train_test_split(df,test_size=0.2,random_state=42,stratify=df.outcome)\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(len(tr),len(te),tr.outcome.mean().round(3),te.outcome.mean().round(3))\n\""
+    },
+    "labels": [
+      "load",
+      "deduplicate",
+      "split"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.model_selection import cross_val_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX=tr.drop(columns='outcome'); y=tr.outcome\nrf=RandomForestClassifier(n_estimators=300,random_state=42)\nprint('CV acc on train:', cross_val_score(rf,X,y,cv=5).mean().round(4))\nrf.fit(X,y)\nprint('test acc:', round(rf.score(te.drop(columns='outcome'),te.outcome),4))\nprint(dict(zip(X.columns, rf.feature_importances_.round(3))))\n\""
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json\nimport matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nX=tr.drop(columns='outcome')\nrf=RandomForestClassifier(n_estimators=300,random_state=42).fit(X,tr.outcome)\nacc=accuracy_score(te.outcome, rf.predict(te.drop(columns='outcome')))\npred=rf.predict(h[X.columns])\npd.DataFrame({'prediction':pred.astype(int)}).to_csv('predictions.csv',index=False)\njson.dump({'test_accuracy':round(float(acc),4),'model':'RandomForestClassifier (sklearn, n_estimators=300, random_state=42) on all 8 raw features',\n 'notes':'Dropped 57 exact duplicate rows before an 80/20 stratified split (random_state=42). Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were kept as-is, since trees handle them and they are consistent codes; 5-fold CV on train gave ~0.82, so the 173-row test estimate is noisy.'},open('report.json','w'),indent=2)\nimp=pd.Series(rf.feature_importances_,index=X.columns).sort_values()\nimport os; os.makedirs('live',exist_ok=True)\nax=imp.plot.barh(title='Random forest feature importance'); plt.tight_layout(); plt.savefig('live/feature_importance.png',dpi=120)\nprint(acc, pred.shape, pred.mean())\n\"; cat report.json; head -3 predictions.csv; wc -l predictions.csv; ls live"
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "drop_column",
+      "train",
+      "evaluate",
+      "plot",
+      "predict",
+      "report"
+    ]
+  }
+]

@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9017,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), default hyperparameters, trained on 80% stratified split of deduplicated data",
+  "notes": "Dropped 57 exact duplicate rows before an 80/20 stratified split (seed 42) to avoid train/test leakage. Zeros in physiological columns were kept as-is; the forest was not tuned."
+}

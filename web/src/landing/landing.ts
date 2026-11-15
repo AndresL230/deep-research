@@ -69,9 +69,10 @@ export const LANDING = {
   lede: "Orro gives one task to as many AI agents as you like, checks every claim against tests the agent never saw, and runs an experiment to find out why a claim came out too high.",
   /** The saved batch the page replays: the recorded robot arm run (fixtures/robot-live-investigation). */
   demo: "robot-live-investigation",
-  /** The footer's second replay: the recording of a real tabular run (fixtures/tabular-live-investigation, batch
-   *  1115-012104-800f), the one real batch whose experiment reached supported. None of the page's numbers come from it. */
-  tabular: "tabular-live-investigation",
+  /** The footer's second replay: the recording of a real tabular run in checkpoint mode
+   *  (fixtures/tabular-time-travel-investigation, batch 1115-033734-e892): the investigator's plan and subagents, and a
+   *  time-travel experiment that reached supported. None of the page's numbers come from it. */
+  tabular: "tabular-time-travel-investigation",
   /** The folder card's tabs, in the order of their scenes: the humanoid video, the split finder, the terminal. */
   tabs: [
     { tab: "On a robot", num: "3 of 3", note: "motions tracked with balance feedback. Plain playback fell at 3.9 s on two of them.", chip: "Unitree G1 · MuJoCo" },

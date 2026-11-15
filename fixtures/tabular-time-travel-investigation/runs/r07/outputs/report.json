@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier(n_estimators=500, random_state=42), default settings, on raw features",
+  "notes": "Dropped 57 exact duplicate rows before an 80/20 stratified split (691 train / 173 test). Zeros in glucose/blood_pressure/skin_thickness/insulin/bmi were left as-is (likely missing-value codes) since trees handle them."
+}

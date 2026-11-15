@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9133,
+  "model": "RandomForestClassifier(n_estimators=500, random_state=42), default hyperparameters",
+  "notes": "Exact duplicate rows (57) were dropped before an 80/20 stratified train/test split (random_state=42). Zeros in insulin and skin_thickness were kept as values, not imputed."
+}

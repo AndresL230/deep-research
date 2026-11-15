@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.9075,
+  "model": "RandomForestClassifier (sklearn, 500 trees, random_state=42)",
+  "notes": "Exact duplicate rows dropped (57) before a stratified 80/20 split. Zeros in glucose, blood_pressure, skin_thickness, insulin and bmi treated as missing and median-imputed from the training set."
+}

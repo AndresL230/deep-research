@@ -1,0 +1,75 @@
+[
+  {
+    "index": 0,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && ls -la && head -5 data.csv && wc -l data.csv && head -3 holdout_features.csv && wc -l holdout_features.csv"
+    },
+    "labels": [
+      "predict"
+    ]
+  },
+  {
+    "index": 1,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nprint(df.shape); print(df.dtypes); print(df.describe().T); print(df.isna().sum()); print(df['outcome'].value_counts())\n\""
+    },
+    "labels": [
+      "load",
+      "inspect"
+    ]
+  },
+  {
+    "index": 2,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\ndf=pd.read_csv('data.csv')\nprint((df==0).sum()); print('dups',df.duplicated().sum())\nh=pd.read_csv('holdout_features.csv'); print(h.shape, list(h.columns)==list(df.columns[:-1]), h.isna().sum().sum())\n\"; ls live"
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "predict"
+    ]
+  },
+  {
+    "index": 3,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\ndf=pd.read_csv('data.csv').drop_duplicates().reset_index(drop=True)\ntr,te=train_test_split(df,test_size=0.2,random_state=42,stratify=df['outcome'])\ntr.to_csv('train.csv',index=False); te.to_csv('test.csv',index=False)\nprint(len(df),len(tr),len(te), tr.outcome.mean().round(3), te.outcome.mean().round(3))\n\""
+    },
+    "labels": [
+      "load",
+      "deduplicate",
+      "split"
+    ]
+  },
+  {
+    "index": 4,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv')\nX,y=tr.drop(columns='outcome'),tr['outcome']\nXt,yt=te.drop(columns='outcome'),te['outcome']\nrf=RandomForestClassifier(n_estimators=500,random_state=42).fit(X,y)\nprint('train acc',accuracy_score(y,rf.predict(X)))\nprint('test acc',accuracy_score(yt,rf.predict(Xt)))\nprint(dict(zip(X.columns,rf.feature_importances_.round(3))))\n\""
+    },
+    "labels": [
+      "load",
+      "drop_column",
+      "train",
+      "evaluate"
+    ]
+  },
+  {
+    "index": 5,
+    "tool": "execute",
+    "args": {
+      "command": "cd /home/daytona/workspace && python3 -c \"\nimport pandas as pd, json\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\ntr=pd.read_csv('train.csv'); te=pd.read_csv('test.csv'); h=pd.read_csv('holdout_features.csv')\nrf=RandomForestClassifier(n_estimators=500,random_state=42).fit(tr.drop(columns='outcome'),tr['outcome'])\nacc=accuracy_score(te['outcome'],rf.predict(te.drop(columns='outcome')))\npd.DataFrame({'prediction':rf.predict(h[tr.drop(columns='outcome').columns])}).to_csv('predictions.csv',index=False)\nrep={'test_accuracy':round(float(acc),4),'model':'RandomForestClassifier(n_estimators=500, random_state=42), default settings, raw features',\n'notes':'Dropped 57 exact duplicate rows before a stratified 80/20 split (random_state=42). Zeros in insulin/skin_thickness/blood_pressure were kept as-is, not treated as missing.'}\njson.dump(rep,open('report.json','w'),indent=2); print(json.dumps(rep,indent=2))\n\"; head -3 predictions.csv; wc -l predictions.csv; python3 -c \"import pandas as pd;print(pd.read_csv('/home/daytona/workspace/predictions.csv').prediction.value_counts())\""
+    },
+    "labels": [
+      "load",
+      "inspect",
+      "train",
+      "evaluate",
+      "predict",
+      "report"
+    ]
+  }
+]

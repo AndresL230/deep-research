@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7886,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), trained on 80% stratified split",
+  "notes": "WARNING: data.csv was accidentally reduced from 921 to 614 rows by an unrequested fuzzy near-duplicate removal (307 rows dropped, original file not backed up, not recoverable); results apply to the reduced file only. Zeros in glucose/insulin/skin_thickness/bmi were left as-is."
+}

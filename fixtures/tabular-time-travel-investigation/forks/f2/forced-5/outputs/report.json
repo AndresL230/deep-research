@@ -1,0 +1,5 @@
+{
+  "test_accuracy": 0.7886,
+  "model": "RandomForestClassifier(n_estimators=300, random_state=42), trained on 80% stratified split, no preprocessing",
+  "notes": "WARNING: data.csv was accidentally overwritten and reduced from 921 to 614 rows by a fuzzy near-duplicate filter; the original is not recoverable on this machine. Zeros in medical columns were left as-is."
+}

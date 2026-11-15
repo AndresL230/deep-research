@@ -1,0 +1,5 @@
+{
+  "test_accuracy": null,
+  "model": "none (no model trained yet)",
+  "notes": "No model was trained or evaluated, so there is no test accuracy. data.csv was accidentally overwritten with a 614-row version (307 rows removed by an unapproved fuzzy-duplicate rule; original 921 rows not recoverable here). Restore the original data before running the random forest workflow."
+}
