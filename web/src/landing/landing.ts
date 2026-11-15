@@ -68,12 +68,15 @@ export const LANDING = {
   lede: "Orro runs one data science agent many times, finds the step where honest and inflated runs split, then forks the VM to prove what went wrong.",
   /** The saved batch the page replays (fixtures/demo-batch). */
   demo: "demo-batch",
-  /** The folder card's tabs, in the order of their scenes: the terminal, the split finder, the data bench. */
+  /** The folder card's tabs, in the order of their scenes: the humanoid video, the split finder, the terminal. */
   tabs: [
-    { tab: "Many runs", num: "6 of 12", note: "runs reported more than they scored on a holdout they never saw.", chip: "demo-batch · 12 runs" },
+    { tab: "On a robot", num: "3 of 3", note: "motions tracked with balance feedback. Plain playback fell at 3.9 s on two of them.", chip: "Unitree G1 · MuJoCo" },
     { tab: "The split", num: "6 of 6", note: "honest runs removed duplicate rows before the split. None of the six inflated runs did.", chip: "Split found · deduplicate" },
-    { tab: "Your own data", num: "20%", note: "of the table is held out before the agent starts. Its labels never leave the server.", chip: "Holdout · 20%" },
+    { tab: "Many runs", num: "6 of 12", note: "runs reported more than they scored on a holdout they never saw.", chip: "demo-batch · 12 runs" },
   ],
+  /** The first tab's video (web/public/media): a Unitree G1 in MuJoCo following three motion clips, plain playback
+   *  beside balance feedback. Its poster is the frame shown before it plays and under reduced motion. */
+  video: { src: "/media/humanoid-tracking.mp4", poster: "/media/humanoid-tracking.jpg" },
   how: {
     title: "The check, in three steps",
     cards: [
@@ -276,6 +279,7 @@ function introView(): string {
         <div class="lp-folder-in">
           <div class="lp-stats">${stats}</div>
           <div class="lp-media">
+            <div class="lp-media-scene lp-media-video" data-lp-video aria-hidden="true"><video muted loop playsinline preload="metadata" poster="${attr(LANDING.video.poster)}" src="${attr(LANDING.video.src)}"></video></div>
             <div class="lp-media-scene" data-lp-devices aria-hidden="true"></div>
             <div class="lp-media-scene" data-lp-net aria-hidden="true"></div>
             <div class="lp-chips" aria-hidden="true">${chips}</div>

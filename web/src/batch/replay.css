@@ -1,4 +1,4 @@
-/* The replay control bar (replay.ts `replayBar`). Compact: one row in a header, wrapping to two on a phone. */
+/* The replay control bar (replay.ts `replayBar`). Compact: one row in a header, two on a phone. */
 .rp-bar { display:flex; align-items:center; gap:8px; min-width:0; flex-wrap:wrap; padding:6px 0; font-size:13px; color:var(--fg-70); }
 .rp-tag { flex:none; padding:1px 7px; border-radius:var(--r-ctl); background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:500; letter-spacing:.02em; }
 .rp-btn { flex:none; display:grid; place-items:center; width:30px; height:30px; border-radius:var(--r-ctl); color:var(--fg); transition:background var(--fx-fast) var(--fx-ease); }
@@ -27,11 +27,26 @@
 .rp-end:hover { background:var(--hover); color:var(--fg); }
 .rp-end:disabled { opacity:.45; cursor:default; background:none; }
 
-/* Phone: the scrubber takes its own row under the buttons. */
-@media (max-width: 560px) {
-  .rp-seek { order:10; flex-basis:100%; }
+/* Phone: two rows of 44px controls. Play, the time and the scrubber, which takes the width that is left; under them
+   the tag on the left and restart, the speeds and skip to end on the right. The empty box after the scrubber is the
+   line break. */
+@media (max-width: 640px) {
+  .rp-bar { gap:0 8px; padding:0; }
+  .rp-bar::after { content:""; order:4; flex:0 0 100%; height:0; }
+  /* The play button looks 36px and takes a press on 44px: a clear border round its fill. */
+  .rp-toggle { order:1; width:44px; height:44px; margin-left:-4px; border:4px solid transparent; background-clip:padding-box; }
+  .rp-time { order:2; }
+  .rp-seek { order:3; flex:1 1 0; min-width:0; height:44px; }
+  .rp-seek::-webkit-slider-thumb { width:18px; height:18px; margin-top:-7px; }
+  .rp-seek::-moz-range-thumb { width:18px; height:18px; }
+  .rp-tag { order:5; margin-right:auto; padding:2px 8px; font-size:12px; }
+  .rp-btn:not(.rp-toggle) { order:6; width:44px; height:44px; }
+  /* The speeds and skip to end look 36px tall and take a press on 44px. */
+  .rp-speeds { order:7; }
+  .rp-speed { position:relative; min-width:40px; height:30px; font-size:13px; }
+  .rp-end { position:relative; order:8; width:44px; height:36px; padding:0; justify-content:center; }
+  .rp-speed::after, .rp-end::after { content:""; position:absolute; inset:-7px 0; }
   .rp-end span { display:none; }
-  .rp-end { width:30px; padding:0; justify-content:center; }
 }
 
 @media (prefers-reduced-motion: reduce) {

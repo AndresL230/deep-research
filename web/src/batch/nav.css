@@ -66,8 +66,29 @@
 
 /* ── phones: "+ New", and the theme switch moves into the menu ── */
 @media (max-width: 640px) {
-  .nv-new { height:32px; padding:0 11px 0 8px; }
+  /* "+ New" keeps its size and takes a press 6px above and below it, a 46px target in the 54px bar. */
+  .nv-new { position:relative; height:34px; padding:0 11px 0 8px; }
+  .nv-new::after { content:""; position:absolute; inset:-6px 0; }
   .nv-new-x { display:none; }
+  /* The menu button is a 44px square; its lines stay near the page's right edge. */
+  .nv-menu-b { width:44px; height:44px; margin-right:-8px; }
+  .nv-dot { top:11px; right:11px; }
+  /* The menu is as wide as the page's column, each row 44px tall. */
+  .nv-panel { left:calc(var(--pg-pad) + env(safe-area-inset-left, 0px)); right:calc(var(--pg-pad) + env(safe-area-inset-right, 0px)); top:calc(100% + 4px); width:auto; max-width:none; }
+  .nv-list--menu .nv-a { font-size:15px; }
+  .nv-row { min-height:44px; font-size:14px; }
+  .pg-hdr .nv-panel .th-switch { --th-size:38px; }
+  .nv-n { font-size:12px; }
+  /* Off a batch's pages the bar names the page on screen: of the links, only the current one, as plain words after
+     the logo. The others are in the menu. */
+  .nv { display:flex; flex:0 1 auto; min-width:0; margin-left:0; }
+  .nv::before { content:"›"; flex:none; align-self:center; margin:0 10px 0 2px; color:var(--fg-40); font-size:15px; }
+  .nv-list--bar, .nv-list--bar > li { min-width:0; gap:0; }
+  .nv-list--bar > li:not(:has(> [aria-current="page"])) { display:none; }
+  .nv-list--bar .nv-a { min-width:0; padding:0; font-size:15px; letter-spacing:-0.01em; }
+  .nv-list--bar .nv-a::after { content:none; }
+  .nv-list--bar .nv-l { overflow:hidden; text-overflow:ellipsis; }
+  .nv:not(:has([aria-current="page"])) { display:none; }
   .pg-hdr-r > .th-switch, .pg-hdr-r > .hb { display:none; }
   /* A batch's pages: the cost bar keeps its figure and drops its meter, for the breadcrumb's sake. */
   .pg-hdr-r > .hm-cb .hm-cb-meter { display:none; }
@@ -78,6 +99,16 @@
   .app-root:is([data-view="batch"], [data-view="run"], [data-view="child"]) .pg-home .ask-h1 { display:none; }
   /* No links between the logo and the breadcrumb here: the logo is its first step again. */
   .pg-crumbs::before { content:"›"; width:auto; height:auto; margin:0; background:none; color:var(--fg-40); font-size:15px; }
+  /* A page inside a batch names itself only: the batch's id had no room beside it. The way back to the batch is on
+     the page (the stage rail's first step, a run's "Batch" link). */
+  .pg-crumbs > .pg-crumb:not(:last-child), .pg-crumbs > .ask-crumb-sep { display:none; }
+  /* The page's name gives way with an ellipsis before it is cut. */
+  .pg-crumbs { gap:8px; }
+  .pg-crumbs > .pg-crumb:last-child { flex:0 1 auto; }
+  /* A simulated batch's cost bar holds one chip: it needs no box of its own. Beside the live feed's button there is
+     no room for the cost bar at all; the batch's first page and Costs have the figure. */
+  .pg-hdr-r > .hm-cb:has(.hm-cb-sim) { padding:0; border:0; }
+  .pg-hdr-r:has(> .cm-hf) > .hm-cb { display:none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

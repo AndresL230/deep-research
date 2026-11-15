@@ -146,8 +146,18 @@ tbody .bt-row:first-child { border-top:none; }
 @container (max-width: 420px) {
   .bt-row { padding:12px 14px 14px; gap:12px; }
 }
-@media (max-width: 480px) {
-  .bt-filter { max-width:100%; overflow-x:auto; }
+/* A phone: the filter is a 44px row that scrolls sideways when its domains do not fit, and a card's words are at
+   reading size (its small print at 12px or more). The whole card opens the batch. */
+@media (max-width: 640px) {
+  .bt-filter { height:44px; max-width:100%; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; }
+  .bt-filter::-webkit-scrollbar { display:none; }
+  .bt-f { flex:none; padding:0 12px; font-size:14px; }
+  .bt { font-size:14px; }
+  .bt td { line-height:20px; }
+  .bt-id { font-size:14px; line-height:22px; }
+  .bt-from, .bt-sub, .bt-chip, .bt-none, .bt-counts, .bt-tok { font-size:12.5px; }
+  .bt-usd { font-size:14px; }
+  .bt td:is(.bt-c-claim, .bt-c-step, .bt-c-verdict, .bt-c-spend, .bt-c-models)::before { font-size:12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
