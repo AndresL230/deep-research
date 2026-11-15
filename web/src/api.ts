@@ -189,6 +189,9 @@ export interface BatchConfig {
   budget_usd: number;
   inflation_threshold: number;
   mode: "live" | "replay";
+  /** A recording of a real live batch, committed as a fixture (scripts/make_live_fixture.py): where it came from.
+   *  Absent on a batch that was run on this platform. */
+  recording?: { kind?: string; source_batch?: string; saved_at?: string; note?: string } | null;
   seed: number;
   /** robot_arm only: how many hidden can positions a controller is scored on (the first n); null means all. */
   robot_hidden_positions?: number | null;
