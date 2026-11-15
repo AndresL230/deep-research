@@ -41,12 +41,13 @@ from .events import PREFIX_EVENTS, EventLog, current_step, events_from_update, p
 from .evidence import (current_verdict_evidence, fork_pairs, pairs_to_support, verdict_evidence, verdict_fork,
                        verdict_sentence)
 from .evidence import describe as describe_evidence
-from .evidence import fix_evidence, fix_outcome, method_outcome
+from .evidence import direction_of, fix_evidence, fix_outcome, method_outcome, pair_up
 from .domains import actions_from_events, build_task, intervention_for, score_run
 from .domains.robot_arm import BENCH_DIR
 from . import experiments as xp
 from . import interaction as ixn
-from .forks import (COLUMN_STEPS, ChangeError, anchor_error, change_messages, cut_history, fix_plan, parse_change,
+from .forks import (COLUMN_STEPS, ChangeError, anchor_error, change_messages, cut_history, fix_plan,
+                    forced_todo, held_fields, parse_change,
                     step_model)
 
 logger = logging.getLogger(__name__)
@@ -1139,8 +1140,10 @@ class Batch:
             logger.info("experiment %s: pair %s dropped: %s", fork_id, d["i"], d["reason"])
         scored = xp.score_pairs(kept, prediction)
         cost = self._scope_usd(f"fork:{fork_id}:")
+        held = xp.adherence(self.case.data["forks"][fork_id].get("children") or {}, dropped)
         self.case.update_fork(fork_id, status="done", arms=arms, pairs=kept, dropped_pairs=dropped,
-                              score=scored["score"], p_exact=scored["p_exact"], level=scored["level"], cost_usd=cost)
+                              score=scored["score"], p_exact=scored["p_exact"], level=scored["level"], cost_usd=cost,
+                              adherence=held)
         # The same `evidence` record a fork from the old path carries (`_fork_evidence`): one rule, one shape.
         self.case.update_fork(fork_id, evidence=_fork_evidence(self.case.data["forks"][fork_id]))
         self._fork_findings(fork_id, arms)
@@ -1153,8 +1156,9 @@ class Batch:
         self.push_costs(force=True)
         return {"fork_id": fork_id, "suspect_id": suspect_id, "change": ch.spec, "anchor": src.anchor,
                 "source_run": src.run_id, "fork_at": n_prefix, "prediction": prediction, "pairs_requested": asked,
-                "pairs": kept, "dropped": dropped, "score": scored["score"], "p_exact": scored["p_exact"],
-                "level": scored["level"], "evidence": ev, "cost_usd": cost, "budget_left_usd": self._budget_left()}
+                "pairs": kept, "dropped": dropped, "adherence": held, "score": scored["score"],
+                "p_exact": scored["p_exact"], "level": scored["level"], "evidence": ev, "cost_usd": cost,
+                "budget_left_usd": self._budget_left()}
 
     async def run_interaction(self, change_a: str, change_b: str, per_cell: int = 2, source_run: str | None = None,
                               anchor: str = "before_split", suspects: tuple[str, str] | None = None) -> dict:
@@ -1423,6 +1427,8 @@ class Batch:
         ]
         lines += _arm_lines(plan, arms, kind, found.get("evidence"))
         lines += _findings_lines(record, found)
+        if (found.get("adherence") or {}).get("note"):
+            lines.append(f"{found['adherence']['note']}.")
         if kind == "fix":
             self.case.update_fix(status="tested", fork_id=fork_id,
                                  result={arm: {"mean_true": a["mean_true"], "scored": a["scored"]} for arm, a in arms.items()})
@@ -1507,6 +1513,9 @@ class Batch:
             # MASTER_PLAN 6.1: the pairs, the running score, the display-only exact test and the level on the fork.
             found.update(evidence=ev, outcome=method_outcome(ev), pairs=pairs or [], score=ev["score"],
                          p_exact=ev["p_exact"], level=ev["level"])
+            # The adherence check over every copy so far (more pairs included): pairs whose changed copy undid it.
+            gone = pair_up(fork.get("children"), direction_of(fork.get("prediction")))[1]
+            found["adherence"] = xp.adherence(fork.get("children") or {}, [{"reason": d["why"]} for d in gone])
         self.case.update_fork(fork_id, **found)
         if fork.get("hypothesis_id") and "outcome" in found:
             self.case.set_hypothesis_status(fork["hypothesis_id"], found["outcome"], tested_by=fork_id)
@@ -1565,7 +1574,8 @@ class Batch:
         await asyncio.to_thread(vms.replay_actions, base, actions)
         return base
 
-    async def _seed_copy(self, agent, point: "_ForkPoint", history: list, thread_id: str) -> tuple[Any, dict]:
+    async def _seed_copy(self, agent, point: "_ForkPoint", history: list, thread_id: str,
+                         todo: dict | None = None) -> tuple[Any, dict]:
         """What a copy's agent starts from, and the fields that say so on the copy. `history` is the cut history
         (`point.messages`) plus the arm's change (`change_messages`).
 
@@ -1586,6 +1596,10 @@ class Batch:
                                            "fork_mode_requested": "checkpoint", "fork_mode_fallback": point.fallback}
         change = history[len(point.messages):]
         values = {**point.seed, "messages": list(point.seed.get("messages") or []) + change}
+        if todo is not None:
+            # The changed copy's forced step is in its history as a call it made, so its plan lists it as done
+            # (`forks.forced_todo`). The control's state is the snapshot as it was.
+            values["todos"] = list(point.seed.get("todos") or []) + [todo]
         await agent.aupdate_state({"configurable": {"thread_id": thread_id}}, values, as_node="tools")
         return None, {"fork_mode": "checkpoint", "state_from": "checkpoint", "checkpoint_id": point.checkpoint_id,
                       "source_thread_id": point.source_thread}
@@ -1650,7 +1664,9 @@ class Batch:
                     async with self._analyst_checkpoints() as saver:
                         agent, lessons = await self._new_analyst(DaytonaSandbox(sandbox=vm), copy_model,
                                                                  f"fork {fork_id} {cid}", saver)
-                        inp, state = await self._seed_copy(agent, point, history, thread_id)
+                        inp, state = await self._seed_copy(
+                            agent, point, history, thread_id,
+                            todo=forced_todo(step) if arm == xp.CHANGED_ARM else None)
                         self._set_child(fork_id, cid, thread_id=thread_id, **state,
                                         **({"lessons": lessons} if lessons else {}))
                         watch = _watch_motion(self.domain, vm, cdir / "outputs", f"forks/{fork_id}/{cid}/outputs",
@@ -1678,6 +1694,10 @@ class Batch:
                     )
                     (cdir / "score.json").write_text(json.dumps(score.to_dict(), indent=2))
                     results[cid] = {"arm": arm, **score.to_dict()}
+                    if step is not None and kind != "fix":
+                        # The adherence check (forks.step_held): a changed copy that undid its change is still scored,
+                        # but its pair is dropped (evidence.pair_up). A control has no change to check.
+                        results[cid].update(await asyncio.to_thread(held_fields, step, cdir, self.task))
                     extra = {"charts": [f"forks/{fork_id}/{cid}/live/{name}" for name in charts]} if charts else {}
                     if watch is None and motion:
                         extra["motion_files"] = [f"forks/{fork_id}/{cid}/outputs/{path}" for path in motion]

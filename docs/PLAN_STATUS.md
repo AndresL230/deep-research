@@ -108,6 +108,9 @@ needs `HUB_URL` from `.env`.
 | `1115-010055-bfc9` | tabular, duplicates | 12 honest, $0.09 | f1 control vs control from r01: 3 pairs, score 0.019, **open**. f2 harmless `edit_context` ("clock is set to UTC"): 5 pairs, score 0.0002, **cleared**. All copies by replay | none (an acceptance check, not an investigation). Local only |
 | `1115-012104-800f` | tabular, duplicates with near-duplicates (strength 0.5, noise 0.05, hidden share 0.8) | 12 inflated, 0 honest, $0.486 of $1.50 | f1 (s1 `deduplicate_near`, from r01): 5 of 5 pairs agree, score 24.76, **supported**, p_exact 0.004. f2 (s2 `deduplicate`, from r08): 1 of 5 agree, score 0.0002, **cleared**. 20 copies by replay | "caused", confidence medium; s3 `evaluate` open; rubric sent back twice, then satisfied. In git as `fixtures/tabular-live-investigation` |
 
+`1115-025003-ef94` (tabular, near-duplicates), f3 `deduplicate_near` in checkpoint mode: scored **cleared**
+(0.00019), but **invalid evidence**: all 5 forced copies undid the change (see "Adherence check" below). Local only.
+
 Added Sun Nov 15 around 01:40 Eastern, every number read from each batch's `case/case.json`:
 `1115-012104-800f` is the first real run of the rebuilt investigator on the tabular trap, and the first real batch to
 reach `supported` under the 6.4 score. It started blind (`investigator_assist: none`, `split: null`, no honest run).
@@ -119,6 +122,24 @@ reach `supported` under the 6.4 score. It started blind (`investigator_assist: n
 | The investigator's view named the trap catalog: `list_changes` listed `drop_leak`, `group_split` and `drop_column:followup_score`, and the skill named `followup_score` | `list_changes` shows generic changes only, each with what it does (`forks.blind_changes`): `control`; `force_step` `deduplicate`, `deduplicate_near`, `drop_column:<column>`, `group_split:<column>`; `fake_result`; `edit_context`; `swap_model`. A trap's own step asked for by its label is refused with a pointer to the generic form. A named column must be a column of the batch's data.csv, and the error does not list them. `list_interventions` and `request_forks` output replace trap columns with `<column>`. `trap_fixes` stays with the orchestrator. Traps declare their columns (`Trap.columns`). The skill names no trap column | `forks.py`, `traps/`, `agents/investigator.py`, `batch.py`, `skills/method-errors/SKILL.md`, `tests/test_blind_view.py` |
 | `check_invariants.py` gaps (8.1) | Fails when a suspect's status disagrees with `evidence.<id>` under the running-score rule, when `verdict.supported` names a suspect under 20, when a banned key or `holdout_labels` is on any investigator route (routes found by building the investigator's backend: `/case/`, `/runs/`, `/skills/`, `/memory/`, `/memories/`, plus the analyst VM's files), and when any GET route FastAPI has serves or names `holdout_labels` (each path parameter filled in; a new parameter fails until it gets a probe) | `scripts/check_invariants.py`, `tests/test_check_invariants.py` |
 | The two-factor grid had no caller | `run_interaction(suspect_a, suspect_b, per_cell=2, reason="")` on the investigator, behind the same approve, edit, reject as `run_experiment`, refused unless both suspects are `supported`; each suspect's change comes from its newest experiment. `forks.pending.kind = "interaction"`. `cli interaction <batch> --a s1 --b s2 --per-cell 2 --auto-approve`. A prompt rule says when to run it | `agents/investigator.py`, `interaction.py`, `batch.py`, `cli.py`, `tests/test_interaction_offline.py` |
+
+## Adherence check (Sun Nov 15, 03:30 Eastern)
+
+Found on the real batch `1115-025003-ef94`, experiment f3: `force_step:deduplicate_near`, `smaller_gap`,
+`fork_mode: checkpoint`. It came out **cleared** (score 0.00019) because all 5 forced copies stayed inflated. Every
+forced copy undid the change: the step ran, then the analyst read its own plan (no dedup in it) and the output ("This is
+the intended step", "The original is saved as data_before_dedup.csv"), called the step a mistake and ran
+`cp data_before_dedup.csv data.csv`. The pairs were scored as if the change had held. **ef94/f3 is invalid evidence**:
+it says nothing about near-duplicates, and its "cleared" must not be cited. The same change in messages mode
+(`1115-012104-800f` f1) held in 5 of 5 copies and was supported at 24.76.
+
+| Fix | Where |
+| --- | --- |
+| After each changed copy, plain code checks the change held (`forks.step_held`, `Change.held`; a rule per `force_step` in `step["check"]`, hooks in `forks.HELD_CHECKS`). `deduplicate_near`: the copy's final `outputs/train.csv` has no near-duplicates by the step's own rule (`forks.near_duplicates`), and no later command restores the old backup or copies another file onto data.csv. `deduplicate`: no exact copies in train.csv, same command check. `drop_column:<c>`: `c` is not in train.csv. `group_split:<c>`: no value of `c` in both train.csv and test.csv. Anything else (made-up result, message, model swap, no train.csv): `None`, counted as held and marked unverified | `forks.py` |
+| A changed copy gets `held` and `held_verified` (the control none). A pair whose changed copy has `held: false` is dropped with the reason "the copy undid the change" (`evidence.pair_up`, so `run_experiment`, more pairs and verdicts all agree), and the level is computed from the held pairs only. `forks.<id>.adherence` and the `run_experiment` result carry `undid_change`, `held_verified`, `held_unverified` and the note "k pairs dropped: the copy undid the change" | `evidence.py`, `experiments.adherence`, `batch.py` |
+| The near-duplicate step keeps no backup, and its output is neutral: "Removed 307 near-duplicate rows (rows that match another row up to small numeric differences). 614 rows remain in data.csv." | `forks.INTERVENTIONS` |
+| Checkpoint mode: the changed copy's seeded todo list gains the forced step as a completed item ("Remove near-duplicate rows from data.csv"), so its plan agrees with its history. The control's state is the snapshot as it was. Nothing tells the agent it is in an experiment | `batch._seed_copy`, `forks.forced_todo` |
+| Offline tests: a scripted copy that restores the data is dropped, one that keeps the change is scored, the level counts only held pairs, the seeded todos include the step, the output has no backup or "intended", one rule per change kind; on this machine, every ef94/f3 forced copy reads as not held and every 800f/f1 forced copy as held | `tests/test_adherence.py`, `tests/test_dedup_near.py`, `tests/test_time_travel_offline.py` |
 
 ## Open items (Sun Nov 15, 01:40)
 

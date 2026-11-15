@@ -11,8 +11,10 @@ from typing import Callable
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from . import traps
+from .evidence import UNDID_CHANGE  # noqa: F401 - the reason a pair is dropped, named here with its check
 
-# The forced near-duplicate removal keeps the file as it was under this name, in the VM workspace.
+# An older near-duplicate step kept the file as it was under this name. The step no longer writes it (batch
+# 1115-025003-ef94 f3: every forced copy restored it at once), but a copy that reaches for it undid the change (`held`).
 DEDUP_BACKUP = "data_before_dedup.csv"
 # How far apart (relative) a non-integer value of a near-duplicate may be from the row it copies.
 NEAR_RTOL = 0.05
@@ -24,13 +26,14 @@ INTERVENTIONS: dict[str, dict] = {
     # A jittered copy (traps/duplicates.py) equals its original exactly in every integer or text column and is
     # within a small relative distance in each non-integer column (`trap_noise` scales a value by 1 + N(0, noise/20),
     # so at most 2.5% at the largest noise). Rows are sorted on every column, and a row that matches the one before
-    # it that way is dropped: exact copies too. The file as it was is kept, and the output says what was done and
-    # that it is the intended step, so the copy reads it as a fix and not as damage.
+    # it that way is dropped: exact copies too (`near_duplicates` is the same rule in Python, for `held`). No backup
+    # is kept, and the output says only what was done, in neutral words.
     "deduplicate_near": {
-        "description": "Remove near-duplicate rows from data.csv before the split, keeping the original file",
+        "description": "Remove near-duplicate rows from data.csv before the split",
+        "todo": "Remove near-duplicate rows from data.csv",
         "command": traps.in_workspace(
             "import pandas as pd, numpy as np; d = pd.read_csv('data.csv'); n = len(d); "
-            f"d.to_csv('{DEDUP_BACKUP}', index=False); d = d.drop_duplicates(); "
+            "d = d.drop_duplicates(); "
             "num = d.select_dtypes('number'); "
             "fz = [c for c in num.columns if not (num[c].dropna() % 1 == 0).all()]; "
             "ex = [c for c in d.columns if c not in fz]; "
@@ -40,9 +43,8 @@ INTERVENTIONS: dict[str, dict] = {
             "equal_nan=True).all(axis=1); "
             "dup = same & close; dup[:1] = False; "
             "d = d.drop(index=s.index[dup]); d.to_csv('data.csv', index=False); "
-            "print(f'Removed {n - len(d)} near-duplicate rows (copies of other rows with small numeric jitter). '"
-            "f'{len(d)} rows remain. This is the intended step. "
-            f"The original is saved as {DEDUP_BACKUP}. Continue the task with data.csv.')"
+            "print(f'Removed {n - len(d)} near-duplicate rows (rows that match another row up to small numeric '"
+            "f'differences). {len(d)} rows remain in data.csv.')"
         ),
     },
 }
@@ -270,6 +272,10 @@ class Change:
         return {"kind": self.kind, "name": self.name, "spec": self.spec, "description": self.description,
                 "about": self.about}
 
+    def held(self, copy_dir, task=None) -> bool | None:
+        """Whether this change still held at the end of a changed copy (`step_held`). None: it cannot be checked."""
+        return step_held(self.step, copy_dir, task)
+
 
 class ChangeError(ValueError):
     """A change that cannot be built, with the reason in words for the caller."""
@@ -281,6 +287,7 @@ def drop_column_step(column: str) -> dict:
         raise ChangeError(f"'{column}' is not a column name a change can drop (letters, digits, _ . - and spaces)")
     return {
         "description": f"Drop the {column} column from data.csv and holdout_features.csv before the split",
+        "check": {"rule": "no_column", "column": column},
         "command": traps.in_workspace(
             "import pandas as pd; "
             "[pd.read_csv(f, dtype=str, keep_default_na=False)"
@@ -299,6 +306,7 @@ def group_split_step(column: str) -> dict:
     return {
         "description": f"Keep one row per {column} value in data.csv before the split, so no group is in both train "
                        "and test",
+        "check": {"rule": "group_split", "column": column},
         "command": traps.in_workspace(
             "import pandas as pd; d = pd.read_csv('data.csv', dtype=str, keep_default_na=False); n = len(d); "
             f"d = d.drop_duplicates(subset=['{column}']); d.to_csv('data.csv', index=False); "
@@ -358,8 +366,12 @@ def parse_change(spec: str, force: Callable[[str], dict | None] | None = None,
         if iv is None:
             raise ChangeError(f"no forced step exists for '{name}'; choose one of {force_steps(force)} "
                               "or 'drop_column:<name>'")
-        return Change(kind, name, iv["description"], {"description": iv["description"], "command": iv["command"]},
-                      about=label)
+        step = {"description": iv["description"], "command": iv["command"],
+                **({"todo": iv["todo"]} if iv.get("todo") else {})}
+        check = check_for(label, iv)
+        if check:
+            step["check"] = check
+        return Change(kind, name, iv["description"], step, about=label)
     if kind == "fake_result":
         fake = FAKE_RESULTS.get(name)
         if fake is None:
@@ -537,6 +549,166 @@ def change_messages(backend, step: dict | list | None) -> tuple[list[BaseMessage
             msgs += forced_turn(s, output)
             events.append({"type": "forced", "command": step_text(s), "output": output[:2000]})
     return msgs, events
+
+
+# ---- the adherence check: did the change hold? (plan 3: no false evidence) ----
+#
+# A changed copy's agent can undo what was forced on it (batch 1115-025003-ef94 f3: every forced copy restored the
+# data the near-duplicate step had cleaned). Scored, such a copy is a second control and the pair says the change did
+# nothing. After each changed copy finishes, plain code reads its final files and its log; a pair whose changed copy
+# undid the change is dropped (`evidence.UNDID_CHANGE`), never scored. Each `force_step` names its rule in
+# `step["check"]`; a step without one (a made-up result, a message, a model swap, a fix) cannot be checked: None.
+
+
+
+def check_for(label: str, iv: dict) -> dict | None:
+    """The adherence rule of a fixed `force_step` (`label`, its step `iv`), or None when there is none."""
+    if label == "deduplicate_near":
+        return {"rule": "near_duplicates"}
+    command = iv.get("command", "")
+    if label == "deduplicate" or re.search(r"drop_duplicates\(\)", command) and "subset" not in command:
+        return {"rule": "exact_duplicates"}
+    if m := re.search(r"drop\(columns=\['([^']+)'\]", command):
+        return {"rule": "no_column", "column": m.group(1)}
+    if m := re.search(r"drop_duplicates\(subset=\[?'([^']+)'\]?\)", command):
+        return {"rule": "group_split", "column": m.group(1)}
+    return None
+
+
+def near_duplicates(d) -> int:
+    """How many rows of the table `d` the near-duplicate step would remove: exact copies, then rows that match the one
+    before them (sorted on every column) exactly in each integer or text column and within NEAR_RTOL in each other
+    numeric column. The same rule as the step's command, in Python."""
+    import numpy as np
+
+    n = len(d)
+    d = d.drop_duplicates()
+    num = d.select_dtypes("number")
+    fz = [c for c in num.columns if not (num[c].dropna() % 1 == 0).all()]
+    ex = [c for c in d.columns if c not in fz]
+    s = d.sort_values(ex + fz, kind="stable")
+    p = s.shift()
+    same = s[ex].astype(object).fillna("<NA>").eq(p[ex].astype(object).fillna("<NA>")).all(axis=1).to_numpy()
+    close = np.isclose(s[fz].to_numpy(float), p[fz].to_numpy(float), rtol=NEAR_RTOL, atol=1e-9,
+                       equal_nan=True).all(axis=1)
+    dup = same & close
+    dup[:1] = False
+    return (n - len(d)) + int(dup.sum())
+
+
+# A later command that puts another file in data.csv's place: `cp <src> data.csv`, `mv <src> data.csv`, a shutil copy,
+# or a git checkout of the file.
+_RESTORES = (
+    re.compile(r"\b(?:cp|mv|rsync|install)\b(?:\s+-\S+)*\s+(?P<src>\S+)\s+(?:\S*/)?data\.csv(?![\w.])"),
+    re.compile(r"shutil\.(?:copy\w*|move)\(\s*(?P<src>[^,]+),\s*['\"](?:[^'\"]*/)?data\.csv['\"]"),
+    re.compile(r"\bgit\s+(?:checkout|restore)\b[^\n;&|]*\bdata\.csv\b"),
+)
+
+
+def _later_commands(copy_dir) -> list[str]:
+    """The shell commands a copy ran after its forced step, from its `events.jsonl`."""
+    import json
+    from pathlib import Path
+
+    path = Path(copy_dir) / "events.jsonl"
+    if not path.is_file():
+        return []
+    out, after = [], False
+    for line in path.read_text().splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("type") == "forced":
+            after = True
+        elif after and ev.get("type") == "tool_call":
+            cmd = (ev.get("args") or {}).get("command")
+            if isinstance(cmd, str):
+                out.append(cmd)
+    return out
+
+
+def restored_data(copy_dir) -> bool:
+    """Whether a copy's later commands put back the data the forced step changed: one names the old backup, or copies
+    another file onto data.csv."""
+    for cmd in _later_commands(copy_dir):
+        if DEDUP_BACKUP in cmd:
+            return True
+        for rx in _RESTORES:
+            m = rx.search(cmd)
+            if m and (m.groupdict().get("src") or "").strip("'\" ").rsplit("/", 1)[-1] != "data.csv":
+                return True
+    return False
+
+
+def _read(copy_dir, name: str):
+    import pandas as pd
+    from pathlib import Path
+
+    path = Path(copy_dir) / "outputs" / name
+    if not path.is_file():
+        return None
+    try:
+        return pd.read_csv(path)
+    except Exception:  # noqa: BLE001 - an unreadable file cannot be checked
+        return None
+
+
+def _held_duplicates(copy_dir, near: bool) -> bool | None:
+    if restored_data(copy_dir):
+        return False
+    train = _read(copy_dir, "train.csv")
+    if train is None:
+        return None
+    return (near_duplicates(train) if near else int(train.duplicated().sum())) == 0
+
+
+def _held_no_column(copy_dir, column: str) -> bool | None:
+    train = _read(copy_dir, "train.csv")
+    return None if train is None else column not in train.columns
+
+
+def _held_group_split(copy_dir, column: str) -> bool | None:
+    train, test = _read(copy_dir, "train.csv"), _read(copy_dir, "test.csv")
+    if train is None or test is None or column not in train.columns or column not in test.columns:
+        return None
+    seen = set(train[column].dropna().astype(str))
+    return not any(v in seen for v in test[column].dropna().astype(str))
+
+
+# One hook per rule: (copy folder, the rule's own fields) -> held, or None when it cannot be checked. The copy folder
+# holds `events.jsonl` and `outputs/` (train.csv and test.csv, the rows the run trained and tested on).
+HELD_CHECKS: dict[str, Callable[..., bool | None]] = {
+    "near_duplicates": lambda d, c: _held_duplicates(d, near=True),
+    "exact_duplicates": lambda d, c: _held_duplicates(d, near=False),
+    "no_column": lambda d, c: _held_no_column(d, c["column"]),
+    "group_split": lambda d, c: _held_group_split(d, c["column"]),
+}
+
+
+def step_held(step: dict | list | None, copy_dir, task=None) -> bool | None:
+    """Whether a changed copy's change still held when it finished: True, False (the copy undid it) or None (this
+    kind of change cannot be checked; counted as held, marked unverified). `task` is unused by today's rules: the
+    copy's own files say it all."""
+    if not isinstance(step, dict) or not isinstance(step.get("check"), dict):
+        return None
+    hook = HELD_CHECKS.get(step["check"].get("rule"))
+    return None if hook is None else hook(copy_dir, step["check"])
+
+
+def held_fields(step: dict | list | None, copy_dir, task=None) -> dict:
+    """The fields a changed copy gets: `held` (False only when it undid the change) and `held_verified`."""
+    h = step_held(step, copy_dir, task)
+    return {"held": h is not False, "held_verified": h is not None}
+
+
+def forced_todo(step: dict | list | None) -> dict | None:
+    """The forced step as a completed item of the agent's todo list (checkpoint mode), so its plan agrees with its
+    history: the step is in its history as a call it made. Only a shell-command step (`force_step`); nothing else is
+    a step the agent would have planned."""
+    if not isinstance(step, dict) or step_kind(step) != "command" or not step.get("command"):
+        return None
+    return {"content": step.get("todo") or step["description"], "status": "completed"}
 
 
 # ---- fork points (plan 6.3) ----

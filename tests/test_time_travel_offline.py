@@ -117,8 +117,13 @@ async def test_a_checkpoint_mode_copy_starts_like_a_messages_mode_copy_and_keeps
         assert isinstance(a["messages"][0], HumanMessage) and a["messages"][1].tool_calls[0]["name"] == "write_todos"
         if arm == "forced-1":
             assert isinstance(a["messages"][-1], ToolMessage) and "Removed" in a["messages"][-1].content
-        # And only checkpoint mode keeps the source run's todo list.
-        assert a["todos"] == TODOS
+        # And only checkpoint mode keeps the source run's todo list. The changed copy's plan also lists its forced
+        # step as done, so its plan agrees with its history; the control's is the snapshot's own.
+        if arm == "forced-1":
+            assert a["todos"] == TODOS + [{"content": "Remove duplicate rows from data.csv before the split",
+                                           "status": "completed"}]
+        else:
+            assert a["todos"] == TODOS
         assert not m.get("todos")
     # The forced step really ran in the checkpoint-mode copy's VM: its run came out honest, the control's inflated.
     assert f_cp["children"]["forced-1"]["status"] == "honest"

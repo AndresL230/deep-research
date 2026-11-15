@@ -56,6 +56,20 @@ def pair_outcomes(children: dict[str, dict], pairs: int, prediction: str,
     return kept, sorted(dropped, key=lambda d: d["i"])
 
 
+def adherence(children: dict[str, dict], dropped: list[dict], changed_arm: str = CHANGED_ARM) -> dict:
+    """The adherence check of one experiment, for the investigator and the case file: how many pairs were dropped
+    because the changed copy undid the change, how many changed copies were checked and held, how many could not be
+    checked (counted as held, unverified), and the line that says so."""
+    undid = sum(d.get("reason") == ev.UNDID_CHANGE for d in dropped)
+    changed = [c for cid, c in children.items() if isinstance(c, dict) and cid.startswith(f"{changed_arm}-")
+               and "held" in c]
+    out = {"undid_change": undid,
+           "held_verified": sum(c.get("held") is True and c.get("held_verified") is True for c in changed),
+           "held_unverified": sum(c.get("held") is True and c.get("held_verified") is False for c in changed),
+           "note": f"{undid} pair{'' if undid == 1 else 's'} dropped: {ev.UNDID_CHANGE}" if undid else None}
+    return out
+
+
 def score_pairs(pairs: list[dict], prediction: str) -> dict:
     """`{n_pairs, agree, score, p_exact, level}` of a list of kept pairs (`evidence.score_pairs`)."""
     return ev.score_pairs(pairs, direction(prediction))

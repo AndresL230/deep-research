@@ -38,6 +38,8 @@ NEEDED_PAIRS = 5
 ALPHA = 0.05
 LEVELS = ("open", "supported", "cleared")
 RULE = "running_score"
+# Why a pair is dropped when its changed copy undid the change (the adherence check, `forks.step_held`).
+UNDID_CHANGE = "the copy undid the change"
 # Copies whose gap counts toward a pair: scored ones, as everywhere else in the fork counts.
 PAIRED_STATUSES = ("honest", "inflated")
 # The exact permutation test walks every split of the pooled gaps; past this many it returns None.
@@ -107,6 +109,11 @@ def pair_up(children: dict | None, direction: int = 1, base: str = "control", ch
         failed = next((e[0] for e in ends if e is not None and e[1].get("status") == "failed"), None)
         if failed:
             dropped.append({"i": i, "why": f"{failed} failed"})
+            continue
+        # The adherence check (forks.step_held): a changed copy that undid its change is a second control, not
+        # evidence about the change. Its pair is dropped, whatever its gap.
+        if any(e is not None and e[1].get("held") is False for e in ends):
+            dropped.append({"i": i, "why": UNDID_CHANGE})
             continue
         if any(e is None or e[1].get("status") in (None, "running", "pending", "rebuilding") for e in ends):
             continue

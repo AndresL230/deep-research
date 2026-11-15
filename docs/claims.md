@@ -118,6 +118,14 @@ The landing page draws every number from `DEMO`, which is simulated (`config.sim
   count as disagreeing: score 1.9^6 × 0.1^2 = 0.47, so the new rule reads it `cleared`. Its stored sentence ("caused")
   is unchanged and now reads as an overclaim. That batch is local only (`batches/` is gitignored) and none of the docs
   above claim it. `1114-034546-6c7a` (4 of 4 against 0 of 4, saved "caused") stays `open` at 13.03.
+- **Adherence check** (Sun Nov 15, 03:30 Eastern): a pair now counts only when its changed copy kept the change.
+  Plain code checks each changed copy's final train.csv and later commands (`forks.step_held`); a copy that undid
+  the change drops its pair with "the copy undid the change", and the level comes from the held pairs only
+  (`docs/PLAN_STATUS.md`, "Adherence check"). **`1115-025003-ef94` f3 is invalid evidence:** it reads `cleared`
+  (score 0.00019) for `deduplicate_near` in checkpoint mode, but all 5 forced copies restored the original data
+  (`cp data_before_dedup.csv data.csv`) right after the step. Nothing above claims it, and nothing may. Under the
+  check its 5 pairs would all be dropped. The `TAB` result (`1115-012104-800f` f1, messages mode) is unaffected: all 5
+  forced copies read as held.
 
 ## Demo path (2 minutes)
 
