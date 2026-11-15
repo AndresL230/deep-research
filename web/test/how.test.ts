@@ -141,7 +141,7 @@ describe("the page", () => {
     expect(t).toContain("The claim moved -40.0 pts, the robot moved +5.0 pts.");
     expect(t).toContain("The fork suggests that not testing other can positions inflates the claim");
     expect(html.match(/<p class="hw-quote">([^<]*)<\/p>/)![1]).not.toMatch(/\bcaused\b/);
-    expect(t).toContain("2 of 8 pairs");
+    expect(t).toContain("2 of 5 pairs");
     expect(t).toContain("Run more pairs");
   });
 
@@ -169,7 +169,7 @@ describe("the page", () => {
     expect(t).toContain("4 of 4");
     expect(t).toContain("0 of 6");
     expect(t).toMatch(/The claim moved -40\.\d pts, the robot moved \+5\.0 pts\./);
-    expect(t).toContain("4 of 8 pairs");
+    expect(t).toContain("4 of 5 pairs");
   });
 
   it("says it in plain words: no em dashes, no snake_case", () => {

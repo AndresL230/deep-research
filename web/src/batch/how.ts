@@ -1,5 +1,5 @@
 // "How it works" (`#/how`): a diagram of the loop, then the loop in five steps, each a heading, two plain sentences
-// and a small picture drawn from a real batch, the robot demo (`robot-demo-batch`), loaded with the same case file
+// and a small picture drawn from a real batch, the recorded robot run (`robot-live-investigation`), loaded with the same case file
 // fetch the batch pages use; then how Orro is built, with a diagram of the harness (how-diagrams.ts). Every picture of
 // a result puts a claim next to the truth, the rule of the whole app. Without the case file (still loading, or the
 // server could not give it) the steps read as text alone, and the diagrams that need no numbers stay.
@@ -23,8 +23,9 @@ import { trapOf } from "./trap";
 import { claimHeadline } from "./wall";
 import { capital, domainWords, stepText } from "./words";
 
-/** The batch the page draws its numbers from. */
-export const HOW_BATCH = "robot-demo-batch";
+/** The batch the page draws its numbers from: the recording of a real run (config.recording.kind = "live"), so "a real
+ *  batch" below is true. `robot-demo-batch` is simulated. */
+export const HOW_BATCH = "robot-live-investigation";
 
 // ── the first visit ──────────────────────────────────────────────────────────
 
@@ -132,7 +133,10 @@ function forkPicture(c: CaseFile): string {
   const o = f ? forkOutcome(f) : null;
   if (!f || !o) return "";
   const words = domainWords(c.config);
-  const name = c.split ? stepText(c.split.label, words, trapOf(c)).name : "the step";
+  // The step the fork tested, which need not be the split's (in the recorded robot run the split is tune_params, which
+  // no fork can force, and the fork tested test_table_edges).
+  const label = f.label ?? c.split?.label;
+  const name = label ? stepText(label, words, trapOf(c)).name : "the step";
   return `<div class="hw-fork">${forkDiagram(name, f.source_run ?? c.split?.fork_run_id ?? null, f)}</div>`
     + `<ul class="hw-keys" aria-hidden="true"><li><i class="hw-sw hw-sw--bad"></i>Copy came out inflated</li><li><i class="hw-sw hw-sw--ok"></i>Copy came out honest</li></ul>`
     + `<p class="hw-head hw-head--sm">${esc(forkOutcomeText(o, words.subject))}</p>`;
