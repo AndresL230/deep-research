@@ -300,6 +300,10 @@ button.ln-col-h:focus-visible { outline:2px solid var(--focus); outline-offset:-
 .ln-src { display:flex; flex-direction:column; gap:10px; max-width:880px; }
 .ln-src-how { display:flex; align-items:baseline; flex-wrap:wrap; gap:6px 10px; margin:0; font-size:13.5px; color:var(--fg-70); }
 .ln-src-how > span:last-child { flex:1 1 320px; min-width:0; }
+/* LangGraph time travel: the copies resumed the analyst's saved state from a checkpoint. */
+.ln-tt { border-color:color-mix(in srgb, var(--accent) 55%, transparent); color:var(--accent); white-space:nowrap; }
+.ln-tag + .ln-tt { margin-left:4px; }
+.ln-rewind code { font-family:var(--code); font-size:12.5px; color:var(--fg); }
 
 /* Who did a step: the system's status chip, sentence case. */
 .ln-prov-tag { flex:none; }
