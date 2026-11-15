@@ -16,7 +16,7 @@
 /* The page behind the New batch dialog does not scroll (new-batch-dialog.ts). */
 .app-root[data-modal] .pg-scroll { overflow:hidden; }
 .pg-hdr-r { display:flex; align-items:center; gap:10px; flex:none; }
-.pg-home { display:inline-flex; align-items:center; gap:10px; padding:0; min-width:0; color:inherit; }
+.pg-home { display:inline-flex; align-items:center; gap:10px; padding:0; min-width:0; color:inherit; text-decoration:none; }
 .pg-home .ask-h1 { overflow:hidden; text-overflow:ellipsis; }
 .pg-home:hover .ask-h1-t.is-parent { color:var(--fg-70); }
 .pg-crumb { padding:2px 4px; margin:0 -4px; border-radius:var(--r-ctl); font-size:15px; font-weight:500; letter-spacing:-0.01em; color:var(--fg-55); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
