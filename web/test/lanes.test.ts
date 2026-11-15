@@ -12,7 +12,7 @@ import {
   armCount, armNames, armStats, armStep, armSummaryText, barShare, clip, diagnosisView, eventLine, fixSummaryText, fixTestedText, fixMeasuredText, fixView,
   forkView, investigatorView, isProblemPhase, lineWindows,
   phaseText, pickRuns, planCells, scoreStats, selfCheckText, shortArgs, sortedChildren, splitCounts, splitHeadline,
-  splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictSplit, verdictView,
+  splitIndex, splitView as coloredSplitView, stepWords, verdictArms, verdictLine, verdictSplit, verdictView, stepRows,
 } from "../src/batch/lanes";
 
 // The code is syntax colored (highlight.ts, tested on its own). These tests are about which lines show, so read the
@@ -166,12 +166,43 @@ describe("splitView", () => {
     expect(splitView(vmOf({ split: null, runs: {}, phase: "config" }))).toBe("");
   });
 
+  it("draws two tracks that differ at one stop", () => {
+    const rows = stepRows(demo);
+    const split = rows.filter((r) => r.kind === "split");
+    expect(split).toEqual([{ label: "deduplicate", kind: "split", honest: [6, 6], inflated: [0, 6] }]);
+    // The step the finding names sits where the runs reached it: after loading, before the split.
+    const at = (label: string): number => rows.findIndex((r) => r.label === label);
+    expect(at("load")).toBeLessThan(at("deduplicate"));
+    expect(at("deduplicate")).toBeLessThan(at("split"));
+    expect(rows.find((r) => r.label === "split")).toMatchObject({ kind: "shared", honest: [6, 6], inflated: [6, 6] });
+
+    const html = splitView(withLogs());
+    const fig = html.slice(html.indexOf('<figure class="ln-lanes"'), html.indexOf("</figure>"));
+    // The step is named once, over the stop; each track's stop carries a mark per run and the count.
+    expect(fig.match(/class="ln-lanes-tag">Removing duplicate rows</g)).toHaveLength(1);
+    expect(fig).toMatch(/class="ln-lane-stop ln-grp--honest">.*?<b class="ln-lane-n">6 of 6 runs<\/b>/);
+    expect(fig).toMatch(/class="ln-lane-stop ln-grp--inflated is-skipped">.*?<b class="ln-lane-n">0 of 6 runs<\/b>/);
+    expect(fig.match(/<i class="is-on">/g)).toHaveLength(6);
+    expect(fig.match(/<i class="is-off">/g)).toHaveLength(6);
+    // Every other step is a dot with no words on screen: its name and counts are its tooltip.
+    expect(fig).toContain('<i class="ln-lane-dot" title="Loaded the data: 6 of 6 honest runs"></i>');
+    // All the words in the picture: the step, the two groups, the two counts, where the tracks start and end, and
+    // what a dot is.
+    const words = fig.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    expect(words).toBe("Removing duplicate rows Honest runs 6 of 6 runs Inflated runs 0 of 6 runs Start Wrote the report "
+      + "A step most of the group took A step most of it skipped");
+    // A case with no step labels at all still shows the step the finding names.
+    const bare = Object.fromEntries(Object.entries(demo.runs).map(([id, r]) => [id, { ...r, labels: undefined }]));
+    expect(stepRows({ ...demo, runs: bare, step_labels: {} } as CaseFile).map((r) => r.kind)).toEqual(["split"]);
+  });
+
   it("says what changed in one line, with the counts", () => {
     const html = splitView(withLogs());
     expect(html).toContain("What changed</h2>");
     expect(html).toContain("Honest runs removed duplicate rows before splitting into train and test.");
     expect(html).toContain("Inflated runs did not.");
-    expect(html).toContain("6 of 6 honest runs, 0 of 6 inflated did this before splitting into train and test.");
+    // The counts are the rail's (below): the sentence that repeated them stays for a screen reader only.
+    expect(html).toContain('<span class="mo-sr">6 of 6 honest runs, 0 of 6 inflated did this before splitting into train and test.</span>');
     // A simulated batch says so once, in the page header, not on each section.
     expect(html).not.toContain("Simulated");
   });
@@ -942,8 +973,8 @@ describe("fork page", () => {
     // The fork as two outcomes, once, over the arms.
     expect(count(html, 'class="ln-outcome"')).toBe(1);
     expect(html).toContain('The claim moved <b class="ln-outcome-n">-11.6 pts</b>, the model moved <b class="ln-outcome-n">+1.5 pts</b>.');
-    // The question, the fork point, the evidence, the arms, then how the agents got here.
-    const order = ["ln-q-t", "ln-src-strip", "ln-ev-level", 'data-arms="2"', 'data-morph-key="prov"'].map((k) => html.indexOf(k));
+    // The picture first; then, in the detail, the question, the fork point, the evidence, the arms, and how the agents got here.
+    const order = ['data-morph-key="picture"', "ln-q-t", "ln-src-strip", 'class="ln-evid"', 'data-arms="2"', 'data-morph-key="prov"'].map((k) => html.indexOf(k));
     expect(order.every((x, i) => x > -1 && (i === 0 || x > order[i - 1]))).toBe(true);
   });
 
@@ -1205,9 +1236,39 @@ describe("verdict page", () => {
     expect(html).not.toContain("ln-outs");
   });
 
-  it("adds no buttons or scores, and never shows hidden positions, trace paths or overlap", () => {
+  it("is one picture when folded: a sentence with no counts, the two arms, how far each number moved, the pairs", () => {
+    const html = verdictView(robotVm({}, { open: {} }));
+    expect(html).toContain('<p class="ln-headline">Not testing other can positions likely inflated the claims.</p>');
+    expect(html).not.toMatch(/caused/);
+    const pic = html.slice(html.indexOf('data-morph-key="v-picture"'), html.indexOf('data-act="fold"'));
+    expect(count(pic, '<li class="ln-vp-row')).toBe(2);
+    expect(pic).toMatch(/Left alone<small>Control<\/small>.*?<b class="ln-fk-n">4 of 4 inflated<\/b>/);
+    expect(pic).toMatch(/class="ln-vp-row is-focus">.*?Made to take the step<small>Forced<\/small>.*?<b class="ln-fk-n">0 of 4 inflated<\/b>/);
+    const rows = pic.slice(0, pic.indexOf('<p class="ln-key"'));
+    expect(count(rows, '<i class="is-bad"></i>')).toBe(4);
+    expect(count(rows, '<i class="is-ok"></i>')).toBe(4);
+    expect(pic).toMatch(/<dt>Claim moved<\/dt><dd>-40\.\d pts<\/dd>.*<dt>Robot moved<\/dt><dd>\+5\.0 pts<\/dd>/);
+    expect(pic).toContain("4 of 8 pairs");
+    // No mark is left to guess at: the key names the two kinds drawn, and only those.
+    expect(pic).toContain('<p class="ln-key" data-morph-key="key">');
+    expect(pic).toContain("A copy that inflated its claim");
+    expect(pic).toContain("A copy that did not");
+    expect(pic).not.toContain("Still running");
+    // What it rests on is one click away, and not on the page until then.
+    expect(html).toContain('data-arg="verdict" aria-expanded="false"');
+    expect(html).not.toContain("Where the evidence stands");
+    expect(html).not.toContain("What this verdict rests on");
+    const open = verdictView(robotVm());
+    expect(open).toContain('data-arg="verdict" aria-expanded="true"');
+    expect(open).toContain("What this verdict rests on");
+    // "Caused" only once the evidence supports it.
+    expect(verdictLine(robotVm().case)).toBe("Not testing other can positions likely inflated the claims.");
+  });
+
+  it("adds one button, its fold, and no scores, and never shows hidden positions, trace paths or overlap", () => {
     for (const html of [verdictView(robotVm()), verdictView(vmOf())]) {
-      expect(html).not.toContain("data-act");
+      expect(count(html, "data-act")).toBe(1);
+      expect(html).toContain('data-act="fold" data-arg="verdict"');
       expect(html).not.toContain(" disabled");
       expect(html).not.toContain("ln-score");
       expect(html).not.toContain("ln-conf");
