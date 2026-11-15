@@ -71,6 +71,8 @@ describe("the landing page", () => {
     expect(html).toContain('<a class="lp-link" href="#/b/robot-live-investigation">Demo replay</a>');
     expect(html).toContain('<a class="lp-foot-a" href="#/b/robot-live-investigation">Demo replay</a>');
     expect(html).toContain('<a class="lp-foot-a" href="#/b/tabular-live-investigation">Tabular replay</a>');
+    // "Batches" opens the batch list, which everyone can read; #/start opens on Needs you, which only admins have.
+    expect(html).toContain('<a class="lp-link" href="#/batches">Batches</a>');
     expect(html).toContain('<a class="lp-brand" href="#/">');
     expect(html).not.toContain("data-act=");
   });
