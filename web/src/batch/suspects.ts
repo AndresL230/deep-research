@@ -164,6 +164,7 @@ export function suspectRows(c: CaseFile): SuspectRow[] {
 export const isSimulatedCase = (c: CaseFile): boolean =>
   (c.config as { simulated?: boolean }).simulated === true || c.costs?.simulated === true;
 export const assistOn = (c: CaseFile): boolean => (c.config as { investigator_assist?: string }).investigator_assist === "baseline";
+export const lessonsOn = (c: CaseFile): boolean => (c.config as { lessons?: string }).lessons === "learned";
 
 // ── words and small pieces ───────────────────────────────────────────────────
 
@@ -229,6 +230,7 @@ export function sxTagsView(vm: BatchVm): string {
   const tags: string[] = [];
   if (isSimulatedCase(c)) tags.push(`<span class="sx-flag sx-flag--sim" title="Scripted fixture data: nothing here ran on a model or a VM">Simulated batch</span>`);
   if (assistOn(c)) tags.push(`<span class="sx-flag sx-flag--assist" title="investigator_assist = baseline: the investigator was shown the plain-Python ranking of suspects">Investigator assist on</span>`);
+  if (lessonsOn(c)) tags.push(`<span class="sx-flag sx-flag--assist" title="lessons = learned: the analysts were given the lessons people approved in earlier batches (skills/learned/)">Lessons on</span>`);
   return tags.length ? `<div class="sx-flags" data-morph-key="sx-flags">${tags.join("")}</div>` : "";
 }
 
