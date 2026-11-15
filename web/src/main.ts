@@ -58,7 +58,8 @@ import { LABEL_PATTERNS, chartUrl, logOf, notebookCells } from "./batch/notebook
 import { fetchCosts, type CostReport } from "./api";
 import type { Loadable } from "./batch/model";
 import { costsView } from "./batch/costs";
-import { HOW_BATCH, firstVisitRedirect, howSeen, howView } from "./batch/how";
+import { HOW_BATCH, firstVisitRedirect, howSeen, howStop, howView } from "./batch/how";
+import { placeHowTour } from "./batch/tour";
 import { landingView } from "./landing/landing";
 import { syncLanding } from "./landing/mount";
 import { syncMotion } from "./motion";
@@ -111,6 +112,8 @@ interface AppState {
   costs: Loadable<CostReport>;
   /** The robot demo's case file, for the How it works page's pictures (batch/how.ts). */
   how: Loadable<CaseFile>;
+  /** How it works: the tour's stop on screen (batch/how.ts `howView`). Back to the first on every visit. */
+  howAt: number;
   /** Where the cost screen was opened from, for its back button. */
   costsBack: Route;
   /** The page of a batch last open, so the way back from one of its runs lands on it. */
@@ -139,6 +142,7 @@ const S: AppState = {
   runChart: 0,
   costs: { state: "loading" },
   how: { state: "loading" },
+  howAt: 0,
   costsBack: { name: "home" },
   lastStep: null,
   hub: null,
@@ -423,7 +427,7 @@ function render(): void {
   let body: string;
   if (landing) body = landingView(landingTone, admin());
   else if (r.name === "home") body = homeView(S.home, roleOf(S.access));
-  else if (r.name === "how") body = howView(S.how);
+  else if (r.name === "how") body = howView(S.how, S.howAt);
   else if (r.name === "costs") body = costsView({ report: S.costs, back: "id" in S.costsBack ? S.costsBack.id : null });
   else if (b?.loadError) body = messageView("err", "Couldn't open this batch", b.loadError, true);
   else if (!vm) body = messageView("loading", "Opening the batch", "Loading its case file and event logs…");
@@ -491,6 +495,17 @@ function scrollHome(): void {
   homeScroll = null;
 }
 
+/** How it works: the tour's ring and bubble go where the picture's part is (batch/tour.ts). Again a moment later,
+ *  once the fonts and the picture have settled, and whenever the window changes size. */
+let tourSettle = 0;
+function placeTour(): void {
+  if (S.route.name !== "how") return;
+  placeHowTour(scrollEl);
+  clearTimeout(tourSettle);
+  tourSettle = window.setTimeout(() => { if (S.route.name === "how") placeHowTour(scrollEl); }, 450);
+}
+window.addEventListener("resize", () => { if (S.route.name === "how") placeHowTour(scrollEl); });
+
 let ticker: ReturnType<typeof setInterval> | null = null;
 /** An element to focus once the next paint is in (a row's Start once its confirm opens, say), as a selector. */
 let focusNext: string | null = null;
@@ -502,6 +517,7 @@ function afterPaint(): void {
   scrollHome();
   // First, before the browser styles the page: what morph took off the elements that move (motion.ts).
   syncMotion(scrollEl, scrollEl);
+  placeTour();
   // The landing page's 3D scenes are canvases, not markup: start them when the page is there, stop them when it is
   // not, and show the open item's device.
   syncLanding(scrollEl);
@@ -1021,6 +1037,7 @@ function onRoute(): void {
     else if (was && prev.name === "home" && prev.at === "batches") homeScroll = { to: "top", glide: true };
   } else if (r.name === "how") {
     seenHow.set();
+    if (prev.name !== "how") S.howAt = 0;
     closeBatch();
     void loadHow();
   } else if (r.name === "costs") {
@@ -1131,6 +1148,7 @@ root.addEventListener("click", (e) => {
       }
       return;
     case ACT.runChart: { const n = Number(arg); if (Number.isInteger(n) && n >= 0) { S.runChart = n; paint(); } return; }
+    case ACT.howStep: S.howAt = howStop(Number(arg)); focusNext = "[data-how-next]"; paint(); return;
     case ACT.toggleFeed: S.feedOpen = !S.feedOpen; paint(); return;
     case ACT.fold: {
       if (!b) return;

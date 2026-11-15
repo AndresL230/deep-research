@@ -2,36 +2,60 @@
 
 .app-root[data-view="how"] { --pg-w:1040px; }
 
-.hw { width:100%; max-width:var(--pg-w, 1040px); margin:0 auto; padding:56px var(--pg-pad, 24px) 96px; box-sizing:border-box; display:flex; flex-direction:column; gap:72px; min-width:0; color:var(--fg); font-size:14px; }
+.hw { width:100%; max-width:var(--pg-w, 1040px); margin:0 auto; padding:40px var(--pg-pad, 24px) 72px; box-sizing:border-box; display:flex; flex-direction:column; gap:28px; min-width:0; color:var(--fg); font-size:14px; }
 .hw-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 
 /* ── the top ── */
-/* Three levels: the page title (h1), a section heading (h2) with a small label and a lead, a step or part (h3). */
-.hw-intro { display:flex; flex-direction:column; gap:36px; min-width:0; }
-.hw-top { display:flex; flex-direction:column; gap:16px; min-width:0; }
-.hw-sec { display:flex; flex-direction:column; gap:24px; min-width:0; }
-.hw-sec-h { display:flex; flex-direction:column; gap:8px; min-width:0; }
-.hw-sec-lead { margin:4px 0 0; max-width:62ch; font-size:15.5px; line-height:1.55; color:var(--fg-70); }
-.hw-eyebrow { margin:0; font-size:11.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); }
-.hw-title { margin:0; max-width:20ch; font-size:clamp(34px, 4.6vw, 54px); font-weight:500; line-height:1.04; letter-spacing:-0.035em; text-wrap:balance; }
-.hw-lead { margin:0; max-width:56ch; font-size:18px; line-height:1.55; color:var(--fg-70); text-wrap:pretty; }
-.hw-note { margin:-8px 0 0; max-width:72ch; font-size:13px; line-height:1.5; color:var(--fg-55); }
+.hw-top { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.hw-top-r { display:flex; align-items:center; justify-content:flex-end; gap:16px; }
+.hw-skip { padding:4px 8px; margin:-4px -8px; border-radius:var(--r-ctl); font-size:13px; color:var(--fg-55); text-decoration:none; }
+.hw-skip:hover { color:var(--fg); background:var(--hover); }
+.hw-skip:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.hw-title { margin:0; max-width:20ch; font-size:clamp(30px, 3.8vw, 44px); font-weight:500; line-height:1.06; letter-spacing:-0.035em; text-wrap:balance; }
+.hw-lead { margin:0; max-width:60ch; font-size:16.5px; line-height:1.55; color:var(--fg-70); text-wrap:pretty; }
+.hw-note { margin:0; max-width:72ch; font-size:12.5px; line-height:1.5; color:var(--fg-55); }
+.hw-sec-lead { margin:0; max-width:62ch; font-size:14.5px; line-height:1.55; color:var(--fg-70); }
 
-/* ── cards ── */
-.hw-fig, .hw-step, .hw-part { min-width:0; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); box-sizing:border-box; }
+/* ── the tour: the rail, then one stop ── */
+.hw-tour { display:flex; flex-direction:column; gap:16px; min-width:0; }
+.hw-rail { display:flex; flex-wrap:wrap; gap:6px; margin:0; padding:0; list-style:none; }
+.hw-stopb { display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 12px 0 5px; border:1px solid var(--border); border-radius:var(--r-ctl); background:none; color:var(--fg-55); font:inherit; font-size:13px; font-weight:500; cursor:pointer; transition:color var(--t-hover) ease, background var(--t-hover) ease, border-color var(--t-hover) ease; }
+.hw-stopb:hover { color:var(--fg); background:var(--hover); }
+.hw-stopb:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.hw-stopb.is-done { color:var(--fg-70); }
+.hw-stopb[aria-current="step"] { border-color:var(--ink); background:var(--ink); color:var(--ink-fg); }
+.hw-n { flex:none; display:grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:11.5px; font-weight:600; font-variant-numeric:tabular-nums; }
+.hw-stopb[aria-current="step"] .hw-n { background:color-mix(in srgb, var(--ink-fg) 18%, transparent); color:var(--ink-fg); }
+
+.hw-fig, .hw-stop, .hw-part { min-width:0; border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); box-sizing:border-box; }
 .hw-fig { margin:0; padding:28px; }
-
-/* ── the five steps ── */
-.hw-steps { display:flex; flex-direction:column; gap:16px; margin:0; padding:0; list-style:none; }
-.hw-step { display:grid; grid-template-columns:minmax(0, 300px) minmax(0, 1fr); gap:24px 48px; padding:32px; }
-.hw-step.is-text { grid-template-columns:minmax(0, 1fr); }
-.hw-step-l { display:flex; align-items:flex-start; gap:16px; min-width:0; }
-.hw-n { flex:none; display:grid; place-items:center; width:28px; height:28px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:12.5px; font-weight:600; font-variant-numeric:tabular-nums; }
-.hw-h { margin:2px 0 0; font-size:20px; font-weight:500; line-height:1.3; letter-spacing:-0.015em; }
-.hw-h2 { margin:0; font-size:clamp(26px, 2.8vw, 32px); font-weight:500; line-height:1.15; letter-spacing:-0.025em; }
+.hw-stop { display:grid; grid-template-columns:minmax(0, 300px) minmax(0, 1fr); align-items:stretch; overflow:hidden; }
+.hw-stop.is-text { grid-template-columns:minmax(0, 1fr); }
+.hw-stop-l { display:flex; flex-direction:column; min-width:0; padding:28px; }
+.hw-count { margin:0 0 10px; font-size:12px; font-variant-numeric:tabular-nums; color:var(--fg-55); }
+.hw-h { margin:0; font-size:24px; font-weight:500; line-height:1.2; letter-spacing:-0.02em; text-wrap:balance; }
 .hw-h3 { margin:0; font-size:16px; font-weight:500; line-height:1.35; letter-spacing:-0.01em; }
-.hw-p { margin:8px 0 0; max-width:62ch; font-size:14.5px; line-height:1.65; color:var(--fg-70); text-wrap:pretty; }
+.hw-p { margin:10px 0 0; max-width:62ch; font-size:14.5px; line-height:1.6; color:var(--fg-70); text-wrap:pretty; }
+.hw-nav { display:flex; flex-wrap:wrap; gap:8px; margin-top:24px; }
+.hw-btn { height:40px; padding:0 16px; font-size:14px; text-decoration:none; display:inline-flex; align-items:center; gap:8px; }
+.hw-btn:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.hw-btn--big { height:48px; padding:0 22px; font-size:15px; }
+.hw-next-k { font-weight:400; opacity:.6; }
+
+/* The stage: the stop's picture, one part of it ringed, the rest dimmed, and a bubble on that part (tour.ts). */
+.hw-stage { position:relative; min-width:0; min-height:340px; padding:28px 28px 32px; border-left:1px solid var(--border); background:var(--bg); overflow:hidden; box-sizing:border-box; display:flex; flex-direction:column; justify-content:flex-start; }
 .hw-pic { display:flex; flex-direction:column; gap:16px; min-width:0; }
+/* Nothing in a picture grows in: the ring is placed on the part as it is. */
+.hw-stage .ds-pop { animation:none !important; }
+.hw-ring { position:absolute; left:0; top:0; width:0; height:0; border-radius:8px; opacity:0; pointer-events:none; box-shadow:0 0 0 2px var(--accent), 0 0 0 4000px color-mix(in srgb, var(--bg) 45%, transparent); transition:left .45s var(--ease-out), top .45s var(--ease-out), width .45s var(--ease-out), height .45s var(--ease-out), opacity .2s ease; }
+.hw-ring.is-on { opacity:1; }
+.hw-tip { position:relative; z-index:1; margin:16px 0 0; max-width:300px; padding:10px 13px; border-radius:6px; background:var(--ink); color:var(--ink-fg); font-size:13.5px; line-height:1.45; font-variant-numeric:tabular-nums; text-wrap:pretty; box-shadow:var(--menu-shadow); }
+.hw-tip.is-placed { position:absolute; margin:0; width:max-content; transition:left .45s var(--ease-out), top .45s var(--ease-out); }
+.hw-tip.is-placed::before { content:""; position:absolute; left:var(--hw-ax, 24px); top:-5px; width:10px; height:10px; margin-left:-5px; background:var(--ink); transform:rotate(45deg); }
+
+/* 6. the way on */
+.hw-start { display:flex; flex-wrap:wrap; gap:12px; }
+
 .hw-head { margin:0; font-size:16px; font-weight:500; line-height:1.4; letter-spacing:-0.01em; }
 .hw-head--sm { font-size:14px; }
 .hw-cap { margin:0; font-size:13px; line-height:1.55; color:var(--fg-55); }
@@ -54,10 +78,9 @@
 .hw-row-n { color:var(--fg-70); }
 .hw-row-v { font-variant-numeric:tabular-nums; font-weight:500; text-align:right; white-space:nowrap; }
 
-/* 2. the chart and the map sit in the picture column */
+/* 2. the chart sits in the picture column */
 .hw-chart { overflow-x:clip; }
 .hw-chart .ov-card { padding:16px; }
-.hw-map .ck { margin:0; }
 
 /* 3. the step */
 .hw-step-name { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:0; font-size:15px; font-weight:500; }
@@ -72,23 +95,22 @@
 .hw-sw--bad { background:var(--bad); }
 
 /* 5. the pairs */
-.hw-pairs { display:flex; align-items:center; flex-wrap:wrap; gap:10px 14px; }
+.hw-pairs { display:inline-flex; align-self:flex-start; align-items:center; flex-wrap:wrap; gap:10px 14px; }
 .hw-level { padding:1px 8px; border-radius:var(--r-ctl); font-size:11.5px; font-weight:600; line-height:20px; color:var(--fg-55); box-shadow:inset 0 0 0 1px var(--border-strong); }
 .hw-level[data-level="supported"] { color:var(--green); box-shadow:none; background:color-mix(in srgb, var(--green) 16%, transparent); }
 .hw-slots { display:inline-flex; gap:4px; }
 .hw-slots > i { display:block; width:18px; height:10px; border-radius:2px; box-shadow:inset 0 0 0 1px var(--border-strong); }
 .hw-slots > i.is-on { background:var(--accent); box-shadow:none; }
 
-/* ── under the hood ── */
-
+/* ── under the hood, folded ── */
+.hw-hood { min-width:0; border-top:1px solid var(--border); padding-top:16px; }
+.hw-hood-s { display:inline-flex; align-items:center; gap:8px; padding:4px 8px; margin-left:-8px; border-radius:var(--r-ctl); font-size:13.5px; font-weight:500; color:var(--fg-70); cursor:pointer; }
+.hw-hood-s:hover { color:var(--fg); background:var(--hover); }
+.hw-hood-s:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.hw-hood-b { display:flex; flex-direction:column; gap:20px; padding-top:20px; }
 .hw-parts { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; }
 .hw-part { padding:24px 26px; }
 .hw-part .hw-p { font-size:14px; }
-
-/* ── the way out ── */
-.hw-go { display:flex; flex-wrap:wrap; gap:12px; margin-top:-24px; padding-top:40px; border-top:1px solid var(--border); }
-.hw-btn { height:42px; padding:0 20px; font-size:14px; text-decoration:none; }
-.hw-btn:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
 
 /* ── the diagrams ── */
 .hw-svg { display:block; width:100%; height:auto; overflow:visible; font-family:inherit; }
@@ -119,11 +141,17 @@
 .hw-d-sq--honest { fill:var(--ok); }
 
 @media (max-width: 760px) {
-  .hw { padding-top:32px; gap:48px; }
-  .hw-intro { gap:24px; }
-  .hw-lead { font-size:16px; }
-  .hw-step { grid-template-columns:minmax(0, 1fr); gap:20px; padding:22px 18px; }
-  .hw-h { font-size:18px; }
+  .hw { padding-top:28px; gap:22px; }
+  .hw-lead { font-size:15.5px; }
+  .hw-stop { grid-template-columns:minmax(0, 1fr); }
+  .hw-stop-l { padding:20px 18px; }
+  .hw-nav { margin-top:18px; }
+  .hw-stage { min-height:0; padding:22px 18px 26px; border-left:0; border-top:1px solid var(--border); }
+  .hw-h { font-size:21px; }
+  .hw-stopb-l { display:none; }
+  .hw-stopb { padding:0 5px; }
+  .hw-stopb[aria-current="step"] .hw-stopb-l { display:inline; }
+  .hw-stopb[aria-current="step"] { padding-right:12px; }
   .hw-part { padding:20px; }
   .hw-parts { grid-template-columns:minmax(0, 1fr); }
   .hw-fig { padding:16px 12px; }
@@ -131,3 +159,4 @@
   .hw-svg--narrow { display:block; }
   .hw-row { grid-template-columns:96px minmax(0, 1fr) 48px; gap:10px; }
 }
+@media (prefers-reduced-motion: reduce) { .hw-ring, .hw-tip.is-placed { transition:none; } }
