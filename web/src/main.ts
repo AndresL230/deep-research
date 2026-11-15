@@ -63,7 +63,6 @@ import type { Loadable } from "./batch/model";
 import { costsView } from "./batch/costs";
 import { HOW_BATCH, firstVisitRedirect, howSeen, howStop, howView } from "./batch/how";
 import { placeHowTour } from "./batch/tour";
-import { syncHowFx } from "./batch/how-fx";
 import { landingView } from "./landing/landing";
 import { syncLanding } from "./landing/mount";
 import { syncMotion } from "./motion";
@@ -532,14 +531,12 @@ function scrollHome(): void {
  *  once the fonts and the picture have settled, and whenever the window changes size. */
 let tourSettle = 0;
 function placeTour(): void {
-  // The last stop's moving recap (batch/how-fx.ts) starts and stops with its canvas, on any route.
-  if (S.route.name !== "how") { syncHowFx(scrollEl); return; }
-  const place = (): void => { placeHowTour(scrollEl); syncHowFx(scrollEl); };
-  place();
+  if (S.route.name !== "how") return;
+  placeHowTour(scrollEl);
   clearTimeout(tourSettle);
-  tourSettle = window.setTimeout(() => { if (S.route.name === "how") place(); }, 450);
+  tourSettle = window.setTimeout(() => { if (S.route.name === "how") placeHowTour(scrollEl); }, 450);
 }
-window.addEventListener("resize", () => { if (S.route.name === "how") { placeHowTour(scrollEl); syncHowFx(scrollEl); } });
+window.addEventListener("resize", () => { if (S.route.name === "how") placeHowTour(scrollEl); });
 
 let ticker: ReturnType<typeof setInterval> | null = null;
 /** An element to focus once the next paint is in (a row's Start once its confirm opens, say), as a selector. */

@@ -2,7 +2,7 @@
 // sentences, and a small picture drawn from a real batch, the recorded robot run (`robot-live-investigation`), loaded with the same
 // case file fetch the batch pages use. On each picture one part is ringed and a bubble says the one thing to read there
 // (tour.ts places the ring and the bubble). Five stops are the loop's steps; the sixth hands over: open the demo batch,
-// or start one, over a moving recap of the same batch (how-fx.ts). How Orro is built is folded at the foot. Without the case file (still loading, or the server could not
+// or start one. How Orro is built is folded at the foot. Without the case file (still loading, or the server could not
 // give it) the stops read as text alone.
 //
 // It is also the app's first screen for someone new: the first time a person enters the app (the landing's links,
@@ -255,25 +255,6 @@ function verdictTip(c: CaseFile): string {
   return score ? `Score ${score}. It needs ${SUPPORTED_SCORE}, so the verdict stays open.` : `${ev.pairs} pairs so far, so the verdict stays open.`;
 }
 
-/** What the last stop's moving recap draws (how-fx.ts): each run's result and gap, which run was copied, and for each
- *  pair whether its two copies came out inflated. Letters and numbers only, so it is short in the page. */
-function fxData(c: CaseFile | null): string {
-  if (!c) return "";
-  const runs = Object.values(c.runs ?? {}).sort(byId);
-  if (!runs.length) return "";
-  const f = theFork(c);
-  const src = f?.source_run ?? followed(c)?.id ?? null;
-  const letter = (st: string): string => (st === "inflated" ? "i" : st === "honest" ? "h" : st === "failed" ? "f" : "u");
-  const gap = (r: RunRecord): number =>
-    typeof r.reported_accuracy === "number" && typeof r.true_accuracy === "number" ? Math.round((r.reported_accuracy - r.true_accuracy) * 100) / 100 : 0;
-  return JSON.stringify({
-    runs: runs.map((r) => letter(r.status)).join(""),
-    gaps: runs.map(gap),
-    follow: runs.findIndex((r) => r.id === src),
-    pairs: tourPairs(c).map((p) => [p.baseBad ? 1 : 0, p.changedBad ? 1 : 0]),
-  });
-}
-
 /** 6. The way on: the demo batch (ringed), or a batch of one's own (the header's dialog). */
 const startPicture = (): string =>
   `<div class="hw-start">`
@@ -400,11 +381,8 @@ export function howView(demo: Loadable<CaseFile>, at = 0): string {
   const target = s ? (c ? s.focus(c) : "") : FOCUS_SEL;
   // The stage stays the same element from stop to stop, so the ring glides from one part to the next; the picture in
   // it is replaced whole.
-  // The last stop's recap is drawn by script on a canvas of its own (how-fx.ts); `data-keep` leaves it running.
-  const fx = s ? "" : `<div class="hw-fx" data-how-fx data-fx="${attr(fxData(c))}" aria-hidden="true"><canvas data-keep></canvas></div>`;
   const stage = pic
-    ? `<div class="hw-stage${fx ? " hw-stage--fx" : ""}" data-how-stage data-how-target="${attr(target)}">`
-      + fx
+    ? `<div class="hw-stage" data-how-stage data-how-target="${attr(target)}">`
       + `<div class="hw-pic" data-morph-key="how:pic:${s ? s.key : START.key}">${pic}</div>`
       // `data-keep`: tour.ts owns the ring's place and its lit state, so a repaint leaves them as they are.
       + `<span class="hw-ring" data-how-ring data-keep aria-hidden="true"></span>`
