@@ -99,30 +99,30 @@ export function researchNote(config: unknown, compact = false): string {
 const symbols = (text: string): string => esc(text).replace(/\bE_([a-z]+)\b/g, "<i>E</i><sub>$1</sub>");
 
 /**
- * A batch's paper, set as the top of a paper's first page: the arXiv number up its left margin, the title and the
- * authors centred, then one table of this batch's setup, ruled and captioned as a paper's table is, and the paper's
- * address. The table's rows show one after another when the page first appears (robot.css; at once for a reader who
- * asked for less motion). Empty for a batch that builds on no paper.
+ * A batch's paper, as one of the batch page's own cards: a "Research paper" tag, the title, the authors and the year,
+ * a link to the paper on arXiv, and the batch's setup as one list of what and how, in two columns. The rows show one
+ * after another when the card first appears (robot.css; at once for a reader who asked for less motion). Empty for a
+ * batch that builds on no paper.
  *
- * The table is the batch's setup, as its caption says, and its rows are fixed text written when the domain was
- * built: nothing reads the paper while the page loads, and the page does not say that anything does.
+ * The list is the batch's setup, as its heading says, and its rows are fixed text written when the domain was
+ * built: nothing reads the paper while the page loads, and the card does not say that anything does.
  */
 export function researchCard(config: unknown): string {
   const r = researchSource(config);
   if (!r) return "";
-  const address = r.url.replace(/^https?:\/\//, "");
-  const rows = r.setup.map(([what, how], i) => `<tr class="rp-row" style="--i:${i}"><th scope="row">${esc(what)}</th><td>${symbols(how)}</td></tr>`).join("");
-  return `<section class="rp" data-morph-key="research" aria-label="${attr(`Research paper: ${r.name}`)}">`
-    + `<p class="rp-eyebrow">The research paper this batch builds on</p>`
-    + `<div class="rp-page">`
-    + `<span class="rp-arxiv" aria-hidden="true">${esc(`${r.paper} · ${r.year}`)}</span>`
-    + `<h3 class="rp-title"><a href="${attr(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a></h3>`
-    + `<p class="rp-authors">${esc(r.authors)}</p>`
-    + `<table class="rp-table">`
-    + `<caption><span class="rp-cap-n">Table I</span><span class="rp-cap-t">Setup of this batch</span></caption>`
-    + `<tbody>${rows}</tbody>`
-    + `</table>`
-    + `<p class="rp-ref">${esc(`${r.name}, ${r.paper}.`)} <a href="${attr(r.url)}" target="_blank" rel="noopener">${esc(address)}</a></p>`
+  const rows = r.setup.map(([what, how], i) => `<div class="rp-row" style="--i:${i}"><dt>${esc(what)}</dt><dd>${symbols(how)}</dd></div>`).join("");
+  return `<section class="ov-card rp" data-morph-key="research" aria-label="${attr(`Research paper: ${r.name}`)}">`
+    + `<div class="rp-head">`
+    + `<div class="rp-id">`
+    + `<span class="ds-eyebrow">Research paper</span>`
+    + `<h3 class="rp-title">${esc(r.title)}</h3>`
+    + `<p class="rp-authors">${esc(`${r.authors} · ${r.year}`)}</p>`
+    + `</div>`
+    + `<a class="rp-open" href="${attr(r.url)}" target="_blank" rel="noopener" title="Open the paper on arXiv">${esc(r.paper)}${EXTERNAL}</a>`
+    + `</div>`
+    + `<div class="rp-setup">`
+    + `<h4 class="rp-sub">Setup of this batch</h4>`
+    + `<dl class="rp-list" style="--rows:${Math.ceil(r.setup.length / 2)}">${rows}</dl>`
     + `</div>`
     + `</section>`;
 }

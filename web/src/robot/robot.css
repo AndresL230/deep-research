@@ -116,29 +116,20 @@
 .rs-link { display:inline-flex; align-items:center; gap:4px; color:var(--accent, #a78bfa); text-decoration:none; white-space:nowrap; }
 .rs-link:hover, .rs-link:focus-visible { text-decoration:underline; }
 
-/* a batch's paper, set as the top of a paper's first page: black serif type on a white sheet in either theme */
-.rp { margin:20px 0 4px; }
-.rp-eyebrow { margin:0 0 8px; font-family:var(--label); font-size:12px; color:var(--fg-55); }
-.rp-page { position:relative; padding:34px 64px 26px; border-radius:2px; color:#111; background:#fff; font-family:"Times New Roman", Times, "Nimbus Roman", serif; box-shadow:0 0 0 1px rgb(0 0 0 / 12%); }
-/* the paper's number up the left margin, as arXiv prints it on a first page */
-.rp-arxiv { position:absolute; left:22px; top:50%; transform:translate(-50%, -50%) rotate(-90deg); white-space:nowrap; font-size:13px; letter-spacing:.02em; color:#8a8a8a; }
-.rp-title { margin:0 auto; max-width:30em; text-align:center; font-size:23px; line-height:1.22; font-weight:400; text-wrap:balance; }
-.rp-title a { color:inherit; text-decoration:none; }
-.rp-title a:hover, .rp-title a:focus-visible { text-decoration:underline; }
-.rp-authors { margin:10px auto 0; max-width:46em; text-align:center; font-size:14px; line-height:1.4; text-wrap:balance; }
-/* a paper's table: a heavy rule above and below, a hairline between rows, no boxes */
-.rp-table { margin:20px auto 0; width:100%; max-width:660px; border-collapse:collapse; font-size:14.5px; line-height:1.35; }
-.rp-table caption { caption-side:top; padding-bottom:7px; text-align:center; font-size:12px; letter-spacing:.06em; text-transform:uppercase; }
-.rp-cap-n, .rp-cap-t { display:block; }
-.rp-table tbody { border-top:1.5px solid #111; border-bottom:1.5px solid #111; }
-.rp-table tr + tr th, .rp-table tr + tr td { border-top:.5px solid #c9c9c9; }
-.rp-table th, .rp-table td { padding:5px 10px; text-align:left; vertical-align:top; }
-.rp-table th { width:8.5em; font-weight:400; font-style:italic; white-space:nowrap; }
-.rp-table sub { font-size:.72em; }
-.rp-ref { margin:14px auto 0; max-width:660px; font-size:12.5px; color:#333; }
-.rp-ref a { color:#111; font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:11.5px; text-underline-offset:2px; }
-/* the table's rows show one after another */
-.rp-row { animation:rp-in .35s ease-out calc(.25s + var(--i) * .09s) 1 both; }
+/* a batch's paper: one of the batch page's cards (overview.css .ov-card), with the batch's setup as a list in two columns */
+.rp { margin:18px 0 4px; gap:18px; }
+.rp-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px 20px; flex-wrap:wrap; }
+.rp-id { display:flex; flex-direction:column; align-items:flex-start; gap:8px; min-width:0; }
+.rp-title { margin:0; max-width:52ch; font-size:19px; line-height:1.25; font-weight:500; letter-spacing:-0.015em; text-wrap:balance; }
+.rp-authors { margin:0; max-width:80ch; font-size:12.5px; line-height:1.45; color:var(--fg-55); }
+.rp-open { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border:1px solid var(--border-strong); border-radius:var(--r-ctl); font-size:12px; font-weight:500; font-variant-numeric:tabular-nums; color:var(--fg-70); text-decoration:none; white-space:nowrap; }
+.rp-open:hover, .rp-open:focus-visible { background:var(--hover); color:var(--fg); }
+.rp-sub { margin:0 0 2px; font-size:12.5px; font-weight:400; color:var(--fg-55); }
+.rp-list { display:grid; grid-auto-flow:column; grid-template-rows:repeat(var(--rows), auto); grid-auto-columns:minmax(0, 1fr); column-gap:36px; margin:0; }
+.rp-row { display:grid; grid-template-columns:104px minmax(0, 1fr); gap:12px; padding:9px 0; border-top:1px solid var(--border); font-size:13.5px; line-height:1.4; animation:rp-in .3s var(--fx-ease, ease-out) calc(.15s + var(--i) * .07s) 1 both; }
+.rp-row dt { font-size:12.5px; color:var(--fg-55); }
+.rp-row dd { margin:0; color:var(--fg); }
+.rp-row sub { font-size:.72em; }
 @keyframes rp-in { from { opacity:0; } to { opacity:1; } }
 @media (prefers-reduced-motion: reduce) { .rp-row { animation:none; } }
-@media (max-width: 720px) { .rp-page { padding:22px 18px 18px 34px; } .rp-arxiv { left:14px; font-size:11px; } .rp-title { font-size:19px; } .rp-table th { width:auto; white-space:normal; } }
+@media (max-width: 760px) { .rp-list { grid-auto-flow:row; grid-template-rows:none; } .rp-row { grid-template-columns:88px minmax(0, 1fr); } }

@@ -237,29 +237,29 @@ describe("the research a batch builds on", () => {
     expect(compact).not.toContain(`class="rs-t"`);
   });
 
-  it("sets the paper as the top of a paper's page, with one table of the batch's setup", async () => {
+  it("draws the paper as one of the page's cards, with the batch's setup as one list", async () => {
     const { researchCard } = await import("../src/robot/markup");
     const card = researchCard(cfg);
-    expect(card).toContain("The research paper this batch builds on");
-    expect(card).toContain(">ExBody2: Advanced Expressive Humanoid Whole-Body Control</a>");
-    expect(card).toContain("Mazeyu Ji, Xuanbin Peng, Fangchen Liu, Jialong Li, Ge Yang, Xuxin Cheng, Xiaolong Wang");
-    expect(card).toContain(`<span class="rp-arxiv" aria-hidden="true">arXiv:2412.13196 · 2024</span>`);
-    expect(card.match(/href="https:\/\/arxiv\.org\/abs\/2412\.13196"/g)).toHaveLength(2);
-    expect(card).toContain(">arxiv.org/abs/2412.13196</a>");
-    // One table, captioned as the batch's setup: what follows the paper and how the batch runs it are rows of it.
-    expect(card.match(/<table/g)).toHaveLength(1);
-    expect(card).toMatch(/<caption>.*Table I.*Setup of this batch.*<\/caption>/);
-    expect(card).toMatch(/<th scope="row">Task<\/th><td>Follow a reference motion with the whole body<\/td>.*<th scope="row">Controller<\/th><td>Code written by an AI agent<\/td>/s);
+    expect(card).toContain(`<section class="ov-card rp"`);
+    expect(card).toContain(`<span class="ds-eyebrow">Research paper</span>`);
+    expect(card).toContain(">ExBody2: Advanced Expressive Humanoid Whole-Body Control</h3>");
+    expect(card).toContain("Mazeyu Ji, Xuanbin Peng, Fangchen Liu, Jialong Li, Ge Yang, Xuxin Cheng, Xiaolong Wang · 2024");
+    expect(card).toMatch(/<a class="rp-open" href="https:\/\/arxiv\.org\/abs\/2412\.13196" target="_blank" rel="noopener"[^>]*>arXiv:2412\.13196<svg/);
+    // One list, headed as the batch's setup: what follows the paper and how the batch runs it are rows of it.
+    expect(card.match(/<dl /g)).toHaveLength(1);
+    expect(card).toContain(">Setup of this batch</h4>");
+    expect(card).toMatch(/<dt>Task<\/dt><dd>Follow a reference motion with the whole body<\/dd>.*<dt>Controller<\/dt><dd>Code written by an AI agent<\/dd>/s);
     expect(card).toContain("<i>E</i><sub>vel</sub>, <i>E</i><sub>mpkpe</sub> and <i>E</i><sub>mpjpe</sub>");
     expect(card.match(/class="rp-row" style="--i:\d+"/g)).toHaveLength(7);
+    expect(card).toContain(`style="--rows:4"`);
     expect(card).not.toMatch(/From the paper|In this batch|not the paper|The paper:/);
-    // Nothing reads the paper while the page loads, and the page does not say that anything does.
+    // Nothing reads the paper while the page loads, and the card does not say that anything does.
     expect(card).not.toMatch(/extract|analy[sz]ing|reading the paper|scanning/i);
     const libero = researchCard({ domain: "robot_arm", robot_positions: "libero_pro" });
     expect(libero).toContain("LIBERO-PRO: Towards Robust and Fair Evaluation of Vision-Language-Action Models Beyond Memorization");
-    expect(libero).toContain("Xueyang Zhou, Yangming Xu, Guiyao Tie, Yongchao Chen, Guowen Zhang, Duanfeng Chu, Pan Zhou, Lichao Sun");
-    expect(libero).toContain("arXiv:2510.03827 · 2025");
-    expect(libero).toMatch(/<th scope="row">Test<\/th><td>LIBERO-PRO&#39;s position changes, objects swapped and shifted: 30 episodes<\/td>/);
+    expect(libero).toContain("Xueyang Zhou, Yangming Xu, Guiyao Tie, Yongchao Chen, Guowen Zhang, Duanfeng Chu, Pan Zhou, Lichao Sun · 2025");
+    expect(libero).toContain(">arXiv:2510.03827<svg");
+    expect(libero).toMatch(/<dt>Test<\/dt><dd>LIBERO-PRO&#39;s position changes, objects swapped and shifted: 30 episodes<\/dd>/);
     expect(libero.match(/class="rp-row"/g)).toHaveLength(8);
     expect(researchCard({ domain: "humanoid" })).toBe("");
   });
