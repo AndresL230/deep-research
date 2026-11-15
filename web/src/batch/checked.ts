@@ -365,7 +365,8 @@ function dialSvg(checked: [number, number][], checkedWord: string): string {
   }).join("");
   const practice = checked.find(isPracticePush);
   const label = practice
-    ? (() => { const p = pushToView(practice[0], practice[1]); return `<text class="ck-t ck-t--checked" x="${n2(p.sx)}" y="${n2(p.sy + 7.5)}" text-anchor="middle">${esc(cap(checkedWord))}</text>`; })()
+    // Beside the mark, not under it: under it is the dial's "from behind".
+    ? (() => { const p = pushToView(practice[0], practice[1]); return `<text class="ck-t ck-t--checked" x="${n2(p.sx + 5)}" y="${n2(p.sy + 1.3)}" text-anchor="start">${esc(cap(checkedWord))}</text>`; })()
     : "";
   // The robot from above: a body and a nose pointing up the page (forward).
   const robot = `<g class="ck-robot" transform="translate(${c} ${c})"><ellipse rx="5.2" ry="3.4"/><path d="M-2.2 -2.6 0 -6.4 2.2 -2.6Z"/></g>`;

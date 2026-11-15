@@ -327,8 +327,8 @@ function overlapStat(share: number | null | undefined, trap: TrapInfo | null, sc
   const text = domainWords(config).evidence_text;
   const ev = evidenceParts(share, trap, text ?? "", 1);
   const title = ev ? `${ev.share} ${ev.text}` : "";
-  // "Overlap" is a tabular word (test rows in training); a robot run's number is its share of practice spot episodes.
-  return stat(isMotionBatch(config) ? "At practice spot" : "Overlap", pct(share), "", title);
+  // "Overlap" is a tabular word (test rows in training); a robot run's number is its share of episodes at the practice spot (or push).
+  return stat(isMotionBatch(config) ? `At ${domainWords(config).checked}` : "Overlap", pct(share), "", title);
 }
 
 /** The strip above the conversation: which run, its status and score, charts, back to the batch. */
