@@ -7,11 +7,10 @@ import "./overview.css";
 import type { BatchConfig, CaseFile, RunRecord } from "../api";
 import { attr, esc } from "../ui";
 import { badge, chip, count, reveal, spinner } from "../motion";
-import { pct, pts, tokens, usd } from "./format";
-import { costGroups } from "./home";
-import { barShare, forkExperiments, isProblemPhase, isSimulated, pendingForks, phaseText, scoreStats } from "./lanes";
+import { pct, pts } from "./format";
+import { barShare, forkExperiments, isProblemPhase, pendingForks, phaseText } from "./lanes";
 import { ACT, STEP_LABEL, type BatchStep, type BatchVm } from "./model";
-import { claimHeadline, summaryLine, wallSummary } from "./wall";
+import { claimStatus, wallSummary } from "./wall";
 import { isMotionBatch, scoreWords } from "../robot/markup";
 import { domainWords } from "./words";
 
@@ -82,61 +81,6 @@ function steps(vm: BatchVm, current: BatchStep): string {
 
 // ── the numbers ──────────────────────────────────────────────────────────────
 
-function tile(key: string, label: string, value: string, sub: string, hi = false): string {
-  return `<div class="ov-kpi${hi ? " ov-kpi--hi" : ""} ds-pop" data-io data-morph-key="kpi:${key}">`
-    + `<span class="ov-kpi-k">${esc(label)}</span><span class="ov-kpi-v">${value}</span><span class="ov-kpi-s">${esc(sub)}</span></div>`;
-}
-
-function tiles(vm: BatchVm): string {
-  const c = vm.case;
-  const s = wallSummary(vm);
-  const w = scoreWords(c.config);
-  const [rep, tru] = [w.reported.toLowerCase(), w.true.toLowerCase()];
-  const runs = Object.values(c.runs ?? {});
-  const gap = scoreStats(runs.filter((r) => r.status === "inflated")).gap;
-  const working = s.running + s.queued;
-  const groups = costGroups(c.costs ?? {});
-  const tok = groups.reduce((n, g) => n + g.tokens, 0);
-  const simulated = isSimulated(c);
-  const dollars = !simulated && c.costs?.prices_missing !== true && c.costs?.spent_usd != null;
-  const budget = c.costs?.budget_usd;
-  const cost = dollars
-    ? tile("cost", "Spent", count(c.costs.spent_usd, "usd", usd(c.costs.spent_usd)), budget != null ? `of a ${usd(budget)} budget` : `${tokens(tok)} tokens`)
-    : tile("cost", "Tokens", count(tok, "tokens", tokens(tok)), simulated ? "token counts only, no real spend" : tok ? "prices missing" : "nothing spent yet");
-  return `<div class="ov-kpis">`
-    + tile("agents", "Agents", count(s.total, "int", String(s.total)), !s.total ? "none started yet" : working ? `${s.running} working, ${s.queued} waiting` : "all scored")
-    + tile("honest", "Honest", count(s.honest, "int", String(s.honest)), `${rep} what was ${tru}`)
-    + tile("inflated", "Inflated", count(s.inflated, "int", String(s.inflated)), `${rep} more than was ${tru}`, true)
-    + tile("gap", "Mean inflation", count(gap, "pts", pts(gap)), `${rep} minus ${tru}, inflated runs`)
-    + cost
-    + `</div>`;
-}
-
-// ── scored so far ────────────────────────────────────────────────────────────
-
-function ring(vm: BatchVm): string {
-  const s = wallSummary(vm);
-  const scored = s.honest + s.inflated + s.failed + (s.unclear ?? 0);
-  const share = s.total ? (scored / s.total) * 100 : 0;
-  const rows: [string, string, number][] = [
-    ["honest", "Honest", s.honest], ["inflated", "Inflated", s.inflated],
-    // Robot runs between the two thresholds: a row of its own only when there are some.
-    ...(s.unclear ? [["unclear", "Unclear", s.unclear] as [string, string, number]] : []),
-    ["failed", "Failed", s.failed], ["running", "Working", s.running], ["queued", "Waiting", s.queued],
-  ];
-  return `<div class="ov-card ov-card--ring ds-pop" data-io data-morph-key="ring">`
-    + `<div class="ov-card-h"><h3 class="ov-card-t">Agents scored</h3><span class="ov-card-s">${esc(s.total ? `of ${s.total}` : "none yet")}</span></div>`
-    + `<div class="ov-ring-row">`
-    + `<div class="ov-ring" role="img" aria-label="${attr(`${scored} of ${s.total} agents scored`)}">`
-    + `<svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ov-ring-t" cx="60" cy="60" r="50"></circle>`
-    + `<circle class="ov-ring-p" cx="60" cy="60" r="50" pathLength="100" style="stroke-dasharray:${share.toFixed(2)} 100"></circle></svg>`
-    + `<div class="ov-ring-n">${count(scored, "int", String(scored), { linear: true })}<small>scored</small></div>`
-    + `</div>`
-    + `<ul class="ov-legend">${rows.map(([k, label, n], i) =>
-      `<li style="--i:${i}"><i class="ov-sw ov-sw--${k}"></i><span>${label}</span><b>${count(n, "int", String(n))}</b></li>`).join("")}</ul>`
-    + `</div></div>`;
-}
-
 // ── reported against true, one bar per agent ─────────────────────────────────
 
 /** A bar's height, 0 to 100. Accuracy on two classes starts at a coin flip, so those bars run from 50%; a robot's
@@ -176,10 +120,10 @@ export function claimBars(c: Pick<CaseFile, "runs" | "config">): string {
     ? `<div class="ov-bars" data-morph-key="bars" data-morph-list>${runs.map((r, i) => bar(r, i, robot, words)).join("")}</div>`
     : `<p class="ov-none" data-morph-key="none">The bars appear as agents are scored.</p>`;
   return `<div class="ov-card ov-card--bars ds-pop" data-io data-morph-key="bars-card">`
-    + `<div class="ov-card-h"><h3 class="ov-card-t">${esc(`${w.reported} against ${words[1]}`)}</h3>`
+    + `<div class="ov-card-h"><h3 class="ov-card-t">${esc(`${w.reported} vs ${words[1]}`)}</h3>`
     + `<div class="ov-keys"><span><i class="ov-sw ov-sw--true"></i>${esc(w.true)}</span><span><i class="ov-sw ov-sw--over"></i>${esc(`${w.reported} above ${words[1]}`)}</span></div></div>`
     + body
-    + `<p class="ov-foot">One bar per agent, from ${robot ? "0%" : "50%"} to 100%.${threshold != null ? ` A run counts as inflated when its ${esc(words[0])} score is ${esc(pts(threshold).replace(/^\+/, ""))} or more above its ${esc(words[1])} one.` : ""}</p>`
+    + `<p class="ov-foot">Scale ${robot ? "0" : "50"}–100%.${threshold != null ? ` Inflated: ${esc(words[0])} ${esc(pts(threshold).replace(/^\+/, ""))} or more above ${esc(words[1])}.` : ""}</p>`
     + `</div>`;
 }
 
@@ -197,7 +141,7 @@ const WORKING = new Set(["running", "analyzing", "investigating", "awaiting_appr
 export function headline(vm: BatchVm): string {
   const phase = String(vm.case.phase ?? "config");
   if (isProblemPhase(phase)) return phaseText(phase);
-  const claim = claimHeadline(vm.case);
+  const claim = claimStatus(vm.case);
   if (claim) return claim;
   if (WORKING.has(phase)) return phaseText(phase);
   // Rarely reached: everything finished but no run has both numbers to show.
@@ -316,28 +260,16 @@ function eyebrows(vm: BatchVm): string {
   return `<div class="ov-eyebrows"><span class="ds-eyebrow">Batch <b>${esc(vm.id)}</b></span>${kind}${phaseChip(phase)}</div>`;
 }
 
-/** One line under the title: what the batch is. */
-function lede(vm: BatchVm): string {
-  const n = Object.keys(vm.case.runs ?? {}).length;
-  if (!n) return "Agents appear here once the batch starts.";
-  return `${n} ${n === 1 ? "agent" : "agents"} on the same task, each in its own sandbox. Orro scores every one, finds the step that separates the honest runs from the inflated ones, and forks a run to test it.`;
-}
-
 export function overviewView(vm: BatchVm): string {
   const c = vm.case;
   const phase = String(c.phase ?? "config");
-  const s = wallSummary(vm);
   return `<section class="ov" data-morph-key="ov" aria-label="Overview">`
     + `<div class="ds-aurora" aria-hidden="true"><i></i><i></i><i></i></div>`
     + `<header class="ov-head" data-io>`
     + eyebrows(vm)
     + `<h1 class="ov-title${isProblemPhase(phase) ? " ov-title--bad" : ""}" data-morph-key="title">${reveal(headline(vm))}</h1>`
-    // The run counts, a quieter line under the title.
-    + (s.total ? `<p class="ov-count" data-morph-key="count" aria-live="polite">${esc(summaryLine(s))}</p>` : "")
-    + `<p class="ov-sub">${esc(lede(vm))}</p>`
     + `</header>`
     + steps(vm, "wall")
-    + tiles(vm)
-    + `<div class="ov-cards">${ring(vm)}${claimBars(vm.case)}</div>`
+    + claimBars(vm.case)
     + `</section>`;
 }

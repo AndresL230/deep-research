@@ -15,7 +15,7 @@ import type { AgentTodo, CaseFile, RunRecord, RunStatus, TrapInfo } from "../api
 import { activityOf, chartUrl, logOf, notebookCells, notebookTail, stagesOf, type NbCell } from "./notebook";
 import { evidenceParts, trapOf } from "./trap";
 import { askIcon } from "../ask-icons";
-import { chip, count, reveal as revealText, spinner, type ChipMark, type ChipTone } from "../motion";
+import { chip, count, spinner, type ChipMark, type ChipTone } from "../motion";
 import { attr, esc } from "../ui";
 import { cleanReason, modelShort, pct, pts, usd, wholePct } from "./format";
 import { ACT, type BatchVm } from "./model";
@@ -111,6 +111,26 @@ export function claimHeadline(c: Pick<CaseFile, "runs" | "config">): string | nu
 }
 
 /**
+ * The batch page's headline once every run has finished, as a status line: "3 of 12 agents inflated: claimed 91%,
+ * measured 79%". The means are over the inflated runs, else over the scored ones ("0 of 12 agents inflated: claimed
+ * 75%, measured 76%"). Null while a run is still going, or when no run has both numbers. `claimHeadline` says the
+ * same in a sentence, for How it works.
+ */
+export function claimStatus(c: Pick<CaseFile, "runs" | "config">): string | null {
+  const runs = Object.values(c.runs ?? {});
+  if (!runs.length || runs.some((r) => !isScored(r.status as Status))) return null;
+  const inflated = runs.filter((r) => r.status === "inflated");
+  const group = inflated.length ? inflated : runs.filter((r) => r.status === "honest" || r.status === "unclear");
+  const claimed = meanOf(group.map((r) => r.reported_accuracy));
+  const measured = meanOf(group.map((r) => r.true_accuracy));
+  if (claimed == null || measured == null) return null;
+  const w = domainWords(c.config);
+  const n = runs.length;
+  return `${inflated.length} of ${n} ${n === 1 ? "agent" : "agents"} inflated: ${w.claim_label.toLowerCase()} ${wholePct(claimed)}, `
+    + `${w.truth_label.toLowerCase()} ${wholePct(measured)}`;
+}
+
+/**
  * "Starting point: controller.py as handed to every run, before any agent changed it. Measured 50% (10 of 20)."
  * The code the runs started from, scored unchanged: what a run's own measured rate is an improvement on, or not.
  * Null when the batch has no baseline (the runs start from nothing, or it was saved before baselines existed).
@@ -125,10 +145,11 @@ export function baselineLine(c: Pick<CaseFile, "baseline" | "config">): string |
   return `${lead} ${domainWords(c.config).truth_label} ${wholePct(b.true_accuracy)}${counts}.`;
 }
 
-/** The wall's own heading, under the overview: what its devices show. No numbers, the overview's title has them. */
+/** The wall's own heading, under the overview: a label and the count ("Agents · 12", "Agents · 4 of 12 working"). */
 export function wallTitle(vm: BatchVm, s: WallSummary = wallSummary(vm)): string {
   if (!s.total) return "No agents yet";
-  return s.running + s.queued > 0 ? "Each agent at work, in its own sandbox" : "Each agent's sandbox, and what it came to";
+  const working = s.running + s.queued;
+  return working > 0 ? `Agents · ${working} of ${s.total} working` : `Agents · ${s.total}`;
 }
 
 /** The analyst models the batch's runs use, in run order, or [] when it used one (or names none). */
@@ -307,11 +328,9 @@ export function wallView(vm: BatchVm): string {
   // The batch's one headline (the claim against the truth) and its run counts are the overview's title and the line
   // under it (overview.ts), just above: the wall names what it shows, agent by agent.
   const head = `<div class="bw-head" data-io>`
-    + `<span class="ds-eyebrow">Agents</span>`
-    + `<h2 class="bw-sum">${revealText(wallTitle(vm, s))}</h2>`
+    + `<h2 class="bw-sum bw-sum--label" title="${attr(scoreWords(vm.case.config).explainer)}">${esc(wallTitle(vm, s))}</h2>`
     + (baseline ? `<p class="bw-baseline" data-morph-key="baseline">${esc(baseline)}</p>` : "")
     + (byModel ? `<p class="bw-sum-models" data-morph-key="by-model">${esc(byModel)}</p>` : "")
-    + (s.total ? `<p class="bw-explain">${esc(scoreWords(vm.case.config).explainer)}</p>` : "")
     + `</div>`;
   const grid = runs.length
     ? `<div class="bw-grid" data-morph-key="grid" data-morph-list>${runs.map((r) => tile(vm, r, multiModel)).join("")}</div>`
