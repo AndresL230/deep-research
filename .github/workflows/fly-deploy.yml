@@ -4,6 +4,10 @@
 # Needs the repository secret FLY_API_TOKEN, a deploy token for orro-research only:
 #   fly tokens create deploy -a orro-research | gh secret set FLY_API_TOKEN -R AndresL230/deep-research
 # Without it the job skips with a notice instead of failing.
+#
+# A deploy restarts the machine, which stops every batch it is running. So the job first waits, up to 90 minutes,
+# until no live batch is working (scripts/wait_for_idle.py); batches waiting on a person do not hold it. Run it by
+# hand with "force" to deploy without waiting. The site it checks is the repository variable ORRO_URL, or orrolab.dev.
 name: Deploy to Fly.io
 
 on:
@@ -25,6 +29,11 @@ on:
       - "fly.toml"
       - "scripts/fly-start.sh"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Deploy now, even while batches are running (they will be stopped)"
+        type: boolean
+        default: false
 
 concurrency:
   group: fly-deploy
@@ -33,8 +42,12 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+      - name: Wait until no batch is running
+        if: ${{ !inputs.force }}
+        run: python3 scripts/wait_for_idle.py --url "${{ vars.ORRO_URL || 'https://orrolab.dev' }}"
       - uses: superfly/flyctl-actions/setup-flyctl@1.5
       - name: Deploy
         env:
